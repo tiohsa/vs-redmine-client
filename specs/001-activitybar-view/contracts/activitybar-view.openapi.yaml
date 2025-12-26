@@ -1,0 +1,113 @@
+openapi: 3.0.3
+info:
+  title: Activity Bar View Data Contract
+  version: 1.0.0
+  description: Internal contract for list data shown in the Activity Bar dedicated view.
+servers:
+  - url: https://internal.local
+paths:
+  /projects:
+    get:
+      summary: List projects for the Activity Bar view
+      responses:
+        '200':
+          description: Project list
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProjectList'
+        '500':
+          description: List retrieval failed
+  /tickets:
+    get:
+      summary: List tickets for the Activity Bar view
+      parameters:
+        - in: query
+          name: projectId
+          required: false
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Ticket list
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TicketList'
+        '500':
+          description: List retrieval failed
+  /comments:
+    get:
+      summary: List comments for the Activity Bar view
+      parameters:
+        - in: query
+          name: ticketId
+          required: false
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Comment list
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CommentList'
+        '500':
+          description: List retrieval failed
+components:
+  schemas:
+    Project:
+      type: object
+      required: [id, name]
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        hasChildren:
+          type: boolean
+    Ticket:
+      type: object
+      required: [id, subject, projectId]
+      properties:
+        id:
+          type: string
+        subject:
+          type: string
+        projectId:
+          type: string
+        status:
+          type: string
+        updatedAt:
+          type: string
+          format: date-time
+    Comment:
+      type: object
+      required: [id, ticketId, body]
+      properties:
+        id:
+          type: string
+        ticketId:
+          type: string
+        author:
+          type: string
+        createdAt:
+          type: string
+          format: date-time
+        body:
+          type: string
+    ProjectList:
+      type: array
+      maxItems: 2000
+      items:
+        $ref: '#/components/schemas/Project'
+    TicketList:
+      type: array
+      maxItems: 2000
+      items:
+        $ref: '#/components/schemas/Ticket'
+    CommentList:
+      type: array
+      maxItems: 2000
+      items:
+        $ref: '#/components/schemas/Comment'

@@ -13,6 +13,9 @@
     "onView:todoexProjects",
     "onView:todoexTickets",
     "onView:todoexComments",
+    "onView:todoexActivityProjects",
+    "onView:todoexActivityTickets",
+    "onView:todoexActivityComments",
     "onCommand:todoex.refreshTickets",
     "onCommand:todoex.refreshProjects",
     "onCommand:todoex.selectProject",
@@ -25,6 +28,15 @@
   ],
   "main": "./dist/extension.js",
   "contributes": {
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "todoexActivity",
+          "title": "TodoEx",
+          "icon": "media/todoex-activitybar.svg"
+        }
+      ]
+    },
     "commands": [
       {
         "command": "todoex.helloWorld",
@@ -79,6 +91,20 @@
         },
         {
           "id": "todoexComments",
+          "name": "Redmine Comments"
+        }
+      ],
+      "todoexActivity": [
+        {
+          "id": "todoexActivityProjects",
+          "name": "Redmine Projects"
+        },
+        {
+          "id": "todoexActivityTickets",
+          "name": "Redmine Tickets"
+        },
+        {
+          "id": "todoexActivityComments",
           "name": "Redmine Comments"
         }
       ]

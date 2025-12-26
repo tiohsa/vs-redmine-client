@@ -21,27 +21,100 @@ import { getCommentSaveNotification } from "./views/commentSaveNotifications";
 import { handleCommentEditorSave } from "./views/commentSaveSync";
 import { getSaveNotification } from "./views/ticketSaveNotifications";
 import { handleTicketEditorSave } from "./views/ticketSaveSync";
+import { registerFocusRefresh } from "./views/viewFocusRefresh";
+import {
+  VIEW_ID_ACTIVITY_COMMENTS,
+  VIEW_ID_ACTIVITY_PROJECTS,
+  VIEW_ID_ACTIVITY_TICKETS,
+  VIEW_ID_EXPLORER_COMMENTS,
+  VIEW_ID_EXPLORER_PROJECTS,
+  VIEW_ID_EXPLORER_TICKETS,
+} from "./views/viewIds";
 
 export async function activate(context: vscode.ExtensionContext) {
   const ticketsProvider = new TicketsTreeProvider();
   const commentsProvider = new CommentsTreeProvider();
   const projectsProvider = new ProjectsTreeProvider();
-  const projectsView = vscode.window.createTreeView("todoexProjects", {
+  const projectsView = vscode.window.createTreeView(VIEW_ID_EXPLORER_PROJECTS, {
     treeDataProvider: projectsProvider,
   });
-  const ticketsView = vscode.window.createTreeView("todoexTickets", {
+  const ticketsView = vscode.window.createTreeView(VIEW_ID_EXPLORER_TICKETS, {
     treeDataProvider: ticketsProvider,
   });
-  const commentsView = vscode.window.createTreeView("todoexComments", {
+  const commentsView = vscode.window.createTreeView(VIEW_ID_EXPLORER_COMMENTS, {
     treeDataProvider: commentsProvider,
   });
+  const activityProjectsView = vscode.window.createTreeView(
+    VIEW_ID_ACTIVITY_PROJECTS,
+    {
+      treeDataProvider: projectsProvider,
+    },
+  );
+  const activityTicketsView = vscode.window.createTreeView(
+    VIEW_ID_ACTIVITY_TICKETS,
+    {
+      treeDataProvider: ticketsProvider,
+    },
+  );
+  const activityCommentsView = vscode.window.createTreeView(
+    VIEW_ID_ACTIVITY_COMMENTS,
+    {
+      treeDataProvider: commentsProvider,
+    },
+  );
   let selectedComment: CommentTreeItem | undefined;
   let selectedCommentDocumentUri: string | undefined;
   context.subscriptions.push(
     projectsView,
     ticketsView,
     commentsView,
+    activityProjectsView,
+    activityTicketsView,
+    activityCommentsView,
+    registerFocusRefresh(activityProjectsView, () => projectsProvider.refresh()),
+    registerFocusRefresh(activityTicketsView, () => ticketsProvider.refresh()),
+    registerFocusRefresh(activityCommentsView, () => commentsProvider.refresh()),
   );
+
+  const getSelectedComment = (item?: CommentTreeItem): CommentTreeItem | undefined => {
+    return (
+      item ??
+      (commentsView.selection[0] as CommentTreeItem | undefined) ??
+      (activityCommentsView.selection[0] as CommentTreeItem | undefined) ??
+      selectedComment
+    );
+  };
+
+  const handleTicketSelection = (item?: TicketTreeItem): void => {
+    const selected = item ?? (ticketsView.selection[0] as TicketTreeItem | undefined);
+    if (!selected || !(selected instanceof TicketTreeItem)) {
+      return;
+    }
+
+    commentsProvider.setTicketId(selected.ticket.id);
+  };
+
+  const handleCommentSelection = async (item?: CommentTreeItem): Promise<void> => {
+    const selected = getSelectedComment(item);
+    if (!selected || !(selected instanceof CommentTreeItem)) {
+      return;
+    }
+
+    selectedComment = selected;
+    try {
+      const detail = await getIssueDetail(selected.comment.ticketId);
+      commentsProvider.setTicketId(detail.ticket.id);
+      setCommentDraft(detail.ticket.id, selected.comment.body);
+      const editor = await showTicketComment(
+        detail.ticket,
+        selected.comment.body,
+        selected.comment.id,
+      );
+      selectedCommentDocumentUri = editor.document.uri.toString();
+    } catch (error) {
+      vscode.window.showErrorMessage((error as Error).message);
+    }
+  };
 
   let previousActiveEditor = vscode.window.activeTextEditor;
   context.subscriptions.push(
@@ -210,10 +283,7 @@ export async function activate(context: vscode.ExtensionContext) {
     vscode.commands.registerCommand(
       "todoex.editComment",
       async (item?: CommentTreeItem) => {
-        const selected =
-          item ??
-          (commentsView.selection[0] as CommentTreeItem | undefined) ??
-          selectedComment;
+        const selected = getSelectedComment(item);
         if (!selected || !(selected instanceof CommentTreeItem)) {
           vscode.window.showErrorMessage("Select a comment to edit.");
           return;
@@ -263,37 +333,26 @@ export async function activate(context: vscode.ExtensionContext) {
   );
 
   context.subscriptions.push(
-    ticketsView.onDidChangeSelection(async (event) => {
-      const selected = event.selection[0];
-      if (!selected || !(selected instanceof TicketTreeItem)) {
-        return;
-      }
-
-      commentsProvider.setTicketId(selected.ticket.id);
+    ticketsView.onDidChangeSelection((event) => {
+      handleTicketSelection(event.selection[0] as TicketTreeItem | undefined);
     }),
   );
 
   context.subscriptions.push(
-    commentsView.onDidChangeSelection(async (event) => {
-      const selected = event.selection[0];
-      if (!selected || !(selected instanceof CommentTreeItem)) {
-        return;
-      }
+    activityTicketsView.onDidChangeSelection((event) => {
+      handleTicketSelection(event.selection[0] as TicketTreeItem | undefined);
+    }),
+  );
 
-      selectedComment = selected;
-      try {
-        const detail = await getIssueDetail(selected.comment.ticketId);
-        commentsProvider.setTicketId(detail.ticket.id);
-        setCommentDraft(detail.ticket.id, selected.comment.body);
-        const editor = await showTicketComment(
-          detail.ticket,
-          selected.comment.body,
-          selected.comment.id,
-        );
-        selectedCommentDocumentUri = editor.document.uri.toString();
-      } catch (error) {
-        vscode.window.showErrorMessage((error as Error).message);
-      }
+  context.subscriptions.push(
+    commentsView.onDidChangeSelection((event) => {
+      void handleCommentSelection(event.selection[0] as CommentTreeItem | undefined);
+    }),
+  );
+
+  context.subscriptions.push(
+    activityCommentsView.onDidChangeSelection((event) => {
+      void handleCommentSelection(event.selection[0] as CommentTreeItem | undefined);
     }),
   );
 

@@ -1,10 +1,12 @@
 node_modules/
 dist/
-build/
 out/
 coverage/
-.vscode-test/
 *.log
+*.tmp
+*.swp
 .env*
 .DS_Store
 Thumbs.db
+.vscode/
+.idea/

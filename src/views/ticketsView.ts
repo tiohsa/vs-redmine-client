@@ -8,6 +8,7 @@ import { getProjectSelection } from "../config/projectSelection";
 import { listIssues } from "../redmine/issues";
 import { Ticket } from "../redmine/types";
 import { showError } from "../utils/notifications";
+import { MAX_VIEW_ITEMS } from "./viewLimits";
 import { createEmptyStateItem, createErrorStateItem } from "./viewState";
 
 export const normalizeFilterOptions = (
@@ -32,7 +33,7 @@ export const buildTicketsViewItems = (
     return [createEmptyStateItem("No tickets for the selected project.")];
   }
 
-  return tickets.map((ticket) => new TicketTreeItem(ticket));
+  return tickets.slice(0, MAX_VIEW_ITEMS).map((ticket) => new TicketTreeItem(ticket));
 };
 
 export class TicketsTreeProvider implements vscode.TreeDataProvider<vscode.TreeItem> {
@@ -114,6 +115,10 @@ export class TicketsTreeProvider implements vscode.TreeDataProvider<vscode.TreeI
       return [];
     }
 
+    return this.getViewItems();
+  }
+
+  getViewItems(): vscode.TreeItem[] {
     return buildTicketsViewItems(this.tickets, this.selectedProjectId, this.errorMessage);
   }
 }

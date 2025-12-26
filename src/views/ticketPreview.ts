@@ -1,3 +1,4 @@
+import * as fs from "fs";
 import * as vscode from "vscode";
 import { Ticket } from "../redmine/types";
 import { TicketEditorKind } from "./ticketEditorTypes";
@@ -18,6 +19,7 @@ import {
   buildCommentEditorFilename,
   buildTicketEditorFilename,
 } from "./editorFilename";
+import { buildUniqueUntitledPath } from "./untitledPath";
 
 export const buildTicketPreviewContent = (
   ticket: Pick<Ticket, "subject" | "description">,
@@ -70,7 +72,11 @@ const buildUntitledUri = (filename: string): vscode.Uri => {
     return vscode.Uri.parse(`untitled:${filename}`);
   }
 
-  const targetPath = vscode.Uri.joinPath(workspace.uri, filename).path;
+  const targetPath = buildUniqueUntitledPath(
+    workspace.uri.path,
+    filename,
+    (candidate) => fs.existsSync(candidate),
+  );
   return vscode.Uri.parse(`untitled:${targetPath}`);
 };
 

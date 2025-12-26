@@ -3,6 +3,7 @@ import { getProjectSelection } from "../config/projectSelection";
 import { listProjects } from "../redmine/projects";
 import { Project } from "../redmine/types";
 import { showError } from "../utils/notifications";
+import { MAX_VIEW_ITEMS } from "./viewLimits";
 import { createEmptyStateItem, createErrorStateItem } from "./viewState";
 
 export const buildProjectTreeItems = (
@@ -24,7 +25,8 @@ export const buildProjectsViewItems = (
     return [createEmptyStateItem("No projects available.")];
   }
 
-  return buildProjectTreeItems(projects, selectedProjectId);
+  const visibleProjects = projects.slice(0, MAX_VIEW_ITEMS);
+  return buildProjectTreeItems(visibleProjects, selectedProjectId);
 };
 
 export class ProjectsTreeProvider implements vscode.TreeDataProvider<vscode.TreeItem> {
@@ -70,6 +72,10 @@ export class ProjectsTreeProvider implements vscode.TreeDataProvider<vscode.Tree
   }
 
   getChildren(): vscode.ProviderResult<vscode.TreeItem[]> {
+    return this.getViewItems();
+  }
+
+  getViewItems(): vscode.TreeItem[] {
     return buildProjectsViewItems(this.projects, this.selectedProjectId, this.errorMessage);
   }
 

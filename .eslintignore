@@ -1,7 +1,6 @@
 node_modules/
 dist/
-build/
 out/
+build/
 coverage/
-.vscode-test/
 *.min.js
