@@ -1,6 +1,21 @@
 import { TicketEditorKind } from "./ticketEditorTypes";
 
 const sanitizeId = (value: number): string => String(value);
+const ticketPattern = /^project-(\d+)_ticket-(\d+)(?:_extra)?(?:-\d+)?\.md$/;
+const commentPattern = /^project-(\d+)_ticket-(\d+)_comment-(\d+)(?:-\d+)?\.md$/;
+
+export type ParsedEditorFilename =
+  | {
+      type: "ticket";
+      projectId: number;
+      ticketId: number;
+    }
+  | {
+      type: "comment";
+      projectId: number;
+      ticketId: number;
+      commentId: number;
+    };
 
 export const buildTicketEditorFilename = (
   projectId: number,
@@ -17,3 +32,28 @@ export const buildCommentEditorFilename = (
   commentId: number,
 ): string =>
   `project-${sanitizeId(projectId)}_ticket-${sanitizeId(ticketId)}_comment-${sanitizeId(commentId)}.md`;
+
+export const parseEditorFilename = (
+  filename: string,
+): ParsedEditorFilename | undefined => {
+  const commentMatch = filename.match(commentPattern);
+  if (commentMatch) {
+    return {
+      type: "comment",
+      projectId: Number(commentMatch[1]),
+      ticketId: Number(commentMatch[2]),
+      commentId: Number(commentMatch[3]),
+    };
+  }
+
+  const ticketMatch = filename.match(ticketPattern);
+  if (ticketMatch) {
+    return {
+      type: "ticket",
+      projectId: Number(ticketMatch[1]),
+      ticketId: Number(ticketMatch[2]),
+    };
+  }
+
+  return undefined;
+};

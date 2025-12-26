@@ -2,6 +2,7 @@ import * as assert from "assert";
 import {
   buildCommentEditorFilename,
   buildTicketEditorFilename,
+  parseEditorFilename,
 } from "../views/editorFilename";
 
 suite("Editor filename builder", () => {
@@ -21,5 +22,63 @@ suite("Editor filename builder", () => {
     const filename = buildCommentEditorFilename(2, 10, 55);
 
     assert.strictEqual(filename, "project-2_ticket-10_comment-55.md");
+  });
+
+  test("parses ticket filename", () => {
+    const parsed = parseEditorFilename("project-2_ticket-10.md");
+
+    assert.deepStrictEqual(parsed, {
+      type: "ticket",
+      projectId: 2,
+      ticketId: 10,
+    });
+  });
+
+  test("parses extra ticket filename", () => {
+    const parsed = parseEditorFilename("project-2_ticket-10_extra.md");
+
+    assert.deepStrictEqual(parsed, {
+      type: "ticket",
+      projectId: 2,
+      ticketId: 10,
+    });
+  });
+
+  test("parses suffixed ticket filename", () => {
+    const parsed = parseEditorFilename("project-2_ticket-10-7.md");
+
+    assert.deepStrictEqual(parsed, {
+      type: "ticket",
+      projectId: 2,
+      ticketId: 10,
+    });
+  });
+
+  test("parses comment filename", () => {
+    const parsed = parseEditorFilename("project-2_ticket-10_comment-55.md");
+
+    assert.deepStrictEqual(parsed, {
+      type: "comment",
+      projectId: 2,
+      ticketId: 10,
+      commentId: 55,
+    });
+  });
+
+  test("parses suffixed comment filename", () => {
+    const parsed = parseEditorFilename("project-2_ticket-10_comment-55-3.md");
+
+    assert.deepStrictEqual(parsed, {
+      type: "comment",
+      projectId: 2,
+      ticketId: 10,
+      commentId: 55,
+    });
+  });
+
+  test("ignores unrelated filename", () => {
+    const parsed = parseEditorFilename("notes.md");
+
+    assert.strictEqual(parsed, undefined);
   });
 });

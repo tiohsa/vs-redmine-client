@@ -10,9 +10,6 @@
     "Other"
   ],
   "activationEvents": [
-    "onView:todoexProjects",
-    "onView:todoexTickets",
-    "onView:todoexComments",
     "onView:todoexActivityProjects",
     "onView:todoexActivityTickets",
     "onView:todoexActivityComments",
@@ -80,20 +77,6 @@
       }
     ],
     "views": {
-      "explorer": [
-        {
-          "id": "todoexProjects",
-          "name": "Redmine Projects"
-        },
-        {
-          "id": "todoexTickets",
-          "name": "Redmine Tickets"
-        },
-        {
-          "id": "todoexComments",
-          "name": "Redmine Comments"
-        }
-      ],
       "todoexActivity": [
         {
           "id": "todoexActivityProjects",

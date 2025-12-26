@@ -1,3 +1,4 @@
+import * as path from "path";
 import * as vscode from "vscode";
 import { addCommentForIssue } from "./commands/addComment";
 import { createTicketFromEditor } from "./commands/createTicket";
@@ -7,6 +8,7 @@ import { getIssueDetail } from "./redmine/issues";
 import { showError, showSuccess, showWarning } from "./utils/notifications";
 import { setCommentDraft } from "./views/commentDraftStore";
 import { CommentTreeItem, CommentsTreeProvider } from "./views/commentsView";
+import { parseEditorFilename } from "./views/editorFilename";
 import { ProjectTreeItem, ProjectsTreeProvider } from "./views/projectsView";
 import { TicketTreeItem, TicketsTreeProvider } from "./views/ticketsView";
 import {
@@ -18,32 +20,20 @@ import {
 } from "./views/ticketEditorRegistry";
 import { showTicketComment, showTicketPreview } from "./views/ticketPreview";
 import { getCommentSaveNotification } from "./views/commentSaveNotifications";
-import { handleCommentEditorSave } from "./views/commentSaveSync";
+import { handleCommentEditorSave, syncCommentDraft } from "./views/commentSaveSync";
 import { getSaveNotification } from "./views/ticketSaveNotifications";
-import { handleTicketEditorSave } from "./views/ticketSaveSync";
+import { handleTicketEditorSave, syncTicketDraft } from "./views/ticketSaveSync";
 import { registerFocusRefresh } from "./views/viewFocusRefresh";
 import {
   VIEW_ID_ACTIVITY_COMMENTS,
   VIEW_ID_ACTIVITY_PROJECTS,
   VIEW_ID_ACTIVITY_TICKETS,
-  VIEW_ID_EXPLORER_COMMENTS,
-  VIEW_ID_EXPLORER_PROJECTS,
-  VIEW_ID_EXPLORER_TICKETS,
 } from "./views/viewIds";
 
 export async function activate(context: vscode.ExtensionContext) {
   const ticketsProvider = new TicketsTreeProvider();
   const commentsProvider = new CommentsTreeProvider();
   const projectsProvider = new ProjectsTreeProvider();
-  const projectsView = vscode.window.createTreeView(VIEW_ID_EXPLORER_PROJECTS, {
-    treeDataProvider: projectsProvider,
-  });
-  const ticketsView = vscode.window.createTreeView(VIEW_ID_EXPLORER_TICKETS, {
-    treeDataProvider: ticketsProvider,
-  });
-  const commentsView = vscode.window.createTreeView(VIEW_ID_EXPLORER_COMMENTS, {
-    treeDataProvider: commentsProvider,
-  });
   const activityProjectsView = vscode.window.createTreeView(
     VIEW_ID_ACTIVITY_PROJECTS,
     {
@@ -65,9 +55,6 @@ export async function activate(context: vscode.ExtensionContext) {
   let selectedComment: CommentTreeItem | undefined;
   let selectedCommentDocumentUri: string | undefined;
   context.subscriptions.push(
-    projectsView,
-    ticketsView,
-    commentsView,
     activityProjectsView,
     activityTicketsView,
     activityCommentsView,
@@ -79,14 +66,14 @@ export async function activate(context: vscode.ExtensionContext) {
   const getSelectedComment = (item?: CommentTreeItem): CommentTreeItem | undefined => {
     return (
       item ??
-      (commentsView.selection[0] as CommentTreeItem | undefined) ??
       (activityCommentsView.selection[0] as CommentTreeItem | undefined) ??
       selectedComment
     );
   };
 
   const handleTicketSelection = (item?: TicketTreeItem): void => {
-    const selected = item ?? (ticketsView.selection[0] as TicketTreeItem | undefined);
+    const selected =
+      item ?? (activityTicketsView.selection[0] as TicketTreeItem | undefined);
     if (!selected || !(selected instanceof TicketTreeItem)) {
       return;
     }
@@ -142,53 +129,94 @@ export async function activate(context: vscode.ExtensionContext) {
     }),
   );
 
-  context.subscriptions.push(
-    vscode.workspace.onWillSaveTextDocument((event) => {
-      const document = event.document;
-      const editor =
-        vscode.window.visibleTextEditors.find((candidate) => candidate.document === document) ??
-        (vscode.window.activeTextEditor?.document === document
-          ? vscode.window.activeTextEditor
-          : undefined);
-      if (!editor) {
-        return;
-      }
-      void (async () => {
-        const result = await handleTicketEditorSave(editor);
-        if (result) {
-          const notification = getSaveNotification(result);
-          if (!notification) {
-            return;
-          }
+  const notifyTicketSaveResult = (result: Awaited<ReturnType<typeof handleTicketEditorSave>>): void => {
+    if (!result) {
+      return;
+    }
 
-          if (notification.type === "info") {
-            showSuccess(notification.message);
-          } else if (notification.type === "warning") {
-            showWarning(notification.message);
-          } else {
-            showError(notification.message);
-          }
+    const notification = getSaveNotification(result);
+    if (!notification) {
+      return;
+    }
+
+    if (notification.type === "info") {
+      showSuccess(notification.message);
+    } else if (notification.type === "warning") {
+      showWarning(notification.message);
+    } else {
+      showError(notification.message);
+    }
+  };
+
+  const notifyCommentSaveResult = (
+    result: Awaited<ReturnType<typeof handleCommentEditorSave>>,
+  ): void => {
+    if (!result) {
+      return;
+    }
+
+    const notification = getCommentSaveNotification(result);
+    if (!notification) {
+      return;
+    }
+
+    if (notification.type === "info") {
+      showSuccess(notification.message);
+    } else if (notification.type === "warning") {
+      showWarning(notification.message);
+    } else {
+      showError(notification.message);
+    }
+  };
+
+  const syncOnSave = (document: vscode.TextDocument): void => {
+    const editor =
+      vscode.window.visibleTextEditors.find((candidate) => candidate.document === document) ??
+      (vscode.window.activeTextEditor?.document === document
+        ? vscode.window.activeTextEditor
+        : undefined);
+
+    void (async () => {
+      if (editor) {
+        const ticketResult = await handleTicketEditorSave(editor);
+        if (ticketResult) {
+          notifyTicketSaveResult(ticketResult);
           return;
         }
 
         const commentResult = await handleCommentEditorSave(editor);
-        if (!commentResult) {
+        if (commentResult) {
+          notifyCommentSaveResult(commentResult);
           return;
         }
+      }
 
-        const commentNotification = getCommentSaveNotification(commentResult);
-        if (!commentNotification) {
-          return;
-        }
+      const filename = path.basename(document.uri.path);
+      const parsed = parseEditorFilename(filename);
+      if (!parsed) {
+        return;
+      }
 
-        if (commentNotification.type === "info") {
-          showSuccess(commentNotification.message);
-        } else if (commentNotification.type === "warning") {
-          showWarning(commentNotification.message);
-        } else {
-          showError(commentNotification.message);
-        }
-      })();
+      if (parsed.type === "ticket") {
+        const result = await syncTicketDraft({
+          ticketId: parsed.ticketId,
+          content: document.getText(),
+        });
+        notifyTicketSaveResult(result);
+        return;
+      }
+
+      const commentResult = await syncCommentDraft({
+        commentId: parsed.commentId,
+        content: document.getText(),
+      });
+      notifyCommentSaveResult(commentResult);
+    })();
+  };
+
+  context.subscriptions.push(
+    vscode.workspace.onDidSaveTextDocument((document) => {
+      syncOnSave(document);
     }),
   );
 
@@ -245,7 +273,8 @@ export async function activate(context: vscode.ExtensionContext) {
     vscode.commands.registerCommand(
       "todoex.openTicketPreview",
       async (item?: TicketTreeItem) => {
-        const selected = item ?? (ticketsView.selection[0] as TicketTreeItem | undefined);
+        const selected =
+          item ?? (activityTicketsView.selection[0] as TicketTreeItem | undefined);
         if (!selected || !(selected instanceof TicketTreeItem)) {
           vscode.window.showErrorMessage("Select a ticket to preview.");
           return;
@@ -261,7 +290,8 @@ export async function activate(context: vscode.ExtensionContext) {
     vscode.commands.registerCommand(
       "todoex.openExtraTicketEditor",
       async (item?: TicketTreeItem) => {
-        const selected = item ?? (ticketsView.selection[0] as TicketTreeItem | undefined);
+        const selected =
+          item ?? (activityTicketsView.selection[0] as TicketTreeItem | undefined);
         if (!selected || !(selected instanceof TicketTreeItem)) {
           vscode.window.showErrorMessage("Select a ticket to preview.");
           return;
@@ -305,7 +335,8 @@ export async function activate(context: vscode.ExtensionContext) {
 
   context.subscriptions.push(
     vscode.commands.registerCommand("todoex.addComment", async () => {
-      const selected = ticketsView.selection[0] as TicketTreeItem | undefined;
+      const selected =
+        activityTicketsView.selection[0] as TicketTreeItem | undefined;
       if (!selected) {
         vscode.window.showErrorMessage("Select a ticket before adding a comment.");
         return;
@@ -319,7 +350,13 @@ export async function activate(context: vscode.ExtensionContext) {
   );
 
   context.subscriptions.push(
-    projectsView.onDidChangeSelection(async (event) => {
+    activityTicketsView.onDidChangeSelection((event) => {
+      handleTicketSelection(event.selection[0] as TicketTreeItem | undefined);
+    }),
+  );
+
+  context.subscriptions.push(
+    activityProjectsView.onDidChangeSelection(async (event) => {
       const selected = event.selection[0] as ProjectTreeItem | undefined;
       if (!selected) {
         return;
@@ -329,24 +366,6 @@ export async function activate(context: vscode.ExtensionContext) {
       projectsProvider.setSelectedProjectId(selected.project.id);
       ticketsProvider.setSelectedProjectId(selected.project.id);
       ticketsProvider.refresh();
-    }),
-  );
-
-  context.subscriptions.push(
-    ticketsView.onDidChangeSelection((event) => {
-      handleTicketSelection(event.selection[0] as TicketTreeItem | undefined);
-    }),
-  );
-
-  context.subscriptions.push(
-    activityTicketsView.onDidChangeSelection((event) => {
-      handleTicketSelection(event.selection[0] as TicketTreeItem | undefined);
-    }),
-  );
-
-  context.subscriptions.push(
-    commentsView.onDidChangeSelection((event) => {
-      void handleCommentSelection(event.selection[0] as CommentTreeItem | undefined);
     }),
   );
 
@@ -361,7 +380,7 @@ export async function activate(context: vscode.ExtensionContext) {
   if (initialSelection.id) {
     const projectItem = projectsProvider.getProjectItemById(initialSelection.id);
     if (projectItem) {
-      await projectsView.reveal(projectItem, { select: true, focus: false });
+      await activityProjectsView.reveal(projectItem, { select: true, focus: false });
     }
     ticketsProvider.setSelectedProjectId(initialSelection.id);
   }
