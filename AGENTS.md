@@ -28,9 +28,9 @@ npm test && npm run lint
 TypeScript 5.9: Follow standard conventions
 
 ## Recent Changes
+- 001-add-comment-button: Added TypeScript 5.9 + VS Code Extension API, webpack, @vscode/test-cli
 - 001-add-ticket-icon: Added TypeScript 5.9 + VS Code Extension API, webpack, @vscode/test-cli
 - 001-activitybar-view: Added TypeScript 5.9 + VS Code Extension API, webpack, @vscode/test-cli
-- 001-stable-editor-filename: Added TypeScript 5.9 + VS Code Extension API, webpack, @vscode/test-cli
 
 
 <!-- MANUAL ADDITIONS START -->
