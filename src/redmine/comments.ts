@@ -42,3 +42,17 @@ export const updateComment = async (journalId: number, notes: string): Promise<v
     body: buildCommentUpdatePayload(notes),
   });
 };
+
+export const buildAddCommentPayload = (notes: string): Record<string, unknown> => ({
+  issue: {
+    notes,
+  },
+});
+
+export const addComment = async (issueId: number, notes: string): Promise<void> => {
+  await requestJson({
+    method: "PUT",
+    path: `/issues/${issueId}.json`,
+    body: buildAddCommentPayload(notes),
+  });
+};

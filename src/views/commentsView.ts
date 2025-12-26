@@ -17,6 +17,11 @@ export class CommentsTreeProvider implements vscode.TreeDataProvider<CommentTree
     this.refresh();
   }
 
+  refreshForTicket(ticketId: number): void {
+    this.ticketId = ticketId;
+    this.refresh();
+  }
+
   refresh(): void {
     void this.loadComments();
   }

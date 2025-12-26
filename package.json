@@ -19,7 +19,8 @@
     "onCommand:todoex.toggleChildProjects",
     "onCommand:todoex.openTicketPreview",
     "onCommand:todoex.createTicket",
-    "onCommand:todoex.editComment"
+    "onCommand:todoex.editComment",
+    "onCommand:todoex.addComment"
   ],
   "main": "./dist/extension.js",
   "contributes": {
@@ -55,6 +56,10 @@
       {
         "command": "todoex.editComment",
         "title": "Redmine: Edit Comment"
+      },
+      {
+        "command": "todoex.addComment",
+        "title": "Redmine: Add Comment"
       }
     ],
     "views": {

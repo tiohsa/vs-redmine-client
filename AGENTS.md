@@ -23,9 +23,10 @@ npm test && npm run lint
 TypeScript 5.9: Follow standard conventions
 
 ## Recent Changes
+- 001-comment-from-editor: Added TypeScript 5.9 + VS Code Extension API, webpack, @vscode/test-cli
+- 002-add-ticket-comment: Added TypeScript 5.9 + VS Code Extension API, webpack, @vscode/test-cli
 - 001-project-list-sidebar: Added TypeScript 5.9 + VS Code Extension API, webpack, @vscode/test-cli
 
-- 001-redmine-ticket-workflow: Added TypeScript 5.9 + VS Code Extension API, webpack, @vscode/test-cli
 
 <!-- MANUAL ADDITIONS START -->
 <!-- MANUAL ADDITIONS END -->

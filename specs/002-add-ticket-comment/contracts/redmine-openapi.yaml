@@ -1,0 +1,50 @@
+openapi: 3.0.3
+info:
+  title: Add Ticket Comment API
+  version: 6.1.0
+  description: API surface used to create ticket comments.
+servers:
+  - url: https://{redmineHost}
+    variables:
+      redmineHost:
+        default: redmine.example.com
+security:
+  - ApiKeyAuth: []
+
+paths:
+  /issues/{issueId}.json:
+    put:
+      summary: Add comment to issue
+      parameters:
+        - in: path
+          name: issueId
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/IssueComment"
+      responses:
+        "200":
+          description: Comment added
+
+components:
+  securitySchemes:
+    ApiKeyAuth:
+      type: apiKey
+      in: header
+      name: X-Redmine-API-Key
+  schemas:
+    IssueComment:
+      type: object
+      required: [issue]
+      properties:
+        issue:
+          type: object
+          required: [notes]
+          properties:
+            notes:
+              type: string

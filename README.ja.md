@@ -25,7 +25,7 @@ English README: `README.md`
 
 ## 設定項目
 
-- `todoex.baseUrl`: Redmine のベースURL
+- `todoex.baseUrl`: Redmine のベースURL（http:// または https:// を含める）
 - `todoex.apiKey`: Redmine API キー
 - `todoex.defaultProjectId`: デフォルトのプロジェクトID/識別子
 - `todoex.includeChildProjects`: 子プロジェクトを一覧に含めるか
@@ -33,13 +33,13 @@ English README: `README.md`
 
 ## 使い方
 
-1. `todoex.baseUrl` と `todoex.apiKey` を設定
+1. `todoex.baseUrl`（http:// または https:// を含める）と `todoex.apiKey` を設定
 2. `todoex.defaultProjectId` を設定（またはコマンドで選択）
 3. サイドバーの "Redmine Tickets" で一覧を確認
 4. "Redmine Projects" でプロジェクトを選択してチケットを表示
 5. チケット選択でプレビューとコメントを表示
 6. "Redmine: Create Ticket from Editor" で新規作成
-7. "Redmine: Edit Comment" で自分のコメントを編集
+7. "Redmine: Edit Comment" で自分のコメントをエディタ内容で更新
 
 ## コマンド
 
@@ -50,6 +50,56 @@ English README: `README.md`
 - `Redmine: Open Ticket Preview`
 - `Redmine: Create Ticket from Editor`
 - `Redmine: Edit Comment`
+- `Redmine: Add Comment`
+
+### コマンドの利用方法
+
+#### Redmine: Refresh Projects
+
+1. エクスプローラーの "Redmine Projects" を開く
+2. コマンド実行でプロジェクト一覧を再読み込み
+
+#### Redmine: Refresh Tickets
+
+1. プロジェクトを選択しておく
+2. "Redmine Tickets" を開く
+3. コマンド実行で選択プロジェクトのチケットを再読み込み
+
+#### Redmine: Select Project
+
+1. コマンドを実行
+2. 数値のプロジェクトIDを入力
+3. チケットとコメントが選択プロジェクトに更新される
+
+#### Redmine: Toggle Child Projects
+
+1. コマンドを実行
+2. 子プロジェクトを含む/含まないでチケット一覧を再読み込み
+
+#### Redmine: Open Ticket Preview
+
+1. "Redmine Tickets" でチケットを選択
+2. コマンド実行で読み取り専用プレビューを開く
+
+#### Redmine: Create Ticket from Editor
+
+1. 説明文にしたい内容をエディタで開く
+2. コマンド実行 → 件名を入力
+3. 添付方法（ファイル/クリップボードの data URI）を選択
+4. Mermaid ブロックは `{{mermaid ... }}` に変換されて投稿される
+
+#### Redmine: Edit Comment
+
+1. チケットを選び "Redmine Comments" で自分のコメントを選択
+2. 更新したい本文をエディタで開く
+3. コマンド実行でアクティブエディタ内容を反映する
+
+#### Redmine: Add Comment
+
+1. "Redmine Tickets" でチケットを選択
+2. コメント本文をエディタで開く（最大 20000 文字）
+3. コマンド実行でアクティブエディタ内容を投稿する
+4. 空白のみの入力はエラーで拒否される
 
 ## デバッグ実行
 

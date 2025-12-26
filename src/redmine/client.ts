@@ -14,6 +14,21 @@ export interface RequestOptions {
   contentType?: string;
 }
 
+const normalizeBaseUrl = (rawBaseUrl: string): string => {
+  try {
+    const url = new URL(rawBaseUrl);
+    if (url.protocol !== "http:" && url.protocol !== "https:") {
+      throw new Error("Base URL must start with http:// or https://");
+    }
+    return url.toString();
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Invalid base URL.";
+    throw new Error(
+      `Invalid Redmine base URL. Use http:// or https:// and remove spaces. (${message})`,
+    );
+  }
+};
+
 const ensureConfig = (): { baseUrl: string; apiKey: string } => {
   const baseUrl = getBaseUrl();
   const apiKey = getApiKey();
@@ -23,7 +38,7 @@ const ensureConfig = (): { baseUrl: string; apiKey: string } => {
   if (!apiKey) {
     throw new Error("Missing Redmine API key configuration.");
   }
-  return { baseUrl, apiKey };
+  return { baseUrl: normalizeBaseUrl(baseUrl), apiKey };
 };
 
 const buildUrl = (baseUrl: string, path: string, query?: QueryParams): string => {
@@ -74,7 +89,17 @@ export const requestJson = async <T>(options: RequestOptions): Promise<T> => {
     );
   }
 
-  return (await response.json()) as T;
+  const text = await response.text();
+  if (!text) {
+    return {} as T;
+  }
+  try {
+    return JSON.parse(text) as T;
+  } catch (error) {
+    throw new Error(
+      `Redmine response was not valid JSON. (${(error as Error).message})`,
+    );
+  }
 };
 
 export const requestText = async (options: RequestOptions): Promise<string> => {

@@ -1,23 +1,22 @@
 import * as vscode from "vscode";
-import { updateComment } from "../redmine/comments";
-import { Comment } from "../redmine/types";
+import { addComment } from "../redmine/comments";
 import { getCommentLimitGuidance, validateComment } from "../utils/commentValidation";
 import { showError, showInfo } from "../utils/notifications";
 
-export const editComment = async (comment: Comment): Promise<void> => {
-  if (!comment.editableByCurrentUser) {
-    showError("You can only edit your own comments.");
-    return;
-  }
+export interface AddCommentInput {
+  issueId: number;
+  onSuccess?: () => void | Promise<void>;
+}
 
+export const addCommentForIssue = async (input: AddCommentInput): Promise<void> => {
   const editor = vscode.window.activeTextEditor;
   if (!editor) {
     showError("No active editor found.");
     return;
   }
 
-  const updated = editor.document.getText();
-  const validation = validateComment(updated);
+  const text = editor.document.getText();
+  const validation = validateComment(text);
   if (!validation.valid) {
     showError(validation.message ?? "Invalid comment.");
     showInfo(getCommentLimitGuidance());
@@ -25,8 +24,9 @@ export const editComment = async (comment: Comment): Promise<void> => {
   }
 
   try {
-    await updateComment(comment.id, updated);
-    showInfo("Comment updated successfully.");
+    await addComment(input.issueId, text);
+    showInfo("Comment added.");
+    await input.onSuccess?.();
   } catch (error) {
     showError((error as Error).message);
   }

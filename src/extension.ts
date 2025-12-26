@@ -1,4 +1,5 @@
 import * as vscode from "vscode";
+import { addCommentForIssue } from "./commands/addComment";
 import { createTicketFromEditor } from "./commands/createTicket";
 import { editComment } from "./commands/editComment";
 import { setProjectSelection, getProjectSelection } from "./config/projectSelection";
@@ -94,6 +95,21 @@ export async function activate(context: vscode.ExtensionContext) {
         await editComment(item.comment);
       },
     ),
+  );
+
+  context.subscriptions.push(
+    vscode.commands.registerCommand("todoex.addComment", async () => {
+      const selected = ticketsView.selection[0] as TicketTreeItem | undefined;
+      if (!selected) {
+        vscode.window.showErrorMessage("Select a ticket before adding a comment.");
+        return;
+      }
+
+      await addCommentForIssue({
+        issueId: selected.ticket.id,
+        onSuccess: () => commentsProvider.refreshForTicket(selected.ticket.id),
+      });
+    }),
   );
 
   context.subscriptions.push(
