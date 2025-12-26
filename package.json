@@ -16,8 +16,74 @@
       {
         "command": "todoex.helloWorld",
         "title": "Hello World"
+      },
+      {
+        "command": "todoex.refreshTickets",
+        "title": "Redmine: Refresh Tickets"
+      },
+      {
+        "command": "todoex.selectProject",
+        "title": "Redmine: Select Project"
+      },
+      {
+        "command": "todoex.toggleChildProjects",
+        "title": "Redmine: Toggle Child Projects"
+      },
+      {
+        "command": "todoex.openTicketPreview",
+        "title": "Redmine: Open Ticket Preview"
+      },
+      {
+        "command": "todoex.createTicket",
+        "title": "Redmine: Create Ticket from Editor"
+      },
+      {
+        "command": "todoex.editComment",
+        "title": "Redmine: Edit Comment"
       }
-    ]
+    ],
+    "views": {
+      "explorer": [
+        {
+          "id": "todoexTickets",
+          "name": "Redmine Tickets"
+        },
+        {
+          "id": "todoexComments",
+          "name": "Redmine Comments"
+        }
+      ]
+    },
+    "configuration": {
+      "title": "TodoEx",
+      "properties": {
+        "todoex.baseUrl": {
+          "type": "string",
+          "default": "",
+          "description": "Base URL of the Redmine instance."
+        },
+        "todoex.apiKey": {
+          "type": "string",
+          "default": "",
+          "description": "Redmine API key for authentication."
+        },
+        "todoex.defaultProjectId": {
+          "type": "string",
+          "default": "",
+          "description": "Default project identifier or ID used in ticket listing."
+        },
+        "todoex.includeChildProjects": {
+          "type": "boolean",
+          "default": false,
+          "description": "Include child projects when listing tickets."
+        },
+        "todoex.ticketListLimit": {
+          "type": "number",
+          "default": 50,
+          "description": "Default number of tickets to load per request."
+        }
+      }
+    }
   },
   "scripts": {
     "vscode:prepublish": "pnpm run package",
@@ -28,7 +94,8 @@
     "watch-tests": "tsc -p . -w --outDir out",
     "pretest": "pnpm run compile-tests && pnpm run compile && pnpm run lint",
     "lint": "eslint src",
-    "test": "vscode-test"
+    "test": "vscode-test",
+    "test:unsafe": "bash ./scripts/vscode-test-nosandbox.sh"
   },
   "devDependencies": {
     "@types/vscode": "^1.107.0",

@@ -1,0 +1,171 @@
+openapi: 3.0.3
+info:
+  title: Redmine Ticket Workflow API
+  version: 6.1.0
+  description: API surface used by the VS Code extension.
+servers:
+  - url: https://{redmineHost}
+    variables:
+      redmineHost:
+        default: redmine.example.com
+security:
+  - ApiKeyAuth: []
+
+paths:
+  /projects.json:
+    get:
+      summary: List projects
+      parameters:
+        - in: query
+          name: include_children
+          schema:
+            type: boolean
+      responses:
+        "200":
+          description: Project list
+
+  /issues.json:
+    get:
+      summary: List issues (tickets)
+      parameters:
+        - in: query
+          name: project_id
+          schema:
+            type: integer
+        - in: query
+          name: include_children
+          schema:
+            type: boolean
+        - in: query
+          name: status_id
+          schema:
+            type: string
+        - in: query
+          name: assigned_to_id
+          schema:
+            type: string
+        - in: query
+          name: limit
+          schema:
+            type: integer
+            default: 50
+        - in: query
+          name: offset
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Issue list
+
+    post:
+      summary: Create issue
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/IssueCreate"
+      responses:
+        "201":
+          description: Issue created
+
+  /issues/{issueId}.json:
+    get:
+      summary: Get issue details (with journals)
+      parameters:
+        - in: path
+          name: issueId
+          required: true
+          schema:
+            type: integer
+        - in: query
+          name: include
+          schema:
+            type: string
+            example: journals
+      responses:
+        "200":
+          description: Issue details
+
+  /uploads.json:
+    post:
+      summary: Upload attachment
+      requestBody:
+        required: true
+        content:
+          application/octet-stream:
+            schema:
+              type: string
+              format: binary
+      responses:
+        "201":
+          description: Upload token
+
+  /journals/{journalId}.json:
+    put:
+      summary: Update a journal (comment)
+      parameters:
+        - in: path
+          name: journalId
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/JournalUpdate"
+      responses:
+        "200":
+          description: Journal updated
+
+components:
+  securitySchemes:
+    ApiKeyAuth:
+      type: apiKey
+      in: header
+      name: X-Redmine-API-Key
+  schemas:
+    IssueCreate:
+      type: object
+      required: [issue]
+      properties:
+        issue:
+          type: object
+          required: [project_id, subject, description]
+          properties:
+            project_id:
+              type: integer
+            subject:
+              type: string
+            description:
+              type: string
+            assigned_to_id:
+              type: integer
+            status_id:
+              type: integer
+            uploads:
+              type: array
+              items:
+                $ref: "#/components/schemas/UploadToken"
+    UploadToken:
+      type: object
+      required: [token, filename, content_type]
+      properties:
+        token:
+          type: string
+        filename:
+          type: string
+        content_type:
+          type: string
+    JournalUpdate:
+      type: object
+      required: [journal]
+      properties:
+        journal:
+          type: object
+          required: [notes]
+          properties:
+            notes:
+              type: string

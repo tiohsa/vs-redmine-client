@@ -1,71 +1,74 @@
-# todoex README
+# TodoEx
 
-This is the README for your extension "todoex". After writing up a brief description, we recommend including the following sections.
+Manage Redmine 6.1 tickets directly inside VS Code. Browse project tickets,
+preview details, create new tickets from editor content with attachments, and
+edit your own comments without leaving the editor.
+
+Japanese README: `README.ja.md`
 
 ## Features
 
-Describe specific features of your extension including screenshots of your extension in action. Image paths are relative to this README file.
-
-For example if there is an image subfolder under your extension project workspace:
-
-\!\[feature X\]\(images/feature-x.png\)
-
-> Tip: Many popular extensions utilize animations. This is an excellent way to show off your extension! We recommend short, focused animations that are easy to follow.
+- Sidebar ticket list with status/assignee filters
+- Child project inclusion toggle
+- Read-only ticket preview in the editor
+- Create tickets from active editor content
+- Image attachments from file selection or clipboard data URI
+- Mermaid block conversion for redmica_ui_extension (`{{mermaid ... }}`)
+- Edit only your own ticket comments
+- Comments list in a dedicated sidebar view
 
 ## Requirements
 
-If you have any requirements or dependencies, add a section describing those and how to install and configure them.
+- Redmine 6.1 server
+- Redmine API key with access to target projects
 
 ## Extension Settings
 
-Include if your extension adds any VS Code settings through the `contributes.configuration` extension point.
-
-For example:
-
 This extension contributes the following settings:
 
-* `myExtension.enable`: Enable/disable this extension.
-* `myExtension.thing`: Set to `blah` to do something.
+- `todoex.baseUrl`: Base URL of the Redmine instance
+- `todoex.apiKey`: Redmine API key
+- `todoex.defaultProjectId`: Default project identifier or ID
+- `todoex.includeChildProjects`: Include child projects in ticket list
+- `todoex.ticketListLimit`: Default number of tickets to load per request
+
+## Usage
+
+1. Configure `todoex.baseUrl` and `todoex.apiKey`.
+2. Set `todoex.defaultProjectId` or use the command to select a project.
+3. Browse tickets in the "Redmine Tickets" view.
+4. Select a ticket to preview details and load comments.
+5. Use the "Redmine: Create Ticket from Editor" command to create a ticket.
+6. Use the "Redmine: Edit Comment" command to update your own comments.
+
+## Commands
+
+- `Redmine: Refresh Tickets`
+- `Redmine: Select Project`
+- `Redmine: Toggle Child Projects`
+- `Redmine: Open Ticket Preview`
+- `Redmine: Create Ticket from Editor`
+- `Redmine: Edit Comment`
+
+## Debug
+
+1. Open this repo in VS Code.
+2. Run the "Run Extension" debug configuration (F5).
+3. Configure settings in the Extension Host.
+4. Use the commands above to verify behavior.
+
+## Tests
+
+- `pnpm test`: compile + lint + VS Code integration tests
+- `pnpm run test:unsafe`: uses no-sandbox flags for environments that block
+  the VS Code test runner
 
 ## Known Issues
 
-Calling out known issues can help limit users opening duplicate issues against your extension.
+- Clipboard attachments require a data URI in the clipboard.
 
 ## Release Notes
 
-Users appreciate release notes as you update your extension.
+### 0.0.1
 
-### 1.0.0
-
-Initial release of ...
-
-### 1.0.1
-
-Fixed issue #.
-
-### 1.1.0
-
-Added features X, Y, and Z.
-
----
-
-## Following extension guidelines
-
-Ensure that you've read through the extensions guidelines and follow the best practices for creating your extension.
-
-* [Extension Guidelines](https://code.visualstudio.com/api/references/extension-guidelines)
-
-## Working with Markdown
-
-You can author your README using Visual Studio Code. Here are some useful editor keyboard shortcuts:
-
-* Split the editor (`Cmd+\` on macOS or `Ctrl+\` on Windows and Linux).
-* Toggle preview (`Shift+Cmd+V` on macOS or `Shift+Ctrl+V` on Windows and Linux).
-* Press `Ctrl+Space` (Windows, Linux, macOS) to see a list of Markdown snippets.
-
-## For more information
-
-* [Visual Studio Code's Markdown Support](http://code.visualstudio.com/docs/languages/markdown)
-* [Markdown Syntax Reference](https://help.github.com/articles/markdown-basics/)
-
-**Enjoy!**
+Initial release.

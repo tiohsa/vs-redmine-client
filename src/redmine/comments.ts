@@ -1,0 +1,44 @@
+import { requestJson } from "./client";
+import { Comment, RedmineIssueDetailResponse } from "./types";
+
+export const filterEditableComments = <T extends { editableByCurrentUser: boolean }>(
+  comments: T[],
+): T[] => comments.filter((comment) => comment.editableByCurrentUser);
+
+export const buildCommentUpdatePayload = (notes: string): Record<string, unknown> => ({
+  journal: {
+    notes,
+  },
+});
+
+export const listComments = async (
+  issueId: number,
+  currentUserId?: number,
+): Promise<Comment[]> => {
+  const response = await requestJson<RedmineIssueDetailResponse>({
+    method: "GET",
+    path: `/issues/${issueId}.json`,
+    query: { include: "journals" },
+  });
+
+  const issue = response.issue;
+  return (issue.journals ?? []).map((journal) => ({
+    id: journal.id,
+    ticketId: issue.id,
+    authorId: journal.user?.id ?? 0,
+    authorName: journal.user?.name ?? "Unknown",
+    body: journal.notes ?? "",
+    createdAt: journal.created_on,
+    updatedAt: journal.updated_on,
+    editableByCurrentUser:
+      currentUserId !== undefined && journal.user?.id === currentUserId,
+  }));
+};
+
+export const updateComment = async (journalId: number, notes: string): Promise<void> => {
+  await requestJson({
+    method: "PUT",
+    path: `/journals/${journalId}.json`,
+    body: buildCommentUpdatePayload(notes),
+  });
+};
