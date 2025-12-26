@@ -3,10 +3,12 @@ import * as vscode from "vscode";
 import {
   clearRegistry,
   getLastActiveEditor,
+  getNewTicketDraftUri,
   getPrimaryEditor,
   getTicketEditors,
   getTicketIdForEditor,
   markEditorActive,
+  registerNewTicketDraft,
   registerTicketEditor,
   removeTicketEditorByDocument,
   removeTicketEditorByUri,
@@ -64,5 +66,14 @@ suite("Ticket editor registry", () => {
     (primary.document as { uri: vscode.Uri }).uri = vscode.Uri.parse("file:/tmp/ticket-4.md");
 
     assert.strictEqual(getTicketIdForEditor(primary), 4);
+  });
+
+  test("returns the new ticket draft uri when registered", () => {
+    const draft = createEditorStub(vscode.Uri.parse("untitled:todoex-new-ticket.md"), "");
+
+    registerNewTicketDraft(draft);
+
+    const uri = getNewTicketDraftUri();
+    assert.strictEqual(uri?.toString(), "untitled:todoex-new-ticket.md");
   });
 });

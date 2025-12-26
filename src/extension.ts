@@ -2,6 +2,7 @@ import * as path from "path";
 import * as vscode from "vscode";
 import { addCommentForIssue } from "./commands/addComment";
 import { createTicketFromEditor } from "./commands/createTicket";
+import { createTicketFromList } from "./commands/createTicketFromList";
 import { editComment } from "./commands/editComment";
 import { setProjectSelection, getProjectSelection } from "./config/projectSelection";
 import { getIssueDetail } from "./redmine/issues";
@@ -306,6 +307,12 @@ export async function activate(context: vscode.ExtensionContext) {
   context.subscriptions.push(
     vscode.commands.registerCommand("todoex.createTicket", async () => {
       await createTicketFromEditor();
+    }),
+  );
+
+  context.subscriptions.push(
+    vscode.commands.registerCommand("todoex.createTicketFromList", async () => {
+      await createTicketFromList();
     }),
   );
 

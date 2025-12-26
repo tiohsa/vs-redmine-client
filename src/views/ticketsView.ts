@@ -1,5 +1,7 @@
 import * as vscode from "vscode";
 import {
+  getApiKey,
+  getBaseUrl,
   getDefaultProjectId,
   getIncludeChildProjects,
   getTicketListLimit,
@@ -9,7 +11,24 @@ import { listIssues } from "../redmine/issues";
 import { Ticket } from "../redmine/types";
 import { showError } from "../utils/notifications";
 import { MAX_VIEW_ITEMS } from "./viewLimits";
+import { setViewContext } from "./viewContext";
 import { createEmptyStateItem, createErrorStateItem } from "./viewState";
+
+export const CREATE_TICKET_CONTEXT_KEY = "todoex.canCreateTickets";
+
+export const evaluateCreateTicketPermission = (
+  baseUrl: string,
+  apiKey: string,
+): boolean => baseUrl.length > 0 && apiKey.length > 0;
+
+export const refreshCreateTicketContext = (
+  baseUrl = getBaseUrl(),
+  apiKey = getApiKey(),
+): boolean => {
+  const canCreate = evaluateCreateTicketPermission(baseUrl, apiKey);
+  void setViewContext(CREATE_TICKET_CONTEXT_KEY, canCreate);
+  return canCreate;
+};
 
 export const normalizeFilterOptions = (
   allOptions: string[],
@@ -56,6 +75,7 @@ export class TicketsTreeProvider implements vscode.TreeDataProvider<vscode.TreeI
   async loadTickets(): Promise<void> {
     try {
       this.errorMessage = undefined;
+      refreshCreateTicketContext();
       const selection = getProjectSelection();
       const fallbackId = Number(getDefaultProjectId());
       const projectId = selection.id ?? (Number.isNaN(fallbackId) ? undefined : fallbackId);

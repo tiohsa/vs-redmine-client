@@ -20,6 +20,7 @@
     "onCommand:todoex.openTicketPreview",
     "onCommand:todoex.openExtraTicketEditor",
     "onCommand:todoex.createTicket",
+    "onCommand:todoex.createTicketFromList",
     "onCommand:todoex.editComment",
     "onCommand:todoex.addComment"
   ],
@@ -68,6 +69,10 @@
         "title": "Redmine: Create Ticket from Editor"
       },
       {
+        "command": "todoex.createTicketFromList",
+        "title": "Redmine: New Ticket"
+      },
+      {
         "command": "todoex.editComment",
         "title": "Redmine: Edit Comment"
       },
@@ -93,6 +98,15 @@
       ]
     },
     "menus": {
+      "view/title": [
+        {
+          "command": "todoex.createTicketFromList",
+          "when": "view == todoexActivityTickets",
+          "group": "navigation",
+          "icon": "$(add)",
+          "enablement": "todoex.canCreateTickets"
+        }
+      ],
       "view/item/context": [
         {
           "command": "todoex.openTicketPreview",

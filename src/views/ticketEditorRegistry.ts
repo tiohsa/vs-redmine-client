@@ -9,6 +9,7 @@ const editorByUri = new Map<string, TicketEditorRecord>();
 let editorByDocument = new WeakMap<vscode.TextDocument, TicketEditorRecord>();
 let editorByEditor = new WeakMap<vscode.TextEditor, TicketEditorRecord>();
 const editorsByTicket = new Map<number, Set<string>>();
+const NEW_TICKET_DRAFT_ID = -1;
 
 const syncRecordUri = (record: TicketEditorRecord, nextUri: string): void => {
   if (record.uri === nextUri) {
@@ -61,6 +62,19 @@ export const registerTicketEditor = (
   editorsByTicket.get(ticketId)?.add(uri);
 
   return record;
+};
+
+export const registerNewTicketDraft = (editor: vscode.TextEditor): TicketEditorRecord =>
+  registerTicketEditor(NEW_TICKET_DRAFT_ID, editor, "primary", "ticket");
+
+export const getNewTicketDraftUri = (): vscode.Uri | undefined => {
+  const record =
+    getLastActiveEditor(NEW_TICKET_DRAFT_ID) ?? getPrimaryEditor(NEW_TICKET_DRAFT_ID);
+  if (!record) {
+    return undefined;
+  }
+
+  return vscode.Uri.parse(record.uri);
 };
 
 export const getTicketEditors = (ticketId: number): TicketEditorRecord[] =>
