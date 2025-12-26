@@ -1,0 +1,150 @@
+openapi: 3.0.3
+info:
+  title: Ticket Editor Pinning
+  version: 1.0.0
+  description: Contract for ticket editor selection and comment draft handling.
+paths:
+  /tickets/{ticketId}/editor:
+    get:
+      summary: Select ticket and focus the appropriate editor
+      parameters:
+        - name: ticketId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Focused editor for the ticket
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/EditorFocus"
+  /tickets/{ticketId}/editors:
+    post:
+      summary: Create an extra editor for a ticket
+      parameters:
+        - name: ticketId
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/EditorCreateRequest"
+      responses:
+        "201":
+          description: Newly created editor
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Editor"
+  /tickets/{ticketId}/editors/primary:
+    post:
+      summary: Create a new primary editor when missing
+      parameters:
+        - name: ticketId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "201":
+          description: Newly created primary editor
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Editor"
+  /tickets/{ticketId}/comments/draft:
+    get:
+      summary: Get current comment draft for a ticket
+      parameters:
+        - name: ticketId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Comment draft state
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CommentDraft"
+    post:
+      summary: Update comment draft for a ticket
+      parameters:
+        - name: ticketId
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CommentDraftUpdate"
+      responses:
+        "200":
+          description: Updated comment draft
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CommentDraft"
+components:
+  schemas:
+    Editor:
+      type: object
+      required: [editorId, ticketId, kind, isOpen]
+      properties:
+        editorId:
+          type: string
+        ticketId:
+          type: string
+        kind:
+          type: string
+          enum: [primary, extra]
+        isOpen:
+          type: boolean
+    EditorFocus:
+      type: object
+      required: [editorId, ticketId]
+      properties:
+        editorId:
+          type: string
+        ticketId:
+          type: string
+    EditorCreateRequest:
+      type: object
+      properties:
+        openInForeground:
+          type: boolean
+    CommentDraft:
+      type: object
+      required: [draftId, ticketId, content, status]
+      properties:
+        draftId:
+          type: string
+        ticketId:
+          type: string
+        content:
+          type: string
+        status:
+          type: string
+          enum: [editing, saved, discarded]
+        updatedAt:
+          type: string
+          format: date-time
+    CommentDraftUpdate:
+      type: object
+      required: [content, status]
+      properties:
+        content:
+          type: string
+        status:
+          type: string
+          enum: [editing, saved, discarded]

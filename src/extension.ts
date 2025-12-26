@@ -3,10 +3,19 @@ import { addCommentForIssue } from "./commands/addComment";
 import { createTicketFromEditor } from "./commands/createTicket";
 import { editComment } from "./commands/editComment";
 import { setProjectSelection, getProjectSelection } from "./config/projectSelection";
+import { getIssueDetail } from "./redmine/issues";
+import { setCommentDraft } from "./views/commentDraftStore";
 import { CommentTreeItem, CommentsTreeProvider } from "./views/commentsView";
 import { ProjectTreeItem, ProjectsTreeProvider } from "./views/projectsView";
 import { TicketTreeItem, TicketsTreeProvider } from "./views/ticketsView";
-import { showTicketPreview } from "./views/ticketPreview";
+import {
+  getEditorContentType,
+  getTicketIdForEditor,
+  isTicketEditor,
+  markEditorActive,
+  removeTicketEditorByUri,
+} from "./views/ticketEditorRegistry";
+import { showTicketComment, showTicketPreview } from "./views/ticketPreview";
 
 export async function activate(context: vscode.ExtensionContext) {
   const ticketsProvider = new TicketsTreeProvider();
@@ -27,6 +36,32 @@ export async function activate(context: vscode.ExtensionContext) {
     projectsView,
     ticketsView,
     commentsView,
+  );
+
+  let previousActiveEditor = vscode.window.activeTextEditor;
+  context.subscriptions.push(
+    vscode.window.onDidChangeActiveTextEditor((editor) => {
+      if (previousActiveEditor && isTicketEditor(previousActiveEditor)) {
+        const ticketId = getTicketIdForEditor(previousActiveEditor);
+        const contentType = getEditorContentType(previousActiveEditor);
+        if (ticketId && contentType === "comment") {
+          const draft = previousActiveEditor.document.getText();
+          setCommentDraft(ticketId, draft);
+        }
+      }
+
+      if (editor) {
+        markEditorActive(editor);
+      }
+
+      previousActiveEditor = editor;
+    }),
+  );
+
+  context.subscriptions.push(
+    vscode.workspace.onDidCloseTextDocument((document) => {
+      removeTicketEditorByUri(document.uri);
+    }),
   );
 
   context.subscriptions.push(
@@ -90,6 +125,22 @@ export async function activate(context: vscode.ExtensionContext) {
 
         commentsProvider.setTicketId(selected.ticket.id);
         await showTicketPreview(selected.ticket);
+      },
+    ),
+  );
+
+  context.subscriptions.push(
+    vscode.commands.registerCommand(
+      "todoex.openExtraTicketEditor",
+      async (item?: TicketTreeItem) => {
+        const selected = item ?? (ticketsView.selection[0] as TicketTreeItem | undefined);
+        if (!selected || !(selected instanceof TicketTreeItem)) {
+          vscode.window.showErrorMessage("Select a ticket to preview.");
+          return;
+        }
+
+        commentsProvider.setTicketId(selected.ticket.id);
+        await showTicketPreview(selected.ticket, { kind: "extra" });
       },
     ),
   );
@@ -175,12 +226,15 @@ export async function activate(context: vscode.ExtensionContext) {
       }
 
       selectedComment = selected;
-      const document = await vscode.workspace.openTextDocument({
-        content: selected.comment.body,
-        language: "markdown",
-      });
-      selectedCommentDocumentUri = document.uri.toString();
-      await vscode.window.showTextDocument(document, { preview: false });
+      try {
+        const detail = await getIssueDetail(selected.comment.ticketId);
+        commentsProvider.setTicketId(detail.ticket.id);
+        setCommentDraft(detail.ticket.id, selected.comment.body);
+        const editor = await showTicketComment(detail.ticket, selected.comment.body);
+        selectedCommentDocumentUri = editor.document.uri.toString();
+      } catch (error) {
+        vscode.window.showErrorMessage((error as Error).message);
+      }
     }),
   );
 
