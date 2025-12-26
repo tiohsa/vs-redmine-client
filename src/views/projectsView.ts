@@ -65,6 +65,10 @@ export class ProjectsTreeProvider implements vscode.TreeDataProvider<vscode.Tree
     return element;
   }
 
+  getParent(): vscode.ProviderResult<vscode.TreeItem> {
+    return undefined;
+  }
+
   getChildren(): vscode.ProviderResult<vscode.TreeItem[]> {
     return buildProjectsViewItems(this.projects, this.selectedProjectId, this.errorMessage);
   }

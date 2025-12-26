@@ -4,6 +4,7 @@ import { createTicketFromEditor } from "./commands/createTicket";
 import { editComment } from "./commands/editComment";
 import { setProjectSelection, getProjectSelection } from "./config/projectSelection";
 import { getIssueDetail } from "./redmine/issues";
+import { showError, showSuccess, showWarning } from "./utils/notifications";
 import { setCommentDraft } from "./views/commentDraftStore";
 import { CommentTreeItem, CommentsTreeProvider } from "./views/commentsView";
 import { ProjectTreeItem, ProjectsTreeProvider } from "./views/projectsView";
@@ -13,9 +14,13 @@ import {
   getTicketIdForEditor,
   isTicketEditor,
   markEditorActive,
-  removeTicketEditorByUri,
+  removeTicketEditorByDocument,
 } from "./views/ticketEditorRegistry";
 import { showTicketComment, showTicketPreview } from "./views/ticketPreview";
+import { getCommentSaveNotification } from "./views/commentSaveNotifications";
+import { handleCommentEditorSave } from "./views/commentSaveSync";
+import { getSaveNotification } from "./views/ticketSaveNotifications";
+import { handleTicketEditorSave } from "./views/ticketSaveSync";
 
 export async function activate(context: vscode.ExtensionContext) {
   const ticketsProvider = new TicketsTreeProvider();
@@ -60,7 +65,57 @@ export async function activate(context: vscode.ExtensionContext) {
 
   context.subscriptions.push(
     vscode.workspace.onDidCloseTextDocument((document) => {
-      removeTicketEditorByUri(document.uri);
+      removeTicketEditorByDocument(document);
+    }),
+  );
+
+  context.subscriptions.push(
+    vscode.workspace.onWillSaveTextDocument((event) => {
+      const document = event.document;
+      const editor =
+        vscode.window.visibleTextEditors.find((candidate) => candidate.document === document) ??
+        (vscode.window.activeTextEditor?.document === document
+          ? vscode.window.activeTextEditor
+          : undefined);
+      if (!editor) {
+        return;
+      }
+      void (async () => {
+        const result = await handleTicketEditorSave(editor);
+        if (result) {
+          const notification = getSaveNotification(result);
+          if (!notification) {
+            return;
+          }
+
+          if (notification.type === "info") {
+            showSuccess(notification.message);
+          } else if (notification.type === "warning") {
+            showWarning(notification.message);
+          } else {
+            showError(notification.message);
+          }
+          return;
+        }
+
+        const commentResult = await handleCommentEditorSave(editor);
+        if (!commentResult) {
+          return;
+        }
+
+        const commentNotification = getCommentSaveNotification(commentResult);
+        if (!commentNotification) {
+          return;
+        }
+
+        if (commentNotification.type === "info") {
+          showSuccess(commentNotification.message);
+        } else if (commentNotification.type === "warning") {
+          showWarning(commentNotification.message);
+        } else {
+          showError(commentNotification.message);
+        }
+      })();
     }),
   );
 
@@ -230,7 +285,11 @@ export async function activate(context: vscode.ExtensionContext) {
         const detail = await getIssueDetail(selected.comment.ticketId);
         commentsProvider.setTicketId(detail.ticket.id);
         setCommentDraft(detail.ticket.id, selected.comment.body);
-        const editor = await showTicketComment(detail.ticket, selected.comment.body);
+        const editor = await showTicketComment(
+          detail.ticket,
+          selected.comment.body,
+          selected.comment.id,
+        );
         selectedCommentDocumentUri = editor.document.uri.toString();
       } catch (error) {
         vscode.window.showErrorMessage((error as Error).message);

@@ -4,6 +4,7 @@ import {
   RedmineIssueDetailResponse,
   RedmineIssueListResponse,
   Ticket,
+  TicketUpdateFields,
 } from "./types";
 
 export interface IssuesListInput {
@@ -100,6 +101,39 @@ export const createIssue = async (input: IssueCreateInput): Promise<void> => {
     method: "POST",
     path: "/issues.json",
     body: buildIssueCreatePayload(input),
+  });
+};
+
+export interface IssueUpdateInput {
+  issueId: number;
+  fields: TicketUpdateFields;
+}
+
+export const buildIssueUpdatePayload = (
+  fields: TicketUpdateFields,
+): Record<string, unknown> => {
+  const payload: Record<string, unknown> = {};
+  if (fields.subject !== undefined) {
+    payload.subject = fields.subject;
+  }
+  if (fields.description !== undefined) {
+    payload.description = fields.description;
+  }
+  if (fields.statusId !== undefined) {
+    payload.status_id = fields.statusId;
+  }
+  if (fields.assigneeId !== undefined) {
+    payload.assigned_to_id = fields.assigneeId;
+  }
+
+  return { issue: payload };
+};
+
+export const updateIssue = async (input: IssueUpdateInput): Promise<void> => {
+  await requestJson({
+    method: "PUT",
+    path: `/issues/${input.issueId}.json`,
+    body: buildIssueUpdatePayload(input.fields),
   });
 };
 

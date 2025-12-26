@@ -6,6 +6,10 @@ node_modules
 *.vsix
 *.log
 .env*
+.vscode/
+.idea/
+*.tmp
+*.swp
 .DS_Store
 Thumbs.db
 coverage/

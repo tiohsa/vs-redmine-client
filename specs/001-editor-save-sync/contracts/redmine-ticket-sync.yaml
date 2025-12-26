@@ -1,0 +1,82 @@
+openapi: 3.0.3
+info:
+  title: Redmine Ticket Sync
+  version: 1.0.0
+servers:
+  - url: https://redmine.example.com
+paths:
+  /tickets/{ticketId}:
+    get:
+      summary: Fetch a Redmine ticket for refresh
+      parameters:
+        - name: ticketId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Ticket fetched
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RedmineTicket"
+        "404":
+          description: Ticket not found
+        "403":
+          description: Access denied
+    patch:
+      summary: Update a Redmine ticket with changed fields
+      parameters:
+        - name: ticketId
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/TicketUpdate"
+      responses:
+        "200":
+          description: Ticket updated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RedmineTicket"
+        "409":
+          description: Conflict (remote change detected)
+        "404":
+          description: Ticket not found
+        "403":
+          description: Access denied
+components:
+  schemas:
+    RedmineTicket:
+      type: object
+      required:
+        - ticketId
+        - fields
+        - updatedAt
+      properties:
+        ticketId:
+          type: string
+        fields:
+          type: object
+          additionalProperties: true
+        updatedAt:
+          type: string
+          format: date-time
+    TicketUpdate:
+      type: object
+      required:
+        - changedFields
+      properties:
+        changedFields:
+          type: object
+          additionalProperties: true
+        lastKnownRemoteUpdatedAt:
+          type: string
+          format: date-time

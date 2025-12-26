@@ -3,6 +3,7 @@ import { listComments } from "../redmine/comments";
 import { getCurrentUserId } from "../redmine/users";
 import { Comment } from "../redmine/types";
 import { showError } from "../utils/notifications";
+import { formatCommentDescription, formatCommentLabel } from "./commentListFormat";
 
 export class CommentsTreeProvider implements vscode.TreeDataProvider<CommentTreeItem> {
   private readonly emitter = new vscode.EventEmitter<
@@ -58,8 +59,8 @@ export class CommentsTreeProvider implements vscode.TreeDataProvider<CommentTree
 
 export class CommentTreeItem extends vscode.TreeItem {
   constructor(public readonly comment: Comment) {
-    super(comment.authorName, vscode.TreeItemCollapsibleState.None);
-    this.description = comment.body.slice(0, 80);
+    super(formatCommentLabel(comment), vscode.TreeItemCollapsibleState.None);
+    this.description = formatCommentDescription(comment);
     this.contextValue = comment.editableByCurrentUser
       ? "redmineCommentEditable"
       : "redmineComment";

@@ -11,3 +11,7 @@ export const showWarning = (message: string): void => {
 export const showInfo = (message: string): void => {
   void vscode.window.showInformationMessage(message);
 };
+
+export const showSuccess = (message: string): void => {
+  void vscode.window.showInformationMessage(message);
+};

@@ -6,20 +6,46 @@ import {
 } from "./ticketEditorTypes";
 
 const editorByUri = new Map<string, TicketEditorRecord>();
+let editorByDocument = new WeakMap<vscode.TextDocument, TicketEditorRecord>();
+let editorByEditor = new WeakMap<vscode.TextEditor, TicketEditorRecord>();
 const editorsByTicket = new Map<number, Set<string>>();
 
-const getRecord = (editor: vscode.TextEditor): TicketEditorRecord | undefined =>
-  editorByUri.get(editor.document.uri.toString());
+const syncRecordUri = (record: TicketEditorRecord, nextUri: string): void => {
+  if (record.uri === nextUri) {
+    return;
+  }
+
+  const set = editorsByTicket.get(record.ticketId);
+  if (set) {
+    set.delete(record.uri);
+    set.add(nextUri);
+  }
+  record.uri = nextUri;
+};
+
+const getRecord = (editor: vscode.TextEditor): TicketEditorRecord | undefined => {
+  const uri = editor.document.uri.toString();
+  const record =
+    editorByEditor.get(editor) ??
+    editorByDocument.get(editor.document) ??
+    editorByUri.get(uri);
+  if (record) {
+    syncRecordUri(record, uri);
+  }
+  return record;
+};
 
 export const registerTicketEditor = (
   ticketId: number,
   editor: vscode.TextEditor,
   kind: TicketEditorKind,
   contentType: TicketEditorContentType = "ticket",
+  projectId?: number,
 ): TicketEditorRecord => {
   const uri = editor.document.uri.toString();
   const record: TicketEditorRecord = {
     ticketId,
+    projectId,
     uri,
     kind,
     contentType,
@@ -27,6 +53,8 @@ export const registerTicketEditor = (
   };
 
   editorByUri.set(uri, record);
+  editorByDocument.set(editor.document, record);
+  editorByEditor.set(editor, record);
   if (!editorsByTicket.has(ticketId)) {
     editorsByTicket.set(ticketId, new Set());
   }
@@ -77,6 +105,27 @@ export const setEditorContentType = (
   record.contentType = contentType;
 };
 
+export const setEditorProjectId = (editor: vscode.TextEditor, projectId: number): void => {
+  const record = getRecord(editor);
+  if (!record) {
+    return;
+  }
+
+  record.projectId = projectId;
+};
+
+export const setEditorCommentId = (
+  editor: vscode.TextEditor,
+  commentId: number,
+): void => {
+  const record = getRecord(editor);
+  if (!record) {
+    return;
+  }
+
+  record.commentId = commentId;
+};
+
 export const removeTicketEditorByUri = (uri: vscode.Uri): void => {
   const key = uri.toString();
   const record = editorByUri.get(key);
@@ -96,8 +145,33 @@ export const removeTicketEditorByUri = (uri: vscode.Uri): void => {
   }
 };
 
+export const removeTicketEditorByDocument = (document: vscode.TextDocument): void => {
+  const record = editorByDocument.get(document);
+  if (!record) {
+    return;
+  }
+
+  editorByDocument.delete(document);
+  editorByUri.delete(record.uri);
+  const set = editorsByTicket.get(record.ticketId);
+  if (!set) {
+    return;
+  }
+
+  set.delete(record.uri);
+  if (set.size === 0) {
+    editorsByTicket.delete(record.ticketId);
+  }
+};
+
 export const getTicketIdForEditor = (editor: vscode.TextEditor): number | undefined =>
   getRecord(editor)?.ticketId;
+
+export const getProjectIdForEditor = (editor: vscode.TextEditor): number | undefined =>
+  getRecord(editor)?.projectId;
+
+export const getCommentIdForEditor = (editor: vscode.TextEditor): number | undefined =>
+  getRecord(editor)?.commentId;
 
 export const isTicketEditor = (editor: vscode.TextEditor): boolean =>
   Boolean(getRecord(editor));
@@ -109,4 +183,6 @@ export const getEditorContentType = (
 export const clearRegistry = (): void => {
   editorByUri.clear();
   editorsByTicket.clear();
+  editorByDocument = new WeakMap<vscode.TextDocument, TicketEditorRecord>();
+  editorByEditor = new WeakMap<vscode.TextEditor, TicketEditorRecord>();
 };

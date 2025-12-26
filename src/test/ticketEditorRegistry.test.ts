@@ -5,8 +5,10 @@ import {
   getLastActiveEditor,
   getPrimaryEditor,
   getTicketEditors,
+  getTicketIdForEditor,
   markEditorActive,
   registerTicketEditor,
+  removeTicketEditorByDocument,
   removeTicketEditorByUri,
 } from "../views/ticketEditorRegistry";
 import { createEditorStub } from "./helpers/editorStubs";
@@ -49,9 +51,18 @@ suite("Ticket editor registry", () => {
     const primary = createEditorStub(vscode.Uri.parse("untitled:ticket-3"), "");
     registerTicketEditor(3, primary, "primary", "ticket");
 
-    removeTicketEditorByUri(primary.document.uri);
+    removeTicketEditorByDocument(primary.document);
 
     assert.strictEqual(getPrimaryEditor(3), undefined);
     assert.strictEqual(getTicketEditors(3).length, 0);
+  });
+
+  test("keeps record when document uri changes", () => {
+    const primary = createEditorStub(vscode.Uri.parse("untitled:ticket-4"), "");
+    registerTicketEditor(4, primary, "primary", "ticket");
+
+    (primary.document as { uri: vscode.Uri }).uri = vscode.Uri.parse("file:/tmp/ticket-4.md");
+
+    assert.strictEqual(getTicketIdForEditor(primary), 4);
   });
 });

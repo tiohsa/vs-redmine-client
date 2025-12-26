@@ -19,6 +19,13 @@ export interface Ticket {
   updatedAt?: string;
 }
 
+export interface TicketUpdateFields {
+  subject?: string;
+  description?: string;
+  statusId?: number;
+  assigneeId?: number;
+}
+
 export interface Comment {
   id: number;
   ticketId: number;
