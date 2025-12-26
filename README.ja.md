@@ -9,6 +9,7 @@ English README: `README.md`
 ## 主な機能
 
 - サイドバーでチケット一覧（ステータス/担当者フィルタ）
+- サイドバーでプロジェクト一覧（選択ハイライト）
 - 子プロジェクトのチケットを含める切替
 - エディタ内の読み取り専用プレビュー
 - アクティブエディタ内容からチケット作成
@@ -35,12 +36,14 @@ English README: `README.md`
 1. `todoex.baseUrl` と `todoex.apiKey` を設定
 2. `todoex.defaultProjectId` を設定（またはコマンドで選択）
 3. サイドバーの "Redmine Tickets" で一覧を確認
-4. チケット選択でプレビューとコメントを表示
-5. "Redmine: Create Ticket from Editor" で新規作成
-6. "Redmine: Edit Comment" で自分のコメントを編集
+4. "Redmine Projects" でプロジェクトを選択してチケットを表示
+5. チケット選択でプレビューとコメントを表示
+6. "Redmine: Create Ticket from Editor" で新規作成
+7. "Redmine: Edit Comment" で自分のコメントを編集
 
 ## コマンド
 
+- `Redmine: Refresh Projects`
 - `Redmine: Refresh Tickets`
 - `Redmine: Select Project`
 - `Redmine: Toggle Child Projects`

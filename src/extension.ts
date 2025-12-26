@@ -1,19 +1,32 @@
 import * as vscode from "vscode";
 import { createTicketFromEditor } from "./commands/createTicket";
 import { editComment } from "./commands/editComment";
+import { setProjectSelection, getProjectSelection } from "./config/projectSelection";
 import { CommentTreeItem, CommentsTreeProvider } from "./views/commentsView";
+import { ProjectTreeItem, ProjectsTreeProvider } from "./views/projectsView";
 import { TicketTreeItem, TicketsTreeProvider } from "./views/ticketsView";
 import { showTicketPreview } from "./views/ticketPreview";
 
-export function activate(context: vscode.ExtensionContext) {
+export async function activate(context: vscode.ExtensionContext) {
   const ticketsProvider = new TicketsTreeProvider();
   const commentsProvider = new CommentsTreeProvider();
+  const projectsProvider = new ProjectsTreeProvider();
+  const projectsView = vscode.window.createTreeView("todoexProjects", {
+    treeDataProvider: projectsProvider,
+  });
   const ticketsView = vscode.window.createTreeView("todoexTickets", {
     treeDataProvider: ticketsProvider,
   });
   context.subscriptions.push(
+    projectsView,
     ticketsView,
     vscode.window.registerTreeDataProvider("todoexComments", commentsProvider),
+  );
+
+  context.subscriptions.push(
+    vscode.commands.registerCommand("todoex.refreshProjects", () =>
+      projectsProvider.refresh(),
+    ),
   );
 
   context.subscriptions.push(
@@ -33,12 +46,15 @@ export function activate(context: vscode.ExtensionContext) {
         return;
       }
 
-      const config = vscode.workspace.getConfiguration("todoex");
-      await config.update(
-        "defaultProjectId",
-        projectId,
-        vscode.ConfigurationTarget.Global,
-      );
+      const numericId = Number(projectId);
+      if (Number.isNaN(numericId)) {
+        vscode.window.showErrorMessage("Project ID must be a number.");
+        return;
+      }
+
+      await setProjectSelection(numericId, "");
+      projectsProvider.setSelectedProjectId(numericId);
+      ticketsProvider.setSelectedProjectId(numericId);
       ticketsProvider.refresh();
     }),
   );
@@ -81,14 +97,40 @@ export function activate(context: vscode.ExtensionContext) {
   );
 
   context.subscriptions.push(
-    ticketsView.onDidChangeSelection(async (event) => {
-      const selected = event.selection[0];
-      if (selected) {
-        commentsProvider.setTicketId(selected.ticket.id);
-        await showTicketPreview(selected.ticket);
+    projectsView.onDidChangeSelection(async (event) => {
+      const selected = event.selection[0] as ProjectTreeItem | undefined;
+      if (!selected) {
+        return;
       }
+
+      await setProjectSelection(selected.project.id, selected.project.name);
+      projectsProvider.setSelectedProjectId(selected.project.id);
+      ticketsProvider.setSelectedProjectId(selected.project.id);
+      ticketsProvider.refresh();
     }),
   );
+
+  context.subscriptions.push(
+    ticketsView.onDidChangeSelection(async (event) => {
+      const selected = event.selection[0] as TicketTreeItem | undefined;
+      if (!selected) {
+        return;
+      }
+
+      commentsProvider.setTicketId(selected.ticket.id);
+      await showTicketPreview(selected.ticket);
+    }),
+  );
+
+  const initialSelection = getProjectSelection();
+  await projectsProvider.loadProjects();
+  if (initialSelection.id) {
+    const projectItem = projectsProvider.getProjectItemById(initialSelection.id);
+    if (projectItem) {
+      await projectsView.reveal(projectItem, { select: true, focus: false });
+    }
+    ticketsProvider.setSelectedProjectId(initialSelection.id);
+  }
 
   ticketsProvider.refresh();
 }

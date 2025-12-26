@@ -1,0 +1,53 @@
+openapi: 3.0.3
+info:
+  title: Project List Sidebar API
+  version: 6.1.0
+  description: API surface used to load projects and tickets.
+servers:
+  - url: https://{redmineHost}
+    variables:
+      redmineHost:
+        default: redmine.example.com
+security:
+  - ApiKeyAuth: []
+
+paths:
+  /projects.json:
+    get:
+      summary: List projects
+      parameters:
+        - in: query
+          name: include_children
+          schema:
+            type: boolean
+      responses:
+        "200":
+          description: Project list
+
+  /issues.json:
+    get:
+      summary: List issues (tickets)
+      parameters:
+        - in: query
+          name: project_id
+          schema:
+            type: integer
+        - in: query
+          name: limit
+          schema:
+            type: integer
+            default: 50
+        - in: query
+          name: offset
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Issue list
+
+components:
+  securitySchemes:
+    ApiKeyAuth:
+      type: apiKey
+      in: header
+      name: X-Redmine-API-Key

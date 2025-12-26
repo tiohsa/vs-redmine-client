@@ -4,23 +4,47 @@ import {
   getIncludeChildProjects,
   getTicketListLimit,
 } from "../config/settings";
+import { getProjectSelection } from "../config/projectSelection";
 import { listIssues } from "../redmine/issues";
 import { Ticket } from "../redmine/types";
 import { showError } from "../utils/notifications";
+import { createEmptyStateItem, createErrorStateItem } from "./viewState";
 
 export const normalizeFilterOptions = (
   allOptions: string[],
   _matchingOptions: string[],
 ): string[] => allOptions;
 
-export class TicketsTreeProvider implements vscode.TreeDataProvider<TicketTreeItem> {
+export const buildTicketsViewItems = (
+  tickets: Ticket[],
+  selectedProjectId?: number,
+  errorMessage?: string,
+): vscode.TreeItem[] => {
+  if (errorMessage) {
+    return [createErrorStateItem(errorMessage)];
+  }
+
+  if (!selectedProjectId) {
+    return [createEmptyStateItem("Select a project to view tickets.")];
+  }
+
+  if (tickets.length === 0) {
+    return [createEmptyStateItem("No tickets for the selected project.")];
+  }
+
+  return tickets.map((ticket) => new TicketTreeItem(ticket));
+};
+
+export class TicketsTreeProvider implements vscode.TreeDataProvider<vscode.TreeItem> {
   private readonly emitter = new vscode.EventEmitter<
-    TicketTreeItem | undefined | void
+    vscode.TreeItem | undefined | void
   >();
   private tickets: Ticket[] = [];
   private statusIds: string[] = [];
   private assigneeIds: string[] = [];
   private offset = 0;
+  private errorMessage?: string;
+  private selectedProjectId?: number;
 
   readonly onDidChangeTreeData = this.emitter.event;
 
@@ -30,9 +54,13 @@ export class TicketsTreeProvider implements vscode.TreeDataProvider<TicketTreeIt
 
   async loadTickets(): Promise<void> {
     try {
-      const projectIdRaw = getDefaultProjectId();
-      const projectId = Number(projectIdRaw);
-      if (!projectIdRaw || Number.isNaN(projectId)) {
+      this.errorMessage = undefined;
+      const selection = getProjectSelection();
+      const fallbackId = Number(getDefaultProjectId());
+      const projectId = selection.id ?? (Number.isNaN(fallbackId) ? undefined : fallbackId);
+
+      this.selectedProjectId = projectId;
+      if (!projectId) {
         this.tickets = [];
         this.emitter.fire();
         return;
@@ -50,7 +78,10 @@ export class TicketsTreeProvider implements vscode.TreeDataProvider<TicketTreeIt
       this.tickets = result.tickets;
       this.emitter.fire();
     } catch (error) {
-      showError((error as Error).message);
+      const message = (error as Error).message;
+      this.errorMessage = `Failed to load tickets: ${message}`;
+      showError(this.errorMessage);
+      this.emitter.fire();
     }
   }
 
@@ -69,16 +100,21 @@ export class TicketsTreeProvider implements vscode.TreeDataProvider<TicketTreeIt
     this.refresh();
   }
 
-  getTreeItem(element: TicketTreeItem): vscode.TreeItem {
+  setSelectedProjectId(projectId?: number): void {
+    this.selectedProjectId = projectId;
+    this.refresh();
+  }
+
+  getTreeItem(element: vscode.TreeItem): vscode.TreeItem {
     return element;
   }
 
-  getChildren(element?: TicketTreeItem): vscode.ProviderResult<TicketTreeItem[]> {
+  getChildren(element?: vscode.TreeItem): vscode.ProviderResult<vscode.TreeItem[]> {
     if (element) {
       return [];
     }
 
-    return this.tickets.map((ticket) => new TicketTreeItem(ticket));
+    return buildTicketsViewItems(this.tickets, this.selectedProjectId, this.errorMessage);
   }
 }
 

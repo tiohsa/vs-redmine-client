@@ -9,6 +9,7 @@ Japanese README: `README.ja.md`
 ## Features
 
 - Sidebar ticket list with status/assignee filters
+- Sidebar project list with selection highlight
 - Child project inclusion toggle
 - Read-only ticket preview in the editor
 - Create tickets from active editor content
@@ -37,12 +38,14 @@ This extension contributes the following settings:
 1. Configure `todoex.baseUrl` and `todoex.apiKey`.
 2. Set `todoex.defaultProjectId` or use the command to select a project.
 3. Browse tickets in the "Redmine Tickets" view.
-4. Select a ticket to preview details and load comments.
-5. Use the "Redmine: Create Ticket from Editor" command to create a ticket.
-6. Use the "Redmine: Edit Comment" command to update your own comments.
+4. Select a project in the "Redmine Projects" view to load tickets.
+5. Select a ticket to preview details and load comments.
+6. Use the "Redmine: Create Ticket from Editor" command to create a ticket.
+7. Use the "Redmine: Edit Comment" command to update your own comments.
 
 ## Commands
 
+- `Redmine: Refresh Projects`
 - `Redmine: Refresh Tickets`
 - `Redmine: Select Project`
 - `Redmine: Toggle Child Projects`

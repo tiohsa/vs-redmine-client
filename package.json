@@ -9,13 +9,28 @@
   "categories": [
     "Other"
   ],
-  "activationEvents": [],
+  "activationEvents": [
+    "onView:todoexProjects",
+    "onView:todoexTickets",
+    "onView:todoexComments",
+    "onCommand:todoex.refreshTickets",
+    "onCommand:todoex.refreshProjects",
+    "onCommand:todoex.selectProject",
+    "onCommand:todoex.toggleChildProjects",
+    "onCommand:todoex.openTicketPreview",
+    "onCommand:todoex.createTicket",
+    "onCommand:todoex.editComment"
+  ],
   "main": "./dist/extension.js",
   "contributes": {
     "commands": [
       {
         "command": "todoex.helloWorld",
         "title": "Hello World"
+      },
+      {
+        "command": "todoex.refreshProjects",
+        "title": "Redmine: Refresh Projects"
       },
       {
         "command": "todoex.refreshTickets",
@@ -45,6 +60,10 @@
     "views": {
       "explorer": [
         {
+          "id": "todoexProjects",
+          "name": "Redmine Projects"
+        },
+        {
           "id": "todoexTickets",
           "name": "Redmine Tickets"
         },
@@ -71,6 +90,18 @@
           "type": "string",
           "default": "",
           "description": "Default project identifier or ID used in ticket listing."
+        },
+        "todoex.selectedProjectId": {
+          "type": "string",
+          "default": "",
+          "scope": "machine",
+          "description": "Last selected project ID (used for restoring selection)."
+        },
+        "todoex.selectedProjectName": {
+          "type": "string",
+          "default": "",
+          "scope": "machine",
+          "description": "Last selected project name (used for restoring selection)."
         },
         "todoex.includeChildProjects": {
           "type": "boolean",
