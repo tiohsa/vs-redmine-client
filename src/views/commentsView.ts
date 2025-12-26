@@ -1,5 +1,6 @@
 import * as vscode from "vscode";
 import { listComments } from "../redmine/comments";
+import { getCurrentUserId } from "../redmine/users";
 import { Comment } from "../redmine/types";
 import { showError } from "../utils/notifications";
 
@@ -34,7 +35,8 @@ export class CommentsTreeProvider implements vscode.TreeDataProvider<CommentTree
     }
 
     try {
-      this.comments = await listComments(this.ticketId);
+      const currentUserId = await getCurrentUserId();
+      this.comments = await listComments(this.ticketId, currentUserId);
       this.emitter.fire();
     } catch (error) {
       showError((error as Error).message);

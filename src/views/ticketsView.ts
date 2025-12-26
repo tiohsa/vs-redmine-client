@@ -123,5 +123,10 @@ export class TicketTreeItem extends vscode.TreeItem {
     super(`#${ticket.id} ${ticket.subject}`, vscode.TreeItemCollapsibleState.None);
     this.description = ticket.statusName ?? "";
     this.contextValue = "redmineTicket";
+    this.command = {
+      command: "todoex.openTicketPreview",
+      title: "Open Ticket Preview",
+      arguments: [this],
+    };
   }
 }

@@ -91,8 +91,8 @@ English README: `README.md`
 #### Redmine: Edit Comment
 
 1. チケットを選び "Redmine Comments" で自分のコメントを選択
-2. 更新したい本文をエディタで開く
-3. コマンド実行でアクティブエディタ内容を反映する
+2. コメントが専用エディタに開く
+3. 編集後にコマンド実行で内容を反映する
 
 #### Redmine: Add Comment
 

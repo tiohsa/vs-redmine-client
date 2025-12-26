@@ -94,8 +94,8 @@ This extension contributes the following settings:
 #### Redmine: Edit Comment
 
 1. Select a ticket and choose one of your own comments in "Redmine Comments".
-2. Open an editor with the new comment body.
-3. Run the command to update the comment from the active editor content.
+2. The comment opens in a dedicated editor for editing.
+3. Update the content and run the command to save the changes.
 
 #### Redmine: Add Comment
 

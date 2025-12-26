@@ -18,10 +18,15 @@ export async function activate(context: vscode.ExtensionContext) {
   const ticketsView = vscode.window.createTreeView("todoexTickets", {
     treeDataProvider: ticketsProvider,
   });
+  const commentsView = vscode.window.createTreeView("todoexComments", {
+    treeDataProvider: commentsProvider,
+  });
+  let selectedComment: CommentTreeItem | undefined;
+  let selectedCommentDocumentUri: string | undefined;
   context.subscriptions.push(
     projectsView,
     ticketsView,
-    vscode.window.registerTreeDataProvider("todoexComments", commentsProvider),
+    commentsView,
   );
 
   context.subscriptions.push(
@@ -76,8 +81,15 @@ export async function activate(context: vscode.ExtensionContext) {
   context.subscriptions.push(
     vscode.commands.registerCommand(
       "todoex.openTicketPreview",
-      async (item: TicketTreeItem) => {
-        await showTicketPreview(item.ticket);
+      async (item?: TicketTreeItem) => {
+        const selected = item ?? (ticketsView.selection[0] as TicketTreeItem | undefined);
+        if (!selected || !(selected instanceof TicketTreeItem)) {
+          vscode.window.showErrorMessage("Select a ticket to preview.");
+          return;
+        }
+
+        commentsProvider.setTicketId(selected.ticket.id);
+        await showTicketPreview(selected.ticket);
       },
     ),
   );
@@ -91,8 +103,26 @@ export async function activate(context: vscode.ExtensionContext) {
   context.subscriptions.push(
     vscode.commands.registerCommand(
       "todoex.editComment",
-      async (item: CommentTreeItem) => {
-        await editComment(item.comment);
+      async (item?: CommentTreeItem) => {
+        const selected =
+          item ??
+          (commentsView.selection[0] as CommentTreeItem | undefined) ??
+          selectedComment;
+        if (!selected || !(selected instanceof CommentTreeItem)) {
+          vscode.window.showErrorMessage("Select a comment to edit.");
+          return;
+        }
+
+        if (
+          selectedCommentDocumentUri &&
+          vscode.window.activeTextEditor?.document?.uri.toString() !==
+            selectedCommentDocumentUri
+        ) {
+          vscode.window.showErrorMessage("Open the comment editor before updating.");
+          return;
+        }
+
+        await editComment(selected.comment);
       },
     ),
   );
@@ -128,13 +158,29 @@ export async function activate(context: vscode.ExtensionContext) {
 
   context.subscriptions.push(
     ticketsView.onDidChangeSelection(async (event) => {
-      const selected = event.selection[0] as TicketTreeItem | undefined;
-      if (!selected) {
+      const selected = event.selection[0];
+      if (!selected || !(selected instanceof TicketTreeItem)) {
         return;
       }
 
       commentsProvider.setTicketId(selected.ticket.id);
-      await showTicketPreview(selected.ticket);
+    }),
+  );
+
+  context.subscriptions.push(
+    commentsView.onDidChangeSelection(async (event) => {
+      const selected = event.selection[0];
+      if (!selected || !(selected instanceof CommentTreeItem)) {
+        return;
+      }
+
+      selectedComment = selected;
+      const document = await vscode.workspace.openTextDocument({
+        content: selected.comment.body,
+        language: "markdown",
+      });
+      selectedCommentDocumentUri = document.uri.toString();
+      await vscode.window.showTextDocument(document, { preview: false });
     }),
   );
 

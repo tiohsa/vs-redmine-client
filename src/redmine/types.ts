@@ -98,3 +98,10 @@ export interface RedmineUploadResponse {
     token: string;
   };
 }
+
+export interface RedmineCurrentUserResponse {
+  user: {
+    id: number;
+    name: string;
+  };
+}
