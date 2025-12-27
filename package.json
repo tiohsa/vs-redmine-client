@@ -20,6 +20,8 @@
     "onCommand:todoex.toggleChildProjects",
     "onCommand:todoex.openTicketPreview",
     "onCommand:todoex.openExtraTicketEditor",
+    "onCommand:todoex.reloadTicket",
+    "onCommand:todoex.reloadComment",
     "onCommand:todoex.configureTicketPriorityFilter",
     "onCommand:todoex.configureTicketStatusFilter",
     "onCommand:todoex.configureTicketTrackerFilter",
@@ -56,6 +58,14 @@
       {
         "command": "todoex.refreshTickets",
         "title": "Redmine: Refresh Tickets"
+      },
+      {
+        "command": "todoex.reloadTicket",
+        "title": "Redmine: Reload Ticket"
+      },
+      {
+        "command": "todoex.reloadComment",
+        "title": "Redmine: Reload Comment"
       },
       {
         "command": "todoex.selectProject",
@@ -152,11 +162,23 @@
           "enablement": "todoex.canCreateTickets"
         },
         {
+          "command": "todoex.reloadTicket",
+          "when": "view == todoexActivityTickets",
+          "group": "navigation@1",
+          "icon": "$(sync)"
+        },
+        {
           "command": "todoex.addCommentFromComments",
           "when": "view == todoexActivityComments",
           "group": "navigation",
           "icon": "$(add)",
           "enablement": "todoex.canAddComments"
+        },
+        {
+          "command": "todoex.reloadComment",
+          "when": "view == todoexActivityComments",
+          "group": "navigation@1",
+          "icon": "$(sync)"
         }
       ],
       "view/item/context": [

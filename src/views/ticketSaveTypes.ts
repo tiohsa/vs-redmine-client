@@ -18,6 +18,8 @@ export interface TicketDraftState {
   ticketId: number;
   baseSubject: string;
   baseDescription: string;
+  draftSubject?: string;
+  draftDescription?: string;
   lastKnownRemoteUpdatedAt?: string;
   lastSyncedAt?: number;
   status: TicketDraftStatus;

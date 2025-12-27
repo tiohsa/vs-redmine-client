@@ -34,6 +34,8 @@ export const TICKET_SETTINGS_COMMANDS = {
   reset: "todoex.resetTicketListSettings",
 };
 
+export const TICKET_RELOAD_COMMAND = "todoex.reloadTicket";
+
 export const CREATE_TICKET_CONTEXT_KEY = "todoex.canCreateTickets";
 
 export const evaluateCreateTicketPermission = (

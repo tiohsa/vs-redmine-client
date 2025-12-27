@@ -3,18 +3,19 @@ import * as vscode from "vscode";
 import { Ticket } from "../redmine/types";
 import { TicketEditorKind } from "./ticketEditorTypes";
 import {
-  getLastActiveEditor,
-  getPrimaryEditor,
-  needsPrimaryEditor,
   registerTicketEditor,
-  removeTicketEditorByUri,
   setEditorCommentId,
   setEditorContentType,
   setEditorProjectId,
+  setEditorDisplaySource,
 } from "./ticketEditorRegistry";
-import { initializeCommentEdit } from "./commentEditStore";
-import { initializeTicketDraft } from "./ticketDraftStore";
-import { buildTicketEditorContent } from "./ticketEditorContent";
+import { ensureCommentEdit, resolveCommentEditorBody } from "./commentEditStore";
+import { ensureTicketDraft, getTicketDraftContent } from "./ticketDraftStore";
+import {
+  buildTicketEditorContent,
+  resolveTicketEditorDisplay,
+  TicketEditorContent,
+} from "./ticketEditorContent";
 import {
   buildCommentEditorFilename,
   buildTicketEditorFilename,
@@ -50,9 +51,6 @@ export const applyEditorContent = async (
   });
 };
 
-const getOpenDocument = (uri: string): vscode.TextDocument | undefined =>
-  vscode.workspace.textDocuments.find((document) => document.uri.toString() === uri);
-
 const openTicketEditor = async (
   ticket: Ticket,
   kind: TicketEditorKind,
@@ -80,53 +78,28 @@ const buildUntitledUri = (filename: string): vscode.Uri => {
   return vscode.Uri.parse(`untitled:${targetPath}`);
 };
 
-const resolveTicketEditor = async (
-  ticket: Ticket,
-  kind: TicketEditorKind,
-  filename: string,
-): Promise<vscode.TextEditor> => {
-  if (kind === "extra") {
-    return openTicketEditor(ticket, "extra", filename);
-  }
-
-  if (needsPrimaryEditor(ticket.id)) {
-    return openTicketEditor(ticket, "primary", filename);
-  }
-
-  const primary = getPrimaryEditor(ticket.id);
-  if (!primary) {
-    return openTicketEditor(ticket, "primary", filename);
-  }
-
-  const lastActive = getLastActiveEditor(ticket.id) ?? primary;
-  const document = getOpenDocument(lastActive.uri);
-  if (!document) {
-    removeTicketEditorByUri(vscode.Uri.parse(lastActive.uri));
-    return openTicketEditor(ticket, "primary", filename);
-  }
-
-  return vscode.window.showTextDocument(document, { preview: false });
-};
-
 export const showTicketPreview = async (
   ticket: Ticket,
   options?: { kind?: TicketEditorKind },
 ): Promise<vscode.TextEditor> => {
-  const content = buildTicketPreviewContent(ticket);
+  const savedContent: TicketEditorContent = {
+    subject: ticket.subject,
+    description: ticket.description ?? "",
+  };
+  const draftContent = getTicketDraftContent(ticket.id);
+  const display = resolveTicketEditorDisplay(savedContent, draftContent);
+  const content = buildTicketEditorContent(display.content);
   const filename = buildTicketEditorFilename(
     ticket.projectId,
     ticket.id,
     options?.kind ?? "primary",
   );
-  const editor = await resolveTicketEditor(
-    ticket,
-    options?.kind ?? "primary",
-    filename,
-  );
+  const editor = await openTicketEditor(ticket, options?.kind ?? "primary", filename);
   await applyEditorContent(editor, content);
   setEditorContentType(editor, "ticket");
   setEditorProjectId(editor, ticket.projectId);
-  initializeTicketDraft(ticket.id, ticket.subject, ticket.description ?? "", ticket.updatedAt);
+  setEditorDisplaySource(editor, display.source);
+  ensureTicketDraft(ticket.id, ticket.subject, ticket.description ?? "", ticket.updatedAt);
   return editor;
 };
 
@@ -135,13 +108,15 @@ export const showTicketComment = async (
   comment: string,
   commentId: number,
 ): Promise<vscode.TextEditor> => {
-  const content = buildCommentEditorContent(comment);
+  const display = resolveCommentEditorBody(commentId, comment);
   const filename = buildCommentEditorFilename(ticket.projectId, ticket.id, commentId);
-  const editor = await resolveTicketEditor(ticket, "primary", filename);
+  const editor = await openTicketEditor(ticket, "primary", filename);
+  const content = buildCommentEditorContent(display.body);
   await applyEditorContent(editor, content);
   setEditorContentType(editor, "comment");
   setEditorProjectId(editor, ticket.projectId);
   setEditorCommentId(editor, commentId);
-  initializeCommentEdit(commentId, ticket.id, comment);
+  setEditorDisplaySource(editor, display.source);
+  ensureCommentEdit(commentId, ticket.id, comment);
   return editor;
 };

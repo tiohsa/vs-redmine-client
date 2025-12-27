@@ -4,13 +4,18 @@ import { addCommentFromList } from "./commands/addCommentFromList";
 import { createTicketFromEditor } from "./commands/createTicket";
 import { createTicketFromList } from "./commands/createTicketFromList";
 import { editComment } from "./commands/editComment";
+import { reloadCommentFromEditor } from "./commands/reloadComment";
+import { reloadTicketFromEditor } from "./commands/reloadTicket";
 import { setProjectSelection, getProjectSelection } from "./config/projectSelection";
 import { getIssueDetail } from "./redmine/issues";
 import { showError, showSuccess, showWarning } from "./utils/notifications";
 import { setCommentDraft } from "./views/commentDraftStore";
 import { CommentTreeItem, CommentsTreeProvider } from "./views/commentsView";
+import { setCommentDraftBody } from "./views/commentEditStore";
 import { parseEditorFilename, parseNewCommentDraftFilename } from "./views/editorFilename";
 import { ProjectTreeItem, ProjectsTreeProvider } from "./views/projectsView";
+import { parseTicketEditorContent } from "./views/ticketEditorContent";
+import { setTicketDraftContent } from "./views/ticketDraftStore";
 import { TicketSettingsTreeProvider } from "./views/ticketSettingsView";
 import {
   TicketTreeItem,
@@ -18,6 +23,7 @@ import {
   TICKET_SETTINGS_COMMANDS,
 } from "./views/ticketsView";
 import {
+  getCommentIdForEditor,
   getEditorContentType,
   getTicketIdForEditor,
   isTicketEditor,
@@ -129,9 +135,16 @@ export async function activate(context: vscode.ExtensionContext) {
       if (previousActiveEditor && isTicketEditor(previousActiveEditor)) {
         const ticketId = getTicketIdForEditor(previousActiveEditor);
         const contentType = getEditorContentType(previousActiveEditor);
-        if (ticketId && contentType === "comment") {
+        if (ticketId && contentType === "ticket") {
+          const parsed = parseTicketEditorContent(previousActiveEditor.document.getText());
+          setTicketDraftContent(ticketId, parsed);
+        } else if (ticketId && contentType === "comment") {
           const draft = previousActiveEditor.document.getText();
           setCommentDraft(ticketId, draft);
+          const commentId = getCommentIdForEditor(previousActiveEditor);
+          if (commentId) {
+            setCommentDraftBody(commentId, draft);
+          }
         }
       }
 
@@ -269,6 +282,18 @@ export async function activate(context: vscode.ExtensionContext) {
     vscode.commands.registerCommand("todoex.refreshTickets", () =>
       ticketsProvider.refresh(),
     ),
+  );
+
+  context.subscriptions.push(
+    vscode.commands.registerCommand("todoex.reloadTicket", async () => {
+      await reloadTicketFromEditor();
+    }),
+  );
+
+  context.subscriptions.push(
+    vscode.commands.registerCommand("todoex.reloadComment", async () => {
+      await reloadCommentFromEditor();
+    }),
   );
 
   context.subscriptions.push(

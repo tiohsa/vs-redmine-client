@@ -12,6 +12,7 @@ Auto-generated from all feature plans. Last updated: 2025-12-26
 - N/A (no new persistence) (001-add-ticket-icon)
 - TypeScript 5.9 + VS Code Extension API, webpack, @vscode/test-cli, ESLint (001-add-settings-panel)
 - In-memory state only (no persistence changes) (001-add-settings-panel)
+- なし（下書き/表示はインメモリ） (001-show-saved-editor)
 
 - TypeScript 5.9 + VS Code Extension API, webpack, @vscode/test-cli (001-redmine-ticket-workflow)
 
@@ -31,9 +32,9 @@ npm test && npm run lint
 TypeScript 5.9: Follow standard conventions
 
 ## Recent Changes
+- 001-show-saved-editor: Added TypeScript 5.9 + VS Code Extension API, webpack, @vscode/test-cli, ESLint
 - 001-add-settings-panel: Added TypeScript 5.9 + VS Code Extension API, webpack, @vscode/test-cli, ESLint
 - 001-add-comment-button: Added TypeScript 5.9 + VS Code Extension API, webpack, @vscode/test-cli
-- 001-add-ticket-icon: Added TypeScript 5.9 + VS Code Extension API, webpack, @vscode/test-cli
 
 
 <!-- MANUAL ADDITIONS START -->

@@ -1,9 +1,11 @@
 import * as vscode from "vscode";
 import {
   TicketEditorContentType,
+  TicketEditorDisplaySource,
   TicketEditorKind,
   TicketEditorRecord,
 } from "./ticketEditorTypes";
+import { clearEditorDisplayState, setEditorDisplayState } from "./viewState";
 
 const editorByUri = new Map<string, TicketEditorRecord>();
 let editorByDocument = new WeakMap<vscode.TextDocument, TicketEditorRecord>();
@@ -51,6 +53,8 @@ export const registerTicketEditor = (
     kind,
     contentType,
     lastActiveAt: Date.now(),
+    displaySource: "saved",
+    lastLoadedAt: Date.now(),
   };
 
   editorByUri.set(uri, record);
@@ -158,6 +162,27 @@ export const setEditorCommentId = (
   record.commentId = commentId;
 };
 
+export const setEditorDisplaySource = (
+  editor: vscode.TextEditor,
+  source: TicketEditorDisplaySource,
+): void => {
+  const record = getRecord(editor);
+  if (!record) {
+    return;
+  }
+
+  record.displaySource = source;
+  record.lastLoadedAt = Date.now();
+  setEditorDisplayState(record.uri, {
+    source,
+    lastLoadedAt: record.lastLoadedAt,
+  });
+};
+
+export const getEditorDisplaySource = (
+  editor: vscode.TextEditor,
+): TicketEditorDisplaySource | undefined => getRecord(editor)?.displaySource;
+
 export const removeTicketEditorByUri = (uri: vscode.Uri): void => {
   const key = uri.toString();
   const record = editorByUri.get(key);
@@ -217,4 +242,5 @@ export const clearRegistry = (): void => {
   editorsByTicket.clear();
   editorByDocument = new WeakMap<vscode.TextDocument, TicketEditorRecord>();
   editorByEditor = new WeakMap<vscode.TextEditor, TicketEditorRecord>();
+  clearEditorDisplayState();
 };

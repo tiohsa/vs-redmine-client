@@ -1,5 +1,6 @@
 import * as vscode from "vscode";
 import { addComment, updateComment } from "../redmine/comments";
+import { getIssueDetail } from "../redmine/issues";
 import { validateComment } from "../utils/commentValidation";
 import {
   getEditorContentType,
@@ -9,6 +10,7 @@ import {
 } from "./ticketEditorRegistry";
 import { getCommentEdit, updateCommentEdit } from "./commentEditStore";
 import { CommentSaveResult } from "./commentSaveTypes";
+import { applyEditorContent } from "./ticketPreview";
 
 export interface CommentSaveDependencies {
   addComment: typeof addComment;
@@ -18,6 +20,16 @@ export interface CommentSaveDependencies {
 const defaultDeps: CommentSaveDependencies = {
   addComment,
   updateComment,
+};
+
+export interface CommentReloadDependencies {
+  getIssueDetail: typeof getIssueDetail;
+  applyEditorContent: typeof applyEditorContent;
+}
+
+const defaultReloadDeps: CommentReloadDependencies = {
+  getIssueDetail,
+  applyEditorContent,
 };
 
 const buildResult = (status: CommentSaveResult["status"], message: string): CommentSaveResult => ({
@@ -129,4 +141,26 @@ export const handleCommentEditorSave = async (
     commentId,
     content: editor.document.getText(),
   });
+};
+
+export const reloadCommentEditor = async (input: {
+  ticketId: number;
+  commentId: number;
+  editor: vscode.TextEditor;
+  deps?: CommentReloadDependencies;
+}): Promise<CommentSaveResult> => {
+  const deps = input.deps ?? defaultReloadDeps;
+  try {
+    const detail = await deps.getIssueDetail(input.ticketId);
+    const comment = detail.comments.find((entry) => entry.id === input.commentId);
+    if (!comment) {
+      return buildResult("not_found", "Comment not found in Redmine.");
+    }
+
+    await deps.applyEditorContent(input.editor, comment.body);
+    updateCommentEdit(input.commentId, comment.body);
+    return buildResult("success", "Comment reloaded.");
+  } catch (error) {
+    return mapErrorToResult(error);
+  }
 };

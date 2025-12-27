@@ -13,6 +13,7 @@ import {
   isTicketEditor,
 } from "./ticketEditorRegistry";
 import { TicketSaveResult } from "./ticketSaveTypes";
+import { applyEditorContent, buildTicketPreviewContent } from "./ticketPreview";
 
 export interface TicketSaveDependencies {
   getIssueDetail: typeof getIssueDetail;
@@ -22,6 +23,16 @@ export interface TicketSaveDependencies {
 const defaultDeps: TicketSaveDependencies = {
   getIssueDetail,
   updateIssue,
+};
+
+export interface TicketReloadDependencies {
+  getIssueDetail: typeof getIssueDetail;
+  applyEditorContent: typeof applyEditorContent;
+}
+
+const defaultReloadDeps: TicketReloadDependencies = {
+  getIssueDetail,
+  applyEditorContent,
 };
 
 const buildResult = (status: TicketSaveResult["status"], message: string): TicketSaveResult => ({
@@ -130,6 +141,28 @@ export const syncTicketDraft = async (input: {
 
   updateDraftAfterSave(input.ticketId, subject, description, updatedAt);
   return buildResult("success", "Redmine updated.");
+};
+
+export const reloadTicketEditor = async (input: {
+  ticketId: number;
+  editor: vscode.TextEditor;
+  deps?: TicketReloadDependencies;
+}): Promise<TicketSaveResult> => {
+  const deps = input.deps ?? defaultReloadDeps;
+  try {
+    const detail = await deps.getIssueDetail(input.ticketId);
+    const content = buildTicketPreviewContent(detail.ticket);
+    await deps.applyEditorContent(input.editor, content);
+    updateDraftAfterSave(
+      input.ticketId,
+      detail.ticket.subject,
+      detail.ticket.description ?? "",
+      detail.ticket.updatedAt,
+    );
+    return buildResult("success", "Reloaded from Redmine.");
+  } catch (error) {
+    return mapErrorToResult(error);
+  }
 };
 
 export const handleTicketEditorSave = async (

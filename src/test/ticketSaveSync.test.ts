@@ -1,10 +1,14 @@
 import * as assert from "assert";
 import {
   clearTicketDrafts,
+  getTicketDraft,
   initializeTicketDraft,
+  setTicketDraftContent,
 } from "../views/ticketDraftStore";
 import { buildTicketEditorContent } from "../views/ticketEditorContent";
-import { syncTicketDraft } from "../views/ticketSaveSync";
+import { reloadTicketEditor, syncTicketDraft } from "../views/ticketSaveSync";
+import { createEditorStub } from "./helpers/editorStubs";
+import * as vscode from "vscode";
 
 suite("Ticket save sync", () => {
   teardown(() => {
@@ -92,5 +96,62 @@ suite("Ticket save sync", () => {
     });
 
     assert.strictEqual(result.status, "success");
+  });
+
+  test("reload overwrites editor content with saved data", async () => {
+    initializeTicketDraft(5, "Title", "Body", "t1");
+    setTicketDraftContent(5, { subject: "Draft", description: "Draft Body" });
+    const editor = createEditorStub(vscode.Uri.parse("untitled:ticket-5.md"), "Draft");
+    let applied = "";
+
+    const result = await reloadTicketEditor({
+      ticketId: 5,
+      editor,
+      deps: {
+        getIssueDetail: async () => ({
+          ticket: {
+            id: 5,
+            subject: "Reloaded",
+            description: "New Body",
+            projectId: 1,
+            updatedAt: "t2",
+          },
+          comments: [],
+        }),
+        applyEditorContent: async (_editor, content) => {
+          applied = content;
+        },
+      },
+    });
+
+    assert.strictEqual(result.status, "success");
+    assert.strictEqual(
+      applied,
+      buildTicketEditorContent({ subject: "Reloaded", description: "New Body" }),
+    );
+    const draft = getTicketDraft(5);
+    assert.strictEqual(draft?.baseSubject, "Reloaded");
+    assert.strictEqual(draft?.draftSubject, undefined);
+  });
+
+  test("reload keeps draft when fetch fails", async () => {
+    initializeTicketDraft(6, "Title", "Body", "t1");
+    setTicketDraftContent(6, { subject: "Draft", description: "Draft Body" });
+    const editor = createEditorStub(vscode.Uri.parse("untitled:ticket-6.md"), "Draft");
+
+    const result = await reloadTicketEditor({
+      ticketId: 6,
+      editor,
+      deps: {
+        getIssueDetail: async () => {
+          throw new Error("Redmine request failed (503): Service Unavailable");
+        },
+        applyEditorContent: async () => undefined,
+      },
+    });
+
+    assert.strictEqual(result.status, "unreachable");
+    const draft = getTicketDraft(6);
+    assert.strictEqual(draft?.draftSubject, "Draft");
   });
 });

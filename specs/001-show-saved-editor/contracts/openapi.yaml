@@ -1,0 +1,89 @@
+openapi: 3.0.3
+info:
+  title: TodoEx Editor Sync
+  version: 0.1.0
+paths:
+  /tickets/{ticketId}:
+    get:
+      summary: Get saved ticket content
+      parameters:
+        - name: ticketId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Saved ticket content
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SavedContent"
+  /comments/{commentId}:
+    get:
+      summary: Get saved comment content
+      parameters:
+        - name: commentId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Saved comment content
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SavedContent"
+  /tickets/{ticketId}/reload:
+    post:
+      summary: Reload and sync ticket content
+      parameters:
+        - name: ticketId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Synced ticket content
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SavedContent"
+        "409":
+          description: Reload failed
+  /comments/{commentId}/reload:
+    post:
+      summary: Reload and sync comment content
+      parameters:
+        - name: commentId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Synced comment content
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SavedContent"
+        "409":
+          description: Reload failed
+components:
+  schemas:
+    SavedContent:
+      type: object
+      required:
+        - id
+        - savedContent
+        - updatedAt
+      properties:
+        id:
+          type: string
+        savedContent:
+          type: string
+        updatedAt:
+          type: string
+          format: date-time
