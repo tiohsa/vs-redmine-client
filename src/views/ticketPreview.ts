@@ -1,4 +1,3 @@
-import * as fs from "fs";
 import * as vscode from "vscode";
 import { Ticket } from "../redmine/types";
 import { TicketEditorKind } from "./ticketEditorTypes";
@@ -20,7 +19,6 @@ import {
   buildCommentEditorFilename,
   buildTicketEditorFilename,
 } from "./editorFilename";
-import { buildUniqueUntitledPath } from "./untitledPath";
 
 export const buildTicketPreviewContent = (
   ticket: Pick<Ticket, "subject" | "description">,
@@ -51,31 +49,40 @@ export const applyEditorContent = async (
   });
 };
 
+const getEditorStorageDir = (): vscode.Uri | undefined => {
+  const workspace = vscode.workspace.workspaceFolders?.[0];
+  if (!workspace) {
+    return undefined;
+  }
+
+  return vscode.Uri.joinPath(workspace.uri, ".todoex", "editors");
+};
+
 const openTicketEditor = async (
   ticket: Ticket,
   kind: TicketEditorKind,
   filename: string,
+  content: string,
 ): Promise<vscode.TextEditor> => {
-  const document = await vscode.workspace.openTextDocument(
-    buildUntitledUri(filename),
-  );
+  const storageDir = getEditorStorageDir();
+  if (!storageDir) {
+    const document = await vscode.workspace.openTextDocument(
+      vscode.Uri.parse(`untitled:${filename}`),
+    );
+    const editor = await vscode.window.showTextDocument(document, { preview: false });
+    await applyEditorContent(editor, content);
+    registerTicketEditor(ticket.id, editor, kind, "ticket", ticket.projectId);
+    return editor;
+  }
+
+  await vscode.workspace.fs.createDirectory(storageDir);
+  const fileUri = vscode.Uri.joinPath(storageDir, filename);
+  const bytes = new TextEncoder().encode(content);
+  await vscode.workspace.fs.writeFile(fileUri, bytes);
+  const document = await vscode.workspace.openTextDocument(fileUri);
   const editor = await vscode.window.showTextDocument(document, { preview: false });
   registerTicketEditor(ticket.id, editor, kind, "ticket", ticket.projectId);
   return editor;
-};
-
-const buildUntitledUri = (filename: string): vscode.Uri => {
-  const workspace = vscode.workspace.workspaceFolders?.[0];
-  if (!workspace) {
-    return vscode.Uri.parse(`untitled:${filename}`);
-  }
-
-  const targetPath = buildUniqueUntitledPath(
-    workspace.uri.path,
-    filename,
-    (candidate) => fs.existsSync(candidate),
-  );
-  return vscode.Uri.parse(`untitled:${targetPath}`);
 };
 
 export const showTicketPreview = async (
@@ -94,8 +101,12 @@ export const showTicketPreview = async (
     ticket.id,
     options?.kind ?? "primary",
   );
-  const editor = await openTicketEditor(ticket, options?.kind ?? "primary", filename);
-  await applyEditorContent(editor, content);
+  const editor = await openTicketEditor(
+    ticket,
+    options?.kind ?? "primary",
+    filename,
+    content,
+  );
   setEditorContentType(editor, "ticket");
   setEditorProjectId(editor, ticket.projectId);
   setEditorDisplaySource(editor, display.source);
@@ -110,9 +121,8 @@ export const showTicketComment = async (
 ): Promise<vscode.TextEditor> => {
   const display = resolveCommentEditorBody(commentId, comment);
   const filename = buildCommentEditorFilename(ticket.projectId, ticket.id, commentId);
-  const editor = await openTicketEditor(ticket, "primary", filename);
   const content = buildCommentEditorContent(display.body);
-  await applyEditorContent(editor, content);
+  const editor = await openTicketEditor(ticket, "primary", filename, content);
   setEditorContentType(editor, "comment");
   setEditorProjectId(editor, ticket.projectId);
   setEditorCommentId(editor, commentId);
