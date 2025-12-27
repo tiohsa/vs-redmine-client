@@ -1,6 +1,7 @@
 import { IssueMetadata } from "./ticketMetadataTypes";
 
 export type TicketSaveStatus =
+  | "created"
   | "success"
   | "no_change"
   | "conflict"

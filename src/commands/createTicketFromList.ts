@@ -1,6 +1,15 @@
 import * as fs from "fs";
 import * as vscode from "vscode";
-import { getNewTicketDraftUri, registerNewTicketDraft } from "../views/ticketEditorRegistry";
+import { getDefaultProjectId } from "../config/settings";
+import { getProjectSelection } from "../config/projectSelection";
+import {
+  getNewTicketDraftUri,
+  registerNewTicketDraft,
+  setEditorProjectId,
+} from "../views/ticketEditorRegistry";
+import { buildTicketEditorContent } from "../views/ticketEditorContent";
+import { IssueMetadata } from "../views/ticketMetadataTypes";
+import { applyEditorContent } from "../views/ticketPreview";
 import { buildUniqueUntitledPath } from "../views/untitledPath";
 
 const DRAFT_FILENAME = "todoex-new-ticket.md";
@@ -12,6 +21,30 @@ const findOpenDocument = (uri: vscode.Uri): vscode.TextDocument | undefined =>
 
 const getWorkspacePath = (): string | undefined =>
   vscode.workspace.workspaceFolders?.[0]?.uri.path;
+
+const DEFAULT_METADATA: IssueMetadata = {
+  tracker: "",
+  priority: "",
+  status: "",
+  due_date: "",
+};
+
+const buildNewTicketTemplate = (): string =>
+  buildTicketEditorContent({
+    subject: "",
+    description: "",
+    metadata: DEFAULT_METADATA,
+  });
+
+const resolveProjectId = (): number | undefined => {
+  const selection = getProjectSelection();
+  if (selection.id) {
+    return selection.id;
+  }
+
+  const fallback = Number(getDefaultProjectId());
+  return Number.isNaN(fallback) ? undefined : fallback;
+};
 
 export const buildNewTicketDraftUri = (
   workspacePath?: string,
@@ -33,4 +66,12 @@ export const createTicketFromList = async (): Promise<void> => {
   const editor = await vscode.window.showTextDocument(document, { preview: false });
 
   registerNewTicketDraft(editor);
+  const projectId = resolveProjectId();
+  if (projectId) {
+    setEditorProjectId(editor, projectId);
+  }
+
+  if (document.getText().trim().length === 0) {
+    await applyEditorContent(editor, buildNewTicketTemplate());
+  }
 };

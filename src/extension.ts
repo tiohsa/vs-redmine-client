@@ -12,7 +12,11 @@ import { showError, showSuccess, showWarning } from "./utils/notifications";
 import { setCommentDraft } from "./views/commentDraftStore";
 import { CommentTreeItem, CommentsTreeProvider } from "./views/commentsView";
 import { setCommentDraftBody } from "./views/commentEditStore";
-import { parseEditorFilename, parseNewCommentDraftFilename } from "./views/editorFilename";
+import {
+  isNewTicketDraftFilename,
+  parseEditorFilename,
+  parseNewCommentDraftFilename,
+} from "./views/editorFilename";
 import { ProjectTreeItem, ProjectsTreeProvider } from "./views/projectsView";
 import { parseTicketEditorContent } from "./views/ticketEditorContent";
 import { setTicketDraftContent } from "./views/ticketDraftStore";
@@ -38,7 +42,12 @@ import {
   syncNewCommentDraft,
 } from "./views/commentSaveSync";
 import { getSaveNotification } from "./views/ticketSaveNotifications";
-import { handleTicketEditorSave, syncTicketDraft } from "./views/ticketSaveSync";
+import {
+  handleTicketEditorSave,
+  syncNewTicketDraft,
+  syncNewTicketDraftContent,
+  syncTicketDraft,
+} from "./views/ticketSaveSync";
 import { registerFocusRefresh } from "./views/viewFocusRefresh";
 import {
   VIEW_ID_ACTIVITY_COMMENTS,
@@ -220,6 +229,9 @@ export async function activate(context: vscode.ExtensionContext) {
         const ticketResult = await handleTicketEditorSave(editor);
         if (ticketResult) {
           notifyTicketSaveResult(ticketResult);
+          if (ticketResult.status === "created") {
+            ticketsProvider.refresh();
+          }
           return;
         }
 
@@ -241,6 +253,26 @@ export async function activate(context: vscode.ExtensionContext) {
       if (!parsed) {
         const draftTicketId = parseNewCommentDraftFilename(filename);
         if (!draftTicketId) {
+          if (!isNewTicketDraftFilename(filename)) {
+            return;
+          }
+
+          if (editor) {
+            const result = await syncNewTicketDraft({ editor });
+            notifyTicketSaveResult(result);
+            if (result.status === "created") {
+              ticketsProvider.refresh();
+            }
+            return;
+          }
+
+          const result = await syncNewTicketDraftContent({
+            content: document.getText(),
+          });
+          notifyTicketSaveResult(result);
+          if (result.status === "created") {
+            ticketsProvider.refresh();
+          }
           return;
         }
 

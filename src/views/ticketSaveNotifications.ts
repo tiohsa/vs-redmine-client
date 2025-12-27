@@ -9,6 +9,8 @@ export const getSaveNotification = (
   result: TicketSaveResult,
 ): TicketSaveNotification | undefined => {
   switch (result.status) {
+    case "created":
+      return { type: "info", message: "Ticket created." };
     case "success":
       return { type: "info", message: "Redmine updated." };
     case "no_change":

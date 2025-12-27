@@ -11,7 +11,7 @@ const editorByUri = new Map<string, TicketEditorRecord>();
 let editorByDocument = new WeakMap<vscode.TextDocument, TicketEditorRecord>();
 let editorByEditor = new WeakMap<vscode.TextEditor, TicketEditorRecord>();
 const editorsByTicket = new Map<number, Set<string>>();
-const NEW_TICKET_DRAFT_ID = -1;
+export const NEW_TICKET_DRAFT_ID = -1;
 
 const syncRecordUri = (record: TicketEditorRecord, nextUri: string): void => {
   if (record.uri === nextUri) {

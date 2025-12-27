@@ -93,6 +93,10 @@ export interface IssueCreateInput {
   subject: string;
   description: string;
   uploads?: IssueUploadInput[];
+  statusId?: number;
+  trackerId?: number;
+  priorityId?: number;
+  dueDate?: string;
 }
 
 export const buildIssueCreatePayload = (input: IssueCreateInput): Record<string, unknown> => ({
@@ -101,15 +105,20 @@ export const buildIssueCreatePayload = (input: IssueCreateInput): Record<string,
     subject: input.subject,
     description: input.description,
     uploads: input.uploads ?? [],
+    ...(input.statusId !== undefined ? { status_id: input.statusId } : {}),
+    ...(input.trackerId !== undefined ? { tracker_id: input.trackerId } : {}),
+    ...(input.priorityId !== undefined ? { priority_id: input.priorityId } : {}),
+    ...(input.dueDate !== undefined ? { due_date: input.dueDate } : {}),
   },
 });
 
-export const createIssue = async (input: IssueCreateInput): Promise<void> => {
-  await requestJson({
+export const createIssue = async (input: IssueCreateInput): Promise<number | undefined> => {
+  const response = await requestJson<{ issue?: { id?: number } }>({
     method: "POST",
     path: "/issues.json",
     body: buildIssueCreatePayload(input),
   });
+  return response.issue?.id;
 };
 
 export interface IssueUpdateInput {

@@ -4,6 +4,7 @@ const sanitizeId = (value: number): string => String(value);
 const ticketPattern = /^project-(\d+)_ticket-(\d+)(?:_extra)?(?:-\d+)?\.md$/;
 const commentPattern = /^project-(\d+)_ticket-(\d+)_comment-(\d+)(?:-\d+)?\.md$/;
 const newCommentDraftPattern = /^todoex-new-comment-(\d+)(?:-\d+)?\.md$/;
+const newTicketDraftPattern = /^todoex-new-ticket(?:-\d+)?\.md$/;
 
 export type ParsedEditorFilename =
   | {
@@ -67,3 +68,6 @@ export const parseNewCommentDraftFilename = (filename: string): number | undefin
 
   return Number(match[1]);
 };
+
+export const isNewTicketDraftFilename = (filename: string): boolean =>
+  newTicketDraftPattern.test(filename);

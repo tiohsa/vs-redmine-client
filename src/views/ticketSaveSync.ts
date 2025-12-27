@@ -1,5 +1,8 @@
 import * as vscode from "vscode";
+import { getDefaultProjectId } from "../config/settings";
+import { getProjectSelection } from "../config/projectSelection";
 import {
+  createIssue,
   getIssueDetail,
   listIssuePriorities,
   listIssueStatuses,
@@ -16,9 +19,15 @@ import { parseTicketEditorContent } from "./ticketEditorContent";
 import { IssueMetadata } from "./ticketMetadataTypes";
 import {
   getEditorContentType,
+  getProjectIdForEditor,
   getTicketIdForEditor,
   isTicketEditor,
+  NEW_TICKET_DRAFT_ID,
+  registerTicketEditor,
+  removeTicketEditorByDocument,
+  setEditorDisplaySource,
 } from "./ticketEditorRegistry";
+import { TicketEditorContent } from "./ticketEditorContent";
 import { TicketSaveResult } from "./ticketSaveTypes";
 import { applyEditorContent, buildTicketPreviewContent } from "./ticketPreview";
 
@@ -33,6 +42,20 @@ export interface TicketSaveDependencies {
 const defaultDeps: TicketSaveDependencies = {
   getIssueDetail,
   updateIssue,
+  listIssueStatuses,
+  listTrackers,
+  listIssuePriorities,
+};
+
+export interface TicketCreateDependencies {
+  createIssue: typeof createIssue;
+  listIssueStatuses: typeof listIssueStatuses;
+  listTrackers: typeof listTrackers;
+  listIssuePriorities: typeof listIssuePriorities;
+}
+
+const defaultCreateDeps: TicketCreateDependencies = {
+  createIssue,
   listIssueStatuses,
   listTrackers,
   listIssuePriorities,
@@ -73,6 +96,22 @@ const mapErrorToResult = (error: unknown): TicketSaveResult => {
 
   return buildResult("failed", message);
 };
+
+const resolveProjectIdForCreate = (projectId?: number): number | undefined => {
+  if (projectId) {
+    return projectId;
+  }
+  const selection = getProjectSelection();
+  if (selection.id) {
+    return selection.id;
+  }
+
+  const fallback = Number(getDefaultProjectId());
+  return Number.isNaN(fallback) ? undefined : fallback;
+};
+
+const resolveProjectIdForEditor = (editor: vscode.TextEditor): number | undefined =>
+  resolveProjectIdForCreate(getProjectIdForEditor(editor));
 
 const computeChanges = (
   baseSubject: string,
@@ -161,6 +200,44 @@ const resolveMetadataUpdates = async (
   return updateFields;
 };
 
+const resolveMetadataForCreate = async (
+  metadata: IssueMetadata,
+  deps: TicketCreateDependencies,
+): Promise<TicketUpdateFields> => {
+  const [statuses, trackers, priorities] = await Promise.all([
+    deps.listIssueStatuses(),
+    deps.listTrackers(),
+    deps.listIssuePriorities(),
+  ]);
+
+  const statusMatch = statuses.find((item) => item.name === metadata.status);
+  if (!statusMatch) {
+    throw new Error(`Unknown status: ${metadata.status}`);
+  }
+
+  const trackerMatch = trackers.find((item) => item.name === metadata.tracker);
+  if (!trackerMatch) {
+    throw new Error(`Unknown tracker: ${metadata.tracker}`);
+  }
+
+  const priorityMatch = priorities.find((item) => item.name === metadata.priority);
+  if (!priorityMatch) {
+    throw new Error(`Unknown priority: ${metadata.priority}`);
+  }
+
+  const fields: TicketUpdateFields = {
+    statusId: statusMatch.id,
+    trackerId: trackerMatch.id,
+    priorityId: priorityMatch.id,
+  };
+
+  if (metadata.due_date.length > 0) {
+    fields.dueDate = metadata.due_date;
+  }
+
+  return fields;
+};
+
 export const syncTicketDraft = async (input: {
   ticketId: number;
   content: string;
@@ -244,6 +321,108 @@ export const syncTicketDraft = async (input: {
   return buildResult("success", "Redmine updated.");
 };
 
+export const syncNewTicketDraft = async (input: {
+  editor: vscode.TextEditor;
+  deps?: TicketCreateDependencies;
+}): Promise<TicketSaveResult> => {
+  const deps = input.deps ?? defaultCreateDeps;
+  const projectId = resolveProjectIdForEditor(input.editor);
+  const { result, createdId, parsed } = await createTicketFromContent({
+    content: input.editor.document.getText(),
+    projectId,
+    deps,
+  });
+
+  if (result.status !== "created" || !createdId || !parsed || !projectId) {
+    return result;
+  }
+
+  removeTicketEditorByDocument(input.editor.document);
+  registerTicketEditor(createdId, input.editor, "primary", "ticket", projectId);
+  setEditorDisplaySource(input.editor, "saved");
+  updateDraftAfterSave(createdId, parsed.subject, parsed.description, parsed.metadata);
+
+  return result;
+};
+
+export const syncNewTicketDraftContent = async (input: {
+  content: string;
+  projectId?: number;
+  deps?: TicketCreateDependencies;
+}): Promise<TicketSaveResult> => {
+  const deps = input.deps ?? defaultCreateDeps;
+  const { result } = await createTicketFromContent({
+    content: input.content,
+    projectId: input.projectId,
+    deps,
+  });
+  return result;
+};
+
+const createTicketFromContent = async (input: {
+  content: string;
+  projectId?: number;
+  deps: TicketCreateDependencies;
+}): Promise<{
+  result: TicketSaveResult;
+  createdId?: number;
+  parsed?: TicketEditorContent;
+}> => {
+  const projectId = resolveProjectIdForCreate(input.projectId);
+  if (!projectId) {
+    return {
+      result: buildResult(
+        "failed",
+        "Select a project or set a default project ID before creating tickets.",
+      ),
+    };
+  }
+
+  let parsed: TicketEditorContent;
+  try {
+    parsed = parseTicketEditorContent(input.content);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Invalid metadata.";
+    return { result: buildResult("failed", message) };
+  }
+
+  const subject = parsed.subject.trim();
+  if (!subject) {
+    return { result: buildResult("failed", "Ticket subject is required.") };
+  }
+
+  let metadataFields: TicketUpdateFields = {};
+  try {
+    metadataFields = await resolveMetadataForCreate(parsed.metadata, input.deps);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Invalid metadata.";
+    return { result: buildResult("failed", message) };
+  }
+
+  let createdId: number | undefined;
+  try {
+    const dueDate =
+      typeof metadataFields.dueDate === "string" ? metadataFields.dueDate : undefined;
+    createdId = await input.deps.createIssue({
+      projectId,
+      subject,
+      description: parsed.description,
+      statusId: metadataFields.statusId,
+      trackerId: metadataFields.trackerId,
+      priorityId: metadataFields.priorityId,
+      dueDate,
+    });
+  } catch (error) {
+    return { result: mapErrorToResult(error) };
+  }
+
+  return {
+    result: buildResult("created", "Ticket created."),
+    createdId,
+    parsed,
+  };
+};
+
 export const reloadTicketEditor = async (input: {
   ticketId: number;
   editor: vscode.TextEditor;
@@ -287,6 +466,10 @@ export const handleTicketEditorSave = async (
   const ticketId = getTicketIdForEditor(editor);
   if (!ticketId) {
     return undefined;
+  }
+
+  if (ticketId === NEW_TICKET_DRAFT_ID) {
+    return syncNewTicketDraft({ editor });
   }
 
   return syncTicketDraft({
