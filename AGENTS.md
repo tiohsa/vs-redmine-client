@@ -15,6 +15,7 @@ Auto-generated from all feature plans. Last updated: 2025-12-26
 - なし（下書き/表示はインメモリ） (001-show-saved-editor)
 - TypeScript 5.9 + VS Code Extension API, webpack 5, @vscode/test-cli, ESLint (001-ticket-metadata-editor)
 - N/A（インメモリのみ） (001-ticket-metadata-editor)
+- N/A（永続化変更なし、インメモリのみ） (001-iconize-view-buttons)
 
 - TypeScript 5.9 + VS Code Extension API, webpack, @vscode/test-cli (001-redmine-ticket-workflow)
 
@@ -34,9 +35,9 @@ npm test && npm run lint
 TypeScript 5.9: Follow standard conventions
 
 ## Recent Changes
+- 001-iconize-view-buttons: Added TypeScript 5.9 + VS Code Extension API, webpack 5, @vscode/test-cli, ESLint
 - 001-ticket-metadata-editor: Added TypeScript 5.9 + VS Code Extension API, webpack 5, @vscode/test-cli, ESLint
 - 001-show-saved-editor: Added TypeScript 5.9 + VS Code Extension API, webpack, @vscode/test-cli, ESLint
-- 001-add-settings-panel: Added TypeScript 5.9 + VS Code Extension API, webpack, @vscode/test-cli, ESLint
 
 
 <!-- MANUAL ADDITIONS START -->

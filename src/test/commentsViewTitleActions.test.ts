@@ -1,60 +1,60 @@
 import * as assert from "assert";
-import { loadPackageJson } from "./helpers/packageJson";
+import {
+  CommandItem,
+  getCommands,
+  getViewTitleMenuItems,
+  MenuItem,
+} from "./helpers/packageJson";
 
-type MenuItem = {
-  command: string;
-  when?: string;
-  group?: string;
-  enablement?: string;
-};
+const findCommand = (commandId: string): CommandItem | undefined =>
+  getCommands().find((command) => command.command === commandId);
 
-type CommandItem = {
-  command: string;
-  title?: string;
-};
+const findViewTitleEntry = (commandId: string): MenuItem | undefined =>
+  getViewTitleMenuItems().find((item) => item.command === commandId);
 
 suite("Comments view title actions", () => {
   test("declares add comment command and view title action", () => {
-    const packageJson = loadPackageJson();
-    const contributes = packageJson.contributes as Record<string, unknown> | undefined;
-    assert.ok(contributes, "contributes must be defined");
-
-    const commands = contributes.commands as CommandItem[] | undefined;
-    assert.ok(commands, "commands must be defined");
-    const addCommand = commands.find(
-      (command) => command.command === "todoex.addCommentFromComments",
-    );
+    const addCommand = findCommand("todoex.addCommentFromComments");
     assert.ok(addCommand, "todoex.addCommentFromComments command must exist");
     assert.strictEqual(addCommand?.title, "Redmine: Add Comment");
 
-    const menus = contributes.menus as Record<string, MenuItem[]> | undefined;
-    assert.ok(menus, "menus must be defined");
-    const viewTitle = menus["view/title"] as MenuItem[] | undefined;
-    assert.ok(viewTitle, "view/title menu must be defined");
-    const entry = viewTitle.find(
-      (item) => item.command === "todoex.addCommentFromComments",
-    );
+    const entry = findViewTitleEntry("todoex.addCommentFromComments");
     assert.ok(entry, "add comment view/title entry must exist");
     assert.strictEqual(entry?.when, "view == todoexActivityComments");
     assert.strictEqual(entry?.enablement, "todoex.canAddComments");
   });
 
+  test("declares comment view title icons and tooltip sources", () => {
+    const addCommand = findCommand("todoex.addCommentFromComments");
+    const reloadCommand = findCommand("todoex.reloadComment");
+    assert.ok(addCommand?.title, "add comment command must include a title");
+    assert.ok(reloadCommand?.title, "reload comment command must include a title");
+    assert.ok(addCommand?.icon, "add comment command must include an icon");
+    assert.ok(reloadCommand?.icon, "reload comment command must include an icon");
+
+    const addEntry = findViewTitleEntry("todoex.addCommentFromComments");
+    const reloadEntry = findViewTitleEntry("todoex.reloadComment");
+    assert.ok(addEntry, "add comment view/title entry must exist");
+    assert.ok(reloadEntry, "reload comment view/title entry must exist");
+  });
+
+  test("uses new-file icon for comment add action", () => {
+    const addCommand = findCommand("todoex.addCommentFromComments");
+    assert.ok(addCommand, "add comment command must exist");
+    assert.strictEqual(addCommand?.icon, "$(add)");
+  });
+
+  test("uses refresh icon for comment reload action", () => {
+    const reloadCommand = findCommand("todoex.reloadComment");
+    assert.ok(reloadCommand, "reload comment command must exist");
+    assert.strictEqual(reloadCommand?.icon, "$(refresh)");
+  });
+
   test("keeps existing comment commands", () => {
-    const packageJson = loadPackageJson();
-    const contributes = packageJson.contributes as Record<string, unknown> | undefined;
-    assert.ok(contributes, "contributes must be defined");
-
-    const commands = contributes.commands as CommandItem[] | undefined;
-    assert.ok(commands, "commands must be defined");
-
-    const addComment = commands.find(
-      (command) => command.command === "todoex.addComment",
-    );
+    const addComment = findCommand("todoex.addComment");
     assert.ok(addComment, "todoex.addComment command must exist");
 
-    const editComment = commands.find(
-      (command) => command.command === "todoex.editComment",
-    );
+    const editComment = findCommand("todoex.editComment");
     assert.ok(editComment, "todoex.editComment command must exist");
   });
 });

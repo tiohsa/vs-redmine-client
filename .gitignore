@@ -1,6 +1,7 @@
 node_modules/
 dist/
 out/
+build/
 coverage/
 *.log
 *.tmp

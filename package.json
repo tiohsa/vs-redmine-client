@@ -61,11 +61,13 @@
       },
       {
         "command": "todoex.reloadTicket",
-        "title": "Redmine: Reload Ticket"
+        "title": "Redmine: Reload Ticket",
+        "icon": "$(refresh)"
       },
       {
         "command": "todoex.reloadComment",
-        "title": "Redmine: Reload Comment"
+        "title": "Redmine: Reload Comment",
+        "icon": "$(refresh)"
       },
       {
         "command": "todoex.selectProject",
@@ -117,7 +119,8 @@
       },
       {
         "command": "todoex.createTicketFromList",
-        "title": "Redmine: New Ticket"
+        "title": "Redmine: New Ticket",
+        "icon": "$(add)"
       },
       {
         "command": "todoex.editComment",
@@ -129,7 +132,8 @@
       },
       {
         "command": "todoex.addCommentFromComments",
-        "title": "Redmine: Add Comment"
+        "title": "Redmine: Add Comment",
+        "icon": "$(add)"
       }
     ],
     "views": {
@@ -158,27 +162,23 @@
           "command": "todoex.createTicketFromList",
           "when": "view == todoexActivityTickets",
           "group": "navigation",
-          "icon": "$(add)",
           "enablement": "todoex.canCreateTickets"
         },
         {
           "command": "todoex.reloadTicket",
           "when": "view == todoexActivityTickets",
-          "group": "navigation@1",
-          "icon": "$(sync)"
+          "group": "navigation@1"
         },
         {
           "command": "todoex.addCommentFromComments",
           "when": "view == todoexActivityComments",
           "group": "navigation",
-          "icon": "$(add)",
           "enablement": "todoex.canAddComments"
         },
         {
           "command": "todoex.reloadComment",
           "when": "view == todoexActivityComments",
-          "group": "navigation@1",
-          "icon": "$(sync)"
+          "group": "navigation@1"
         }
       ],
       "view/item/context": [

@@ -1,53 +1,58 @@
 import * as assert from "assert";
-import { loadPackageJson } from "./helpers/packageJson";
+import {
+  CommandItem,
+  getCommands,
+  getMenuItems,
+  getViewTitleMenuItems,
+  MenuItem,
+} from "./helpers/packageJson";
 
-type MenuItem = {
-  command: string;
-  when?: string;
-  group?: string;
-  enablement?: string;
-};
+const findCommand = (commandId: string): CommandItem | undefined =>
+  getCommands().find((command) => command.command === commandId);
 
-type CommandItem = {
-  command: string;
-  title?: string;
-};
+const findViewTitleEntry = (commandId: string): MenuItem | undefined =>
+  getViewTitleMenuItems().find((item) => item.command === commandId);
 
 suite("Tickets view title actions", () => {
   test("declares add ticket command and view title action", () => {
-    const packageJson = loadPackageJson();
-    const contributes = packageJson.contributes as Record<string, unknown> | undefined;
-    assert.ok(contributes, "contributes must be defined");
-
-    const commands = contributes.commands as CommandItem[] | undefined;
-    assert.ok(commands, "commands must be defined");
-    const addCommand = commands.find(
-      (command) => command.command === "todoex.createTicketFromList",
-    );
+    const addCommand = findCommand("todoex.createTicketFromList");
     assert.ok(addCommand, "todoex.createTicketFromList command must exist");
     assert.strictEqual(addCommand?.title, "Redmine: New Ticket");
 
-    const menus = contributes.menus as Record<string, MenuItem[]> | undefined;
-    assert.ok(menus, "menus must be defined");
-    const viewTitle = menus["view/title"] as MenuItem[] | undefined;
-    assert.ok(viewTitle, "view/title menu must be defined");
-    const entry = viewTitle.find(
-      (item) => item.command === "todoex.createTicketFromList",
-    );
+    const entry = findViewTitleEntry("todoex.createTicketFromList");
     assert.ok(entry, "add ticket view/title entry must exist");
     assert.strictEqual(entry?.when, "view == todoexActivityTickets");
     assert.strictEqual(entry?.enablement, "todoex.canCreateTickets");
   });
 
-  test("keeps existing ticket context actions", () => {
-    const packageJson = loadPackageJson();
-    const contributes = packageJson.contributes as Record<string, unknown> | undefined;
-    assert.ok(contributes, "contributes must be defined");
+  test("declares ticket view title icons and tooltip sources", () => {
+    const addCommand = findCommand("todoex.createTicketFromList");
+    const reloadCommand = findCommand("todoex.reloadTicket");
+    assert.ok(addCommand?.title, "add ticket command must include a title");
+    assert.ok(reloadCommand?.title, "reload ticket command must include a title");
+    assert.ok(addCommand?.icon, "add ticket command must include an icon");
+    assert.ok(reloadCommand?.icon, "reload ticket command must include an icon");
 
-    const menus = contributes.menus as Record<string, MenuItem[]> | undefined;
-    assert.ok(menus, "menus must be defined");
-    const contextItems = menus["view/item/context"] as MenuItem[] | undefined;
-    assert.ok(contextItems, "view/item/context menu must be defined");
+    const addEntry = findViewTitleEntry("todoex.createTicketFromList");
+    const reloadEntry = findViewTitleEntry("todoex.reloadTicket");
+    assert.ok(addEntry, "add ticket view/title entry must exist");
+    assert.ok(reloadEntry, "reload ticket view/title entry must exist");
+  });
+
+  test("uses new-file icon for ticket add action", () => {
+    const addCommand = findCommand("todoex.createTicketFromList");
+    assert.ok(addCommand, "add ticket command must exist");
+    assert.strictEqual(addCommand?.icon, "$(add)");
+  });
+
+  test("uses refresh icon for ticket reload action", () => {
+    const reloadCommand = findCommand("todoex.reloadTicket");
+    assert.ok(reloadCommand, "reload ticket command must exist");
+    assert.strictEqual(reloadCommand?.icon, "$(refresh)");
+  });
+
+  test("keeps existing ticket context actions", () => {
+    const contextItems = getMenuItems("view/item/context");
 
     const openPreview = contextItems.find(
       (item) => item.command === "todoex.openTicketPreview",
