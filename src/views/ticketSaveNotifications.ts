@@ -25,7 +25,7 @@ export const getSaveNotification = (
     case "not_found":
       return { type: "error", message: "Ticket not found in Redmine." };
     case "failed":
-      return { type: "error", message: result.message };
+      return { type: "error", message: `Save failed: ${result.message}` };
     default:
       return { type: "error", message: result.message };
   }

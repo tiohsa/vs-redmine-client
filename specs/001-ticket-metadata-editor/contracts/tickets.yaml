@@ -1,0 +1,78 @@
+openapi: 3.0.3
+info:
+  title: Ticket Metadata Update API
+  version: 1.0.0
+paths:
+  /tickets/{ticketId}:
+    patch:
+      summary: Update ticket metadata
+      parameters:
+        - in: path
+          name: ticketId
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TicketMetadataUpdate'
+      responses:
+        '200':
+          description: Updated ticket metadata
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TicketMetadata'
+        '400':
+          description: Validation error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+components:
+  schemas:
+    TicketMetadataUpdate:
+      type: object
+      required:
+        - tracker
+        - priority
+        - status
+      properties:
+        tracker:
+          type: string
+          description: Tracker name
+        priority:
+          type: string
+          description: Priority name
+        status:
+          type: string
+          description: Status name
+        due_date:
+          type: string
+          nullable: true
+          description: Due date in YYYY-MM-DD or empty
+    TicketMetadata:
+      type: object
+      required:
+        - tracker
+        - priority
+        - status
+        - due_date
+      properties:
+        tracker:
+          type: string
+        priority:
+          type: string
+        status:
+          type: string
+        due_date:
+          type: string
+    Error:
+      type: object
+      required:
+        - message
+      properties:
+        message:
+          type: string

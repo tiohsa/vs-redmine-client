@@ -136,8 +136,14 @@ export async function activate(context: vscode.ExtensionContext) {
         const ticketId = getTicketIdForEditor(previousActiveEditor);
         const contentType = getEditorContentType(previousActiveEditor);
         if (ticketId && contentType === "ticket") {
-          const parsed = parseTicketEditorContent(previousActiveEditor.document.getText());
-          setTicketDraftContent(ticketId, parsed);
+          try {
+            const parsed = parseTicketEditorContent(
+              previousActiveEditor.document.getText(),
+            );
+            setTicketDraftContent(ticketId, parsed);
+          } catch {
+            // Ignore parse errors when swapping focus; save will surface validation errors.
+          }
         } else if (ticketId && contentType === "comment") {
           const draft = previousActiveEditor.document.getText();
           setCommentDraft(ticketId, draft);

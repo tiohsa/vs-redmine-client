@@ -15,17 +15,25 @@ import {
   resolveTicketEditorDisplay,
   TicketEditorContent,
 } from "./ticketEditorContent";
+import { IssueMetadata } from "./ticketMetadataTypes";
 import {
   buildCommentEditorFilename,
   buildTicketEditorFilename,
 } from "./editorFilename";
 
 export const buildTicketPreviewContent = (
-  ticket: Pick<Ticket, "subject" | "description">,
+  ticket: Pick<Ticket, "subject" | "description" | "trackerName" | "priorityName" | "statusName" | "dueDate">,
 ): string => {
+  const metadata: IssueMetadata = {
+    tracker: ticket.trackerName ?? "",
+    priority: ticket.priorityName ?? "",
+    status: ticket.statusName ?? "",
+    due_date: ticket.dueDate ?? "",
+  };
   return buildTicketEditorContent({
     subject: ticket.subject,
     description: ticket.description ?? "",
+    metadata,
   });
 };
 
@@ -92,6 +100,12 @@ export const showTicketPreview = async (
   const savedContent: TicketEditorContent = {
     subject: ticket.subject,
     description: ticket.description ?? "",
+    metadata: {
+      tracker: ticket.trackerName ?? "",
+      priority: ticket.priorityName ?? "",
+      status: ticket.statusName ?? "",
+      due_date: ticket.dueDate ?? "",
+    },
   };
   const draftContent = getTicketDraftContent(ticket.id);
   const display = resolveTicketEditorDisplay(savedContent, draftContent);
@@ -110,7 +124,13 @@ export const showTicketPreview = async (
   setEditorContentType(editor, "ticket");
   setEditorProjectId(editor, ticket.projectId);
   setEditorDisplaySource(editor, display.source);
-  ensureTicketDraft(ticket.id, ticket.subject, ticket.description ?? "", ticket.updatedAt);
+  ensureTicketDraft(
+    ticket.id,
+    ticket.subject,
+    ticket.description ?? "",
+    savedContent.metadata,
+    ticket.updatedAt,
+  );
   return editor;
 };
 

@@ -29,6 +29,9 @@ export interface TicketUpdateFields {
   description?: string;
   statusId?: number;
   assigneeId?: number;
+  trackerId?: number;
+  priorityId?: number;
+  dueDate?: string | null;
 }
 
 export interface Comment {
@@ -109,6 +112,18 @@ export interface RedmineIssueDetailResponse {
       user?: RedmineUserRef;
     }>;
   };
+}
+
+export interface RedmineIssueStatusResponse {
+  issue_statuses: Array<{ id: number; name: string }>;
+}
+
+export interface RedmineTrackerResponse {
+  trackers: Array<{ id: number; name: string }>;
+}
+
+export interface RedminePriorityResponse {
+  issue_priorities: Array<{ id: number; name: string }>;
 }
 
 export interface RedmineUploadResponse {

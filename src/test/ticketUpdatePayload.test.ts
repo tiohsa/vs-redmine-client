@@ -8,6 +8,9 @@ suite("Ticket update payload", () => {
       description: "New body",
       statusId: 2,
       assigneeId: 5,
+      trackerId: 4,
+      priorityId: 3,
+      dueDate: "2025-12-31",
     });
 
     assert.deepStrictEqual(payload, {
@@ -16,6 +19,9 @@ suite("Ticket update payload", () => {
         description: "New body",
         status_id: 2,
         assigned_to_id: 5,
+        tracker_id: 4,
+        priority_id: 3,
+        due_date: "2025-12-31",
       },
     });
   });
@@ -23,11 +29,13 @@ suite("Ticket update payload", () => {
   test("omits undefined fields", () => {
     const payload = buildIssueUpdatePayload({
       description: "Only body",
+      dueDate: null,
     });
 
     assert.deepStrictEqual(payload, {
       issue: {
         description: "Only body",
+        due_date: null,
       },
     });
   });

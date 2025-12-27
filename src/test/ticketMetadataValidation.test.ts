@@ -1,0 +1,68 @@
+import * as assert from "assert";
+import { parseIssueMetadataYaml } from "../views/ticketMetadataYaml";
+
+suite("Ticket metadata validation", () => {
+  test("rejects missing issue block", () => {
+    assert.throws(
+      () => parseIssueMetadataYaml("tracker: Task"),
+      /issue/,
+    );
+  });
+
+  test("rejects missing required keys", () => {
+    assert.throws(
+      () =>
+        parseIssueMetadataYaml(
+          ["issue:", "  tracker: Task", "  priority: Normal"].join("\n"),
+        ),
+      /Missing metadata key/,
+    );
+  });
+
+  test("rejects duplicate keys", () => {
+    assert.throws(
+      () =>
+        parseIssueMetadataYaml(
+          [
+            "issue:",
+            "  tracker: Task",
+            "  tracker: Task",
+            "  priority: Normal",
+            "  status: In Progress",
+            "  due_date: 2025-12-31",
+          ].join("\n"),
+        ),
+      /Duplicate metadata key/,
+    );
+  });
+
+  test("rejects invalid due_date format", () => {
+    assert.throws(
+      () =>
+        parseIssueMetadataYaml(
+          [
+            "issue:",
+            "  tracker: Task",
+            "  priority: Normal",
+            "  status: In Progress",
+            "  due_date: tomorrow",
+          ].join("\n"),
+        ),
+      /due_date/,
+    );
+  });
+
+  test("allows empty due_date", () => {
+    const parsed = parseIssueMetadataYaml(
+      [
+        "issue:",
+        "  tracker: Task",
+        "  priority: Normal",
+        "  status: In Progress",
+        "  due_date:",
+      ].join("\n"),
+    );
+
+    assert.strictEqual(parsed.due_date, "");
+  });
+});

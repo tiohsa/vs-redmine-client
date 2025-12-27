@@ -1,3 +1,5 @@
+import { IssueMetadata } from "./ticketMetadataTypes";
+
 export type TicketSaveStatus =
   | "success"
   | "no_change"
@@ -18,8 +20,10 @@ export interface TicketDraftState {
   ticketId: number;
   baseSubject: string;
   baseDescription: string;
+  baseMetadata: IssueMetadata;
   draftSubject?: string;
   draftDescription?: string;
+  draftMetadata?: IssueMetadata;
   lastKnownRemoteUpdatedAt?: string;
   lastSyncedAt?: number;
   status: TicketDraftStatus;

@@ -6,6 +6,7 @@ import {
   markDraftStatus,
   updateDraftAfterSave,
 } from "../views/ticketDraftStore";
+import { buildIssueMetadataFixture } from "./helpers/ticketMetadataFixtures";
 
 suite("Ticket draft store", () => {
   teardown(() => {
@@ -13,7 +14,13 @@ suite("Ticket draft store", () => {
   });
 
   test("initializes and updates draft state", () => {
-    initializeTicketDraft(10, "Subject", "Body", "2024-01-01T00:00:00Z");
+    initializeTicketDraft(
+      10,
+      "Subject",
+      "Body",
+      buildIssueMetadataFixture(),
+      "2024-01-01T00:00:00Z",
+    );
 
     const draft = getTicketDraft(10);
     assert.ok(draft);
@@ -25,7 +32,13 @@ suite("Ticket draft store", () => {
     markDraftStatus(10, "conflict");
     assert.strictEqual(getTicketDraft(10)?.status, "conflict");
 
-    updateDraftAfterSave(10, "Next", "Next Body", "2024-01-02T00:00:00Z");
+    updateDraftAfterSave(
+      10,
+      "Next",
+      "Next Body",
+      buildIssueMetadataFixture({ priority: "High" }),
+      "2024-01-02T00:00:00Z",
+    );
     const updated = getTicketDraft(10);
     assert.strictEqual(updated?.baseSubject, "Next");
     assert.strictEqual(updated?.baseDescription, "Next Body");

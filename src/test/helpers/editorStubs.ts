@@ -1,5 +1,7 @@
 import * as vscode from "vscode";
 import { buildTicketEditorContent } from "../../views/ticketEditorContent";
+import { IssueMetadata } from "../../views/ticketMetadataTypes";
+import { buildIssueMetadataFixture } from "./ticketMetadataFixtures";
 
 type MutableDocument = vscode.TextDocument & { setText: (text: string) => void };
 
@@ -43,5 +45,13 @@ export const createMutableEditorStub = (
   } as vscode.TextEditor & { document: MutableDocument };
 };
 
-export const createTicketContentFixture = (subject: string, description: string): string =>
-  buildTicketEditorContent({ subject, description });
+export const createTicketContentFixture = (
+  subject: string,
+  description: string,
+  overrides: Partial<IssueMetadata> = {},
+): string =>
+  buildTicketEditorContent({
+    subject,
+    description,
+    metadata: buildIssueMetadataFixture(overrides),
+  });

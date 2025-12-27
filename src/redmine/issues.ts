@@ -3,6 +3,9 @@ import {
   Comment,
   RedmineIssueDetailResponse,
   RedmineIssueListResponse,
+  RedmineIssueStatusResponse,
+  RedminePriorityResponse,
+  RedmineTrackerResponse,
   Ticket,
   TicketUpdateFields,
 } from "./types";
@@ -130,6 +133,15 @@ export const buildIssueUpdatePayload = (
   if (fields.assigneeId !== undefined) {
     payload.assigned_to_id = fields.assigneeId;
   }
+  if (fields.trackerId !== undefined) {
+    payload.tracker_id = fields.trackerId;
+  }
+  if (fields.priorityId !== undefined) {
+    payload.priority_id = fields.priorityId;
+  }
+  if (fields.dueDate !== undefined) {
+    payload.due_date = fields.dueDate;
+  }
 
   return { issue: payload };
 };
@@ -182,4 +194,31 @@ export const getIssueDetail = async (issueId: number): Promise<IssueDetailResult
   }));
 
   return { ticket, comments };
+};
+
+export const listIssueStatuses = async (): Promise<Array<{ id: number; name: string }>> => {
+  const response = await requestJson<RedmineIssueStatusResponse>({
+    method: "GET",
+    path: "/issue_statuses.json",
+  });
+
+  return response.issue_statuses ?? [];
+};
+
+export const listTrackers = async (): Promise<Array<{ id: number; name: string }>> => {
+  const response = await requestJson<RedmineTrackerResponse>({
+    method: "GET",
+    path: "/trackers.json",
+  });
+
+  return response.trackers ?? [];
+};
+
+export const listIssuePriorities = async (): Promise<Array<{ id: number; name: string }>> => {
+  const response = await requestJson<RedminePriorityResponse>({
+    method: "GET",
+    path: "/enumerations/issue_priorities.json",
+  });
+
+  return response.issue_priorities ?? [];
 };

@@ -8,6 +8,7 @@ import {
 import { buildTicketEditorContent } from "../views/ticketEditorContent";
 import { reloadTicketEditor, syncTicketDraft } from "../views/ticketSaveSync";
 import { createEditorStub } from "./helpers/editorStubs";
+import { buildIssueMetadataFixture } from "./helpers/ticketMetadataFixtures";
 import * as vscode from "vscode";
 
 suite("Ticket save sync", () => {
@@ -16,11 +17,15 @@ suite("Ticket save sync", () => {
   });
 
   test("returns no_change when content matches base", async () => {
-    initializeTicketDraft(1, "Title", "Body", "t1");
+    initializeTicketDraft(1, "Title", "Body", buildIssueMetadataFixture(), "t1");
 
     const result = await syncTicketDraft({
       ticketId: 1,
-      content: buildTicketEditorContent({ subject: "Title", description: "Body" }),
+      content: buildTicketEditorContent({
+        subject: "Title",
+        description: "Body",
+        metadata: buildIssueMetadataFixture(),
+      }),
       deps: {
         getIssueDetail: async () => ({
           ticket: { id: 1, subject: "Title", projectId: 1, updatedAt: "t1" },
@@ -29,6 +34,9 @@ suite("Ticket save sync", () => {
         updateIssue: async () => {
           throw new Error("should not update");
         },
+        listIssueStatuses: async () => [],
+        listTrackers: async () => [],
+        listIssuePriorities: async () => [],
       },
     });
 
@@ -36,11 +44,15 @@ suite("Ticket save sync", () => {
   });
 
   test("returns conflict when remote updated", async () => {
-    initializeTicketDraft(2, "Title", "Body", "t1");
+    initializeTicketDraft(2, "Title", "Body", buildIssueMetadataFixture(), "t1");
 
     const result = await syncTicketDraft({
       ticketId: 2,
-      content: buildTicketEditorContent({ subject: "Title", description: "Updated" }),
+      content: buildTicketEditorContent({
+        subject: "Title",
+        description: "Updated",
+        metadata: buildIssueMetadataFixture(),
+      }),
       deps: {
         getIssueDetail: async () => ({
           ticket: { id: 2, subject: "Title", projectId: 1, updatedAt: "t2" },
@@ -49,6 +61,9 @@ suite("Ticket save sync", () => {
         updateIssue: async () => {
           throw new Error("should not update");
         },
+        listIssueStatuses: async () => [],
+        listTrackers: async () => [],
+        listIssuePriorities: async () => [],
       },
     });
 
@@ -56,11 +71,15 @@ suite("Ticket save sync", () => {
   });
 
   test("returns unreachable on server error", async () => {
-    initializeTicketDraft(3, "Title", "Body", "t1");
+    initializeTicketDraft(3, "Title", "Body", buildIssueMetadataFixture(), "t1");
 
     const result = await syncTicketDraft({
       ticketId: 3,
-      content: buildTicketEditorContent({ subject: "Title", description: "Updated" }),
+      content: buildTicketEditorContent({
+        subject: "Title",
+        description: "Updated",
+        metadata: buildIssueMetadataFixture(),
+      }),
       deps: {
         getIssueDetail: async () => {
           throw new Error("Redmine request failed (503): Service Unavailable");
@@ -68,6 +87,9 @@ suite("Ticket save sync", () => {
         updateIssue: async () => {
           throw new Error("should not update");
         },
+        listIssueStatuses: async () => [],
+        listTrackers: async () => [],
+        listIssuePriorities: async () => [],
       },
     });
 
@@ -75,12 +97,16 @@ suite("Ticket save sync", () => {
   });
 
   test("updates when changes exist and no conflict", async () => {
-    initializeTicketDraft(4, "Title", "Body", "t1");
+    initializeTicketDraft(4, "Title", "Body", buildIssueMetadataFixture(), "t1");
 
     const updatedAtValues = ["t1", "t2"];
     const result = await syncTicketDraft({
       ticketId: 4,
-      content: buildTicketEditorContent({ subject: "New", description: "Body" }),
+      content: buildTicketEditorContent({
+        subject: "New",
+        description: "Body",
+        metadata: buildIssueMetadataFixture(),
+      }),
       deps: {
         getIssueDetail: async () => ({
           ticket: {
@@ -92,6 +118,9 @@ suite("Ticket save sync", () => {
           comments: [],
         }),
         updateIssue: async () => undefined,
+        listIssueStatuses: async () => [],
+        listTrackers: async () => [],
+        listIssuePriorities: async () => [],
       },
     });
 
@@ -99,8 +128,12 @@ suite("Ticket save sync", () => {
   });
 
   test("reload overwrites editor content with saved data", async () => {
-    initializeTicketDraft(5, "Title", "Body", "t1");
-    setTicketDraftContent(5, { subject: "Draft", description: "Draft Body" });
+    initializeTicketDraft(5, "Title", "Body", buildIssueMetadataFixture(), "t1");
+    setTicketDraftContent(5, {
+      subject: "Draft",
+      description: "Draft Body",
+      metadata: buildIssueMetadataFixture(),
+    });
     const editor = createEditorStub(vscode.Uri.parse("untitled:ticket-5.md"), "Draft");
     let applied = "";
 
@@ -115,6 +148,10 @@ suite("Ticket save sync", () => {
             description: "New Body",
             projectId: 1,
             updatedAt: "t2",
+            trackerName: "Task",
+            priorityName: "Normal",
+            statusName: "In Progress",
+            dueDate: "2025-12-31",
           },
           comments: [],
         }),
@@ -127,7 +164,11 @@ suite("Ticket save sync", () => {
     assert.strictEqual(result.status, "success");
     assert.strictEqual(
       applied,
-      buildTicketEditorContent({ subject: "Reloaded", description: "New Body" }),
+      buildTicketEditorContent({
+        subject: "Reloaded",
+        description: "New Body",
+        metadata: buildIssueMetadataFixture(),
+      }),
     );
     const draft = getTicketDraft(5);
     assert.strictEqual(draft?.baseSubject, "Reloaded");
@@ -135,8 +176,12 @@ suite("Ticket save sync", () => {
   });
 
   test("reload keeps draft when fetch fails", async () => {
-    initializeTicketDraft(6, "Title", "Body", "t1");
-    setTicketDraftContent(6, { subject: "Draft", description: "Draft Body" });
+    initializeTicketDraft(6, "Title", "Body", buildIssueMetadataFixture(), "t1");
+    setTicketDraftContent(6, {
+      subject: "Draft",
+      description: "Draft Body",
+      metadata: buildIssueMetadataFixture(),
+    });
     const editor = createEditorStub(vscode.Uri.parse("untitled:ticket-6.md"), "Draft");
 
     const result = await reloadTicketEditor({
