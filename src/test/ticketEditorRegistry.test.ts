@@ -4,10 +4,12 @@ import {
   clearRegistry,
   getLastActiveEditor,
   getNewTicketDraftUri,
+  getNewCommentDraftUri,
   getPrimaryEditor,
   getTicketEditors,
   getTicketIdForEditor,
   markEditorActive,
+  registerNewCommentDraft,
   registerNewTicketDraft,
   registerTicketEditor,
   removeTicketEditorByDocument,
@@ -75,5 +77,17 @@ suite("Ticket editor registry", () => {
 
     const uri = getNewTicketDraftUri();
     assert.strictEqual(uri?.toString(), "untitled:todoex-new-ticket.md");
+  });
+
+  test("returns the new comment draft uri when registered", () => {
+    const draft = createEditorStub(
+      vscode.Uri.parse("untitled:todoex-new-comment-9.md"),
+      "",
+    );
+
+    registerNewCommentDraft(9, draft);
+
+    const uri = getNewCommentDraftUri(9);
+    assert.strictEqual(uri?.toString(), "untitled:todoex-new-comment-9.md");
   });
 });

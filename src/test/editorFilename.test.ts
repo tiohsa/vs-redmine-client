@@ -3,6 +3,7 @@ import {
   buildCommentEditorFilename,
   buildTicketEditorFilename,
   parseEditorFilename,
+  parseNewCommentDraftFilename,
 } from "../views/editorFilename";
 
 suite("Editor filename builder", () => {
@@ -80,5 +81,23 @@ suite("Editor filename builder", () => {
     const parsed = parseEditorFilename("notes.md");
 
     assert.strictEqual(parsed, undefined);
+  });
+
+  test("parses new comment draft filename", () => {
+    const ticketId = parseNewCommentDraftFilename("todoex-new-comment-42.md");
+
+    assert.strictEqual(ticketId, 42);
+  });
+
+  test("parses new comment draft filename with suffix", () => {
+    const ticketId = parseNewCommentDraftFilename("todoex-new-comment-42-2.md");
+
+    assert.strictEqual(ticketId, 42);
+  });
+
+  test("ignores unrelated new comment draft filename", () => {
+    const ticketId = parseNewCommentDraftFilename("todoex-new-comment.md");
+
+    assert.strictEqual(ticketId, undefined);
   });
 });

@@ -1,6 +1,6 @@
 import * as path from "path";
 import * as vscode from "vscode";
-import { addCommentForIssue } from "./commands/addComment";
+import { addCommentFromList } from "./commands/addCommentFromList";
 import { createTicketFromEditor } from "./commands/createTicket";
 import { createTicketFromList } from "./commands/createTicketFromList";
 import { editComment } from "./commands/editComment";
@@ -9,7 +9,7 @@ import { getIssueDetail } from "./redmine/issues";
 import { showError, showSuccess, showWarning } from "./utils/notifications";
 import { setCommentDraft } from "./views/commentDraftStore";
 import { CommentTreeItem, CommentsTreeProvider } from "./views/commentsView";
-import { parseEditorFilename } from "./views/editorFilename";
+import { parseEditorFilename, parseNewCommentDraftFilename } from "./views/editorFilename";
 import { ProjectTreeItem, ProjectsTreeProvider } from "./views/projectsView";
 import { TicketTreeItem, TicketsTreeProvider } from "./views/ticketsView";
 import {
@@ -21,7 +21,11 @@ import {
 } from "./views/ticketEditorRegistry";
 import { showTicketComment, showTicketPreview } from "./views/ticketPreview";
 import { getCommentSaveNotification } from "./views/commentSaveNotifications";
-import { handleCommentEditorSave, syncCommentDraft } from "./views/commentSaveSync";
+import {
+  handleCommentEditorSave,
+  syncCommentDraft,
+  syncNewCommentDraft,
+} from "./views/commentSaveSync";
 import { getSaveNotification } from "./views/ticketSaveNotifications";
 import { handleTicketEditorSave, syncTicketDraft } from "./views/ticketSaveSync";
 import { registerFocusRefresh } from "./views/viewFocusRefresh";
@@ -188,6 +192,12 @@ export async function activate(context: vscode.ExtensionContext) {
         const commentResult = await handleCommentEditorSave(editor);
         if (commentResult) {
           notifyCommentSaveResult(commentResult);
+          if (commentResult.status === "created") {
+            const ticketId = getTicketIdForEditor(editor);
+            if (ticketId) {
+              commentsProvider.refreshForTicket(ticketId);
+            }
+          }
           return;
         }
       }
@@ -195,6 +205,19 @@ export async function activate(context: vscode.ExtensionContext) {
       const filename = path.basename(document.uri.path);
       const parsed = parseEditorFilename(filename);
       if (!parsed) {
+        const draftTicketId = parseNewCommentDraftFilename(filename);
+        if (!draftTicketId) {
+          return;
+        }
+
+        const result = await syncNewCommentDraft({
+          ticketId: draftTicketId,
+          content: document.getText(),
+        });
+        notifyCommentSaveResult(result);
+        if (result.status === "created") {
+          commentsProvider.refreshForTicket(draftTicketId);
+        }
         return;
       }
 
@@ -349,10 +372,14 @@ export async function activate(context: vscode.ExtensionContext) {
         return;
       }
 
-      await addCommentForIssue({
-        issueId: selected.ticket.id,
-        onSuccess: () => commentsProvider.refreshForTicket(selected.ticket.id),
-      });
+      await addCommentFromList(selected.ticket.id);
+    }),
+  );
+
+  context.subscriptions.push(
+    vscode.commands.registerCommand("todoex.addCommentFromComments", async () => {
+      const ticketId = commentsProvider.getTicketId();
+      await addCommentFromList(ticketId);
     }),
   );
 

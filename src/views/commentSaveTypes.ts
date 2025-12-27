@@ -1,5 +1,6 @@
 export type CommentSaveStatus =
   | "success"
+  | "created"
   | "no_change"
   | "conflict"
   | "unreachable"

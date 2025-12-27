@@ -1,6 +1,6 @@
 import * as assert from "assert";
 import { clearCommentEdits, initializeCommentEdit } from "../views/commentEditStore";
-import { syncCommentDraft } from "../views/commentSaveSync";
+import { syncCommentDraft, syncNewCommentDraft } from "../views/commentSaveSync";
 
 suite("Comment save sync", () => {
   teardown(() => {
@@ -14,6 +14,9 @@ suite("Comment save sync", () => {
       commentId: 1,
       content: "Body",
       deps: {
+        addComment: async () => {
+          throw new Error("should not add");
+        },
         updateComment: async () => {
           throw new Error("should not update");
         },
@@ -30,6 +33,9 @@ suite("Comment save sync", () => {
       commentId: 2,
       content: "   ",
       deps: {
+        addComment: async () => {
+          throw new Error("should not add");
+        },
         updateComment: async () => {
           throw new Error("should not update");
         },
@@ -47,6 +53,9 @@ suite("Comment save sync", () => {
       commentId: 3,
       content: "Next",
       deps: {
+        addComment: async () => {
+          throw new Error("should not add");
+        },
         updateComment: async () => {
           updated = true;
         },
@@ -64,6 +73,9 @@ suite("Comment save sync", () => {
       commentId: 4,
       content: "Next",
       deps: {
+        addComment: async () => {
+          throw new Error("should not add");
+        },
         updateComment: async () => {
           throw new Error("Redmine request failed (404): Not Found");
         },
@@ -71,5 +83,24 @@ suite("Comment save sync", () => {
     });
 
     assert.strictEqual(result.status, "not_found");
+  });
+
+  test("creates comment when draft is valid", async () => {
+    let added = false;
+    const result = await syncNewCommentDraft({
+      ticketId: 11,
+      content: "New comment",
+      deps: {
+        addComment: async () => {
+          added = true;
+        },
+        updateComment: async () => {
+          throw new Error("should not update");
+        },
+      },
+    });
+
+    assert.strictEqual(added, true);
+    assert.strictEqual(result.status, "created");
   });
 });

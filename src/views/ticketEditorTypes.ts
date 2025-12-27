@@ -1,5 +1,5 @@
 export type TicketEditorKind = "primary" | "extra";
-export type TicketEditorContentType = "ticket" | "comment";
+export type TicketEditorContentType = "ticket" | "comment" | "commentDraft";
 
 export interface TicketEditorRecord {
   ticketId: number;

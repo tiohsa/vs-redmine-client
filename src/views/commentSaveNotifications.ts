@@ -11,6 +11,8 @@ export const getCommentSaveNotification = (
   switch (result.status) {
     case "success":
       return { type: "info", message: "Comment updated." };
+    case "created":
+      return { type: "info", message: "Comment added." };
     case "no_change":
       return undefined;
     case "conflict":

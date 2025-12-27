@@ -3,6 +3,7 @@ import { TicketEditorKind } from "./ticketEditorTypes";
 const sanitizeId = (value: number): string => String(value);
 const ticketPattern = /^project-(\d+)_ticket-(\d+)(?:_extra)?(?:-\d+)?\.md$/;
 const commentPattern = /^project-(\d+)_ticket-(\d+)_comment-(\d+)(?:-\d+)?\.md$/;
+const newCommentDraftPattern = /^todoex-new-comment-(\d+)(?:-\d+)?\.md$/;
 
 export type ParsedEditorFilename =
   | {
@@ -56,4 +57,13 @@ export const parseEditorFilename = (
   }
 
   return undefined;
+};
+
+export const parseNewCommentDraftFilename = (filename: string): number | undefined => {
+  const match = filename.match(newCommentDraftPattern);
+  if (!match) {
+    return undefined;
+  }
+
+  return Number(match[1]);
 };

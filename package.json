@@ -21,6 +21,7 @@
     "onCommand:todoex.openExtraTicketEditor",
     "onCommand:todoex.createTicket",
     "onCommand:todoex.createTicketFromList",
+    "onCommand:todoex.addCommentFromComments",
     "onCommand:todoex.editComment",
     "onCommand:todoex.addComment"
   ],
@@ -79,6 +80,10 @@
       {
         "command": "todoex.addComment",
         "title": "Redmine: Add Comment"
+      },
+      {
+        "command": "todoex.addCommentFromComments",
+        "title": "Redmine: Add Comment"
       }
     ],
     "views": {
@@ -105,6 +110,13 @@
           "group": "navigation",
           "icon": "$(add)",
           "enablement": "todoex.canCreateTickets"
+        },
+        {
+          "command": "todoex.addCommentFromComments",
+          "when": "view == todoexActivityComments",
+          "group": "navigation",
+          "icon": "$(add)",
+          "enablement": "todoex.canAddComments"
         }
       ],
       "view/item/context": [

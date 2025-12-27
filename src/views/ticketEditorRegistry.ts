@@ -77,6 +77,24 @@ export const getNewTicketDraftUri = (): vscode.Uri | undefined => {
   return vscode.Uri.parse(record.uri);
 };
 
+const getCommentDraftRecord = (ticketId: number): TicketEditorRecord | undefined =>
+  getTicketEditors(ticketId).find((record) => record.contentType === "commentDraft");
+
+export const registerNewCommentDraft = (
+  ticketId: number,
+  editor: vscode.TextEditor,
+): TicketEditorRecord =>
+  registerTicketEditor(ticketId, editor, "primary", "commentDraft");
+
+export const getNewCommentDraftUri = (ticketId: number): vscode.Uri | undefined => {
+  const record = getCommentDraftRecord(ticketId);
+  if (!record) {
+    return undefined;
+  }
+
+  return vscode.Uri.parse(record.uri);
+};
+
 export const getTicketEditors = (ticketId: number): TicketEditorRecord[] =>
   Array.from(editorsByTicket.get(ticketId) ?? []).map((uri) => editorByUri.get(uri))
     .filter((record): record is TicketEditorRecord => Boolean(record));

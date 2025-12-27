@@ -22,4 +22,16 @@ suite("Comment save notifications", () => {
       message: "Comment updated.",
     });
   });
+
+  test("maps created to info", () => {
+    const notification = getCommentSaveNotification({
+      status: "created",
+      message: "Added",
+    });
+
+    assert.deepStrictEqual(notification, {
+      type: "info",
+      message: "Comment added.",
+    });
+  });
 });

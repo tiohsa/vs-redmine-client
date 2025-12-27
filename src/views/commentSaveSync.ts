@@ -1,19 +1,22 @@
 import * as vscode from "vscode";
-import { updateComment } from "../redmine/comments";
+import { addComment, updateComment } from "../redmine/comments";
 import { validateComment } from "../utils/commentValidation";
 import {
   getEditorContentType,
   getCommentIdForEditor,
+  getTicketIdForEditor,
   isTicketEditor,
 } from "./ticketEditorRegistry";
 import { getCommentEdit, updateCommentEdit } from "./commentEditStore";
 import { CommentSaveResult } from "./commentSaveTypes";
 
 export interface CommentSaveDependencies {
+  addComment: typeof addComment;
   updateComment: typeof updateComment;
 }
 
 const defaultDeps: CommentSaveDependencies = {
+  addComment,
   updateComment,
 };
 
@@ -73,6 +76,26 @@ export const syncCommentDraft = async (input: {
   return buildResult("success", "Comment updated.");
 };
 
+export const syncNewCommentDraft = async (input: {
+  ticketId: number;
+  content: string;
+  deps?: CommentSaveDependencies;
+}): Promise<CommentSaveResult> => {
+  const deps = input.deps ?? defaultDeps;
+  const validation = validateComment(input.content);
+  if (!validation.valid) {
+    return buildResult("failed", validation.message ?? "Invalid comment.");
+  }
+
+  try {
+    await deps.addComment(input.ticketId, input.content);
+  } catch (error) {
+    return mapErrorToResult(error);
+  }
+
+  return buildResult("created", "Comment added.");
+};
+
 export const handleCommentEditorSave = async (
   editor: vscode.TextEditor,
 ): Promise<CommentSaveResult | undefined> => {
@@ -80,8 +103,21 @@ export const handleCommentEditorSave = async (
     return undefined;
   }
 
-  if (getEditorContentType(editor) !== "comment") {
+  const contentType = getEditorContentType(editor);
+  if (contentType !== "comment" && contentType !== "commentDraft") {
     return undefined;
+  }
+
+  if (contentType === "commentDraft") {
+    const ticketId = getTicketIdForEditor(editor);
+    if (!ticketId) {
+      return undefined;
+    }
+
+    return syncNewCommentDraft({
+      ticketId,
+      content: editor.document.getText(),
+    });
   }
 
   const commentId = getCommentIdForEditor(editor);

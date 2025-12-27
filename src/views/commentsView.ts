@@ -1,11 +1,29 @@
 import * as vscode from "vscode";
+import { getApiKey, getBaseUrl } from "../config/settings";
 import { listComments } from "../redmine/comments";
 import { getCurrentUserId } from "../redmine/users";
 import { Comment } from "../redmine/types";
 import { showError } from "../utils/notifications";
+import { setCommentAddContext } from "./commentViewContext";
 import { formatCommentDescription, formatCommentLabel } from "./commentListFormat";
 import { MAX_VIEW_ITEMS } from "./viewLimits";
 import { createEmptyStateItem, createErrorStateItem } from "./viewState";
+
+export const evaluateAddCommentPermission = (
+  ticketId: number | undefined,
+  baseUrl: string,
+  apiKey: string,
+): boolean => Boolean(ticketId) && baseUrl.length > 0 && apiKey.length > 0;
+
+export const refreshAddCommentContext = (
+  ticketId: number | undefined,
+  baseUrl = getBaseUrl(),
+  apiKey = getApiKey(),
+): boolean => {
+  const canAdd = evaluateAddCommentPermission(ticketId, baseUrl, apiKey);
+  void setCommentAddContext(canAdd);
+  return canAdd;
+};
 
 export const buildCommentsViewItems = (
   comments: Comment[],
@@ -41,6 +59,7 @@ export class CommentsTreeProvider implements vscode.TreeDataProvider<vscode.Tree
 
   setTicketId(ticketId: number | undefined): void {
     this.ticketId = ticketId;
+    refreshAddCommentContext(this.ticketId);
     this.refresh();
   }
 
@@ -53,7 +72,12 @@ export class CommentsTreeProvider implements vscode.TreeDataProvider<vscode.Tree
     void this.loadComments();
   }
 
+  getTicketId(): number | undefined {
+    return this.ticketId;
+  }
+
   async loadComments(): Promise<void> {
+    refreshAddCommentContext(this.ticketId);
     if (!this.ticketId) {
       this.errorMessage = undefined;
       this.comments = [];
