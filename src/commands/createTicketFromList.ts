@@ -8,9 +8,9 @@ import {
   setEditorProjectId,
 } from "../views/ticketEditorRegistry";
 import { buildTicketEditorContent } from "../views/ticketEditorContent";
-import { IssueMetadata } from "../views/ticketMetadataTypes";
 import { applyEditorContent } from "../views/ticketPreview";
 import { buildUniqueUntitledPath } from "../views/untitledPath";
+import { buildNewTicketDraftContent } from "../views/ticketDraftStore";
 
 const DRAFT_FILENAME = "todoex-new-ticket.md";
 
@@ -22,18 +22,9 @@ const findOpenDocument = (uri: vscode.Uri): vscode.TextDocument | undefined =>
 const getWorkspacePath = (): string | undefined =>
   vscode.workspace.workspaceFolders?.[0]?.uri.path;
 
-const DEFAULT_METADATA: IssueMetadata = {
-  tracker: "",
-  priority: "",
-  status: "",
-  due_date: "",
-};
-
 const buildNewTicketTemplate = (): string =>
   buildTicketEditorContent({
-    subject: "",
-    description: "",
-    metadata: DEFAULT_METADATA,
+    ...buildNewTicketDraftContent(),
   });
 
 const resolveProjectId = (): number | undefined => {

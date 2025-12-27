@@ -1,11 +1,15 @@
 import { TicketDraftState, TicketDraftStatus } from "./ticketSaveTypes";
-import { TicketEditorContent } from "./ticketEditorContent";
+import { applyTicketEditorDefaults, TicketEditorContent } from "./ticketEditorContent";
+import { getTicketEditorDefaults } from "./ticketEditorDefaultsStore";
 import { IssueMetadata, isIssueMetadataEqual } from "./ticketMetadataTypes";
 
 const drafts = new Map<number, TicketDraftState>();
 
 export const getTicketDraft = (ticketId: number): TicketDraftState | undefined =>
   drafts.get(ticketId);
+
+export const buildNewTicketDraftContent = (): TicketEditorContent =>
+  applyTicketEditorDefaults(getTicketEditorDefaults());
 
 export const initializeTicketDraft = (
   ticketId: number,

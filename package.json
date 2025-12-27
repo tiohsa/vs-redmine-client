@@ -29,6 +29,13 @@
     "onCommand:todoex.configureTicketSort",
     "onCommand:todoex.configureTicketDueDateDisplay",
     "onCommand:todoex.resetTicketListSettings",
+    "onCommand:todoex.configureEditorDefaultSubject",
+    "onCommand:todoex.configureEditorDefaultDescription",
+    "onCommand:todoex.configureEditorDefaultTracker",
+    "onCommand:todoex.configureEditorDefaultPriority",
+    "onCommand:todoex.configureEditorDefaultStatus",
+    "onCommand:todoex.configureEditorDefaultDueDate",
+    "onCommand:todoex.resetEditorDefaults",
     "onCommand:todoex.createTicket",
     "onCommand:todoex.createTicketFromList",
     "onCommand:todoex.addCommentFromComments",
@@ -112,6 +119,34 @@
       {
         "command": "todoex.resetTicketListSettings",
         "title": "Redmine: Reset Ticket Settings"
+      },
+      {
+        "command": "todoex.configureEditorDefaultSubject",
+        "title": "Redmine: Configure Editor Default Subject"
+      },
+      {
+        "command": "todoex.configureEditorDefaultDescription",
+        "title": "Redmine: Configure Editor Default Description"
+      },
+      {
+        "command": "todoex.configureEditorDefaultTracker",
+        "title": "Redmine: Configure Editor Default Tracker"
+      },
+      {
+        "command": "todoex.configureEditorDefaultPriority",
+        "title": "Redmine: Configure Editor Default Priority"
+      },
+      {
+        "command": "todoex.configureEditorDefaultStatus",
+        "title": "Redmine: Configure Editor Default Status"
+      },
+      {
+        "command": "todoex.configureEditorDefaultDueDate",
+        "title": "Redmine: Configure Editor Default Due Date"
+      },
+      {
+        "command": "todoex.resetEditorDefaults",
+        "title": "Redmine: Reset Editor Defaults"
       },
       {
         "command": "todoex.createTicket",

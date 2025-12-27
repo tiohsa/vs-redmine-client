@@ -1,6 +1,14 @@
+import { IssueMetadata } from "./ticketMetadataTypes";
+
 export type TicketEditorKind = "primary" | "extra";
 export type TicketEditorContentType = "ticket" | "comment" | "commentDraft";
 export type TicketEditorDisplaySource = "draft" | "saved";
+
+export type TicketEditorDefaults = {
+  subject: string;
+  description: string;
+  metadata: IssueMetadata;
+};
 
 export interface TicketEditorRecord {
   ticketId: number;

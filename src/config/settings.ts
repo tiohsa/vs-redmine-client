@@ -19,3 +19,14 @@ export const getIncludeChildProjects = (): boolean =>
 
 export const getTicketListLimit = (): number =>
   getSettings().get<number>("ticketListLimit", 50);
+
+export const EDITOR_DEFAULT_FIELDS = [
+  "subject",
+  "description",
+  "tracker",
+  "priority",
+  "status",
+  "due_date",
+] as const;
+
+export type EditorDefaultField = (typeof EDITOR_DEFAULT_FIELDS)[number];

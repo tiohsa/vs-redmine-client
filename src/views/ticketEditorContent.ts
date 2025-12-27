@@ -1,4 +1,5 @@
 import { IssueMetadata } from "./ticketMetadataTypes";
+import { TicketEditorDefaults } from "./ticketEditorTypes";
 import { parseIssueMetadataYaml, serializeIssueMetadataYaml } from "./ticketMetadataYaml";
 
 export interface TicketEditorContent {
@@ -82,3 +83,11 @@ export const resolveTicketEditorDisplay = (
 
   return { content: saved, source: "saved" };
 };
+
+export const applyTicketEditorDefaults = (
+  defaults: TicketEditorDefaults,
+): TicketEditorContent => ({
+  subject: defaults.subject,
+  description: defaults.description,
+  metadata: { ...defaults.metadata },
+});

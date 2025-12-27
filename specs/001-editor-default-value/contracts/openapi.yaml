@@ -1,0 +1,55 @@
+openapi: 3.0.3
+info:
+  title: Editor Default Values
+  version: 1.0.0
+  description: Contracts for managing editor default values in settings.
+paths:
+  /settings/editor-defaults:
+    get:
+      summary: Get editor default values
+      responses:
+        "200":
+          description: Current defaults
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/EditorDefaults"
+    put:
+      summary: Save editor default values
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/EditorDefaults"
+      responses:
+        "200":
+          description: Saved
+        "400":
+          description: Validation error
+  /settings/editor-defaults/{fieldKey}:
+    delete:
+      summary: Reset a field default value to blank
+      parameters:
+        - name: fieldKey
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Reset to blank
+components:
+  schemas:
+    EditorDefaults:
+      type: object
+      properties:
+        userId:
+          type: string
+        defaults:
+          type: object
+          additionalProperties:
+            type: string
+      required:
+        - userId
+        - defaults

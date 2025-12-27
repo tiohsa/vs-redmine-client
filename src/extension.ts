@@ -20,7 +20,12 @@ import {
 import { ProjectTreeItem, ProjectsTreeProvider } from "./views/projectsView";
 import { parseTicketEditorContent } from "./views/ticketEditorContent";
 import { setTicketDraftContent } from "./views/ticketDraftStore";
-import { TicketSettingsTreeProvider } from "./views/ticketSettingsView";
+import {
+  configureEditorDefaultField,
+  EDITOR_DEFAULT_COMMANDS,
+  resetEditorDefaults,
+  TicketSettingsTreeProvider,
+} from "./views/ticketSettingsView";
 import {
   TicketTreeItem,
   TicketsTreeProvider,
@@ -379,6 +384,55 @@ export async function activate(context: vscode.ExtensionContext) {
   context.subscriptions.push(
     vscode.commands.registerCommand(TICKET_SETTINGS_COMMANDS.reset, () => {
       ticketsProvider.resetTicketSettings();
+      settingsProvider.refresh();
+    }),
+  );
+
+  context.subscriptions.push(
+    vscode.commands.registerCommand(EDITOR_DEFAULT_COMMANDS.subject, async () => {
+      await configureEditorDefaultField("subject");
+      settingsProvider.refresh();
+    }),
+  );
+
+  context.subscriptions.push(
+    vscode.commands.registerCommand(EDITOR_DEFAULT_COMMANDS.description, async () => {
+      await configureEditorDefaultField("description");
+      settingsProvider.refresh();
+    }),
+  );
+
+  context.subscriptions.push(
+    vscode.commands.registerCommand(EDITOR_DEFAULT_COMMANDS.tracker, async () => {
+      await configureEditorDefaultField("tracker");
+      settingsProvider.refresh();
+    }),
+  );
+
+  context.subscriptions.push(
+    vscode.commands.registerCommand(EDITOR_DEFAULT_COMMANDS.priority, async () => {
+      await configureEditorDefaultField("priority");
+      settingsProvider.refresh();
+    }),
+  );
+
+  context.subscriptions.push(
+    vscode.commands.registerCommand(EDITOR_DEFAULT_COMMANDS.status, async () => {
+      await configureEditorDefaultField("status");
+      settingsProvider.refresh();
+    }),
+  );
+
+  context.subscriptions.push(
+    vscode.commands.registerCommand(EDITOR_DEFAULT_COMMANDS.dueDate, async () => {
+      await configureEditorDefaultField("due_date");
+      settingsProvider.refresh();
+    }),
+  );
+
+  context.subscriptions.push(
+    vscode.commands.registerCommand(EDITOR_DEFAULT_COMMANDS.reset, async () => {
+      await resetEditorDefaults();
       settingsProvider.refresh();
     }),
   );
