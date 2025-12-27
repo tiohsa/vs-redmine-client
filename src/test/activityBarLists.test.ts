@@ -11,7 +11,7 @@ const loadPackageJson = (): Record<string, unknown> => {
 type ViewContribution = { id: string; name: string };
 
 suite("Activity Bar views", () => {
-  test("declares projects/tickets/comments views under the Activity Bar container", () => {
+  test("declares settings/projects/tickets/comments views under the Activity Bar container", () => {
     const packageJson = loadPackageJson();
     const contributes = packageJson.contributes as Record<string, unknown> | undefined;
     assert.ok(contributes, "contributes must be defined");
@@ -20,6 +20,7 @@ suite("Activity Bar views", () => {
     assert.ok(views?.todoexActivity, "views.todoexActivity must be defined");
 
     const viewIds = views.todoexActivity.map((view) => view.id);
+    assert.strictEqual(viewIds[0], "todoexActivityTicketSettings");
     assert.ok(viewIds.includes("todoexActivityProjects"));
     assert.ok(viewIds.includes("todoexActivityTickets"));
     assert.ok(viewIds.includes("todoexActivityComments"));

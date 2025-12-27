@@ -3,6 +3,7 @@ export const VIEW_ID_EXPLORER_TICKETS = "todoexTickets";
 export const VIEW_ID_EXPLORER_COMMENTS = "todoexComments";
 
 export const VIEW_ID_ACTIVITY_CONTAINER = "todoexActivity";
+export const VIEW_ID_ACTIVITY_TICKET_SETTINGS = "todoexActivityTicketSettings";
 export const VIEW_ID_ACTIVITY_PROJECTS = "todoexActivityProjects";
 export const VIEW_ID_ACTIVITY_TICKETS = "todoexActivityTickets";
 export const VIEW_ID_ACTIVITY_COMMENTS = "todoexActivityComments";

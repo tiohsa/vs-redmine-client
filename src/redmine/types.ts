@@ -12,11 +12,16 @@ export interface Ticket {
   description?: string;
   statusId?: number;
   statusName?: string;
+  priorityId?: number;
+  priorityName?: string;
+  trackerId?: number;
+  trackerName?: string;
   assigneeId?: number;
   assigneeName?: string;
   projectId: number;
   createdAt?: string;
   updatedAt?: string;
+  dueDate?: string;
 }
 
 export interface TicketUpdateFields {
@@ -71,9 +76,12 @@ export interface RedmineIssueListResponse {
     description?: string;
     project: { id: number; name: string };
     status?: { id: number; name: string };
+    priority?: { id: number; name: string };
+    tracker?: { id: number; name: string };
     assigned_to?: RedmineUserRef;
     created_on?: string;
     updated_on?: string;
+    due_date?: string;
   }>;
   total_count?: number;
   limit?: number;
@@ -87,9 +95,12 @@ export interface RedmineIssueDetailResponse {
     description?: string;
     project: { id: number; name: string };
     status?: { id: number; name: string };
+    priority?: { id: number; name: string };
+    tracker?: { id: number; name: string };
     assigned_to?: RedmineUserRef;
     created_on?: string;
     updated_on?: string;
+    due_date?: string;
     journals?: Array<{
       id: number;
       notes?: string;

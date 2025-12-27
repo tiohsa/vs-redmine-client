@@ -33,6 +33,10 @@ suite("Activity Bar view container", () => {
     assert.ok(activationEvents, "activationEvents must be defined");
 
     assert.ok(
+      activationEvents.includes("onView:todoexActivityTicketSettings"),
+      "onView:todoexActivityTicketSettings activation missing",
+    );
+    assert.ok(
       activationEvents.includes("onView:todoexActivityProjects"),
       "onView:todoexActivityProjects activation missing",
     );

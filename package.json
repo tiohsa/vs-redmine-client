@@ -10,6 +10,7 @@
     "Other"
   ],
   "activationEvents": [
+    "onView:todoexActivityTicketSettings",
     "onView:todoexActivityProjects",
     "onView:todoexActivityTickets",
     "onView:todoexActivityComments",
@@ -19,6 +20,13 @@
     "onCommand:todoex.toggleChildProjects",
     "onCommand:todoex.openTicketPreview",
     "onCommand:todoex.openExtraTicketEditor",
+    "onCommand:todoex.configureTicketPriorityFilter",
+    "onCommand:todoex.configureTicketStatusFilter",
+    "onCommand:todoex.configureTicketTrackerFilter",
+    "onCommand:todoex.configureTicketAssigneeFilter",
+    "onCommand:todoex.configureTicketSort",
+    "onCommand:todoex.configureTicketDueDateDisplay",
+    "onCommand:todoex.resetTicketListSettings",
     "onCommand:todoex.createTicket",
     "onCommand:todoex.createTicketFromList",
     "onCommand:todoex.addCommentFromComments",
@@ -66,6 +74,34 @@
         "title": "Redmine: Open Ticket Editor (New)"
       },
       {
+        "command": "todoex.configureTicketPriorityFilter",
+        "title": "Redmine: Configure Ticket Priority Filter"
+      },
+      {
+        "command": "todoex.configureTicketStatusFilter",
+        "title": "Redmine: Configure Ticket Status Filter"
+      },
+      {
+        "command": "todoex.configureTicketTrackerFilter",
+        "title": "Redmine: Configure Ticket Tracker Filter"
+      },
+      {
+        "command": "todoex.configureTicketAssigneeFilter",
+        "title": "Redmine: Configure Ticket Assignee Filter"
+      },
+      {
+        "command": "todoex.configureTicketSort",
+        "title": "Redmine: Configure Ticket Sort"
+      },
+      {
+        "command": "todoex.configureTicketDueDateDisplay",
+        "title": "Redmine: Configure Ticket Due Date Display"
+      },
+      {
+        "command": "todoex.resetTicketListSettings",
+        "title": "Redmine: Reset Ticket Settings"
+      },
+      {
         "command": "todoex.createTicket",
         "title": "Redmine: Create Ticket from Editor"
       },
@@ -88,6 +124,10 @@
     ],
     "views": {
       "todoexActivity": [
+        {
+          "id": "todoexActivityTicketSettings",
+          "name": "Ticket Settings"
+        },
         {
           "id": "todoexActivityProjects",
           "name": "Redmine Projects"

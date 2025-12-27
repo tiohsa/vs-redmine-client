@@ -1,0 +1,107 @@
+openapi: 3.0.3
+info:
+  title: Project List Settings Contract
+  version: 1.0.0
+  description: Contract for reading and updating project list settings within the extension.
+paths:
+  /ticket-list/settings:
+    get:
+      summary: Read current settings for the project list.
+      responses:
+        "200":
+          description: Current settings returned.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SettingsState"
+    put:
+      summary: Update settings for the project list.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SettingsState"
+      responses:
+        "200":
+          description: Updated settings returned.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SettingsState"
+components:
+  schemas:
+    SettingsState:
+      type: object
+      required:
+        - filterSelection
+        - sortPreference
+        - dueDateDisplayRule
+      properties:
+        filterSelection:
+          $ref: "#/components/schemas/FilterSelection"
+        sortPreference:
+          $ref: "#/components/schemas/SortPreference"
+        dueDateDisplayRule:
+          $ref: "#/components/schemas/DueDateDisplayRule"
+    FilterSelection:
+      type: object
+      required:
+        - priorities
+        - statuses
+        - trackers
+        - assignees
+        - includeUnassigned
+      properties:
+        priorities:
+          type: array
+          items:
+            type: integer
+        statuses:
+          type: array
+          items:
+            type: integer
+        trackers:
+          type: array
+          items:
+            type: integer
+        assignees:
+          type: array
+          items:
+            type: integer
+        includeUnassigned:
+          type: boolean
+    SortPreference:
+      type: object
+      required:
+        - direction
+      properties:
+        field:
+          type: string
+          enum: [priority, status, tracker, assignee]
+          nullable: true
+        direction:
+          type: string
+          enum: [asc, desc]
+    DueDateDisplayRule:
+      type: object
+      required:
+        - showWithin7Days
+        - showWithin3Days
+        - showWithin1Day
+        - showOverdue
+      properties:
+        showWithin7Days:
+          type: boolean
+        showWithin3Days:
+          type: boolean
+        showWithin1Day:
+          type: boolean
+        showOverdue:
+          type: boolean
+        priorityOrder:
+          type: array
+          items:
+            type: string
+          description: Fixed display priority order.
+          example: ["within1Day", "within3Days", "within7Days", "overdue"]

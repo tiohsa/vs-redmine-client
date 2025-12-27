@@ -55,10 +55,15 @@ export const listIssues = async (input: IssuesListInput): Promise<IssuesListResu
     projectId: issue.project.id,
     statusId: issue.status?.id,
     statusName: issue.status?.name,
+    priorityId: issue.priority?.id,
+    priorityName: issue.priority?.name,
+    trackerId: issue.tracker?.id,
+    trackerName: issue.tracker?.name,
     assigneeId: issue.assigned_to?.id,
     assigneeName: issue.assigned_to?.name,
     createdAt: issue.created_on,
     updatedAt: issue.updated_on,
+    dueDate: issue.due_date,
   }));
 
   return {
@@ -154,10 +159,15 @@ export const getIssueDetail = async (issueId: number): Promise<IssueDetailResult
     projectId: issue.project.id,
     statusId: issue.status?.id,
     statusName: issue.status?.name,
+    priorityId: issue.priority?.id,
+    priorityName: issue.priority?.name,
+    trackerId: issue.tracker?.id,
+    trackerName: issue.tracker?.name,
     assigneeId: issue.assigned_to?.id,
     assigneeName: issue.assigned_to?.name,
     createdAt: issue.created_on,
     updatedAt: issue.updated_on,
+    dueDate: issue.due_date,
   };
 
   const comments: Comment[] = (issue.journals ?? []).map((journal) => ({

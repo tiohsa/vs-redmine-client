@@ -11,7 +11,12 @@ import { setCommentDraft } from "./views/commentDraftStore";
 import { CommentTreeItem, CommentsTreeProvider } from "./views/commentsView";
 import { parseEditorFilename, parseNewCommentDraftFilename } from "./views/editorFilename";
 import { ProjectTreeItem, ProjectsTreeProvider } from "./views/projectsView";
-import { TicketTreeItem, TicketsTreeProvider } from "./views/ticketsView";
+import { TicketSettingsTreeProvider } from "./views/ticketSettingsView";
+import {
+  TicketTreeItem,
+  TicketsTreeProvider,
+  TICKET_SETTINGS_COMMANDS,
+} from "./views/ticketsView";
 import {
   getEditorContentType,
   getTicketIdForEditor,
@@ -32,17 +37,25 @@ import { registerFocusRefresh } from "./views/viewFocusRefresh";
 import {
   VIEW_ID_ACTIVITY_COMMENTS,
   VIEW_ID_ACTIVITY_PROJECTS,
+  VIEW_ID_ACTIVITY_TICKET_SETTINGS,
   VIEW_ID_ACTIVITY_TICKETS,
 } from "./views/viewIds";
 
 export async function activate(context: vscode.ExtensionContext) {
   const ticketsProvider = new TicketsTreeProvider();
+  const settingsProvider = new TicketSettingsTreeProvider(ticketsProvider);
   const commentsProvider = new CommentsTreeProvider();
   const projectsProvider = new ProjectsTreeProvider();
   const activityProjectsView = vscode.window.createTreeView(
     VIEW_ID_ACTIVITY_PROJECTS,
     {
       treeDataProvider: projectsProvider,
+    },
+  );
+  const activitySettingsView = vscode.window.createTreeView(
+    VIEW_ID_ACTIVITY_TICKET_SETTINGS,
+    {
+      treeDataProvider: settingsProvider,
     },
   );
   const activityTicketsView = vscode.window.createTreeView(
@@ -61,9 +74,11 @@ export async function activate(context: vscode.ExtensionContext) {
   let selectedCommentDocumentUri: string | undefined;
   context.subscriptions.push(
     activityProjectsView,
+    activitySettingsView,
     activityTicketsView,
     activityCommentsView,
     registerFocusRefresh(activityProjectsView, () => projectsProvider.refresh()),
+    registerFocusRefresh(activitySettingsView, () => settingsProvider.refresh()),
     registerFocusRefresh(activityTicketsView, () => ticketsProvider.refresh()),
     registerFocusRefresh(activityCommentsView, () => commentsProvider.refresh()),
   );
@@ -254,6 +269,55 @@ export async function activate(context: vscode.ExtensionContext) {
     vscode.commands.registerCommand("todoex.refreshTickets", () =>
       ticketsProvider.refresh(),
     ),
+  );
+
+  context.subscriptions.push(
+    vscode.commands.registerCommand(TICKET_SETTINGS_COMMANDS.priorityFilter, async () => {
+      await ticketsProvider.configurePriorityFilter();
+      settingsProvider.refresh();
+    }),
+  );
+
+  context.subscriptions.push(
+    vscode.commands.registerCommand(TICKET_SETTINGS_COMMANDS.statusFilter, async () => {
+      await ticketsProvider.configureStatusFilter();
+      settingsProvider.refresh();
+    }),
+  );
+
+  context.subscriptions.push(
+    vscode.commands.registerCommand(TICKET_SETTINGS_COMMANDS.trackerFilter, async () => {
+      await ticketsProvider.configureTrackerFilter();
+      settingsProvider.refresh();
+    }),
+  );
+
+  context.subscriptions.push(
+    vscode.commands.registerCommand(TICKET_SETTINGS_COMMANDS.assigneeFilter, async () => {
+      await ticketsProvider.configureAssigneeFilter();
+      settingsProvider.refresh();
+    }),
+  );
+
+  context.subscriptions.push(
+    vscode.commands.registerCommand(TICKET_SETTINGS_COMMANDS.sort, async () => {
+      await ticketsProvider.configureSort();
+      settingsProvider.refresh();
+    }),
+  );
+
+  context.subscriptions.push(
+    vscode.commands.registerCommand(TICKET_SETTINGS_COMMANDS.dueDate, async () => {
+      await ticketsProvider.configureDueDateDisplay();
+      settingsProvider.refresh();
+    }),
+  );
+
+  context.subscriptions.push(
+    vscode.commands.registerCommand(TICKET_SETTINGS_COMMANDS.reset, () => {
+      ticketsProvider.resetTicketSettings();
+      settingsProvider.refresh();
+    }),
   );
 
   context.subscriptions.push(
