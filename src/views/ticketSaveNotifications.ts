@@ -12,7 +12,7 @@ export const getSaveNotification = (
     case "created":
       return { type: "info", message: "Ticket created." };
     case "success":
-      return { type: "info", message: "Redmine updated." };
+      return { type: "info", message: result.message || "Redmine updated." };
     case "no_change":
       return undefined;
     case "conflict":

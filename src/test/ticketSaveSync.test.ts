@@ -9,6 +9,7 @@ import { buildTicketEditorContent } from "../views/ticketEditorContent";
 import { reloadTicketEditor, syncTicketDraft } from "../views/ticketSaveSync";
 import { createEditorStub } from "./helpers/editorStubs";
 import { buildIssueMetadataFixture } from "./helpers/ticketMetadataFixtures";
+import { buildTicketEditorMetadataContentWithChildren } from "./helpers/ticketEditorMetadataStubs";
 import * as vscode from "vscode";
 
 suite("Ticket save sync", () => {
@@ -34,6 +35,10 @@ suite("Ticket save sync", () => {
         updateIssue: async () => {
           throw new Error("should not update");
         },
+        createIssue: async () => {
+          throw new Error("should not create child");
+        },
+        deleteIssue: async () => undefined,
         listIssueStatuses: async () => [],
         listTrackers: async () => [],
         listIssuePriorities: async () => [],
@@ -61,6 +66,10 @@ suite("Ticket save sync", () => {
         updateIssue: async () => {
           throw new Error("should not update");
         },
+        createIssue: async () => {
+          throw new Error("should not create child");
+        },
+        deleteIssue: async () => undefined,
         listIssueStatuses: async () => [],
         listTrackers: async () => [],
         listIssuePriorities: async () => [],
@@ -87,6 +96,10 @@ suite("Ticket save sync", () => {
         updateIssue: async () => {
           throw new Error("should not update");
         },
+        createIssue: async () => {
+          throw new Error("should not create child");
+        },
+        deleteIssue: async () => undefined,
         listIssueStatuses: async () => [],
         listTrackers: async () => [],
         listIssuePriorities: async () => [],
@@ -118,6 +131,10 @@ suite("Ticket save sync", () => {
           comments: [],
         }),
         updateIssue: async () => undefined,
+        createIssue: async () => {
+          throw new Error("should not create child");
+        },
+        deleteIssue: async () => undefined,
         listIssueStatuses: async () => [],
         listTrackers: async () => [],
         listIssuePriorities: async () => [],
@@ -125,6 +142,183 @@ suite("Ticket save sync", () => {
     });
 
     assert.strictEqual(result.status, "success");
+  });
+
+  test("appends children on update and clears metadata", async () => {
+    initializeTicketDraft(7, "Title", "Body", buildIssueMetadataFixture(), "t1");
+    const created: Array<{ subject: string; parentId?: number }> = [];
+    let nextId = 500;
+
+    const result = await syncTicketDraft({
+      ticketId: 7,
+      content: buildTicketEditorMetadataContentWithChildren(
+        "Title",
+        "Body",
+        ["Child task 1", "Child task 2"],
+      ),
+      deps: {
+        getIssueDetail: async () => ({
+          ticket: { id: 7, subject: "Title", projectId: 1, updatedAt: "t1" },
+          comments: [],
+        }),
+        updateIssue: async () => undefined,
+        createIssue: async (input) => {
+          created.push(input as { subject: string; parentId?: number });
+          return nextId++;
+        },
+        deleteIssue: async () => undefined,
+        listIssueStatuses: async () => [{ id: 1, name: "In Progress" }],
+        listTrackers: async () => [{ id: 2, name: "Task" }],
+        listIssuePriorities: async () => [{ id: 3, name: "Normal" }],
+      },
+    });
+
+    assert.strictEqual(result.status, "success");
+    assert.strictEqual(created.length, 2);
+    assert.strictEqual(created[0].parentId, 7);
+    const draft = getTicketDraft(7);
+    assert.deepStrictEqual(draft?.baseMetadata.children, []);
+  });
+
+  test("skips duplicate children within the same update", async () => {
+    initializeTicketDraft(8, "Title", "Body", buildIssueMetadataFixture(), "t1");
+    const created: Array<{ subject: string }> = [];
+
+    const result = await syncTicketDraft({
+      ticketId: 8,
+      content: buildTicketEditorMetadataContentWithChildren(
+        "Title",
+        "Body",
+        ["Child task 1", "Child task 1"],
+      ),
+      deps: {
+        getIssueDetail: async () => ({
+          ticket: { id: 8, subject: "Title", projectId: 1, updatedAt: "t1" },
+          comments: [],
+        }),
+        updateIssue: async () => undefined,
+        createIssue: async (input) => {
+          created.push(input as { subject: string });
+          return 600;
+        },
+        deleteIssue: async () => undefined,
+        listIssueStatuses: async () => [{ id: 1, name: "In Progress" }],
+        listTrackers: async () => [{ id: 2, name: "Task" }],
+        listIssuePriorities: async () => [{ id: 3, name: "Normal" }],
+      },
+    });
+
+    assert.strictEqual(result.status, "success");
+    assert.strictEqual(created.length, 1);
+    assert.match(result.message, /Skipped duplicate children/);
+  });
+
+  test("fails and rolls back when child creation fails during update", async () => {
+    initializeTicketDraft(9, "Title", "Body", buildIssueMetadataFixture(), "t1");
+    const deleted: number[] = [];
+    let nextId = 700;
+
+    const result = await syncTicketDraft({
+      ticketId: 9,
+      content: buildTicketEditorMetadataContentWithChildren(
+        "Title",
+        "Body",
+        ["Child task 1", "Child task 2"],
+      ),
+      deps: {
+        getIssueDetail: async () => ({
+          ticket: { id: 9, subject: "Title", projectId: 1, updatedAt: "t1" },
+          comments: [],
+        }),
+        updateIssue: async () => undefined,
+        createIssue: async (input) => {
+          if ((input as { subject: string }).subject === "Child task 2") {
+            throw new Error("Child failure");
+          }
+          return nextId++;
+        },
+        deleteIssue: async (issueId: number) => {
+          deleted.push(issueId);
+        },
+        listIssueStatuses: async () => [{ id: 1, name: "In Progress" }],
+        listTrackers: async () => [{ id: 2, name: "Task" }],
+        listIssuePriorities: async () => [{ id: 3, name: "Normal" }],
+      },
+    });
+
+    assert.strictEqual(result.status, "failed");
+    assert.deepStrictEqual(deleted, [700]);
+  });
+
+  test("fails update when children metadata is invalid", async () => {
+    initializeTicketDraft(10, "Title", "Body", buildIssueMetadataFixture(), "t1");
+    const content = [
+      "# Title",
+      "",
+      "---",
+      "issue:",
+      "  tracker:   Task",
+      "  priority:  Normal",
+      "  status:    In Progress",
+      "  due_date:  2025-12-31",
+      "  children: Child task 1",
+      "---",
+      "",
+      "Body",
+    ].join("\n");
+
+    const result = await syncTicketDraft({
+      ticketId: 10,
+      content,
+      deps: {
+        getIssueDetail: async () => ({
+          ticket: { id: 10, subject: "Title", projectId: 1, updatedAt: "t1" },
+          comments: [],
+        }),
+        updateIssue: async () => undefined,
+        createIssue: async () => {
+          throw new Error("should not create child");
+        },
+        deleteIssue: async () => undefined,
+        listIssueStatuses: async () => [{ id: 1, name: "In Progress" }],
+        listTrackers: async () => [{ id: 2, name: "Task" }],
+        listIssuePriorities: async () => [{ id: 3, name: "Normal" }],
+      },
+    });
+
+    assert.strictEqual(result.status, "failed");
+  });
+
+  test("updates without children do not create child tickets", async () => {
+    initializeTicketDraft(11, "Title", "Body", buildIssueMetadataFixture(), "t1");
+    let created = 0;
+
+    const result = await syncTicketDraft({
+      ticketId: 11,
+      content: buildTicketEditorContent({
+        subject: "Title",
+        description: "Updated",
+        metadata: buildIssueMetadataFixture(),
+      }),
+      deps: {
+        getIssueDetail: async () => ({
+          ticket: { id: 11, subject: "Title", projectId: 1, updatedAt: "t1" },
+          comments: [],
+        }),
+        updateIssue: async () => undefined,
+        createIssue: async () => {
+          created += 1;
+          return 800;
+        },
+        deleteIssue: async () => undefined,
+        listIssueStatuses: async () => [{ id: 1, name: "In Progress" }],
+        listTrackers: async () => [{ id: 2, name: "Task" }],
+        listIssuePriorities: async () => [{ id: 3, name: "Normal" }],
+      },
+    });
+
+    assert.strictEqual(result.status, "success");
+    assert.strictEqual(created, 0);
   });
 
   test("reload overwrites editor content with saved data", async () => {

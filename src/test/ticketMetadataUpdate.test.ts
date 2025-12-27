@@ -29,6 +29,10 @@ suite("Ticket metadata update", () => {
         updateIssue: async ({ fields }) => {
           updatedFields = fields;
         },
+        createIssue: async () => {
+          throw new Error("should not create child");
+        },
+        deleteIssue: async () => undefined,
         listIssueStatuses: async () => [{ id: 1, name: "In Progress" }],
         listTrackers: async () => [{ id: 2, name: "Task" }],
         listIssuePriorities: async () => [

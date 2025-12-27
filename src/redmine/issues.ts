@@ -98,6 +98,7 @@ export interface IssueCreateInput {
   trackerId?: number;
   priorityId?: number;
   dueDate?: string;
+  parentId?: number;
 }
 
 export const buildIssueCreatePayload = (input: IssueCreateInput): Record<string, unknown> => ({
@@ -110,6 +111,7 @@ export const buildIssueCreatePayload = (input: IssueCreateInput): Record<string,
     ...(input.trackerId !== undefined ? { tracker_id: input.trackerId } : {}),
     ...(input.priorityId !== undefined ? { priority_id: input.priorityId } : {}),
     ...(input.dueDate !== undefined ? { due_date: input.dueDate } : {}),
+    ...(input.parentId !== undefined ? { parent_issue_id: input.parentId } : {}),
   },
 });
 
@@ -120,6 +122,13 @@ export const createIssue = async (input: IssueCreateInput): Promise<number | und
     body: buildIssueCreatePayload(input),
   });
   return response.issue?.id;
+};
+
+export const deleteIssue = async (issueId: number): Promise<void> => {
+  await requestJson({
+    method: "DELETE",
+    path: `/issues/${issueId}.json`,
+  });
 };
 
 export interface IssueUpdateInput {

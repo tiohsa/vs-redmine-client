@@ -89,5 +89,10 @@ export const applyTicketEditorDefaults = (
 ): TicketEditorContent => ({
   subject: defaults.subject,
   description: defaults.description,
-  metadata: { ...defaults.metadata },
+  metadata: {
+    ...defaults.metadata,
+    children: defaults.metadata.children
+      ? [...defaults.metadata.children]
+      : defaults.metadata.children,
+  },
 });

@@ -7,6 +7,7 @@ const EMPTY_METADATA: IssueMetadata = {
   priority: "",
   status: "",
   due_date: "",
+  children: [],
 };
 
 const buildEmptyDefaults = (): TicketEditorDefaults => ({
@@ -18,7 +19,10 @@ const buildEmptyDefaults = (): TicketEditorDefaults => ({
 const cloneDefaults = (value: TicketEditorDefaults): TicketEditorDefaults => ({
   subject: value.subject,
   description: value.description,
-  metadata: { ...value.metadata },
+  metadata: {
+    ...value.metadata,
+    children: value.metadata.children ? [...value.metadata.children] : [],
+  },
 });
 
 let defaults = buildEmptyDefaults();

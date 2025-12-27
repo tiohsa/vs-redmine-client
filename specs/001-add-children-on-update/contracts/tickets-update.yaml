@@ -1,0 +1,72 @@
+openapi: 3.0.3
+info:
+  title: Ticket Update with Children
+  version: 1.0.0
+paths:
+  /tickets/{ticketId}:
+    put:
+      summary: Update ticket and optionally append children
+      parameters:
+        - name: ticketId
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateTicketRequest'
+      responses:
+        '200':
+          description: Ticket updated and children appended
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UpdateTicketResponse'
+        '400':
+          description: Invalid children metadata
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+components:
+  schemas:
+    UpdateTicketRequest:
+      type: object
+      required:
+        - subject
+        - description
+      properties:
+        subject:
+          type: string
+          minLength: 1
+        description:
+          type: string
+        metadata:
+          type: object
+          properties:
+            children:
+              type: array
+              description: Child ticket subjects to append (YAML list only)
+              items:
+                type: string
+                minLength: 1
+              maxItems: 50
+    UpdateTicketResponse:
+      type: object
+      properties:
+        ticketId:
+          type: string
+        appendedChildIds:
+          type: array
+          items:
+            type: string
+    ErrorResponse:
+      type: object
+      properties:
+        message:
+          type: string
+        reason:
+          type: string

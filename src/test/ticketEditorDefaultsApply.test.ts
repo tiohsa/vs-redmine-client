@@ -27,6 +27,7 @@ suite("Ticket editor defaults application", () => {
         priority: "High",
         status: "New",
         due_date: "2025-01-01",
+        children: [],
       },
     });
   });

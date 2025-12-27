@@ -1,0 +1,63 @@
+openapi: 3.0.3
+info:
+  title: Ticket Creation with Children
+  version: 1.0.0
+paths:
+  /tickets:
+    post:
+      summary: Create parent ticket with optional children
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateTicketRequest'
+      responses:
+        '201':
+          description: Parent and children created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CreateTicketResponse'
+        '400':
+          description: Invalid children metadata
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+components:
+  schemas:
+    CreateTicketRequest:
+      type: object
+      required:
+        - subject
+      properties:
+        subject:
+          type: string
+          minLength: 1
+        metadata:
+          type: object
+          properties:
+            children:
+              type: array
+              description: Child ticket subjects (YAML list only)
+              items:
+                type: string
+                minLength: 1
+              maxItems: 50
+    CreateTicketResponse:
+      type: object
+      properties:
+        parentTicketId:
+          type: string
+        childTicketIds:
+          type: array
+          items:
+            type: string
+    ErrorResponse:
+      type: object
+      properties:
+        message:
+          type: string
+        reason:
+          type: string

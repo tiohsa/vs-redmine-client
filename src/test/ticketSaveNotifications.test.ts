@@ -19,7 +19,7 @@ suite("Ticket save notifications", () => {
 
     assert.deepStrictEqual(notification, {
       type: "info",
-      message: "Redmine updated.",
+      message: "Updated",
     });
   });
 

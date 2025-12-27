@@ -1,6 +1,6 @@
 import { getApiKey, getBaseUrl } from "../config/settings";
 
-type HttpMethod = "GET" | "POST" | "PUT";
+type HttpMethod = "GET" | "POST" | "PUT" | "DELETE";
 type FetchBody = string | Uint8Array;
 
 export type QueryParams = Record<string, string | number | boolean | undefined>;

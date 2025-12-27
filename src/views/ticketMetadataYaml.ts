@@ -1,5 +1,6 @@
 import {
   ISSUE_METADATA_KEYS,
+  ISSUE_METADATA_REQUIRED_KEYS,
   IssueMetadata,
   IssueMetadataKey,
 } from "./ticketMetadataTypes";
@@ -26,9 +27,13 @@ export const parseIssueMetadataYaml = (text: string): IssueMetadata => {
   const values: Partial<IssueMetadata> = {};
   const seen = new Set<IssueMetadataKey>();
   let sawIssue = false;
+  let readingChildren = false;
 
   lines.forEach((line, index) => {
     if (line.trim().length === 0) {
+      if (readingChildren) {
+        throw new Error("children entries cannot be empty.");
+      }
       return;
     }
 
@@ -44,7 +49,24 @@ export const parseIssueMetadataYaml = (text: string): IssueMetadata => {
       throw new Error("Only issue block keys are allowed.");
     }
     if (line.startsWith("   ")) {
-      throw new Error("Nested keys are not allowed.");
+      if (!line.startsWith("    -")) {
+        throw new Error("Nested keys are not allowed.");
+      }
+    }
+
+    if (line.startsWith("    -")) {
+      if (!readingChildren) {
+        throw new Error("Arrays are not allowed.");
+      }
+      const childValue = line.replace(/^ {4}-\s*/, "").trim();
+      if (childValue.length === 0) {
+        throw new Error("children entries cannot be empty.");
+      }
+      if (!values.children) {
+        values.children = [];
+      }
+      values.children.push(childValue);
+      return;
     }
 
     const trimmed = line.trim();
@@ -68,6 +90,17 @@ export const parseIssueMetadataYaml = (text: string): IssueMetadata => {
 
     const rawValue = stripInlineComment(match[2]);
     const value = rawValue.trim();
+
+    if (key === "children") {
+      if (value.length > 0) {
+        throw new Error("children must be a list.");
+      }
+      readingChildren = true;
+      values.children = [];
+      return;
+    }
+
+    readingChildren = false;
     requireValue(key, value);
     values[key] = value;
   });
@@ -76,7 +109,14 @@ export const parseIssueMetadataYaml = (text: string): IssueMetadata => {
     throw new Error("Metadata must include issue block.");
   }
 
-  ISSUE_METADATA_KEYS.forEach((key) => {
+  if (values.children && values.children.length === 0) {
+    throw new Error("children entries cannot be empty.");
+  }
+  if (values.children && values.children.length > 50) {
+    throw new Error("children exceeds limit (50).");
+  }
+
+  ISSUE_METADATA_REQUIRED_KEYS.forEach((key) => {
     if (values[key] === undefined) {
       throw new Error(`Missing metadata key: ${key}`);
     }
@@ -87,11 +127,19 @@ export const parseIssueMetadataYaml = (text: string): IssueMetadata => {
 
 export const serializeIssueMetadataYaml = (metadata: IssueMetadata): string => {
   const dueDate = metadata.due_date ?? "";
-  return [
+  const lines = [
     "issue:",
     `  tracker:   ${metadata.tracker}`,
     `  priority:  ${metadata.priority}`,
     `  status:    ${metadata.status}`,
     `  due_date:  ${dueDate}`,
-  ].join("\n");
+  ];
+  if (metadata.children && metadata.children.length > 0) {
+    lines.push("  children:");
+    metadata.children.forEach((child) => {
+      lines.push(`    - ${child}`);
+    });
+  }
+
+  return lines.join("\n");
 };

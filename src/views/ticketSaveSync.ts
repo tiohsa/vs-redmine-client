@@ -3,7 +3,9 @@ import { getDefaultProjectId } from "../config/settings";
 import { getProjectSelection } from "../config/projectSelection";
 import {
   createIssue,
+  deleteIssue,
   getIssueDetail,
+  IssueDetailResult,
   listIssuePriorities,
   listIssueStatuses,
   listTrackers,
@@ -15,7 +17,7 @@ import {
   markDraftStatus,
   updateDraftAfterSave,
 } from "./ticketDraftStore";
-import { parseTicketEditorContent } from "./ticketEditorContent";
+import { buildTicketEditorContent, parseTicketEditorContent } from "./ticketEditorContent";
 import { IssueMetadata } from "./ticketMetadataTypes";
 import {
   getEditorContentType,
@@ -34,6 +36,8 @@ import { applyEditorContent, buildTicketPreviewContent } from "./ticketPreview";
 export interface TicketSaveDependencies {
   getIssueDetail: typeof getIssueDetail;
   updateIssue: typeof updateIssue;
+  createIssue: typeof createIssue;
+  deleteIssue: typeof deleteIssue;
   listIssueStatuses: typeof listIssueStatuses;
   listTrackers: typeof listTrackers;
   listIssuePriorities: typeof listIssuePriorities;
@@ -42,6 +46,8 @@ export interface TicketSaveDependencies {
 const defaultDeps: TicketSaveDependencies = {
   getIssueDetail,
   updateIssue,
+  createIssue,
+  deleteIssue,
   listIssueStatuses,
   listTrackers,
   listIssuePriorities,
@@ -49,6 +55,7 @@ const defaultDeps: TicketSaveDependencies = {
 
 export interface TicketCreateDependencies {
   createIssue: typeof createIssue;
+  deleteIssue: typeof deleteIssue;
   listIssueStatuses: typeof listIssueStatuses;
   listTrackers: typeof listTrackers;
   listIssuePriorities: typeof listIssuePriorities;
@@ -56,6 +63,7 @@ export interface TicketCreateDependencies {
 
 const defaultCreateDeps: TicketCreateDependencies = {
   createIssue,
+  deleteIssue,
   listIssueStatuses,
   listTrackers,
   listIssuePriorities,
@@ -241,6 +249,7 @@ const resolveMetadataForCreate = async (
 export const syncTicketDraft = async (input: {
   ticketId: number;
   content: string;
+  editor?: vscode.TextEditor;
   deps?: TicketSaveDependencies;
 }): Promise<TicketSaveResult> => {
   const deps = input.deps ?? defaultDeps;
@@ -260,6 +269,18 @@ export const syncTicketDraft = async (input: {
   const subject = parsed.subject || draft.baseSubject;
   const description = parsed.description;
   const metadata = parsed.metadata;
+  const children = metadata.children ?? [];
+  const uniqueChildren: string[] = [];
+  const duplicateChildren: string[] = [];
+  const seenChildren = new Set<string>();
+  children.forEach((child) => {
+    if (seenChildren.has(child)) {
+      duplicateChildren.push(child);
+    } else {
+      seenChildren.add(child);
+      uniqueChildren.push(child);
+    }
+  });
   const contentChanges = computeChanges(
     draft.baseSubject,
     draft.baseDescription,
@@ -276,16 +297,17 @@ export const syncTicketDraft = async (input: {
   }
   const changes = { ...contentChanges, ...metadataFields };
 
-  if (Object.keys(changes).length === 0) {
+  if (Object.keys(changes).length === 0 && children.length === 0) {
     return buildResult("no_change", "No changes to save.");
   }
 
   markDraftStatus(input.ticketId, "dirty");
+  let remoteDetail: IssueDetailResult | undefined;
 
   if (draft.lastKnownRemoteUpdatedAt) {
     try {
-      const detail = await deps.getIssueDetail(input.ticketId);
-      const remoteUpdatedAt = detail.ticket.updatedAt;
+      remoteDetail = await deps.getIssueDetail(input.ticketId);
+      const remoteUpdatedAt = remoteDetail.ticket.updatedAt;
       if (remoteUpdatedAt && remoteUpdatedAt !== draft.lastKnownRemoteUpdatedAt) {
         markDraftStatus(input.ticketId, "conflict");
         return buildResult("conflict", "Remote changes detected. Refresh before saving.");
@@ -299,9 +321,69 @@ export const syncTicketDraft = async (input: {
     }
   }
 
+  const createdChildIds: number[] = [];
+  let childCreateFields: TicketUpdateFields | undefined;
+  if (uniqueChildren.length > 0) {
+    try {
+      childCreateFields = await resolveMetadataForCreate(metadata, deps);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Invalid metadata.";
+      return buildResult("failed", message);
+    }
+
+    let projectId = remoteDetail?.ticket.projectId;
+    if (!projectId) {
+      try {
+        remoteDetail = await deps.getIssueDetail(input.ticketId);
+        projectId = remoteDetail.ticket.projectId;
+      } catch (error) {
+        return mapErrorToResult(error);
+      }
+    }
+    if (!projectId) {
+      return buildResult("failed", "Missing project ID for child tickets.");
+    }
+
+    try {
+      for (const childSubject of uniqueChildren) {
+        const childId = await deps.createIssue({
+          projectId,
+          subject: childSubject,
+          description: "",
+          statusId: childCreateFields.statusId,
+          trackerId: childCreateFields.trackerId,
+          priorityId: childCreateFields.priorityId,
+          dueDate:
+            typeof childCreateFields.dueDate === "string"
+              ? childCreateFields.dueDate
+              : undefined,
+          parentId: input.ticketId,
+        });
+        if (!childId) {
+          throw new Error("Child ticket creation failed.");
+        }
+        createdChildIds.push(childId);
+      }
+    } catch (error) {
+      const message =
+        error instanceof Error ? error.message : "Child ticket creation failed.";
+      await Promise.allSettled(
+        createdChildIds.map((issueId) => deps.deleteIssue(issueId)),
+      );
+      return buildResult("failed", message);
+    }
+  }
+
   try {
-    await deps.updateIssue({ issueId: input.ticketId, fields: changes });
+    if (Object.keys(changes).length > 0) {
+      await deps.updateIssue({ issueId: input.ticketId, fields: changes });
+    }
   } catch (error) {
+    if (createdChildIds.length > 0) {
+      await Promise.allSettled(
+        createdChildIds.map((issueId) => deps.deleteIssue(issueId)),
+      );
+    }
     const result = mapErrorToResult(error);
     if (result.status === "conflict") {
       markDraftStatus(input.ticketId, "conflict");
@@ -310,14 +392,34 @@ export const syncTicketDraft = async (input: {
   }
 
   let updatedAt = draft.lastKnownRemoteUpdatedAt;
-  try {
-    const detail = await deps.getIssueDetail(input.ticketId);
-    updatedAt = detail.ticket.updatedAt ?? updatedAt;
-  } catch {
-    // Ignore refresh errors after successful update.
+  if (Object.keys(changes).length > 0) {
+    try {
+      const detail = await deps.getIssueDetail(input.ticketId);
+      updatedAt = detail.ticket.updatedAt ?? updatedAt;
+    } catch {
+      // Ignore refresh errors after successful update.
+    }
   }
 
-  updateDraftAfterSave(input.ticketId, subject, description, metadata, updatedAt);
+  const clearedMetadata: IssueMetadata = { ...metadata, children: [] };
+  updateDraftAfterSave(input.ticketId, subject, description, clearedMetadata, updatedAt);
+  if (input.editor) {
+    const nextContent = buildTicketEditorContent({
+      subject,
+      description,
+      metadata: clearedMetadata,
+    });
+    await applyEditorContent(input.editor, nextContent);
+  }
+
+  if (duplicateChildren.length > 0) {
+    const duplicates = Array.from(new Set(duplicateChildren)).join(", ");
+    return buildResult(
+      "success",
+      `Redmine updated. Skipped duplicate children: ${duplicates}`,
+    );
+  }
+
   return buildResult("success", "Redmine updated.");
 };
 
@@ -391,6 +493,8 @@ const createTicketFromContent = async (input: {
     return { result: buildResult("failed", "Ticket subject is required.") };
   }
 
+  const children = parsed.metadata.children ?? [];
+
   let metadataFields: TicketUpdateFields = {};
   try {
     metadataFields = await resolveMetadataForCreate(parsed.metadata, input.deps);
@@ -414,6 +518,36 @@ const createTicketFromContent = async (input: {
     });
   } catch (error) {
     return { result: mapErrorToResult(error) };
+  }
+
+  if (createdId && children.length > 0) {
+    const createdChildIds: number[] = [];
+    try {
+      for (const childSubject of children) {
+        const childId = await input.deps.createIssue({
+          projectId,
+          subject: childSubject,
+          description: "",
+          statusId: metadataFields.statusId,
+          trackerId: metadataFields.trackerId,
+          priorityId: metadataFields.priorityId,
+          dueDate: metadataFields.dueDate as string | undefined,
+          parentId: createdId,
+        });
+        if (!childId) {
+          throw new Error("Child ticket creation failed.");
+        }
+        createdChildIds.push(childId);
+      }
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Child ticket creation failed.";
+      await Promise.allSettled(
+        [createdId, ...createdChildIds].map((issueId) =>
+          input.deps.deleteIssue(issueId),
+        ),
+      );
+      return { result: buildResult("failed", message) };
+    }
   }
 
   return {

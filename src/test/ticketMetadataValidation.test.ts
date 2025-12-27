@@ -65,4 +65,74 @@ suite("Ticket metadata validation", () => {
 
     assert.strictEqual(parsed.due_date, "");
   });
+
+  test("allows children list", () => {
+    const parsed = parseIssueMetadataYaml(
+      [
+        "issue:",
+        "  tracker: Task",
+        "  priority: Normal",
+        "  status: In Progress",
+        "  due_date: 2025-12-31",
+        "  children:",
+        "    - Child task 1",
+        "    - Child task 2",
+      ].join("\n"),
+    );
+
+    assert.deepStrictEqual(parsed.children, ["Child task 1", "Child task 2"]);
+  });
+
+  test("rejects children inline values", () => {
+    assert.throws(
+      () =>
+        parseIssueMetadataYaml(
+          [
+            "issue:",
+            "  tracker: Task",
+            "  priority: Normal",
+            "  status: In Progress",
+            "  due_date: 2025-12-31",
+            "  children: Child task 1",
+          ].join("\n"),
+        ),
+      /children must be a list/,
+    );
+  });
+
+  test("rejects empty children entries", () => {
+    assert.throws(
+      () =>
+        parseIssueMetadataYaml(
+          [
+            "issue:",
+            "  tracker: Task",
+            "  priority: Normal",
+            "  status: In Progress",
+            "  due_date: 2025-12-31",
+            "  children:",
+            "    - ",
+          ].join("\n"),
+        ),
+      /children entries cannot be empty/,
+    );
+  });
+
+  test("rejects children over the limit", () => {
+    const children = Array.from({ length: 51 }, (_, index) => `Child ${index + 1}`);
+    const parsed = [
+      "issue:",
+      "  tracker: Task",
+      "  priority: Normal",
+      "  status: In Progress",
+      "  due_date: 2025-12-31",
+      "  children:",
+      ...children.map((child) => `    - ${child}`),
+    ].join("\n");
+
+    assert.throws(
+      () => parseIssueMetadataYaml(parsed),
+      /children exceeds limit/,
+    );
+  });
 });

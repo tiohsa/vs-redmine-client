@@ -9,3 +9,5 @@ export const buildIssueMetadataFixture = (
   due_date: "2025-12-31",
   ...overrides,
 });
+
+export const CHILDREN_SUBJECTS_FIXTURE = ["Child task 1", "Child task 2"];
