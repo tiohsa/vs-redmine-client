@@ -6,6 +6,7 @@ import {
   refreshCreateTicketContext,
   TicketTreeItem,
 } from "../views/ticketsView";
+import { TreeNode } from "../views/treeTypes";
 
 suite("Tickets view permissions", () => {
   teardown(() => {
@@ -25,10 +26,15 @@ suite("Tickets view permissions", () => {
   });
 
   test("combines status and due date indicators in ticket description", () => {
-    const item = new TicketTreeItem(
-      { id: 1, subject: "Issue", projectId: 1, statusName: "Open" },
-      "Due in 3 days",
-    );
+    const node: TreeNode<{ id: number; subject: string; projectId: number; statusName: string }> = {
+      id: 1,
+      parentId: undefined,
+      label: "#1 Issue",
+      data: { id: 1, subject: "Issue", projectId: 1, statusName: "Open" },
+      level: 0,
+      children: [],
+    };
+    const item = new TicketTreeItem(node, "Due in 3 days", false);
 
     assert.strictEqual(item.description, "Open · Due in 3 days");
   });

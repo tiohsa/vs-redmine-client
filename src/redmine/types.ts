@@ -19,6 +19,8 @@ export interface Ticket {
   assigneeId?: number;
   assigneeName?: string;
   projectId: number;
+  parentId?: number;
+  hasChildren?: boolean;
   createdAt?: string;
   updatedAt?: string;
   dueDate?: string;
@@ -78,6 +80,7 @@ export interface RedmineIssueListResponse {
     subject: string;
     description?: string;
     project: { id: number; name: string };
+    parent?: { id: number };
     status?: { id: number; name: string };
     priority?: { id: number; name: string };
     tracker?: { id: number; name: string };
@@ -97,6 +100,7 @@ export interface RedmineIssueDetailResponse {
     subject: string;
     description?: string;
     project: { id: number; name: string };
+    parent?: { id: number };
     status?: { id: number; name: string };
     priority?: { id: number; name: string };
     tracker?: { id: number; name: string };

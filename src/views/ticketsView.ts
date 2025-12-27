@@ -13,6 +13,10 @@ import { showError } from "../utils/notifications";
 import { MAX_VIEW_ITEMS } from "./viewLimits";
 import { setViewContext } from "./viewContext";
 import { createEmptyStateItem, createErrorStateItem } from "./viewState";
+import { buildTree } from "./treeBuilder";
+import { TreeNode, TreeSource } from "./treeTypes";
+import { isTreeExpanded } from "./treeState";
+import { createCycleWarningItem } from "./treeWarnings";
 import {
   applyTicketFilters,
   applyTicketSort,
@@ -37,6 +41,7 @@ export const TICKET_SETTINGS_COMMANDS = {
 export const TICKET_RELOAD_COMMAND = "todoex.reloadTicket";
 
 export const CREATE_TICKET_CONTEXT_KEY = "todoex.canCreateTickets";
+const TICKETS_VIEW_KEY = "tickets";
 
 export const evaluateCreateTicketPermission = (
   baseUrl: string,
@@ -106,6 +111,45 @@ const formatDueDateSummary = (rule: DueDateDisplayRule): string => {
   return enabled.join(", ");
 };
 
+const buildTicketTreeSources = (tickets: Ticket[]): Array<TreeSource<Ticket>> =>
+  tickets.map((ticket) => ({
+    id: ticket.id,
+    parentId: ticket.parentId,
+    label: `#${ticket.id} ${ticket.subject}`,
+    data: ticket,
+  }));
+
+const buildTicketTreeItems = (
+  nodes: Array<TreeNode<Ticket>>,
+  dueIndicators: Map<number, string | undefined>,
+): TicketTreeItem[] =>
+  nodes.map(
+    (node) =>
+      new TicketTreeItem(
+        node,
+        dueIndicators.get(node.data.id),
+        node.children.length > 0 &&
+          isTreeExpanded(TICKETS_VIEW_KEY, String(node.data.id)),
+      ),
+  );
+
+const buildTicketCycleWarnings = (
+  tickets: Ticket[],
+  cycleIds: Set<number>,
+): vscode.TreeItem[] => {
+  if (cycleIds.size === 0) {
+    return [];
+  }
+
+  const labelById = new Map(
+    tickets.map((ticket) => [ticket.id, `#${ticket.id} ${ticket.subject}`]),
+  );
+  return Array.from(cycleIds.values()).map((id) => {
+    const label = labelById.get(id) ?? `Ticket ${id}`;
+    return createCycleWarningItem(label);
+  });
+};
+
 const collectOptions = (
   tickets: Ticket[],
   getId: (ticket: Ticket) => number | undefined,
@@ -163,13 +207,16 @@ export const buildTicketsViewItems = (
     return [createEmptyStateItem("No tickets match the current filters.")];
   }
 
-  const items = visibleTickets.map((ticket) => {
+  const dueIndicators = new Map<number, string | undefined>();
+  visibleTickets.forEach((ticket) => {
     const dueWindow = resolveDueDateWindow(ticket, settings.dueDate, now);
     const dueIndicator = formatDueDateIndicator(dueWindow);
-    return new TicketTreeItem(ticket, dueIndicator);
+    dueIndicators.set(ticket.id, dueIndicator);
   });
-
-  return items;
+  const treeResult = buildTree(buildTicketTreeSources(visibleTickets));
+  const warningItems = buildTicketCycleWarnings(visibleTickets, treeResult.cycleIds);
+  const ticketItems = buildTicketTreeItems(treeResult.roots, dueIndicators);
+  return [...warningItems, ...ticketItems];
 };
 
 export class TicketsTreeProvider implements vscode.TreeDataProvider<vscode.TreeItem> {
@@ -181,6 +228,7 @@ export class TicketsTreeProvider implements vscode.TreeDataProvider<vscode.TreeI
   private errorMessage?: string;
   private selectedProjectId?: number;
   private settings = getDefaultTicketListSettings();
+  private rootNodes: Array<TreeNode<Ticket>> = [];
 
   readonly onDidChangeTreeData = this.emitter.event;
 
@@ -235,20 +283,46 @@ export class TicketsTreeProvider implements vscode.TreeDataProvider<vscode.TreeI
   }
 
   getChildren(element?: vscode.TreeItem): vscode.ProviderResult<vscode.TreeItem[]> {
-    if (element) {
-      return [];
+    if (element instanceof TicketTreeItem) {
+      const dueIndicators = this.buildDueIndicators();
+      return buildTicketTreeItems(element.childNodes, dueIndicators);
     }
 
     return this.getViewItems();
   }
 
   getViewItems(): vscode.TreeItem[] {
-    return buildTicketsViewItems(
+    const items = buildTicketsViewItems(
       this.tickets,
       this.selectedProjectId,
       this.errorMessage,
       this.settings,
     );
+
+    if (this.errorMessage || !this.selectedProjectId) {
+      this.rootNodes = [];
+      return items;
+    }
+
+    const filteredTickets = applyTicketFilters(this.tickets, this.settings.filters);
+    const sortedTickets = applyTicketSort(filteredTickets, this.settings.sort);
+    const visibleTickets = sortedTickets.slice(0, MAX_VIEW_ITEMS);
+    const treeResult = buildTree(buildTicketTreeSources(visibleTickets));
+    this.rootNodes = treeResult.roots;
+    return items;
+  }
+
+  private buildDueIndicators(): Map<number, string | undefined> {
+    const dueIndicators = new Map<number, string | undefined>();
+    const now = new Date();
+    const filteredTickets = applyTicketFilters(this.tickets, this.settings.filters);
+    const sortedTickets = applyTicketSort(filteredTickets, this.settings.sort);
+    const visibleTickets = sortedTickets.slice(0, MAX_VIEW_ITEMS);
+    visibleTickets.forEach((ticket) => {
+      const dueWindow = resolveDueDateWindow(ticket, this.settings.dueDate, now);
+      dueIndicators.set(ticket.id, formatDueDateIndicator(dueWindow));
+    });
+    return dueIndicators;
   }
 
   async configurePriorityFilter(): Promise<void> {
@@ -554,9 +628,21 @@ export class TicketsTreeProvider implements vscode.TreeDataProvider<vscode.TreeI
 }
 
 export class TicketTreeItem extends vscode.TreeItem {
-  constructor(public readonly ticket: Ticket, dueDateIndicator?: string) {
-    super(`#${ticket.id} ${ticket.subject}`, vscode.TreeItemCollapsibleState.None);
-    const status = ticket.statusName ?? "";
+  constructor(
+    public readonly node: TreeNode<Ticket>,
+    dueDateIndicator: string | undefined,
+    isExpanded: boolean,
+  ) {
+    super(
+      `#${node.data.id} ${node.data.subject}`,
+      node.children.length > 0
+        ? isExpanded
+          ? vscode.TreeItemCollapsibleState.Expanded
+          : vscode.TreeItemCollapsibleState.Collapsed
+        : vscode.TreeItemCollapsibleState.None,
+    );
+    this.id = String(node.data.id);
+    const status = node.data.statusName ?? "";
     if (status && dueDateIndicator) {
       this.description = `${status} \u00b7 ${dueDateIndicator}`;
     } else {
@@ -568,5 +654,13 @@ export class TicketTreeItem extends vscode.TreeItem {
       title: "Open Ticket Preview",
       arguments: [this],
     };
+  }
+
+  get ticket(): Ticket {
+    return this.node.data;
+  }
+
+  get childNodes(): Array<TreeNode<Ticket>> {
+    return this.node.children;
   }
 }

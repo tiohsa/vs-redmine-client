@@ -54,6 +54,7 @@ import {
   syncTicketDraft,
 } from "./views/ticketSaveSync";
 import { registerFocusRefresh } from "./views/viewFocusRefresh";
+import { setTreeExpanded } from "./views/treeState";
 import {
   VIEW_ID_ACTIVITY_COMMENTS,
   VIEW_ID_ACTIVITY_PROJECTS,
@@ -90,6 +91,25 @@ export async function activate(context: vscode.ExtensionContext) {
       treeDataProvider: commentsProvider,
     },
   );
+  const trackExpansionState = <T extends vscode.TreeItem>(
+    view: vscode.TreeView<T>,
+    viewKey: string,
+  ): void => {
+    context.subscriptions.push(
+      view.onDidExpandElement((event) => {
+        const elementId = event.element.id;
+        if (elementId) {
+          setTreeExpanded(viewKey, String(elementId), true);
+        }
+      }),
+      view.onDidCollapseElement((event) => {
+        const elementId = event.element.id;
+        if (elementId) {
+          setTreeExpanded(viewKey, String(elementId), false);
+        }
+      }),
+    );
+  };
   let selectedComment: CommentTreeItem | undefined;
   let selectedCommentDocumentUri: string | undefined;
   context.subscriptions.push(
@@ -102,6 +122,8 @@ export async function activate(context: vscode.ExtensionContext) {
     registerFocusRefresh(activityTicketsView, () => ticketsProvider.refresh()),
     registerFocusRefresh(activityCommentsView, () => commentsProvider.refresh()),
   );
+  trackExpansionState(activityProjectsView, "projects");
+  trackExpansionState(activityTicketsView, "tickets");
 
   const getSelectedComment = (item?: CommentTreeItem): CommentTreeItem | undefined => {
     return (
