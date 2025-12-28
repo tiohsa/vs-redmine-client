@@ -66,6 +66,38 @@ suite("Ticket metadata validation", () => {
     assert.strictEqual(parsed.due_date, "");
   });
 
+  test("allows numeric parent", () => {
+    const parsed = parseIssueMetadataYaml(
+      [
+        "issue:",
+        "  tracker: Task",
+        "  priority: Normal",
+        "  status: In Progress",
+        "  due_date: 2025-12-31",
+        "  parent: 123",
+      ].join("\n"),
+    );
+
+    assert.strictEqual(parsed.parent, 123);
+  });
+
+  test("rejects non-numeric parent", () => {
+    assert.throws(
+      () =>
+        parseIssueMetadataYaml(
+          [
+            "issue:",
+            "  tracker: Task",
+            "  priority: Normal",
+            "  status: In Progress",
+            "  due_date: 2025-12-31",
+            "  parent: ABC",
+          ].join("\n"),
+        ),
+      /parent must be a numeric ID/,
+    );
+  });
+
   test("allows children list", () => {
     const parsed = parseIssueMetadataYaml(
       [

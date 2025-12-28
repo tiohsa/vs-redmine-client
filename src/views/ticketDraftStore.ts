@@ -2,6 +2,7 @@ import { TicketDraftState, TicketDraftStatus } from "./ticketSaveTypes";
 import { applyTicketEditorDefaults, TicketEditorContent } from "./ticketEditorContent";
 import { getTicketEditorDefaults } from "./ticketEditorDefaultsStore";
 import { IssueMetadata, isIssueMetadataEqual } from "./ticketMetadataTypes";
+import { Ticket } from "../redmine/types";
 
 const drafts = new Map<number, TicketDraftState>();
 
@@ -10,6 +11,21 @@ export const getTicketDraft = (ticketId: number): TicketDraftState | undefined =
 
 export const buildNewTicketDraftContent = (): TicketEditorContent =>
   applyTicketEditorDefaults(getTicketEditorDefaults());
+
+export const buildNewChildTicketDraftContent = (parentTicket: Ticket): TicketEditorContent => {
+  const content = buildNewTicketDraftContent();
+  return {
+    ...content,
+    metadata: {
+      ...content.metadata,
+      tracker: parentTicket.trackerName ?? content.metadata.tracker,
+      priority: parentTicket.priorityName ?? content.metadata.priority,
+      status: parentTicket.statusName ?? content.metadata.status,
+      due_date: parentTicket.dueDate ?? content.metadata.due_date,
+      parent: parentTicket.id,
+    },
+  };
+};
 
 export const initializeTicketDraft = (
   ticketId: number,

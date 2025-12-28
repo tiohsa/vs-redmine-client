@@ -11,6 +11,7 @@ import { buildTicketEditorContent } from "../views/ticketEditorContent";
 import { applyEditorContent } from "../views/ticketPreview";
 import { buildUniqueUntitledPath } from "../views/untitledPath";
 import { buildNewTicketDraftContent } from "../views/ticketDraftStore";
+import { TicketEditorContent } from "../views/ticketEditorContent";
 
 const DRAFT_FILENAME = "todoex-new-ticket.md";
 
@@ -22,10 +23,8 @@ const findOpenDocument = (uri: vscode.Uri): vscode.TextDocument | undefined =>
 const getWorkspacePath = (): string | undefined =>
   vscode.workspace.workspaceFolders?.[0]?.uri.path;
 
-const buildNewTicketTemplate = (): string =>
-  buildTicketEditorContent({
-    ...buildNewTicketDraftContent(),
-  });
+const buildNewTicketTemplate = (content: TicketEditorContent): string =>
+  buildTicketEditorContent(content);
 
 const resolveProjectId = (): number | undefined => {
   const selection = getProjectSelection();
@@ -49,7 +48,10 @@ export const buildNewTicketDraftUri = (
   return vscode.Uri.parse(`untitled:${targetPath}`);
 };
 
-export const createTicketFromList = async (): Promise<void> => {
+export const openNewTicketDraft = async (input: {
+  content: TicketEditorContent;
+  projectId?: number;
+}): Promise<void> => {
   const knownUri =
     getNewTicketDraftUri() ?? buildNewTicketDraftUri(getWorkspacePath());
   const existing = findOpenDocument(knownUri);
@@ -57,12 +59,19 @@ export const createTicketFromList = async (): Promise<void> => {
   const editor = await vscode.window.showTextDocument(document, { preview: false });
 
   registerNewTicketDraft(editor);
-  const projectId = resolveProjectId();
-  if (projectId) {
-    setEditorProjectId(editor, projectId);
+  if (input.projectId) {
+    setEditorProjectId(editor, input.projectId);
   }
 
   if (document.getText().trim().length === 0) {
-    await applyEditorContent(editor, buildNewTicketTemplate());
+    await applyEditorContent(editor, buildNewTicketTemplate(input.content));
   }
+};
+
+export const createTicketFromList = async (): Promise<void> => {
+  const projectId = resolveProjectId();
+  await openNewTicketDraft({
+    content: buildNewTicketDraftContent(),
+    projectId,
+  });
 };

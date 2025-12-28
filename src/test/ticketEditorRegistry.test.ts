@@ -8,14 +8,19 @@ import {
   getPrimaryEditor,
   getTicketEditors,
   getTicketIdForEditor,
+  getTicketIdForDocument,
+  getTicketIdForUri,
+  getProjectIdForDocument,
+  getProjectIdForUri,
   markEditorActive,
+  registerTicketDocument,
   registerNewCommentDraft,
   registerNewTicketDraft,
   registerTicketEditor,
   removeTicketEditorByDocument,
   removeTicketEditorByUri,
 } from "../views/ticketEditorRegistry";
-import { createEditorStub } from "./helpers/editorStubs";
+import { createDocumentStub, createEditorStub } from "./helpers/editorStubs";
 
 suite("Ticket editor registry", () => {
   teardown(() => {
@@ -68,6 +73,31 @@ suite("Ticket editor registry", () => {
     (primary.document as { uri: vscode.Uri }).uri = vscode.Uri.parse("file:/tmp/ticket-4.md");
 
     assert.strictEqual(getTicketIdForEditor(primary), 4);
+  });
+
+  test("resolves ticket and project from document", () => {
+    const primary = createEditorStub(vscode.Uri.parse("untitled:ticket-5"), "");
+    registerTicketEditor(5, primary, "primary", "ticket", 20);
+
+    assert.strictEqual(getTicketIdForDocument(primary.document), 5);
+    assert.strictEqual(getProjectIdForDocument(primary.document), 20);
+  });
+
+  test("resolves ticket and project from uri", () => {
+    const primary = createEditorStub(vscode.Uri.parse("untitled:ticket-6"), "");
+    registerTicketEditor(6, primary, "primary", "ticket", 30);
+
+    assert.strictEqual(getTicketIdForUri(primary.document.uri), 6);
+    assert.strictEqual(getProjectIdForUri(primary.document.uri), 30);
+  });
+
+  test("registers ticket by document without editor reference", () => {
+    const document = createDocumentStub(vscode.Uri.parse("untitled:ticket-7"), "");
+
+    registerTicketDocument(7, document, "ticket", 40);
+
+    assert.strictEqual(getTicketIdForDocument(document), 7);
+    assert.strictEqual(getProjectIdForDocument(document), 40);
   });
 
   test("returns the new ticket draft uri when registered", () => {

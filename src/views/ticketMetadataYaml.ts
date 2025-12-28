@@ -20,6 +20,9 @@ const requireValue = (key: IssueMetadataKey, value: string): void => {
   if (key === "due_date" && value.length > 0 && !/^\d{4}-\d{2}-\d{2}$/.test(value)) {
     throw new Error("due_date must be YYYY-MM-DD");
   }
+  if (key === "parent" && value.length > 0 && !/^\d+$/.test(value)) {
+    throw new Error("parent must be a numeric ID.");
+  }
 };
 
 export const parseIssueMetadataYaml = (text: string): IssueMetadata => {
@@ -100,6 +103,13 @@ export const parseIssueMetadataYaml = (text: string): IssueMetadata => {
       return;
     }
 
+    if (key === "parent") {
+      readingChildren = false;
+      requireValue(key, value);
+      values.parent = Number(value);
+      return;
+    }
+
     readingChildren = false;
     requireValue(key, value);
     values[key] = value;
@@ -134,6 +144,9 @@ export const serializeIssueMetadataYaml = (metadata: IssueMetadata): string => {
     `  status:    ${metadata.status}`,
     `  due_date:  ${dueDate}`,
   ];
+  if (metadata.parent !== undefined) {
+    lines.push(`  parent:    ${metadata.parent}`);
+  }
   if (metadata.children && metadata.children.length > 0) {
     lines.push("  children:");
     metadata.children.forEach((child) => {

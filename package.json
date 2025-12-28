@@ -40,6 +40,7 @@
     "onCommand:todoex.resetEditorDefaults",
     "onCommand:todoex.createTicket",
     "onCommand:todoex.createTicketFromList",
+    "onCommand:todoex.createChildTicketFromList",
     "onCommand:todoex.addCommentFromComments",
     "onCommand:todoex.editComment",
     "onCommand:todoex.addComment"
@@ -170,6 +171,11 @@
         "icon": "$(add)"
       },
       {
+        "command": "todoex.createChildTicketFromList",
+        "title": "Redmine: Add Child Ticket",
+        "icon": "$(add)"
+      },
+      {
         "command": "todoex.editComment",
         "title": "Redmine: Edit Comment"
       },
@@ -248,6 +254,16 @@
           "command": "todoex.openExtraTicketEditor",
           "when": "view == todoexTickets && viewItem == redmineTicket",
           "group": "navigation@1"
+        },
+        {
+          "command": "todoex.createChildTicketFromList",
+          "when": "view == todoexTickets && viewItem == redmineTicket && todoex.canCreateTickets",
+          "group": "inline@1"
+        },
+        {
+          "command": "todoex.createChildTicketFromList",
+          "when": "view == todoexActivityTickets && viewItem == redmineTicket && todoex.canCreateTickets",
+          "group": "inline@1"
         }
       ]
     },

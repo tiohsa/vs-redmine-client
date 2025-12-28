@@ -460,13 +460,18 @@ export const syncNewTicketDraftContent = async (input: {
   content: string;
   projectId?: number;
   deps?: TicketCreateDependencies;
+  onCreated?: (createdId: number, parsed: TicketEditorContent) => void;
 }): Promise<TicketSaveResult> => {
   const deps = input.deps ?? defaultCreateDeps;
-  const { result } = await createTicketFromContent({
+  const { result, createdId, parsed } = await createTicketFromContent({
     content: input.content,
     projectId: input.projectId,
     deps,
   });
+  if (result.status === "created" && createdId && parsed) {
+    updateDraftAfterSave(createdId, parsed.subject, parsed.description, parsed.metadata);
+    input.onCreated?.(createdId, parsed);
+  }
   return result;
 };
 
@@ -524,6 +529,7 @@ const createTicketFromContent = async (input: {
       trackerId: metadataFields.trackerId,
       priorityId: metadataFields.priorityId,
       dueDate,
+      parentId: parsed.metadata.parent,
     });
   } catch (error) {
     return { result: mapErrorToResult(error) };

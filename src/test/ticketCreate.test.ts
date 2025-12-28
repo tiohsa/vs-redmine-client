@@ -115,6 +115,42 @@ suite("Ticket creation payload", () => {
     assert.strictEqual(created[0].parentId, undefined);
   });
 
+  test("uses parent metadata when creating a child ticket", async () => {
+    const created: Array<{
+      projectId: number;
+      subject: string;
+      description: string;
+      parentId?: number;
+    }> = [];
+
+    const deps = {
+      createIssue: async (input: typeof created[number]) => {
+        created.push(input);
+        return 400;
+      },
+      deleteIssue: async () => undefined,
+      listIssueStatuses: async () => [{ id: 1, name: "In Progress" }],
+      listTrackers: async () => [{ id: 2, name: "Task" }],
+      listIssuePriorities: async () => [{ id: 3, name: "Normal" }],
+    };
+
+    const content = buildTicketEditorMetadataContent(
+      "Child Ticket",
+      "Child body",
+      { parent: 321 },
+    );
+
+    const result = await syncNewTicketDraftContent({
+      content,
+      projectId: 10,
+      deps,
+    });
+
+    assert.strictEqual(result.status, "created");
+    assert.strictEqual(created.length, 1);
+    assert.strictEqual(created[0].parentId, 321);
+  });
+
   test("rolls back when child creation fails", async () => {
     const created: Array<{ subject: string; parentId?: number }> = [];
     const deleted: number[] = [];

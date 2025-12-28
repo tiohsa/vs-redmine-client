@@ -2,6 +2,7 @@ import * as path from "path";
 import * as vscode from "vscode";
 import { addCommentFromList } from "./commands/addCommentFromList";
 import { createTicketFromEditor } from "./commands/createTicket";
+import { createChildTicketFromList } from "./commands/createChildTicketFromList";
 import { createTicketFromList } from "./commands/createTicketFromList";
 import { editComment } from "./commands/editComment";
 import { reloadCommentFromEditor } from "./commands/reloadComment";
@@ -34,9 +35,15 @@ import {
 import {
   getCommentIdForEditor,
   getEditorContentType,
+  getProjectIdForDocument,
+  getProjectIdForUri,
   getTicketIdForEditor,
+  getTicketIdForDocument,
+  getTicketIdForUri,
   isTicketEditor,
   markEditorActive,
+  NEW_TICKET_DRAFT_ID,
+  registerTicketDocument,
   removeTicketEditorByDocument,
 } from "./views/ticketEditorRegistry";
 import { showTicketComment, showTicketPreview } from "./views/ticketPreview";
@@ -303,6 +310,36 @@ export async function activate(context: vscode.ExtensionContext) {
         }
       }
 
+      const ticketIdForDocument =
+        getTicketIdForDocument(document) ?? getTicketIdForUri(document.uri);
+      if (ticketIdForDocument) {
+        if (ticketIdForDocument === NEW_TICKET_DRAFT_ID) {
+          const projectId =
+            getProjectIdForDocument(document) ?? getProjectIdForUri(document.uri);
+          const result = await syncNewTicketDraftContent({
+            content: document.getText(),
+            projectId,
+            onCreated: (createdId) => {
+              removeTicketEditorByDocument(document);
+              registerTicketDocument(createdId, document, "ticket", projectId);
+            },
+          });
+          notifyTicketSaveResult(result);
+          if (result.status === "created") {
+            ticketsProvider.refresh();
+          }
+          return;
+        }
+
+        const result = await syncTicketDraft({
+          ticketId: ticketIdForDocument,
+          content: document.getText(),
+          onSubjectUpdated: updateTicketListSubject,
+        });
+        notifyTicketSaveResult(result);
+        return;
+      }
+
       const filename = path.basename(document.uri.path);
       const parsed = parseEditorFilename(filename);
       if (!parsed) {
@@ -323,6 +360,10 @@ export async function activate(context: vscode.ExtensionContext) {
 
           const result = await syncNewTicketDraftContent({
             content: document.getText(),
+            onCreated: (createdId) => {
+              removeTicketEditorByDocument(document);
+              registerTicketDocument(createdId, document, "ticket");
+            },
           });
           notifyTicketSaveResult(result);
           if (result.status === "created") {
@@ -604,6 +645,11 @@ export async function activate(context: vscode.ExtensionContext) {
   context.subscriptions.push(
     vscode.commands.registerCommand("todoex.createTicketFromList", async () => {
       await createTicketFromList();
+    }),
+  );
+  context.subscriptions.push(
+    vscode.commands.registerCommand("todoex.createChildTicketFromList", async (item) => {
+      await createChildTicketFromList(item as TicketTreeItem | undefined);
     }),
   );
 

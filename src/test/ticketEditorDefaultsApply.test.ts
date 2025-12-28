@@ -3,7 +3,7 @@ import {
   resetTicketEditorDefaults,
   updateTicketEditorDefaultField,
 } from "../views/ticketEditorDefaultsStore";
-import { buildNewTicketDraftContent } from "../views/ticketDraftStore";
+import { buildNewChildTicketDraftContent, buildNewTicketDraftContent } from "../views/ticketDraftStore";
 
 suite("Ticket editor defaults application", () => {
   teardown(() => {
@@ -30,5 +30,23 @@ suite("Ticket editor defaults application", () => {
         children: [],
       },
     });
+  });
+
+  test("applies parent metadata to child ticket draft content", () => {
+    const content = buildNewChildTicketDraftContent({
+      id: 123,
+      subject: "Parent",
+      projectId: 10,
+      trackerName: "Bug",
+      priorityName: "High",
+      statusName: "In Progress",
+      dueDate: "2025-12-24",
+    });
+
+    assert.strictEqual(content.metadata.parent, 123);
+    assert.strictEqual(content.metadata.tracker, "Bug");
+    assert.strictEqual(content.metadata.priority, "High");
+    assert.strictEqual(content.metadata.status, "In Progress");
+    assert.strictEqual(content.metadata.due_date, "2025-12-24");
   });
 });

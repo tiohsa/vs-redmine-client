@@ -45,6 +45,32 @@ suite("Tickets view title actions", () => {
     assert.strictEqual(addCommand?.icon, "$(add)");
   });
 
+  test("declares child ticket action for ticket items", () => {
+    const childCommand = findCommand("todoex.createChildTicketFromList");
+    assert.ok(childCommand, "child ticket command must exist");
+    assert.strictEqual(childCommand?.title, "Redmine: Add Child Ticket");
+    assert.strictEqual(childCommand?.icon, "$(add)");
+
+    const contextItems = getMenuItems("view/item/context");
+    const explorerEntry = contextItems.find(
+      (item) =>
+        item.command === "todoex.createChildTicketFromList" &&
+        item.when ===
+          "view == todoexTickets && viewItem == redmineTicket && todoex.canCreateTickets",
+    );
+    assert.ok(explorerEntry, "child ticket item action must exist in explorer view");
+    assert.strictEqual(explorerEntry?.group, "inline@1");
+
+    const activityEntry = contextItems.find(
+      (item) =>
+        item.command === "todoex.createChildTicketFromList" &&
+        item.when ===
+          "view == todoexActivityTickets && viewItem == redmineTicket && todoex.canCreateTickets",
+    );
+    assert.ok(activityEntry, "child ticket item action must exist in activity view");
+    assert.strictEqual(activityEntry?.group, "inline@1");
+  });
+
   test("uses refresh icon for ticket reload action", () => {
     const reloadCommand = findCommand("todoex.reloadTicket");
     assert.ok(reloadCommand, "reload ticket command must exist");

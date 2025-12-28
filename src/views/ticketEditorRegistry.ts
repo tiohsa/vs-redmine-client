@@ -71,6 +71,34 @@ export const registerTicketEditor = (
 export const registerNewTicketDraft = (editor: vscode.TextEditor): TicketEditorRecord =>
   registerTicketEditor(NEW_TICKET_DRAFT_ID, editor, "primary", "ticket");
 
+export const registerTicketDocument = (
+  ticketId: number,
+  document: vscode.TextDocument,
+  contentType: TicketEditorContentType = "ticket",
+  projectId?: number,
+): TicketEditorRecord => {
+  const uri = document.uri.toString();
+  const record: TicketEditorRecord = {
+    ticketId,
+    projectId,
+    uri,
+    kind: "primary",
+    contentType,
+    lastActiveAt: Date.now(),
+    displaySource: "saved",
+    lastLoadedAt: Date.now(),
+  };
+
+  editorByUri.set(uri, record);
+  editorByDocument.set(document, record);
+  if (!editorsByTicket.has(ticketId)) {
+    editorsByTicket.set(ticketId, new Set());
+  }
+  editorsByTicket.get(ticketId)?.add(uri);
+
+  return record;
+};
+
 export const getNewTicketDraftUri = (): vscode.Uri | undefined => {
   const record =
     getLastActiveEditor(NEW_TICKET_DRAFT_ID) ?? getPrimaryEditor(NEW_TICKET_DRAFT_ID);
@@ -226,6 +254,20 @@ export const getTicketIdForEditor = (editor: vscode.TextEditor): number | undefi
 
 export const getProjectIdForEditor = (editor: vscode.TextEditor): number | undefined =>
   getRecord(editor)?.projectId;
+
+export const getTicketIdForDocument = (
+  document: vscode.TextDocument,
+): number | undefined => editorByDocument.get(document)?.ticketId;
+
+export const getProjectIdForDocument = (
+  document: vscode.TextDocument,
+): number | undefined => editorByDocument.get(document)?.projectId;
+
+export const getTicketIdForUri = (uri: vscode.Uri): number | undefined =>
+  editorByUri.get(uri.toString())?.ticketId;
+
+export const getProjectIdForUri = (uri: vscode.Uri): number | undefined =>
+  editorByUri.get(uri.toString())?.projectId;
 
 export const getCommentIdForEditor = (editor: vscode.TextEditor): number | undefined =>
   getRecord(editor)?.commentId;

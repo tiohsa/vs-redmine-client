@@ -4,6 +4,7 @@ export type IssueMetadata = {
   status: string;
   due_date: string;
   children?: string[];
+  parent?: number;
 };
 
 export const ISSUE_METADATA_REQUIRED_KEYS = [
@@ -13,7 +14,7 @@ export const ISSUE_METADATA_REQUIRED_KEYS = [
   "due_date",
 ] as const;
 
-export const ISSUE_METADATA_OPTIONAL_KEYS = ["children"] as const;
+export const ISSUE_METADATA_OPTIONAL_KEYS = ["children", "parent"] as const;
 
 export const ISSUE_METADATA_KEYS = [
   ...ISSUE_METADATA_REQUIRED_KEYS,
@@ -44,4 +45,5 @@ export const isIssueMetadataEqual = (
   left.priority === right.priority &&
   left.status === right.status &&
   left.due_date === right.due_date &&
-  areChildrenEqual(left.children, right.children);
+  areChildrenEqual(left.children, right.children) &&
+  left.parent === right.parent;

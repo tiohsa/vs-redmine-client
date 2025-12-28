@@ -26,9 +26,14 @@ export const buildTicketEditorMetadataContentWithChildren = (
     `  priority:  ${metadata.priority}`,
     `  status:    ${metadata.status}`,
     `  due_date:  ${metadata.due_date}`,
+  ];
+  if (metadata.parent !== undefined) {
+    metadataLines.push(`  parent:    ${metadata.parent}`);
+  }
+  metadataLines.push(
     "  children:",
     ...children.map((child) => `    - ${child}`),
-  ];
+  );
   const metadataBlock = `---\n${metadataLines.join("\n")}\n---`;
   return `${metadataBlock}\n\n# ${subject}\n\n${description}`;
 };
