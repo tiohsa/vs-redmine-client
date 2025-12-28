@@ -23,6 +23,9 @@ export const getTicketListLimit = (): number =>
 export const getEditorStorageDirectory = (): string =>
   getSettings().get<string>("editorStorageDirectory", "").trim();
 
+export const getNewTicketTemplatePath = (): string =>
+  getSettings().get<string>("newTicketTemplatePath", "").trim();
+
 export const EDITOR_DEFAULT_FIELDS = [
   "subject",
   "description",

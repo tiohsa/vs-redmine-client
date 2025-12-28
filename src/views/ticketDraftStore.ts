@@ -12,8 +12,23 @@ export const getTicketDraft = (ticketId: number): TicketDraftState | undefined =
 export const buildNewTicketDraftContent = (): TicketEditorContent =>
   applyTicketEditorDefaults(getTicketEditorDefaults());
 
-export const buildNewChildTicketDraftContent = (parentTicket: Ticket): TicketEditorContent => {
-  const content = buildNewTicketDraftContent();
+export const buildEmptyTicketDraftContent = (): TicketEditorContent => ({
+  subject: "",
+  description: "",
+  metadata: {
+    tracker: "",
+    priority: "",
+    status: "",
+    due_date: "",
+    children: [],
+  },
+});
+
+export const buildNewChildTicketDraftContent = (
+  parentTicket: Ticket,
+  baseContent: TicketEditorContent = buildNewTicketDraftContent(),
+): TicketEditorContent => {
+  const content = baseContent;
   return {
     ...content,
     metadata: {

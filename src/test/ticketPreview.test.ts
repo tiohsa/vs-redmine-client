@@ -2,8 +2,10 @@ import * as assert from "assert";
 import * as vscode from "vscode";
 import {
   buildTicketPreviewContent,
+  findEmptySubjectPosition,
   resolveTicketEditorUri,
   resolveEditorStorageDir,
+  resolveNewTicketDraftContent,
   withTrailingEditLines,
 } from "../views/ticketPreview";
 
@@ -90,5 +92,49 @@ suite("Ticket preview", () => {
 
     assert.strictEqual(resolution.usedFallback, true);
     assert.strictEqual(resolution.uri, undefined);
+  });
+
+  test("uses template content for new ticket drafts when configured", () => {
+    const template = [
+      "---",
+      "issue:",
+      "  tracker: Task",
+      "  priority: Normal",
+      "  status: New",
+      "  due_date: 2025-01-01",
+      "---",
+      "",
+      "# Template subject",
+      "",
+      "Template body",
+    ].join("\n");
+
+    const resolution = resolveNewTicketDraftContent({
+      templatePath: "/abs/template.md",
+      existsSync: () => true,
+      readFileSync: () => template,
+    });
+
+    assert.strictEqual(resolution.usedTemplate, true);
+    assert.strictEqual(resolution.isTemplateConfigured, true);
+    assert.strictEqual(resolution.content.subject, "Template subject");
+  });
+
+  test("locates the empty subject placeholder position", () => {
+    const content = [
+      "---",
+      "issue:",
+      "  tracker: Task",
+      "  priority: Normal",
+      "  status: New",
+      "  due_date: 2025-01-01",
+      "---",
+      "",
+      "# ",
+      "",
+    ].join("\n");
+
+    const position = findEmptySubjectPosition(content);
+    assert.deepStrictEqual(position, { line: 8, character: 2 });
   });
 });

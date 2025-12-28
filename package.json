@@ -311,6 +311,11 @@
           "type": "string",
           "default": "",
           "description": "Absolute path to store ticket editor files. When empty, the default workspace location is used."
+        },
+        "todoex.newTicketTemplatePath": {
+          "type": "string",
+          "default": "",
+          "description": "Absolute path to the new ticket editor template file."
         }
       }
     }

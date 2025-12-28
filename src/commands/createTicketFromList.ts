@@ -8,10 +8,15 @@ import {
   setEditorProjectId,
 } from "../views/ticketEditorRegistry";
 import { buildTicketEditorContent } from "../views/ticketEditorContent";
-import { applyEditorContent } from "../views/ticketPreview";
+import {
+  applyEditorContent,
+  findEmptySubjectPosition,
+  resolveNewTicketDraftContent,
+} from "../views/ticketPreview";
 import { buildUniqueUntitledPath } from "../views/untitledPath";
-import { buildNewTicketDraftContent } from "../views/ticketDraftStore";
+import { buildEmptyTicketDraftContent } from "../views/ticketDraftStore";
 import { TicketEditorContent } from "../views/ticketEditorContent";
+import { showError } from "../utils/notifications";
 
 const DRAFT_FILENAME = "todoex-new-ticket.md";
 
@@ -64,14 +69,34 @@ export const openNewTicketDraft = async (input: {
   }
 
   if (document.getText().trim().length === 0) {
-    await applyEditorContent(editor, buildNewTicketTemplate(input.content));
+    const templateText = buildNewTicketTemplate(input.content);
+    await applyEditorContent(editor, templateText);
+    if (input.content.subject.trim().length === 0) {
+      const position = findEmptySubjectPosition(templateText);
+      if (position) {
+        editor.selection = new vscode.Selection(
+          new vscode.Position(position.line, position.character),
+          new vscode.Position(position.line, position.character),
+        );
+        editor.revealRange(
+          new vscode.Range(
+            new vscode.Position(position.line, position.character),
+            new vscode.Position(position.line, position.character),
+          ),
+        );
+      }
+    }
   }
 };
 
 export const createTicketFromList = async (): Promise<void> => {
   const projectId = resolveProjectId();
+  const templateResolution = resolveNewTicketDraftContent();
+  if (templateResolution.isTemplateConfigured && templateResolution.errorMessage) {
+    showError(templateResolution.errorMessage);
+  }
   await openNewTicketDraft({
-    content: buildNewTicketDraftContent(),
+    content: templateResolution.content ?? buildEmptyTicketDraftContent(),
     projectId,
   });
 };

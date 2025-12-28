@@ -22,6 +22,7 @@ export type TicketEditorMetadataBlock = "present" | "missing";
 type TicketEditorParseOptions = {
   allowMissingMetadata?: boolean;
   fallbackMetadata?: IssueMetadata;
+  allowMissingSubject?: boolean;
 };
 
 const normalizeDescription = (lines: string[]): string => {
@@ -41,8 +42,9 @@ const extractSubjectLine = (
     if (line.trim().length === 0) {
       continue;
     }
-    if (line.trim().startsWith("# ")) {
-      const heading = line.trim().replace(/^#\s+/, "");
+    const trimmed = line.trim();
+    if (trimmed.startsWith("#") && !trimmed.startsWith("##")) {
+      const heading = trimmed.replace(/^#\s*/, "");
       return { subject: heading, subjectIndex: index };
     }
     return { subject: "", subjectIndex: -1 };
@@ -119,6 +121,15 @@ export const parseTicketEditorContent = (
     const { metadata, nextIndex } = extractMetadataFromStart(lines);
     const { subject, subjectIndex } = extractSubjectLine(lines, nextIndex);
     if (subjectIndex === -1) {
+      if (options.allowMissingSubject) {
+        return {
+          subject: "",
+          description: normalizeDescription(lines.slice(nextIndex)),
+          metadata,
+          layout: "metadata-first",
+          metadataBlock: "present",
+        };
+      }
       throw new Error("Subject line must appear after the metadata block.");
     }
     const description = normalizeDescription(lines.slice(subjectIndex + 1));

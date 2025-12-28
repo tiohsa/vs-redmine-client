@@ -1,6 +1,7 @@
 import { buildNewChildTicketDraftContent } from "../views/ticketDraftStore";
 import { TicketTreeItem } from "../views/ticketsView";
 import { showError } from "../utils/notifications";
+import { resolveNewTicketDraftContent } from "../views/ticketPreview";
 import { openNewTicketDraft } from "./createTicketFromList";
 
 export const createChildTicketFromList = async (
@@ -18,8 +19,13 @@ export const createChildTicketFromList = async (
     return;
   }
 
+  const templateResolution = resolveNewTicketDraftContent();
+  if (templateResolution.isTemplateConfigured && templateResolution.errorMessage) {
+    showError(templateResolution.errorMessage);
+  }
+
   await openNewTicketDraft({
-    content: buildNewChildTicketDraftContent(item.ticket),
+    content: buildNewChildTicketDraftContent(item.ticket, templateResolution.content),
     projectId,
   });
 };

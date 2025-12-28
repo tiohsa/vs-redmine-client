@@ -11,9 +11,15 @@ import {
   setEditorDisplaySource,
 } from "./ticketEditorRegistry";
 import { ensureCommentEdit, resolveCommentEditorBody } from "./commentEditStore";
-import { ensureTicketDraft, getTicketDraftContent } from "./ticketDraftStore";
+import {
+  buildEmptyTicketDraftContent,
+  buildNewTicketDraftContent,
+  ensureTicketDraft,
+  getTicketDraftContent,
+} from "./ticketDraftStore";
 import {
   buildTicketEditorContent,
+  parseTicketEditorContent,
   resolveTicketEditorDisplay,
   TicketEditorContent,
 } from "./ticketEditorContent";
@@ -22,7 +28,7 @@ import {
   buildCommentEditorFilename,
   buildTicketEditorFilename,
 } from "./editorFilename";
-import { getEditorStorageDirectory } from "../config/settings";
+import { getEditorStorageDirectory, getNewTicketTemplatePath } from "../config/settings";
 import { showError } from "../utils/notifications";
 
 export const buildTicketPreviewContent = (
@@ -55,6 +61,26 @@ const moveCursorToEnd = (editor: vscode.TextEditor): void => {
   const end = editor.document.positionAt(editor.document.getText().length);
   editor.selection = new vscode.Selection(end, end);
   editor.revealRange(new vscode.Range(end, end));
+};
+
+export const findEmptySubjectPosition = (
+  content: string,
+): { line: number; character: number } | undefined => {
+  const lines = content.split(/\r?\n/);
+  for (let index = 0; index < lines.length; index += 1) {
+    const line = lines[index];
+    const trimmed = line.trim();
+    if (!trimmed.startsWith("#") || trimmed.startsWith("##")) {
+      continue;
+    }
+    const subject = trimmed.replace(/^#\s*/, "");
+    if (subject.length === 0) {
+      const hashIndex = line.indexOf("#");
+      return { line: index, character: hashIndex === -1 ? 2 : hashIndex + 2 };
+    }
+    return undefined;
+  }
+  return undefined;
 };
 
 export const buildCommentEditorContent = (comment: string): string => comment;
@@ -153,6 +179,88 @@ export const resolveEditorStorageDir = (
   return {
     uri: vscode.Uri.joinPath(workspace.uri, ".todoex", "editors"),
     usedFallback: true,
+  };
+};
+
+type TemplateResolution = {
+  content?: TicketEditorContent;
+  errorMessage?: string;
+};
+
+type NewTicketDraftResolution = {
+  content: TicketEditorContent;
+  errorMessage?: string;
+  usedTemplate: boolean;
+  isTemplateConfigured: boolean;
+};
+
+export const resolveNewTicketTemplateContent = (input: {
+  templatePath: string;
+  readFileSync?: (targetPath: string) => string;
+  existsSync?: (targetPath: string) => boolean;
+}): TemplateResolution => {
+  const templatePath = input.templatePath.trim();
+  if (!path.isAbsolute(templatePath)) {
+    return { errorMessage: "Template file path must be an absolute path." };
+  }
+
+  const exists = input.existsSync ?? fs.existsSync;
+  if (!exists(templatePath)) {
+    return { errorMessage: "Template file does not exist." };
+  }
+
+  const readFile =
+    input.readFileSync ?? ((targetPath: string) => fs.readFileSync(targetPath, "utf8"));
+  let raw: string;
+  try {
+    raw = readFile(templatePath);
+  } catch {
+    return { errorMessage: "Template file could not be read." };
+  }
+
+  if (raw.trim().length === 0) {
+    return { errorMessage: "Template file is empty." };
+  }
+
+  try {
+    return { content: parseTicketEditorContent(raw, { allowMissingSubject: true }) };
+  } catch {
+    return { errorMessage: "Template content is invalid." };
+  }
+};
+
+export const resolveNewTicketDraftContent = (options: {
+  templatePath?: string;
+  readFileSync?: (targetPath: string) => string;
+  existsSync?: (targetPath: string) => boolean;
+} = {}): NewTicketDraftResolution => {
+  const templatePath = options.templatePath ?? getNewTicketTemplatePath();
+  if (templatePath.length === 0) {
+    return {
+      content: buildNewTicketDraftContent(),
+      usedTemplate: false,
+      isTemplateConfigured: false,
+    };
+  }
+
+  const template = resolveNewTicketTemplateContent({
+    templatePath,
+    readFileSync: options.readFileSync,
+    existsSync: options.existsSync,
+  });
+  if (template.content) {
+    return {
+      content: template.content,
+      usedTemplate: true,
+      isTemplateConfigured: true,
+    };
+  }
+
+  return {
+    content: buildEmptyTicketDraftContent(),
+    errorMessage: template.errorMessage,
+    usedTemplate: false,
+    isTemplateConfigured: true,
   };
 };
 
