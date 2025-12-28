@@ -22,6 +22,7 @@ Auto-generated from all feature plans. Last updated: 2025-12-26
 - N/A (in-memory) (001-metadata-before-subject)
 - N/A (in-memory only) (001-add-child-ticket-icon)
 - N/A (local file system only) (001-fix-editor-path)
+- N/A (static asset update) (001-activitybar-icon)
 
 - TypeScript 5.9 + VS Code Extension API, webpack, @vscode/test-cli (001-redmine-ticket-workflow)
 
@@ -41,9 +42,9 @@ npm test && npm run lint
 TypeScript 5.9: Follow standard conventions
 
 ## Recent Changes
+- 001-activitybar-icon: Added TypeScript 5.9 + VS Code Extension API, webpack 5, @vscode/test-cli, ESLint
 - 001-fix-editor-path: Added TypeScript 5.9 + VS Code Extension API, webpack 5, @vscode/test-cli, ESLint
 - 001-add-child-ticket-icon: Added TypeScript 5.9 + VS Code Extension API, webpack 5, @vscode/test-cli, ESLint
-- 001-update-ticket-list-subject: Added TypeScript 5.9 + VS Code Extension API, webpack 5, @vscode/test-cli, ESLint
 
 
 <!-- MANUAL ADDITIONS START -->

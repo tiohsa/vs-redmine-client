@@ -49,4 +49,18 @@ suite("Activity Bar view container", () => {
       "onView:todoexActivityComments activation missing",
     );
   });
+
+  test("uses the updated Activity Bar SVG icon", () => {
+    const svgPath = path.resolve(__dirname, "../../media/todoex-activitybar.svg");
+    const raw = fs.readFileSync(svgPath, "utf8");
+
+    assert.ok(raw.includes('viewBox="2 2 20 20"'), "SVG viewBox must match");
+    assert.ok(raw.includes('fill="currentColor"'), "SVG fill must use currentColor");
+    assert.ok(
+      raw.includes(
+        'd="M4 18h3.5v-5c0-2.48 2.02-4.5 4.5-4.5s4.5 2.02 4.5 4.5v5H20v-3.5c0-4.42-3.58-8-8-8s-8 3.58-8 8V18zM10 18h4v-5c0-1.1-.9-2-2-2s-2 .9-2 2v5z"',
+      ),
+      "SVG path data must match the provided icon",
+    );
+  });
 });
