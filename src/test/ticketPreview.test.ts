@@ -1,5 +1,5 @@
 import * as assert from "assert";
-import { buildTicketPreviewContent } from "../views/ticketPreview";
+import { buildTicketPreviewContent, withTrailingEditLines } from "../views/ticketPreview";
 
 suite("Ticket preview", () => {
   test("renders subject and description", () => {
@@ -15,5 +15,11 @@ suite("Ticket preview", () => {
     assert.ok(content.includes("Sample ticket"));
     assert.ok(content.includes("Details"));
     assert.ok(content.includes("issue:"));
+  });
+
+  test("appends trailing blank lines for editing", () => {
+    assert.strictEqual(withTrailingEditLines("Line"), "Line\n\n");
+    assert.strictEqual(withTrailingEditLines("Line\n"), "Line\n\n");
+    assert.strictEqual(withTrailingEditLines("Line\n\n"), "Line\n\n");
   });
 });

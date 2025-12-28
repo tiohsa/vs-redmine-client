@@ -37,6 +37,22 @@ export const buildTicketPreviewContent = (
   });
 };
 
+export const withTrailingEditLines = (content: string): string => {
+  if (content.endsWith("\n\n")) {
+    return content;
+  }
+  if (content.endsWith("\n")) {
+    return `${content}\n`;
+  }
+  return `${content}\n\n`;
+};
+
+const moveCursorToEnd = (editor: vscode.TextEditor): void => {
+  const end = editor.document.positionAt(editor.document.getText().length);
+  editor.selection = new vscode.Selection(end, end);
+  editor.revealRange(new vscode.Range(end, end));
+};
+
 export const buildCommentEditorContent = (comment: string): string => comment;
 
 export const applyEditorContent = async (
@@ -109,7 +125,7 @@ export const showTicketPreview = async (
   };
   const draftContent = getTicketDraftContent(ticket.id);
   const display = resolveTicketEditorDisplay(savedContent, draftContent);
-  const content = buildTicketEditorContent(display.content);
+  const content = withTrailingEditLines(buildTicketEditorContent(display.content));
   const filename = buildTicketEditorFilename(
     ticket.projectId,
     ticket.id,
@@ -131,6 +147,7 @@ export const showTicketPreview = async (
     savedContent.metadata,
     ticket.updatedAt,
   );
+  moveCursorToEnd(editor);
   return editor;
 };
 
@@ -141,12 +158,18 @@ export const showTicketComment = async (
 ): Promise<vscode.TextEditor> => {
   const display = resolveCommentEditorBody(commentId, comment);
   const filename = buildCommentEditorFilename(ticket.projectId, ticket.id, commentId);
-  const content = buildCommentEditorContent(display.body);
+  const content =
+    display.body.trim().length === 0
+      ? buildCommentEditorContent(display.body)
+      : withTrailingEditLines(buildCommentEditorContent(display.body));
   const editor = await openTicketEditor(ticket, "primary", filename, content);
   setEditorContentType(editor, "comment");
   setEditorProjectId(editor, ticket.projectId);
   setEditorCommentId(editor, commentId);
   setEditorDisplaySource(editor, display.source);
   ensureCommentEdit(commentId, ticket.id, comment);
+  if (content.trim().length > 0) {
+    moveCursorToEnd(editor);
+  }
   return editor;
 };
