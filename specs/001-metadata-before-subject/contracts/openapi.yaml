@@ -1,0 +1,7 @@
+openapi: 3.0.3
+info:
+  title: TodoEx Editor Content Ordering
+  version: 1.0.0
+servers:
+  - url: https://localhost
+paths: {}

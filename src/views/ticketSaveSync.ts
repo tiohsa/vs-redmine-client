@@ -260,7 +260,10 @@ export const syncTicketDraft = async (input: {
 
   let parsed;
   try {
-    parsed = parseTicketEditorContent(input.content);
+    parsed = parseTicketEditorContent(input.content, {
+      allowMissingMetadata: true,
+      fallbackMetadata: draft.baseMetadata,
+    });
   } catch (error) {
     const message = error instanceof Error ? error.message : "Invalid metadata.";
     return buildResult("failed", message);
@@ -408,6 +411,8 @@ export const syncTicketDraft = async (input: {
       subject,
       description,
       metadata: clearedMetadata,
+      layout: parsed.layout,
+      metadataBlock: parsed.metadataBlock,
     });
     await applyEditorContent(input.editor, nextContent);
   }

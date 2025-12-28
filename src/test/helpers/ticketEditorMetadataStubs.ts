@@ -30,5 +30,5 @@ export const buildTicketEditorMetadataContentWithChildren = (
     ...children.map((child) => `    - ${child}`),
   ];
   const metadataBlock = `---\n${metadataLines.join("\n")}\n---`;
-  return `# ${subject}\n\n${metadataBlock}\n\n${description}`.trim();
+  return `${metadataBlock}\n\n# ${subject}\n\n${description}`;
 };
