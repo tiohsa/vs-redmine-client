@@ -13,9 +13,9 @@ import { showError } from "../utils/notifications";
 import { MAX_VIEW_ITEMS } from "./viewLimits";
 import { setViewContext } from "./viewContext";
 import { createEmptyStateItem, createErrorStateItem } from "./viewState";
-import { buildTree } from "./treeBuilder";
-import { TreeNode, TreeSource } from "./treeTypes";
-import { isTreeExpanded } from "./treeState";
+import { buildTree, collectTreeNodeIds } from "./treeBuilder";
+import { TreeBuildResult, TreeNode, TreeSource } from "./treeTypes";
+import { isTreeExpanded, setTreeExpandedBulk } from "./treeState";
 import { createCycleWarningItem } from "./treeWarnings";
 import {
   applyTicketFilters,
@@ -282,6 +282,10 @@ export class TicketsTreeProvider implements vscode.TreeDataProvider<vscode.TreeI
     return element;
   }
 
+  getParent(): vscode.ProviderResult<vscode.TreeItem> {
+    return undefined;
+  }
+
   getChildren(element?: vscode.TreeItem): vscode.ProviderResult<vscode.TreeItem[]> {
     if (element instanceof TicketTreeItem) {
       const dueIndicators = this.buildDueIndicators();
@@ -289,6 +293,16 @@ export class TicketsTreeProvider implements vscode.TreeDataProvider<vscode.TreeI
     }
 
     return this.getViewItems();
+  }
+
+  collapseAllVisible(): void {
+    if (this.errorMessage || !this.selectedProjectId) {
+      return;
+    }
+    const { treeResult } = this.getVisibleTreeResult();
+    const nodeIds = collectTreeNodeIds(treeResult.roots).map(String);
+    setTreeExpandedBulk(TICKETS_VIEW_KEY, nodeIds, false);
+    this.emitter.fire();
   }
 
   getViewItems(): vscode.TreeItem[] {
@@ -304,12 +318,20 @@ export class TicketsTreeProvider implements vscode.TreeDataProvider<vscode.TreeI
       return items;
     }
 
+    const { treeResult } = this.getVisibleTreeResult();
+    this.rootNodes = treeResult.roots;
+    return items;
+  }
+
+  private getVisibleTreeResult(): {
+    visibleTickets: Ticket[];
+    treeResult: TreeBuildResult<Ticket>;
+  } {
     const filteredTickets = applyTicketFilters(this.tickets, this.settings.filters);
     const sortedTickets = applyTicketSort(filteredTickets, this.settings.sort);
     const visibleTickets = sortedTickets.slice(0, MAX_VIEW_ITEMS);
     const treeResult = buildTree(buildTicketTreeSources(visibleTickets));
-    this.rootNodes = treeResult.roots;
-    return items;
+    return { visibleTickets, treeResult };
   }
 
   private buildDueIndicators(): Map<number, string | undefined> {

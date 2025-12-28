@@ -51,6 +51,16 @@ suite("Tickets view title actions", () => {
     assert.strictEqual(reloadCommand?.icon, "$(refresh)");
   });
 
+  test("declares collapse action for tickets view title", () => {
+    const collapseCommand = findCommand("todoex.collapseAllTickets");
+    assert.ok(collapseCommand, "todoex.collapseAllTickets command must exist");
+    assert.strictEqual(collapseCommand?.icon, "$(collapse-all)");
+
+    const collapseEntry = findViewTitleEntry("todoex.collapseAllTickets");
+    assert.ok(collapseEntry, "collapse tickets view/title entry must exist");
+    assert.strictEqual(collapseEntry?.when, "view == todoexActivityTickets");
+  });
+
   test("keeps existing ticket context actions", () => {
     const contextItems = getMenuItems("view/item/context");
 

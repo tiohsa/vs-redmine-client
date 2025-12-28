@@ -16,6 +16,8 @@
     "onView:todoexActivityComments",
     "onCommand:todoex.refreshTickets",
     "onCommand:todoex.refreshProjects",
+    "onCommand:todoex.collapseAllProjects",
+    "onCommand:todoex.collapseAllTickets",
     "onCommand:todoex.selectProject",
     "onCommand:todoex.toggleChildProjects",
     "onCommand:todoex.openTicketPreview",
@@ -65,6 +67,16 @@
       {
         "command": "todoex.refreshTickets",
         "title": "Redmine: Refresh Tickets"
+      },
+      {
+        "command": "todoex.collapseAllProjects",
+        "title": "Redmine: Collapse All Projects",
+        "icon": "$(collapse-all)"
+      },
+      {
+        "command": "todoex.collapseAllTickets",
+        "title": "Redmine: Collapse All Tickets",
+        "icon": "$(collapse-all)"
       },
       {
         "command": "todoex.reloadTicket",
@@ -194,6 +206,11 @@
     "menus": {
       "view/title": [
         {
+          "command": "todoex.collapseAllProjects",
+          "when": "view == todoexActivityProjects",
+          "group": "navigation"
+        },
+        {
           "command": "todoex.createTicketFromList",
           "when": "view == todoexActivityTickets",
           "group": "navigation",
@@ -202,7 +219,12 @@
         {
           "command": "todoex.reloadTicket",
           "when": "view == todoexActivityTickets",
-          "group": "navigation@1"
+          "group": "navigation@2"
+        },
+        {
+          "command": "todoex.collapseAllTickets",
+          "when": "view == todoexActivityTickets",
+          "group": "navigation@3"
         },
         {
           "command": "todoex.addCommentFromComments",

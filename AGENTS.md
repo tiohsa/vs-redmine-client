@@ -18,6 +18,7 @@ Auto-generated from all feature plans. Last updated: 2025-12-26
 - N/A（永続化変更なし、インメモリのみ） (001-iconize-view-buttons)
 - インメモリ（永続化なし） (001-editor-default-value)
 - N/A (インメモリのみ、永続化変更なし) (001-children-ticket-create)
+- VS Code workspace storage (ワークスペース内で永続保持) (001-tree-expand-collapse)
 
 - TypeScript 5.9 + VS Code Extension API, webpack, @vscode/test-cli (001-redmine-ticket-workflow)
 
@@ -37,9 +38,9 @@ npm test && npm run lint
 TypeScript 5.9: Follow standard conventions
 
 ## Recent Changes
+- 001-tree-expand-collapse: Added TypeScript 5.9 + VS Code Extension API, webpack 5, @vscode/test-cli, ESLint
 - 001-add-children-on-update: Added TypeScript 5.9 + VS Code Extension API, webpack 5, @vscode/test-cli, ESLint
 - 001-children-ticket-create: Added TypeScript 5.9 + VS Code Extension API, webpack 5, @vscode/test-cli, ESLint
-- 001-tree-view-hierarchy: Added TypeScript 5.9 + VS Code Extension API, webpack 5, @vscode/test-cli, ESLint
 
 
 <!-- MANUAL ADDITIONS START -->

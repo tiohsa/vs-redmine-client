@@ -1,0 +1,56 @@
+openapi: 3.0.3
+info:
+  title: TodoEx Tree View Controls
+  version: 1.0.0
+servers:
+  - url: https://localhost
+paths:
+  /views/project-tree/expand-all:
+    post:
+      summary: Expand all visible project tree nodes
+      responses:
+        '200':
+          description: All visible nodes expanded
+  /views/project-tree/collapse-all:
+    post:
+      summary: Collapse all visible project tree nodes
+      responses:
+        '200':
+          description: All visible nodes collapsed
+  /views/ticket-tree/expand-all:
+    post:
+      summary: Expand all visible ticket tree nodes
+      responses:
+        '200':
+          description: All visible nodes expanded
+  /views/ticket-tree/collapse-all:
+    post:
+      summary: Collapse all visible ticket tree nodes
+      responses:
+        '200':
+          description: All visible nodes collapsed
+  /views/tree-state:
+    get:
+      summary: Get persisted tree expand state for a list type
+      parameters:
+        - name: listType
+          in: query
+          required: true
+          schema:
+            type: string
+            enum: [project, ticket]
+      responses:
+        '200':
+          description: Tree expand state
+    put:
+      summary: Persist tree expand state for a list type
+      parameters:
+        - name: listType
+          in: query
+          required: true
+          schema:
+            type: string
+            enum: [project, ticket]
+      responses:
+        '204':
+          description: State stored

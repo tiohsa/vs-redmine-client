@@ -123,3 +123,19 @@ export const buildTree = <T>(items: TreeSource<T>[]): TreeBuildResult<T> => {
 
   return { roots, cycleIds };
 };
+
+export const collectTreeNodeIds = <T>(roots: Array<TreeNode<T>>): number[] => {
+  const ids: number[] = [];
+  const stack = [...roots];
+  while (stack.length > 0) {
+    const current = stack.pop();
+    if (!current) {
+      continue;
+    }
+    ids.push(current.id);
+    if (current.children.length > 0) {
+      stack.push(...current.children);
+    }
+  }
+  return ids;
+};

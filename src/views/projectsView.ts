@@ -5,9 +5,9 @@ import { Project } from "../redmine/types";
 import { showError } from "../utils/notifications";
 import { MAX_VIEW_ITEMS } from "./viewLimits";
 import { createEmptyStateItem, createErrorStateItem } from "./viewState";
-import { buildTree } from "./treeBuilder";
-import { TreeNode, TreeSource } from "./treeTypes";
-import { isTreeExpanded } from "./treeState";
+import { buildTree, collectTreeNodeIds } from "./treeBuilder";
+import { TreeBuildResult, TreeNode, TreeSource } from "./treeTypes";
+import { isTreeExpanded, setTreeExpandedBulk } from "./treeState";
 import { createCycleWarningItem } from "./treeWarnings";
 
 const PROJECTS_VIEW_KEY = "projects";
@@ -120,13 +120,28 @@ export class ProjectsTreeProvider implements vscode.TreeDataProvider<vscode.Tree
     return this.getViewItems();
   }
 
+  collapseAllVisible(): void {
+    const { treeResult } = this.getVisibleTreeResult();
+    const nodeIds = collectTreeNodeIds(treeResult.roots).map(String);
+    setTreeExpandedBulk(PROJECTS_VIEW_KEY, nodeIds, false);
+    this.emitter.fire();
+  }
+
   getViewItems(): vscode.TreeItem[] {
-    const visibleProjects = this.projects.slice(0, MAX_VIEW_ITEMS);
-    const treeResult = buildTree(buildProjectTreeSources(visibleProjects));
+    const { visibleProjects, treeResult } = this.getVisibleTreeResult();
     this.rootNodes = treeResult.roots;
     const warningItems = buildCycleWarnings(visibleProjects, treeResult.cycleIds);
     const projectItems = buildProjectTreeItems(treeResult.roots, this.selectedProjectId);
     return [...warningItems, ...projectItems];
+  }
+
+  private getVisibleTreeResult(): {
+    visibleProjects: Project[];
+    treeResult: TreeBuildResult<Project>;
+  } {
+    const visibleProjects = this.projects.slice(0, MAX_VIEW_ITEMS);
+    const treeResult = buildTree(buildProjectTreeSources(visibleProjects));
+    return { visibleProjects, treeResult };
   }
 
   getProjectItemById(projectId: number): ProjectTreeItem | undefined {

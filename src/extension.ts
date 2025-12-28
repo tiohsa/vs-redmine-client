@@ -54,7 +54,7 @@ import {
   syncTicketDraft,
 } from "./views/ticketSaveSync";
 import { registerFocusRefresh } from "./views/viewFocusRefresh";
-import { setTreeExpanded } from "./views/treeState";
+import { initializeTreeExpansionState, setTreeExpanded } from "./views/treeState";
 import {
   VIEW_ID_ACTIVITY_COMMENTS,
   VIEW_ID_ACTIVITY_PROJECTS,
@@ -63,10 +63,13 @@ import {
 } from "./views/viewIds";
 
 export async function activate(context: vscode.ExtensionContext) {
+  initializeTreeExpansionState(context.workspaceState);
   const ticketsProvider = new TicketsTreeProvider();
   const settingsProvider = new TicketSettingsTreeProvider(ticketsProvider);
   const commentsProvider = new CommentsTreeProvider();
   const projectsProvider = new ProjectsTreeProvider();
+  let lastProjectSelection: ProjectTreeItem | undefined;
+  let lastTicketSelection: TicketTreeItem | undefined;
   const activityProjectsView = vscode.window.createTreeView(
     VIEW_ID_ACTIVITY_PROJECTS,
     {
@@ -109,6 +112,25 @@ export async function activate(context: vscode.ExtensionContext) {
         }
       }),
     );
+  };
+  const runTreeCollapseCommand = async (viewId: string): Promise<boolean> => {
+    await vscode.commands.executeCommand(`${viewId}.focus`);
+    const commandId = "list.collapseAll";
+    const available = await vscode.commands.getCommands(true);
+    if (!available.includes(commandId)) {
+      return false;
+    }
+    await vscode.commands.executeCommand(commandId);
+    return true;
+  };
+  const restoreTreeScroll = async (
+    view: vscode.TreeView<vscode.TreeItem>,
+    item?: vscode.TreeItem,
+  ): Promise<void> => {
+    if (!item) {
+      return;
+    }
+    await view.reveal(item, { focus: false, select: false });
   };
   let selectedComment: CommentTreeItem | undefined;
   let selectedCommentDocumentUri: string | undefined;
@@ -350,6 +372,42 @@ export async function activate(context: vscode.ExtensionContext) {
   );
 
   context.subscriptions.push(
+    vscode.commands.registerCommand("todoex.collapseAllProjects", async () => {
+      projectsProvider.collapseAllVisible();
+      const selected =
+        activityProjectsView.selection[0] ??
+        lastProjectSelection ??
+        projectsProvider
+          .getViewItems()
+          .find((item): item is ProjectTreeItem => item instanceof ProjectTreeItem);
+      const usedListCommand = await runTreeCollapseCommand(
+        VIEW_ID_ACTIVITY_PROJECTS,
+      );
+      if (usedListCommand) {
+        await restoreTreeScroll(activityProjectsView, selected);
+      }
+    }),
+  );
+
+  context.subscriptions.push(
+    vscode.commands.registerCommand("todoex.collapseAllTickets", async () => {
+      ticketsProvider.collapseAllVisible();
+      const usedListCommand = await runTreeCollapseCommand(
+        VIEW_ID_ACTIVITY_TICKETS,
+      );
+      if (usedListCommand) {
+        const selected =
+          activityTicketsView.selection[0] ??
+          lastTicketSelection ??
+          ticketsProvider
+            .getViewItems()
+            .find((item): item is TicketTreeItem => item instanceof TicketTreeItem);
+        await restoreTreeScroll(activityTicketsView, selected);
+      }
+    }),
+  );
+
+  context.subscriptions.push(
     vscode.commands.registerCommand("todoex.reloadTicket", async () => {
       await reloadTicketFromEditor();
     }),
@@ -588,7 +646,11 @@ export async function activate(context: vscode.ExtensionContext) {
 
   context.subscriptions.push(
     activityTicketsView.onDidChangeSelection((event) => {
-      handleTicketSelection(event.selection[0] as TicketTreeItem | undefined);
+      const selected = event.selection[0] as TicketTreeItem | undefined;
+      handleTicketSelection(selected);
+      if (selected) {
+        lastTicketSelection = selected;
+      }
     }),
   );
 
@@ -599,6 +661,7 @@ export async function activate(context: vscode.ExtensionContext) {
         return;
       }
 
+      lastProjectSelection = selected;
       await setProjectSelection(selected.project.id, selected.project.name);
       projectsProvider.setSelectedProjectId(selected.project.id);
       ticketsProvider.setSelectedProjectId(selected.project.id);

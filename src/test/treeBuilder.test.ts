@@ -1,5 +1,5 @@
 import * as assert from "assert";
-import { buildTree } from "../views/treeBuilder";
+import { buildTree, collectTreeNodeIds } from "../views/treeBuilder";
 import { TreeSource } from "../views/treeTypes";
 import { buildProjectFixture } from "./helpers/treeFixtures";
 
@@ -45,5 +45,22 @@ suite("Tree builder", () => {
     result.roots.forEach((node) => {
       assert.strictEqual(node.children.length, 0);
     });
+  });
+
+  test("collects node ids from tree roots", () => {
+    const parent = buildProjectFixture({ id: 1, name: "Parent" });
+    const child = buildProjectFixture({ id: 2, name: "Child", parentId: 1 });
+    const grandchild = buildProjectFixture({ id: 3, name: "Grandchild", parentId: 2 });
+
+    const items: Array<TreeSource<typeof parent>> = [
+      { id: parent.id, parentId: parent.parentId, label: parent.name, data: parent },
+      { id: child.id, parentId: child.parentId, label: child.name, data: child },
+      { id: grandchild.id, parentId: grandchild.parentId, label: grandchild.name, data: grandchild },
+    ];
+
+    const result = buildTree(items);
+    const ids = collectTreeNodeIds(result.roots).sort((a, b) => a - b);
+
+    assert.deepStrictEqual(ids, [1, 2, 3]);
   });
 });
