@@ -45,6 +45,7 @@ export interface Comment {
   createdAt?: string;
   updatedAt?: string;
   editableByCurrentUser: boolean;
+  noteIndex?: number;
 }
 
 export interface Attachment {
@@ -117,6 +118,8 @@ export interface RedmineIssueDetailResponse {
     }>;
   };
 }
+
+export type RedmineIssueDetailResponseIssue = RedmineIssueDetailResponse["issue"];
 
 export interface RedmineIssueStatusResponse {
   issue_statuses: Array<{ id: number; name: string }>;

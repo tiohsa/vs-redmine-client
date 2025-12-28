@@ -43,9 +43,9 @@ npm test && npm run lint
 TypeScript 5.9: Follow standard conventions
 
 ## Recent Changes
+- 001-open-in-browser: Added TypeScript 5.9 + VS Code Extension API, webpack 5, @vscode/test-cli, ESLint
 - 001-editor-template: Added TypeScript 5.9 + VS Code Extension API, webpack 5, @vscode/test-cli, ESLint
 - 001-activitybar-icon: Added TypeScript 5.9 + VS Code Extension API, webpack 5, @vscode/test-cli, ESLint
-- 001-fix-editor-path: Added TypeScript 5.9 + VS Code Extension API, webpack 5, @vscode/test-cli, ESLint
 
 
 <!-- MANUAL ADDITIONS START -->

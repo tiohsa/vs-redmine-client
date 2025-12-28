@@ -176,6 +176,21 @@
         "icon": "$(add)"
       },
       {
+        "command": "todoex.openProjectInBrowser",
+        "title": "Redmine: Open Project in Browser",
+        "icon": "$(link-external)"
+      },
+      {
+        "command": "todoex.openTicketInBrowser",
+        "title": "Redmine: Open Ticket in Browser",
+        "icon": "$(link-external)"
+      },
+      {
+        "command": "todoex.openCommentInBrowser",
+        "title": "Redmine: Open Comment in Browser",
+        "icon": "$(link-external)"
+      },
+      {
         "command": "todoex.editComment",
         "title": "Redmine: Edit Comment"
       },
@@ -263,6 +278,21 @@
         {
           "command": "todoex.createChildTicketFromList",
           "when": "view == todoexActivityTickets && viewItem == redmineTicket && todoex.canCreateTickets",
+          "group": "inline@1"
+        },
+        {
+          "command": "todoex.openProjectInBrowser",
+          "when": "view == todoexActivityProjects && (viewItem == redmineProject || viewItem == redmineProjectSelected)",
+          "group": "inline@1"
+        },
+        {
+          "command": "todoex.openTicketInBrowser",
+          "when": "view == todoexActivityTickets && viewItem == redmineTicket",
+          "group": "inline@2"
+        },
+        {
+          "command": "todoex.openCommentInBrowser",
+          "when": "view == todoexActivityComments && (viewItem == redmineComment || viewItem == redmineCommentEditable)",
           "group": "inline@1"
         }
       ]

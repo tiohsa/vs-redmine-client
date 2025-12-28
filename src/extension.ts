@@ -5,6 +5,11 @@ import { createTicketFromEditor } from "./commands/createTicket";
 import { createChildTicketFromList } from "./commands/createChildTicketFromList";
 import { createTicketFromList } from "./commands/createTicketFromList";
 import { editComment } from "./commands/editComment";
+import {
+  openCommentInBrowser,
+  openProjectInBrowser,
+  openTicketInBrowser,
+} from "./commands/openInBrowser";
 import { reloadCommentFromEditor } from "./commands/reloadComment";
 import { reloadTicketFromEditor } from "./commands/reloadTicket";
 import { setProjectSelection, getProjectSelection } from "./config/projectSelection";
@@ -651,6 +656,39 @@ export async function activate(context: vscode.ExtensionContext) {
     vscode.commands.registerCommand("todoex.createChildTicketFromList", async (item) => {
       await createChildTicketFromList(item as TicketTreeItem | undefined);
     }),
+  );
+
+  context.subscriptions.push(
+    vscode.commands.registerCommand(
+      "todoex.openProjectInBrowser",
+      async (item?: ProjectTreeItem) => {
+        const selected =
+          item ?? (activityProjectsView.selection[0] as ProjectTreeItem | undefined);
+        await openProjectInBrowser(selected);
+      },
+    ),
+  );
+
+  context.subscriptions.push(
+    vscode.commands.registerCommand(
+      "todoex.openTicketInBrowser",
+      async (item?: TicketTreeItem) => {
+        const selected =
+          item ?? (activityTicketsView.selection[0] as TicketTreeItem | undefined);
+        await openTicketInBrowser(selected);
+      },
+    ),
+  );
+
+  context.subscriptions.push(
+    vscode.commands.registerCommand(
+      "todoex.openCommentInBrowser",
+      async (item?: CommentTreeItem) => {
+        const selected =
+          item ?? (activityCommentsView.selection[0] as CommentTreeItem | undefined);
+        await openCommentInBrowser(selected);
+      },
+    ),
   );
 
   context.subscriptions.push(

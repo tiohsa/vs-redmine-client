@@ -6,13 +6,14 @@ suite("Comment list formatting", () => {
     const label = formatCommentLabel({
       id: 12,
       ticketId: 1,
+      noteIndex: 3,
       authorId: 99,
       authorName: "Alice",
       body: "Body",
       editableByCurrentUser: false,
     });
 
-    assert.strictEqual(label, "#12 Alice");
+    assert.strictEqual(label, "#3 Alice");
   });
 
   test("formats description from body", () => {

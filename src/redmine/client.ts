@@ -14,7 +14,7 @@ export interface RequestOptions {
   contentType?: string;
 }
 
-const normalizeBaseUrl = (rawBaseUrl: string): string => {
+export const normalizeBaseUrl = (rawBaseUrl: string): string => {
   try {
     const url = new URL(rawBaseUrl);
     if (url.protocol !== "http:" && url.protocol !== "https:") {
