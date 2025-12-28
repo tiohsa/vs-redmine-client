@@ -20,6 +20,9 @@ export const getIncludeChildProjects = (): boolean =>
 export const getTicketListLimit = (): number =>
   getSettings().get<number>("ticketListLimit", 50);
 
+export const getEditorStorageDirectory = (): string =>
+  getSettings().get<string>("editorStorageDirectory", "").trim();
+
 export const EDITOR_DEFAULT_FIELDS = [
   "subject",
   "description",

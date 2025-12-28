@@ -306,6 +306,11 @@
           "type": "number",
           "default": 50,
           "description": "Default number of tickets to load per request."
+        },
+        "todoex.editorStorageDirectory": {
+          "type": "string",
+          "default": "",
+          "description": "Absolute path to store ticket editor files. When empty, the default workspace location is used."
         }
       }
     }

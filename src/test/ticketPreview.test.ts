@@ -1,5 +1,11 @@
 import * as assert from "assert";
-import { buildTicketPreviewContent, withTrailingEditLines } from "../views/ticketPreview";
+import * as vscode from "vscode";
+import {
+  buildTicketPreviewContent,
+  resolveTicketEditorUri,
+  resolveEditorStorageDir,
+  withTrailingEditLines,
+} from "../views/ticketPreview";
 
 suite("Ticket preview", () => {
   test("renders subject and description", () => {
@@ -21,5 +27,68 @@ suite("Ticket preview", () => {
     assert.strictEqual(withTrailingEditLines("Line"), "Line\n\n");
     assert.strictEqual(withTrailingEditLines("Line\n"), "Line\n\n");
     assert.strictEqual(withTrailingEditLines("Line\n\n"), "Line\n\n");
+  });
+
+  test("resolves stable editor uri for the same ticket", () => {
+    const ticket = { id: 12, subject: "Sample", projectId: 5 };
+    const storageDir = vscode.Uri.parse("file:/storage");
+
+    const first = resolveTicketEditorUri({
+      ticket,
+      kind: "primary",
+      storageDir,
+    });
+    const second = resolveTicketEditorUri({
+      ticket,
+      kind: "primary",
+      storageDir,
+    });
+
+    assert.strictEqual(first.toString(), second.toString());
+  });
+
+  test("uses configured storage directory when valid", () => {
+    const resolution = resolveEditorStorageDir({
+      configuredPath: process.cwd(),
+    });
+
+    assert.strictEqual(resolution.usedFallback, false);
+    assert.ok(resolution.uri);
+  });
+
+  test("falls back when configured path is relative", () => {
+    const workspace = [{ uri: vscode.Uri.parse("file:/workspace") }] as vscode.WorkspaceFolder[];
+    const resolution = resolveEditorStorageDir({
+      configuredPath: "relative/path",
+      workspaceFolders: workspace,
+    });
+
+    assert.strictEqual(resolution.usedFallback, true);
+    assert.ok(resolution.errorMessage);
+    assert.strictEqual(
+      resolution.uri?.toString(),
+      vscode.Uri.joinPath(workspace[0].uri, ".todoex", "editors").toString(),
+    );
+  });
+
+  test("falls back when configured path does not exist", () => {
+    const workspace = [{ uri: vscode.Uri.parse("file:/workspace") }] as vscode.WorkspaceFolder[];
+    const resolution = resolveEditorStorageDir({
+      configuredPath: "/path/does/not/exist",
+      workspaceFolders: workspace,
+    });
+
+    assert.strictEqual(resolution.usedFallback, true);
+    assert.ok(resolution.errorMessage);
+  });
+
+  test("returns undefined storage when no workspace is available", () => {
+    const resolution = resolveEditorStorageDir({
+      configuredPath: "",
+      workspaceFolders: [],
+    });
+
+    assert.strictEqual(resolution.usedFallback, true);
+    assert.strictEqual(resolution.uri, undefined);
   });
 });

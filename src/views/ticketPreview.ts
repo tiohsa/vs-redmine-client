@@ -1,4 +1,6 @@
 import * as vscode from "vscode";
+import * as fs from "fs";
+import * as path from "path";
 import { Ticket } from "../redmine/types";
 import { TicketEditorKind } from "./ticketEditorTypes";
 import {
@@ -20,6 +22,8 @@ import {
   buildCommentEditorFilename,
   buildTicketEditorFilename,
 } from "./editorFilename";
+import { getEditorStorageDirectory } from "../config/settings";
+import { showError } from "../utils/notifications";
 
 export const buildTicketPreviewContent = (
   ticket: Pick<Ticket, "subject" | "description" | "trackerName" | "priorityName" | "statusName" | "dueDate">,
@@ -55,6 +59,22 @@ const moveCursorToEnd = (editor: vscode.TextEditor): void => {
 
 export const buildCommentEditorContent = (comment: string): string => comment;
 
+export const resolveTicketEditorUri = (input: {
+  ticket: Ticket;
+  kind: TicketEditorKind;
+  storageDir?: vscode.Uri;
+}): vscode.Uri => {
+  const filename = buildTicketEditorFilename(
+    input.ticket.projectId,
+    input.ticket.id,
+    input.kind,
+  );
+  if (input.storageDir) {
+    return vscode.Uri.joinPath(input.storageDir, filename);
+  }
+  return vscode.Uri.parse(`untitled:${filename}`);
+};
+
 export const applyEditorContent = async (
   editor: vscode.TextEditor,
   nextContent: string,
@@ -73,13 +93,67 @@ export const applyEditorContent = async (
   });
 };
 
-const getEditorStorageDir = (): vscode.Uri | undefined => {
-  const workspace = vscode.workspace.workspaceFolders?.[0];
-  if (!workspace) {
-    return undefined;
+type StorageDirResolution = {
+  uri?: vscode.Uri;
+  usedFallback: boolean;
+  errorMessage?: string;
+};
+
+const validateStorageDir = (dirPath: string): { uri?: vscode.Uri; errorMessage?: string } => {
+  if (!path.isAbsolute(dirPath)) {
+    return { errorMessage: "Editor storage directory must be an absolute path." };
   }
 
-  return vscode.Uri.joinPath(workspace.uri, ".todoex", "editors");
+  if (!fs.existsSync(dirPath)) {
+    return { errorMessage: "Editor storage directory does not exist." };
+  }
+
+  try {
+    const stats = fs.statSync(dirPath);
+    if (!stats.isDirectory()) {
+      return { errorMessage: "Editor storage directory is not a folder." };
+    }
+    fs.accessSync(dirPath, fs.constants.W_OK);
+  } catch {
+    return { errorMessage: "Editor storage directory is not writable." };
+  }
+
+  return { uri: vscode.Uri.file(dirPath) };
+};
+
+export const resolveEditorStorageDir = (
+  options: {
+    configuredPath?: string;
+    workspaceFolders?: readonly vscode.WorkspaceFolder[];
+  } = {},
+): StorageDirResolution => {
+  const configuredPath = options.configuredPath ?? getEditorStorageDirectory();
+  const workspaceFolders = options.workspaceFolders ?? vscode.workspace.workspaceFolders;
+
+  if (configuredPath.length > 0) {
+    const validation = validateStorageDir(configuredPath);
+    if (validation.uri) {
+      return { uri: validation.uri, usedFallback: false };
+    }
+    const fallbackUri = workspaceFolders?.[0]
+      ? vscode.Uri.joinPath(workspaceFolders[0].uri, ".todoex", "editors")
+      : undefined;
+    return {
+      uri: fallbackUri,
+      usedFallback: true,
+      errorMessage: validation.errorMessage,
+    };
+  }
+
+  const workspace = workspaceFolders?.[0];
+  if (!workspace) {
+    return { usedFallback: true };
+  }
+
+  return {
+    uri: vscode.Uri.joinPath(workspace.uri, ".todoex", "editors"),
+    usedFallback: true,
+  };
 };
 
 const openTicketEditor = async (
@@ -88,10 +162,14 @@ const openTicketEditor = async (
   filename: string,
   content: string,
 ): Promise<vscode.TextEditor> => {
-  const storageDir = getEditorStorageDir();
+  const storageResolution = resolveEditorStorageDir();
+  if (storageResolution.errorMessage) {
+    showError(storageResolution.errorMessage);
+  }
+  const storageDir = storageResolution.uri;
   if (!storageDir) {
     const document = await vscode.workspace.openTextDocument(
-      vscode.Uri.parse(`untitled:${filename}`),
+      resolveTicketEditorUri({ ticket, kind, storageDir }),
     );
     const editor = await vscode.window.showTextDocument(document, { preview: false });
     await applyEditorContent(editor, content);
@@ -100,7 +178,7 @@ const openTicketEditor = async (
   }
 
   await vscode.workspace.fs.createDirectory(storageDir);
-  const fileUri = vscode.Uri.joinPath(storageDir, filename);
+  const fileUri = resolveTicketEditorUri({ ticket, kind, storageDir });
   const bytes = new TextEncoder().encode(content);
   await vscode.workspace.fs.writeFile(fileUri, bytes);
   const document = await vscode.workspace.openTextDocument(fileUri);
