@@ -144,6 +144,46 @@ suite("Ticket save sync", () => {
     assert.strictEqual(result.status, "success");
   });
 
+  test("notifies list updater after a subject change", async () => {
+    initializeTicketDraft(5, "Title", "Body", buildIssueMetadataFixture(), "t1");
+    const updated: Array<{ id: number; subject: string }> = [];
+    const updatedAtValues = ["t1", "t2"];
+
+    const result = await syncTicketDraft({
+      ticketId: 5,
+      content: buildTicketEditorContent({
+        subject: "New Title",
+        description: "Body",
+        metadata: buildIssueMetadataFixture(),
+      }),
+      onSubjectUpdated: (ticketId, subject) => {
+        updated.push({ id: ticketId, subject });
+      },
+      deps: {
+        getIssueDetail: async () => ({
+          ticket: {
+            id: 5,
+            subject: "Title",
+            projectId: 1,
+            updatedAt: updatedAtValues.shift(),
+          },
+          comments: [],
+        }),
+        updateIssue: async () => undefined,
+        createIssue: async () => {
+          throw new Error("should not create child");
+        },
+        deleteIssue: async () => undefined,
+        listIssueStatuses: async () => [],
+        listTrackers: async () => [],
+        listIssuePriorities: async () => [],
+      },
+    });
+
+    assert.strictEqual(result.status, "success");
+    assert.deepStrictEqual(updated, [{ id: 5, subject: "New Title" }]);
+  });
+
   test("appends children on update and clears metadata", async () => {
     initializeTicketDraft(7, "Title", "Body", buildIssueMetadataFixture(), "t1");
     const created: Array<{ subject: string; parentId?: number }> = [];

@@ -266,6 +266,10 @@ export async function activate(context: vscode.ExtensionContext) {
     }
   };
 
+  const updateTicketListSubject = (ticketId: number, subject: string): void => {
+    ticketsProvider.updateTicketSubject(ticketId, subject);
+  };
+
   const syncOnSave = (document: vscode.TextDocument): void => {
     const editor =
       vscode.window.visibleTextEditors.find((candidate) => candidate.document === document) ??
@@ -275,7 +279,9 @@ export async function activate(context: vscode.ExtensionContext) {
 
     void (async () => {
       if (editor) {
-        const ticketResult = await handleTicketEditorSave(editor);
+        const ticketResult = await handleTicketEditorSave(editor, {
+          onSubjectUpdated: updateTicketListSubject,
+        });
         if (ticketResult) {
           notifyTicketSaveResult(ticketResult);
           if (ticketResult.status === "created") {
@@ -340,6 +346,7 @@ export async function activate(context: vscode.ExtensionContext) {
         const result = await syncTicketDraft({
           ticketId: parsed.ticketId,
           content: document.getText(),
+          onSubjectUpdated: updateTicketListSubject,
         });
         notifyTicketSaveResult(result);
         return;

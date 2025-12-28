@@ -295,6 +295,25 @@ export class TicketsTreeProvider implements vscode.TreeDataProvider<vscode.TreeI
     return this.getViewItems();
   }
 
+  setTicketsState(tickets: Ticket[], selectedProjectId?: number): void {
+    this.tickets = tickets;
+    this.selectedProjectId = selectedProjectId;
+    this.errorMessage = undefined;
+  }
+
+  updateTicketSubject(ticketId: number, subject: string): boolean {
+    if (this.errorMessage || !this.selectedProjectId) {
+      return false;
+    }
+    const ticket = this.tickets.find((item) => item.id === ticketId);
+    if (!ticket || ticket.subject === subject) {
+      return false;
+    }
+    ticket.subject = subject;
+    this.emitter.fire();
+    return true;
+  }
+
   collapseAllVisible(): void {
     if (this.errorMessage || !this.selectedProjectId) {
       return;

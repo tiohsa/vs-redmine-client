@@ -251,6 +251,7 @@ export const syncTicketDraft = async (input: {
   content: string;
   editor?: vscode.TextEditor;
   deps?: TicketSaveDependencies;
+  onSubjectUpdated?: (ticketId: number, subject: string) => void;
 }): Promise<TicketSaveResult> => {
   const deps = input.deps ?? defaultDeps;
   const draft = getTicketDraft(input.ticketId);
@@ -415,6 +416,9 @@ export const syncTicketDraft = async (input: {
       metadataBlock: parsed.metadataBlock,
     });
     await applyEditorContent(input.editor, nextContent);
+  }
+  if (changes.subject && input.onSubjectUpdated) {
+    input.onSubjectUpdated(input.ticketId, subject);
   }
 
   if (duplicateChildren.length > 0) {
@@ -593,6 +597,7 @@ export const reloadTicketEditor = async (input: {
 
 export const handleTicketEditorSave = async (
   editor: vscode.TextEditor,
+  options: { onSubjectUpdated?: (ticketId: number, subject: string) => void } = {},
 ): Promise<TicketSaveResult | undefined> => {
   if (!isTicketEditor(editor)) {
     return undefined;
@@ -614,5 +619,6 @@ export const handleTicketEditorSave = async (
   return syncTicketDraft({
     ticketId,
     content: editor.document.getText(),
+    onSubjectUpdated: options.onSubjectUpdated,
   });
 };
