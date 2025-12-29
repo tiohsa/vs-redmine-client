@@ -1,8 +1,11 @@
+import { COMMENT_TYPE_LABEL } from "./commentSaveTypes";
 import { TicketEditorKind } from "./ticketEditorTypes";
 
 const sanitizeId = (value: number): string => String(value);
 const ticketPattern = /^project-(\d+)_ticket-(\d+)(?:_extra)?(?:-\d+)?\.md$/;
-const commentPattern = /^project-(\d+)_ticket-(\d+)_comment-(\d+)(?:-\d+)?\.md$/;
+const commentPattern = new RegExp(
+  `^project-(\\d+)_ticket-(\\d+)_${COMMENT_TYPE_LABEL}-(\\d+)(?:-\\d+)?\\.md$`,
+);
 const newCommentDraftPattern = /^todoex-new-comment-(\d+)(?:-\d+)?\.md$/;
 const newTicketDraftPattern = /^todoex-new-ticket(?:-\d+)?\.md$/;
 
@@ -33,7 +36,7 @@ export const buildCommentEditorFilename = (
   ticketId: number,
   commentId: number,
 ): string =>
-  `project-${sanitizeId(projectId)}_ticket-${sanitizeId(ticketId)}_comment-${sanitizeId(commentId)}.md`;
+  `project-${sanitizeId(projectId)}_ticket-${sanitizeId(ticketId)}_${COMMENT_TYPE_LABEL}-${sanitizeId(commentId)}.md`;
 
 export const parseEditorFilename = (
   filename: string,

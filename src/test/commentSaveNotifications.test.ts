@@ -34,4 +34,16 @@ suite("Comment save notifications", () => {
       message: "Comment added.",
     });
   });
+
+  test("maps created_unresolved to warning", () => {
+    const notification = getCommentSaveNotification({
+      status: "created_unresolved",
+      message: "Comment added, but ID missing.",
+    });
+
+    assert.deepStrictEqual(notification, {
+      type: "warning",
+      message: "Comment added, but ID missing.",
+    });
+  });
 });

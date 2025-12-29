@@ -108,11 +108,29 @@ suite("Comment save sync", () => {
         updateComment: async () => {
           throw new Error("should not update");
         },
+        getCurrentUserId: async () => 9,
+        getIssueDetail: async () => ({
+          ticket: { id: 11, subject: "T", projectId: 4 },
+          comments: [
+            {
+              id: 77,
+              ticketId: 11,
+              authorId: 9,
+              authorName: "Tester",
+              body: "New comment",
+              createdAt: "t1",
+              updatedAt: "t2",
+              editableByCurrentUser: true,
+            },
+          ],
+        }),
       },
     });
 
     assert.strictEqual(added, true);
     assert.strictEqual(result.status, "created");
+    assert.strictEqual(result.commentId, 77);
+    assert.strictEqual(result.projectId, 4);
   });
 
   test("reload replaces comment body with saved content", async () => {

@@ -13,6 +13,8 @@ export const getCommentSaveNotification = (
       return { type: "info", message: "Comment updated." };
     case "created":
       return { type: "info", message: "Comment added." };
+    case "created_unresolved":
+      return { type: "warning", message: result.message };
     case "no_change":
       return undefined;
     case "conflict":

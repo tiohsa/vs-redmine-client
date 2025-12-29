@@ -39,6 +39,8 @@ import {
 } from "./views/ticketsView";
 import {
   getCommentIdForEditor,
+  getCommentIdForDocument,
+  getCommentIdForUri,
   getEditorContentType,
   getProjectIdForDocument,
   getProjectIdForUri,
@@ -55,6 +57,8 @@ import { showTicketComment, showTicketPreview } from "./views/ticketPreview";
 import { getCommentSaveNotification } from "./views/commentSaveNotifications";
 import {
   handleCommentEditorSave,
+  finalizeNewCommentDraftDocument,
+  shouldRefreshComments,
   syncCommentDraft,
   syncNewCommentDraft,
 } from "./views/commentSaveSync";
@@ -305,7 +309,7 @@ export async function activate(context: vscode.ExtensionContext) {
         const commentResult = await handleCommentEditorSave(editor);
         if (commentResult) {
           notifyCommentSaveResult(commentResult);
-          if (commentResult.status === "created") {
+          if (shouldRefreshComments(commentResult.status)) {
             const ticketId = getTicketIdForEditor(editor);
             if (ticketId) {
               commentsProvider.refreshForTicket(ticketId);
@@ -313,6 +317,25 @@ export async function activate(context: vscode.ExtensionContext) {
           }
           return;
         }
+      }
+
+      const commentIdForDocument =
+        getCommentIdForDocument(document) ?? getCommentIdForUri(document.uri);
+      if (commentIdForDocument) {
+        const ticketIdForDocument =
+          getTicketIdForDocument(document) ?? getTicketIdForUri(document.uri);
+        if (!ticketIdForDocument) {
+          return;
+        }
+        const commentResult = await syncCommentDraft({
+          commentId: commentIdForDocument,
+          content: document.getText(),
+        });
+        notifyCommentSaveResult(commentResult);
+        if (shouldRefreshComments(commentResult.status)) {
+          commentsProvider.refreshForTicket(ticketIdForDocument);
+        }
+        return;
       }
 
       const ticketIdForDocument =
@@ -380,9 +403,17 @@ export async function activate(context: vscode.ExtensionContext) {
         const result = await syncNewCommentDraft({
           ticketId: draftTicketId,
           content: document.getText(),
+          onCreated: async ({ commentId, projectId }) => {
+            finalizeNewCommentDraftDocument({
+              document,
+              ticketId: draftTicketId,
+              projectId,
+              commentId,
+            });
+          },
         });
         notifyCommentSaveResult(result);
-        if (result.status === "created") {
+        if (shouldRefreshComments(result.status)) {
           commentsProvider.refreshForTicket(draftTicketId);
         }
         return;
@@ -403,6 +434,9 @@ export async function activate(context: vscode.ExtensionContext) {
         content: document.getText(),
       });
       notifyCommentSaveResult(commentResult);
+      if (shouldRefreshComments(commentResult.status)) {
+        commentsProvider.refreshForTicket(parsed.ticketId);
+      }
     })();
   };
 

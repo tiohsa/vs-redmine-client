@@ -55,6 +55,7 @@ As a user, I want each comment in the list to display its comment number so I ca
 - What happens when a comment number is missing or unknown?
 - How does the system handle two open editors for different comments in the same ticket?
 - What happens when the user saves without choosing a location (cancel save)?
+- What happens when a newly created comment receives its identifier after the first save?
 
 ## Requirements *(mandatory)*
 
@@ -71,12 +72,15 @@ As a user, I want each comment in the list to display its comment number so I ca
 - **FR-004**: System MUST prevent filename changes caused by comment body edits.
 - **FR-005**: System MUST keep filenames consistent across multiple saves of the same ticket or comment.
 - **FR-006**: System MUST keep filenames unique across different tickets and comments.
+- **FR-007**: System MUST allow a one-time filename update after a new comment is created to include the comment identifier, then keep it stable.
+- **FR-008**: System MUST include a comment type label ("comment") in comment editor filenames.
 
 ### Key Entities *(include if feature involves data)*
 
 - **Comment List Item**: A displayed entry for a comment, including its number and summary.
 - **Ticket Save Filename**: The saved filename that uniquely identifies a ticket editor.
 - **Comment Save Filename**: The saved filename that uniquely identifies a comment editor.
+- **Comment Type Label**: A fixed label used in comment editor filenames to distinguish comment files.
 
 ### Assumptions
 
