@@ -1,14 +1,17 @@
 import * as vscode from "vscode";
-import { addComment, updateComment } from "../redmine/comments";
+import { addComment, listComments, updateComment } from "../redmine/comments";
 import { getIssueDetail } from "../redmine/issues";
+import { getCurrentUserId } from "../redmine/users";
 import { validateComment } from "../utils/commentValidation";
 import {
   getEditorContentType,
   getCommentIdForEditor,
   getTicketIdForEditor,
   isTicketEditor,
+  setEditorCommentId,
+  setEditorContentType,
 } from "./ticketEditorRegistry";
-import { getCommentEdit, updateCommentEdit } from "./commentEditStore";
+import { ensureCommentEdit, getCommentEdit, updateCommentEdit } from "./commentEditStore";
 import { CommentSaveResult } from "./commentSaveTypes";
 import { applyEditorContent } from "./ticketPreview";
 
@@ -22,6 +25,18 @@ const defaultDeps: CommentSaveDependencies = {
   updateComment,
 };
 
+export interface CommentCreateDependencies extends CommentSaveDependencies {
+  listComments: typeof listComments;
+  getCurrentUserId: typeof getCurrentUserId;
+}
+
+const defaultCreateDeps: CommentCreateDependencies = {
+  addComment,
+  updateComment,
+  listComments,
+  getCurrentUserId,
+};
+
 export interface CommentReloadDependencies {
   getIssueDetail: typeof getIssueDetail;
   applyEditorContent: typeof applyEditorContent;
@@ -32,9 +47,14 @@ const defaultReloadDeps: CommentReloadDependencies = {
   applyEditorContent,
 };
 
-const buildResult = (status: CommentSaveResult["status"], message: string): CommentSaveResult => ({
+const buildResult = (
+  status: CommentSaveResult["status"],
+  message: string,
+  commentId?: number,
+): CommentSaveResult => ({
   status,
   message,
+  commentId,
 });
 
 const mapErrorToResult = (error: unknown): CommentSaveResult => {
@@ -91,9 +111,9 @@ export const syncCommentDraft = async (input: {
 export const syncNewCommentDraft = async (input: {
   ticketId: number;
   content: string;
-  deps?: CommentSaveDependencies;
+  deps?: Partial<CommentCreateDependencies>;
 }): Promise<CommentSaveResult> => {
-  const deps = input.deps ?? defaultDeps;
+  const deps = { ...defaultCreateDeps, ...input.deps };
   const validation = validateComment(input.content);
   if (!validation.valid) {
     return buildResult("failed", validation.message ?? "Invalid comment.");
@@ -105,7 +125,13 @@ export const syncNewCommentDraft = async (input: {
     return mapErrorToResult(error);
   }
 
-  return buildResult("created", "Comment added.");
+  const commentId = await resolveCreatedCommentId({
+    ticketId: input.ticketId,
+    content: input.content,
+    deps,
+  });
+
+  return buildResult("created", "Comment added.", commentId);
 };
 
 export const handleCommentEditorSave = async (
@@ -126,10 +152,16 @@ export const handleCommentEditorSave = async (
       return undefined;
     }
 
-    return syncNewCommentDraft({
+    const result = await syncNewCommentDraft({
       ticketId,
       content: editor.document.getText(),
     });
+    if (result.status === "created" && result.commentId) {
+      setEditorContentType(editor, "comment");
+      setEditorCommentId(editor, result.commentId);
+      ensureCommentEdit(result.commentId, ticketId, editor.document.getText());
+    }
+    return result;
   }
 
   const commentId = getCommentIdForEditor(editor);
@@ -141,6 +173,39 @@ export const handleCommentEditorSave = async (
     commentId,
     content: editor.document.getText(),
   });
+};
+
+const resolveCreatedCommentId = async (input: {
+  ticketId: number;
+  content: string;
+  deps: CommentCreateDependencies;
+}): Promise<number | undefined> => {
+  try {
+    const currentUserId = await input.deps.getCurrentUserId();
+    const normalizedBody = input.content.trim();
+    const comments = await input.deps.listComments(input.ticketId, currentUserId);
+    const matches = comments.filter(
+      (comment) =>
+        comment.authorId === currentUserId &&
+        comment.body.trim() === normalizedBody,
+    );
+    if (matches.length === 0) {
+      return undefined;
+    }
+
+    const latest = matches.reduce((prev, next) => {
+      const prevTime = Date.parse(prev.updatedAt ?? prev.createdAt ?? "") || 0;
+      const nextTime = Date.parse(next.updatedAt ?? next.createdAt ?? "") || 0;
+      if (nextTime > prevTime) {
+        return next;
+      }
+      return prev;
+    });
+
+    return latest.id;
+  } catch {
+    return undefined;
+  }
 };
 
 export const reloadCommentEditor = async (input: {
