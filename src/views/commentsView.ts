@@ -8,6 +8,7 @@ import { setCommentAddContext } from "./commentViewContext";
 import { formatCommentDescription, formatCommentLabel } from "./commentListFormat";
 import { MAX_VIEW_ITEMS } from "./viewLimits";
 import { createEmptyStateItem, createErrorStateItem } from "./viewState";
+import { SELECTION_HIGHLIGHT_ICON } from "./selectionHighlight";
 
 export const COMMENT_RELOAD_COMMAND = "redmine-client.reloadComment";
 
@@ -31,6 +32,7 @@ export const buildCommentsViewItems = (
   comments: Comment[],
   ticketId?: number,
   errorMessage?: string,
+  selectedCommentId?: number,
 ): vscode.TreeItem[] => {
   if (errorMessage) {
     return [createErrorStateItem(errorMessage)];
@@ -46,7 +48,7 @@ export const buildCommentsViewItems = (
 
   return comments
     .slice(0, MAX_VIEW_ITEMS)
-    .map((comment) => new CommentTreeItem(comment));
+    .map((comment) => new CommentTreeItem(comment, comment.id === selectedCommentId));
 };
 
 export class CommentsTreeProvider implements vscode.TreeDataProvider<vscode.TreeItem> {
@@ -56,17 +58,20 @@ export class CommentsTreeProvider implements vscode.TreeDataProvider<vscode.Tree
   private comments: Comment[] = [];
   private ticketId?: number;
   private errorMessage?: string;
+  private selectedCommentId?: number;
 
   readonly onDidChangeTreeData = this.emitter.event;
 
-  setTicketId(ticketId: number | undefined): void {
+  setTicketId(ticketId: number | undefined, selectedCommentId?: number): void {
     this.ticketId = ticketId;
+    this.selectedCommentId = selectedCommentId;
     refreshAddCommentContext(this.ticketId);
     this.refresh();
   }
 
-  refreshForTicket(ticketId: number): void {
+  refreshForTicket(ticketId: number, selectedCommentId = this.selectedCommentId): void {
     this.ticketId = ticketId;
+    this.selectedCommentId = selectedCommentId;
     this.refresh();
   }
 
@@ -113,16 +118,27 @@ export class CommentsTreeProvider implements vscode.TreeDataProvider<vscode.Tree
   }
 
   getViewItems(): vscode.TreeItem[] {
-    return buildCommentsViewItems(this.comments, this.ticketId, this.errorMessage);
+    return buildCommentsViewItems(
+      this.comments,
+      this.ticketId,
+      this.errorMessage,
+      this.selectedCommentId,
+    );
+  }
+
+  setSelectedCommentId(commentId?: number): void {
+    this.selectedCommentId = commentId;
+    this.emitter.fire();
   }
 }
 
 export class CommentTreeItem extends vscode.TreeItem {
-  constructor(public readonly comment: Comment) {
+  constructor(public readonly comment: Comment, isSelected: boolean) {
     super(formatCommentLabel(comment), vscode.TreeItemCollapsibleState.None);
     this.description = formatCommentDescription(comment);
     this.contextValue = comment.editableByCurrentUser
       ? "redmineCommentEditable"
       : "redmineComment";
+    this.iconPath = isSelected ? SELECTION_HIGHLIGHT_ICON : undefined;
   }
 }

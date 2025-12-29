@@ -34,7 +34,7 @@ suite("Tickets view permissions", () => {
       level: 0,
       children: [],
     };
-    const item = new TicketTreeItem(node, "Due in 3 days", false);
+    const item = new TicketTreeItem(node, "Due in 3 days", false, false);
 
     assert.strictEqual(item.description, "Open · Due in 3 days");
   });

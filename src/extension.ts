@@ -190,7 +190,7 @@ export async function activate(context: vscode.ExtensionContext) {
     selectedComment = selected;
     try {
       const detail = await getIssueDetail(selected.comment.ticketId);
-      commentsProvider.setTicketId(detail.ticket.id);
+      commentsProvider.setTicketId(detail.ticket.id, selected.comment.id);
       setCommentDraft(detail.ticket.id, selected.comment.body);
       const editor = await showTicketComment(
         detail.ticket,
@@ -772,6 +772,7 @@ export async function activate(context: vscode.ExtensionContext) {
   context.subscriptions.push(
     activityTicketsView.onDidChangeSelection((event) => {
       const selected = event.selection[0] as TicketTreeItem | undefined;
+      ticketsProvider.setSelectedTicketId(selected?.ticket.id);
       handleTicketSelection(selected);
       if (selected) {
         lastTicketSelection = selected;
@@ -796,7 +797,9 @@ export async function activate(context: vscode.ExtensionContext) {
 
   context.subscriptions.push(
     activityCommentsView.onDidChangeSelection((event) => {
-      void handleCommentSelection(event.selection[0] as CommentTreeItem | undefined);
+      const selected = event.selection[0] as CommentTreeItem | undefined;
+      commentsProvider.setSelectedCommentId(selected?.comment.id);
+      void handleCommentSelection(selected);
     }),
   );
 

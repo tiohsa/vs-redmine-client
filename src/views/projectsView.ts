@@ -9,6 +9,7 @@ import { buildTree, collectTreeNodeIds } from "./treeBuilder";
 import { TreeBuildResult, TreeNode, TreeSource } from "./treeTypes";
 import { isTreeExpanded, setTreeExpandedBulk } from "./treeState";
 import { createCycleWarningItem } from "./treeWarnings";
+import { SELECTION_HIGHLIGHT_ICON } from "./selectionHighlight";
 
 const PROJECTS_VIEW_KEY = "projects";
 
@@ -184,6 +185,7 @@ export class ProjectTreeItem extends vscode.TreeItem {
     this.id = String(node.data.id);
     this.contextValue = isSelected ? "redmineProjectSelected" : "redmineProject";
     this.description = isSelected ? "Selected" : "";
+    this.iconPath = isSelected ? SELECTION_HIGHLIGHT_ICON : undefined;
   }
 
   get project(): Project {

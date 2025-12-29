@@ -17,6 +17,7 @@ import { buildTree, collectTreeNodeIds } from "./treeBuilder";
 import { TreeBuildResult, TreeNode, TreeSource } from "./treeTypes";
 import { isTreeExpanded, setTreeExpandedBulk } from "./treeState";
 import { createCycleWarningItem } from "./treeWarnings";
+import { SELECTION_HIGHLIGHT_ICON } from "./selectionHighlight";
 import {
   applyTicketFilters,
   applyTicketSort,
@@ -122,12 +123,14 @@ const buildTicketTreeSources = (tickets: Ticket[]): Array<TreeSource<Ticket>> =>
 const buildTicketTreeItems = (
   nodes: Array<TreeNode<Ticket>>,
   dueIndicators: Map<number, string | undefined>,
+  selectedTicketId?: number,
 ): TicketTreeItem[] =>
   nodes.map(
     (node) =>
       new TicketTreeItem(
         node,
         dueIndicators.get(node.data.id),
+        node.data.id === selectedTicketId,
         node.children.length > 0 &&
           isTreeExpanded(TICKETS_VIEW_KEY, String(node.data.id)),
       ),
@@ -186,6 +189,7 @@ export const buildTicketsViewItems = (
   errorMessage?: string,
   settings: TicketListSettings = DEFAULT_TICKET_LIST_SETTINGS,
   now: Date = new Date(),
+  selectedTicketId?: number,
 ): vscode.TreeItem[] => {
   if (errorMessage) {
     return [createErrorStateItem(errorMessage)];
@@ -215,7 +219,11 @@ export const buildTicketsViewItems = (
   });
   const treeResult = buildTree(buildTicketTreeSources(visibleTickets));
   const warningItems = buildTicketCycleWarnings(visibleTickets, treeResult.cycleIds);
-  const ticketItems = buildTicketTreeItems(treeResult.roots, dueIndicators);
+  const ticketItems = buildTicketTreeItems(
+    treeResult.roots,
+    dueIndicators,
+    selectedTicketId,
+  );
   return [...warningItems, ...ticketItems];
 };
 
@@ -227,6 +235,7 @@ export class TicketsTreeProvider implements vscode.TreeDataProvider<vscode.TreeI
   private offset = 0;
   private errorMessage?: string;
   private selectedProjectId?: number;
+  private selectedTicketId?: number;
   private settings = getDefaultTicketListSettings();
   private rootNodes: Array<TreeNode<Ticket>> = [];
 
@@ -275,7 +284,13 @@ export class TicketsTreeProvider implements vscode.TreeDataProvider<vscode.TreeI
 
   setSelectedProjectId(projectId?: number): void {
     this.selectedProjectId = projectId;
+    this.selectedTicketId = undefined;
     this.refresh();
+  }
+
+  setSelectedTicketId(ticketId?: number): void {
+    this.selectedTicketId = ticketId;
+    this.emitter.fire();
   }
 
   getTreeItem(element: vscode.TreeItem): vscode.TreeItem {
@@ -289,7 +304,11 @@ export class TicketsTreeProvider implements vscode.TreeDataProvider<vscode.TreeI
   getChildren(element?: vscode.TreeItem): vscode.ProviderResult<vscode.TreeItem[]> {
     if (element instanceof TicketTreeItem) {
       const dueIndicators = this.buildDueIndicators();
-      return buildTicketTreeItems(element.childNodes, dueIndicators);
+      return buildTicketTreeItems(
+        element.childNodes,
+        dueIndicators,
+        this.selectedTicketId,
+      );
     }
 
     return this.getViewItems();
@@ -330,6 +349,8 @@ export class TicketsTreeProvider implements vscode.TreeDataProvider<vscode.TreeI
       this.selectedProjectId,
       this.errorMessage,
       this.settings,
+      new Date(),
+      this.selectedTicketId,
     );
 
     if (this.errorMessage || !this.selectedProjectId) {
@@ -672,6 +693,7 @@ export class TicketTreeItem extends vscode.TreeItem {
   constructor(
     public readonly node: TreeNode<Ticket>,
     dueDateIndicator: string | undefined,
+    isSelected: boolean,
     isExpanded: boolean,
   ) {
     super(
@@ -690,6 +712,7 @@ export class TicketTreeItem extends vscode.TreeItem {
       this.description = status || dueDateIndicator || "";
     }
     this.contextValue = "redmineTicket";
+    this.iconPath = isSelected ? SELECTION_HIGHLIGHT_ICON : undefined;
     this.command = {
       command: "redmine-client.openTicketPreview",
       title: "Open Ticket Preview",
