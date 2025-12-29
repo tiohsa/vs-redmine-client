@@ -15,38 +15,38 @@ const findViewTitleEntry = (commandId: string): MenuItem | undefined =>
 
 suite("Tickets view title actions", () => {
   test("declares add ticket command and view title action", () => {
-    const addCommand = findCommand("todoex.createTicketFromList");
-    assert.ok(addCommand, "todoex.createTicketFromList command must exist");
+    const addCommand = findCommand("redmine-client.createTicketFromList");
+    assert.ok(addCommand, "redmine-client.createTicketFromList command must exist");
     assert.strictEqual(addCommand?.title, "Redmine: New Ticket");
 
-    const entry = findViewTitleEntry("todoex.createTicketFromList");
+    const entry = findViewTitleEntry("redmine-client.createTicketFromList");
     assert.ok(entry, "add ticket view/title entry must exist");
-    assert.strictEqual(entry?.when, "view == todoexActivityTickets");
-    assert.strictEqual(entry?.enablement, "todoex.canCreateTickets");
+    assert.strictEqual(entry?.when, "view == redmine-clientActivityTickets");
+    assert.strictEqual(entry?.enablement, "redmine-client.canCreateTickets");
   });
 
   test("declares ticket view title icons and tooltip sources", () => {
-    const addCommand = findCommand("todoex.createTicketFromList");
-    const reloadCommand = findCommand("todoex.reloadTicket");
+    const addCommand = findCommand("redmine-client.createTicketFromList");
+    const reloadCommand = findCommand("redmine-client.reloadTicket");
     assert.ok(addCommand?.title, "add ticket command must include a title");
     assert.ok(reloadCommand?.title, "reload ticket command must include a title");
     assert.ok(addCommand?.icon, "add ticket command must include an icon");
     assert.ok(reloadCommand?.icon, "reload ticket command must include an icon");
 
-    const addEntry = findViewTitleEntry("todoex.createTicketFromList");
-    const reloadEntry = findViewTitleEntry("todoex.reloadTicket");
+    const addEntry = findViewTitleEntry("redmine-client.createTicketFromList");
+    const reloadEntry = findViewTitleEntry("redmine-client.reloadTicket");
     assert.ok(addEntry, "add ticket view/title entry must exist");
     assert.ok(reloadEntry, "reload ticket view/title entry must exist");
   });
 
   test("uses new-file icon for ticket add action", () => {
-    const addCommand = findCommand("todoex.createTicketFromList");
+    const addCommand = findCommand("redmine-client.createTicketFromList");
     assert.ok(addCommand, "add ticket command must exist");
     assert.strictEqual(addCommand?.icon, "$(add)");
   });
 
   test("declares child ticket action for ticket items", () => {
-    const childCommand = findCommand("todoex.createChildTicketFromList");
+    const childCommand = findCommand("redmine-client.createChildTicketFromList");
     assert.ok(childCommand, "child ticket command must exist");
     assert.strictEqual(childCommand?.title, "Redmine: Add Child Ticket");
     assert.strictEqual(childCommand?.icon, "$(add)");
@@ -54,52 +54,52 @@ suite("Tickets view title actions", () => {
     const contextItems = getMenuItems("view/item/context");
     const explorerEntry = contextItems.find(
       (item) =>
-        item.command === "todoex.createChildTicketFromList" &&
+        item.command === "redmine-client.createChildTicketFromList" &&
         item.when ===
-          "view == todoexTickets && viewItem == redmineTicket && todoex.canCreateTickets",
+          "view == redmine-clientTickets && viewItem == redmineTicket && redmine-client.canCreateTickets",
     );
     assert.ok(explorerEntry, "child ticket item action must exist in explorer view");
     assert.strictEqual(explorerEntry?.group, "inline@1");
 
     const activityEntry = contextItems.find(
       (item) =>
-        item.command === "todoex.createChildTicketFromList" &&
+        item.command === "redmine-client.createChildTicketFromList" &&
         item.when ===
-          "view == todoexActivityTickets && viewItem == redmineTicket && todoex.canCreateTickets",
+          "view == redmine-clientActivityTickets && viewItem == redmineTicket && redmine-client.canCreateTickets",
     );
     assert.ok(activityEntry, "child ticket item action must exist in activity view");
     assert.strictEqual(activityEntry?.group, "inline@1");
   });
 
   test("uses refresh icon for ticket reload action", () => {
-    const reloadCommand = findCommand("todoex.reloadTicket");
+    const reloadCommand = findCommand("redmine-client.reloadTicket");
     assert.ok(reloadCommand, "reload ticket command must exist");
     assert.strictEqual(reloadCommand?.icon, "$(refresh)");
   });
 
   test("declares collapse action for tickets view title", () => {
-    const collapseCommand = findCommand("todoex.collapseAllTickets");
-    assert.ok(collapseCommand, "todoex.collapseAllTickets command must exist");
+    const collapseCommand = findCommand("redmine-client.collapseAllTickets");
+    assert.ok(collapseCommand, "redmine-client.collapseAllTickets command must exist");
     assert.strictEqual(collapseCommand?.icon, "$(collapse-all)");
 
-    const collapseEntry = findViewTitleEntry("todoex.collapseAllTickets");
+    const collapseEntry = findViewTitleEntry("redmine-client.collapseAllTickets");
     assert.ok(collapseEntry, "collapse tickets view/title entry must exist");
-    assert.strictEqual(collapseEntry?.when, "view == todoexActivityTickets");
+    assert.strictEqual(collapseEntry?.when, "view == redmine-clientActivityTickets");
   });
 
   test("keeps existing ticket context actions", () => {
     const contextItems = getMenuItems("view/item/context");
 
     const openPreview = contextItems.find(
-      (item) => item.command === "todoex.openTicketPreview",
+      (item) => item.command === "redmine-client.openTicketPreview",
     );
     assert.ok(openPreview, "open ticket preview menu item must exist");
-    assert.strictEqual(openPreview?.when, "view == todoexTickets && viewItem == redmineTicket");
+    assert.strictEqual(openPreview?.when, "view == redmine-clientTickets && viewItem == redmineTicket");
 
     const openExtra = contextItems.find(
-      (item) => item.command === "todoex.openExtraTicketEditor",
+      (item) => item.command === "redmine-client.openExtraTicketEditor",
     );
     assert.ok(openExtra, "open extra ticket editor menu item must exist");
-    assert.strictEqual(openExtra?.when, "view == todoexTickets && viewItem == redmineTicket");
+    assert.strictEqual(openExtra?.when, "view == redmine-clientTickets && viewItem == redmineTicket");
   });
 });

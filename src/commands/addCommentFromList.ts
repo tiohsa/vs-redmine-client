@@ -14,7 +14,7 @@ export const addCommentFromList = async (ticketId?: number): Promise<void> => {
   }
 
   const workspacePath = vscode.workspace.workspaceFolders?.[0]?.uri.path;
-  const filename = `todoex-new-comment-${ticketId}.md`;
+  const filename = `redmine-client-new-comment-${ticketId}.md`;
   const targetPath = workspacePath
     ? buildUniqueUntitledPath(workspacePath, filename, fs.existsSync)
     : filename;

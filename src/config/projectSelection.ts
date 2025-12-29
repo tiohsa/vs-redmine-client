@@ -1,6 +1,6 @@
 import * as vscode from "vscode";
 
-const CONFIG_SECTION = "todoex";
+const CONFIG_SECTION = "redmine-client";
 
 export interface ProjectSelection {
   id?: number;

@@ -1,45 +1,45 @@
 # Redmine Client
 
-VS Code 上で Redmine 6.1 のチケット管理を完結できます。プロジェクト別のチケット一覧、
-読み取り専用プレビュー、エディタ内容からのチケット作成、画像添付、
-自分のコメント編集に対応します。
+Redmine Client は Redmine 6.1 のチケット運用を VS Code に統合します。プロジェクトの参照、チケットの検索と確認、エディタ内容からの新規チケット作成、コメントの編集までをエディタ内で完結できます。
 
 English README: `README.md`
 
-## 主な機能
+## 特長
 
-- サイドバーでチケット一覧（ステータス/担当者フィルタ）
-- サイドバーでプロジェクト一覧（選択ハイライト）
-- 子プロジェクトのチケットを含める切替
+- Activity Bar に Projects / Tickets / Comments の専用ビュー
+- ステータスや担当者で絞り込めるチケット一覧
 - エディタ内の読み取り専用プレビュー
-- アクティブエディタ内容からチケット作成
-- 画像添付（ファイル選択 / クリップボードの data URI）
+- アクティブエディタの内容からチケットを作成
+- ファイルまたはクリップボード data URI から添付
 - Mermaid ブロックを redmica_ui_extension 形式（`{{mermaid ... }}`）に変換
-- 自分のコメントのみ編集可能
-- コメント一覧ビュー
+- 自分のコメントのみ安全に編集
 
 ## 必要要件
 
 - Redmine 6.1 サーバー
 - 対象プロジェクトにアクセス可能な API キー
 
+## クイックスタート
+
+1. `redmine-client.baseUrl` と `redmine-client.apiKey` を設定する。
+2. `redmine-client.defaultProjectId` を設定、またはコマンドで選択する。
+3. **Projects** ビューでプロジェクトを選ぶ。
+4. **Tickets** でチケットを確認し、プレビューを開く。
+5. コマンドで作成・更新を行う。
+
+## Activity Bar ビュー
+
+- **Projects**: プロジェクト選択
+- **Tickets**: チケットの一覧とフィルタ
+- **Comments**: コメントの参照と編集
+
 ## 設定項目
 
-- `todoex.baseUrl`: Redmine のベースURL（http:// または https:// を含める）
-- `todoex.apiKey`: Redmine API キー
-- `todoex.defaultProjectId`: デフォルトのプロジェクトID/識別子
-- `todoex.includeChildProjects`: 子プロジェクトを一覧に含めるか
-- `todoex.ticketListLimit`: 取得するチケット件数（デフォルト50）
-
-## 使い方
-
-1. `todoex.baseUrl`（http:// または https:// を含める）と `todoex.apiKey` を設定
-2. `todoex.defaultProjectId` を設定（またはコマンドで選択）
-3. サイドバーの "Redmine Tickets" で一覧を確認
-4. "Redmine Projects" でプロジェクトを選択してチケットを表示
-5. チケット選択でプレビューとコメントを表示
-6. "Redmine: Create Ticket from Editor" で新規作成
-7. "Redmine: Edit Comment" で自分のコメントをエディタ内容で更新
+- `redmine-client.baseUrl`: Redmine のベースURL（http:// または https:// を含める）
+- `redmine-client.apiKey`: Redmine API キー
+- `redmine-client.defaultProjectId`: デフォルトのプロジェクトID/識別子
+- `redmine-client.includeChildProjects`: 子プロジェクトを一覧に含めるか
+- `redmine-client.ticketListLimit`: 取得するチケット件数（デフォルト50）
 
 ## コマンド
 
@@ -52,61 +52,17 @@ English README: `README.md`
 - `Redmine: Edit Comment`
 - `Redmine: Add Comment`
 
-### コマンドの利用方法
+## ヒント
 
-#### Redmine: Refresh Projects
+- 添付はファイルまたはクリップボードの data URI を利用できます。
+- Mermaid ブロックは `{{mermaid ... }}` に変換して投稿されます。
 
-1. エクスプローラーの "Redmine Projects" を開く
-2. コマンド実行でプロジェクト一覧を再読み込み
+## デバッグ
 
-#### Redmine: Refresh Tickets
-
-1. プロジェクトを選択しておく
-2. "Redmine Tickets" を開く
-3. コマンド実行で選択プロジェクトのチケットを再読み込み
-
-#### Redmine: Select Project
-
-1. コマンドを実行
-2. 数値のプロジェクトIDを入力
-3. チケットとコメントが選択プロジェクトに更新される
-
-#### Redmine: Toggle Child Projects
-
-1. コマンドを実行
-2. 子プロジェクトを含む/含まないでチケット一覧を再読み込み
-
-#### Redmine: Open Ticket Preview
-
-1. "Redmine Tickets" でチケットを選択
-2. コマンド実行で読み取り専用プレビューを開く
-
-#### Redmine: Create Ticket from Editor
-
-1. 説明文にしたい内容をエディタで開く
-2. コマンド実行 → 件名を入力
-3. 添付方法（ファイル/クリップボードの data URI）を選択
-4. Mermaid ブロックは `{{mermaid ... }}` に変換されて投稿される
-
-#### Redmine: Edit Comment
-
-1. チケットを選び "Redmine Comments" で自分のコメントを選択
-2. コメントが専用エディタに開く
-3. 編集後にコマンド実行で内容を反映する
-
-#### Redmine: Add Comment
-
-1. "Redmine Tickets" でチケットを選択
-2. コメント本文をエディタで開く（最大 20000 文字）
-3. コマンド実行でアクティブエディタ内容を投稿する
-4. 空白のみの入力はエラーで拒否される
-
-## デバッグ実行
-
-1. VS Code でこのリポジトリを開く
-2. "Run Extension" を実行（F5）
-3. Extension Host 側で設定を投入
-4. 上記コマンドで動作確認
+1. VS Code でこのリポジトリを開く。
+2. "Run Extension" を実行（F5）。
+3. Extension Host 側で設定を投入する。
+4. 上記コマンドで動作確認する。
 
 ## テスト
 
@@ -115,10 +71,8 @@ English README: `README.md`
 
 ## 既知の問題
 
-- クリップボード添付は data URI 形式が必要
+- クリップボード添付は data URI 形式が必要。
 
-## リリースノート
+## ライセンス
 
-### 0.0.1
-
-Initial release.
+MIT

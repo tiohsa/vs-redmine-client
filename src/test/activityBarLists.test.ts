@@ -17,12 +17,15 @@ suite("Activity Bar views", () => {
     assert.ok(contributes, "contributes must be defined");
 
     const views = contributes.views as Record<string, ViewContribution[]> | undefined;
-    assert.ok(views?.todoexActivity, "views.todoexActivity must be defined");
+    assert.ok(
+      views?.["redmine-clientActivity"],
+      "views.redmine-clientActivity must be defined",
+    );
 
-    const viewIds = views.todoexActivity.map((view) => view.id);
-    assert.strictEqual(viewIds[0], "todoexActivityTicketSettings");
-    assert.ok(viewIds.includes("todoexActivityProjects"));
-    assert.ok(viewIds.includes("todoexActivityTickets"));
-    assert.ok(viewIds.includes("todoexActivityComments"));
+    const viewIds = views["redmine-clientActivity"].map((view) => view.id);
+    assert.strictEqual(viewIds[0], "redmine-clientActivityTicketSettings");
+    assert.ok(viewIds.includes("redmine-clientActivityProjects"));
+    assert.ok(viewIds.includes("redmine-clientActivityTickets"));
+    assert.ok(viewIds.includes("redmine-clientActivityComments"));
   });
 });

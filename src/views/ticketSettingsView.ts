@@ -9,13 +9,13 @@ import { validateEditorDefaultValue } from "./ticketEditorDefaultsValidation";
 import { TicketsTreeProvider } from "./ticketsView";
 
 export const EDITOR_DEFAULT_COMMANDS = {
-  subject: "todoex.configureEditorDefaultSubject",
-  description: "todoex.configureEditorDefaultDescription",
-  tracker: "todoex.configureEditorDefaultTracker",
-  priority: "todoex.configureEditorDefaultPriority",
-  status: "todoex.configureEditorDefaultStatus",
-  dueDate: "todoex.configureEditorDefaultDueDate",
-  reset: "todoex.resetEditorDefaults",
+  subject: "redmine-client.configureEditorDefaultSubject",
+  description: "redmine-client.configureEditorDefaultDescription",
+  tracker: "redmine-client.configureEditorDefaultTracker",
+  priority: "redmine-client.configureEditorDefaultPriority",
+  status: "redmine-client.configureEditorDefaultStatus",
+  dueDate: "redmine-client.configureEditorDefaultDueDate",
+  reset: "redmine-client.resetEditorDefaults",
 };
 
 const DEFAULT_FIELD_LABELS: Record<EditorDefaultField, string> = {

@@ -1,5 +1,5 @@
 {
-  "name": "todoex",
+  "name": "redmine-client",
   "displayName": "Redmine Client",
   "description": "",
   "version": "0.0.1",
@@ -10,216 +10,216 @@
     "Other"
   ],
   "activationEvents": [
-    "onView:todoexActivityTicketSettings",
-    "onView:todoexActivityProjects",
-    "onView:todoexActivityTickets",
-    "onView:todoexActivityComments",
-    "onCommand:todoex.refreshTickets",
-    "onCommand:todoex.refreshProjects",
-    "onCommand:todoex.collapseAllProjects",
-    "onCommand:todoex.collapseAllTickets",
-    "onCommand:todoex.selectProject",
-    "onCommand:todoex.toggleChildProjects",
-    "onCommand:todoex.openTicketPreview",
-    "onCommand:todoex.openExtraTicketEditor",
-    "onCommand:todoex.reloadTicket",
-    "onCommand:todoex.reloadComment",
-    "onCommand:todoex.configureTicketPriorityFilter",
-    "onCommand:todoex.configureTicketStatusFilter",
-    "onCommand:todoex.configureTicketTrackerFilter",
-    "onCommand:todoex.configureTicketAssigneeFilter",
-    "onCommand:todoex.configureTicketSort",
-    "onCommand:todoex.configureTicketDueDateDisplay",
-    "onCommand:todoex.resetTicketListSettings",
-    "onCommand:todoex.configureEditorDefaultSubject",
-    "onCommand:todoex.configureEditorDefaultDescription",
-    "onCommand:todoex.configureEditorDefaultTracker",
-    "onCommand:todoex.configureEditorDefaultPriority",
-    "onCommand:todoex.configureEditorDefaultStatus",
-    "onCommand:todoex.configureEditorDefaultDueDate",
-    "onCommand:todoex.resetEditorDefaults",
-    "onCommand:todoex.createTicket",
-    "onCommand:todoex.createTicketFromList",
-    "onCommand:todoex.createChildTicketFromList",
-    "onCommand:todoex.addCommentFromComments",
-    "onCommand:todoex.editComment",
-    "onCommand:todoex.addComment"
+    "onView:redmine-clientActivityTicketSettings",
+    "onView:redmine-clientActivityProjects",
+    "onView:redmine-clientActivityTickets",
+    "onView:redmine-clientActivityComments",
+    "onCommand:redmine-client.refreshTickets",
+    "onCommand:redmine-client.refreshProjects",
+    "onCommand:redmine-client.collapseAllProjects",
+    "onCommand:redmine-client.collapseAllTickets",
+    "onCommand:redmine-client.selectProject",
+    "onCommand:redmine-client.toggleChildProjects",
+    "onCommand:redmine-client.openTicketPreview",
+    "onCommand:redmine-client.openExtraTicketEditor",
+    "onCommand:redmine-client.reloadTicket",
+    "onCommand:redmine-client.reloadComment",
+    "onCommand:redmine-client.configureTicketPriorityFilter",
+    "onCommand:redmine-client.configureTicketStatusFilter",
+    "onCommand:redmine-client.configureTicketTrackerFilter",
+    "onCommand:redmine-client.configureTicketAssigneeFilter",
+    "onCommand:redmine-client.configureTicketSort",
+    "onCommand:redmine-client.configureTicketDueDateDisplay",
+    "onCommand:redmine-client.resetTicketListSettings",
+    "onCommand:redmine-client.configureEditorDefaultSubject",
+    "onCommand:redmine-client.configureEditorDefaultDescription",
+    "onCommand:redmine-client.configureEditorDefaultTracker",
+    "onCommand:redmine-client.configureEditorDefaultPriority",
+    "onCommand:redmine-client.configureEditorDefaultStatus",
+    "onCommand:redmine-client.configureEditorDefaultDueDate",
+    "onCommand:redmine-client.resetEditorDefaults",
+    "onCommand:redmine-client.createTicket",
+    "onCommand:redmine-client.createTicketFromList",
+    "onCommand:redmine-client.createChildTicketFromList",
+    "onCommand:redmine-client.addCommentFromComments",
+    "onCommand:redmine-client.editComment",
+    "onCommand:redmine-client.addComment"
   ],
   "main": "./dist/extension.js",
   "contributes": {
     "viewsContainers": {
       "activitybar": [
         {
-          "id": "todoexActivity",
+          "id": "redmine-clientActivity",
           "title": "Redmine Client",
-          "icon": "media/todoex-activitybar.svg"
+          "icon": "media/redmine-client-activitybar.svg"
         }
       ]
     },
     "commands": [
       {
-        "command": "todoex.helloWorld",
+        "command": "redmine-client.helloWorld",
         "title": "Hello World"
       },
       {
-        "command": "todoex.refreshProjects",
+        "command": "redmine-client.refreshProjects",
         "title": "Redmine: Refresh Projects"
       },
       {
-        "command": "todoex.refreshTickets",
+        "command": "redmine-client.refreshTickets",
         "title": "Redmine: Refresh Tickets"
       },
       {
-        "command": "todoex.collapseAllProjects",
+        "command": "redmine-client.collapseAllProjects",
         "title": "Redmine: Collapse All Projects",
         "icon": "$(collapse-all)"
       },
       {
-        "command": "todoex.collapseAllTickets",
+        "command": "redmine-client.collapseAllTickets",
         "title": "Redmine: Collapse All Tickets",
         "icon": "$(collapse-all)"
       },
       {
-        "command": "todoex.reloadTicket",
+        "command": "redmine-client.reloadTicket",
         "title": "Redmine: Reload Ticket",
         "icon": "$(refresh)"
       },
       {
-        "command": "todoex.reloadComment",
+        "command": "redmine-client.reloadComment",
         "title": "Redmine: Reload Comment",
         "icon": "$(refresh)"
       },
       {
-        "command": "todoex.selectProject",
+        "command": "redmine-client.selectProject",
         "title": "Redmine: Select Project"
       },
       {
-        "command": "todoex.toggleChildProjects",
+        "command": "redmine-client.toggleChildProjects",
         "title": "Redmine: Toggle Child Projects"
       },
       {
-        "command": "todoex.openTicketPreview",
+        "command": "redmine-client.openTicketPreview",
         "title": "Redmine: Open Ticket Preview"
       },
       {
-        "command": "todoex.openExtraTicketEditor",
+        "command": "redmine-client.openExtraTicketEditor",
         "title": "Redmine: Open Ticket Editor (New)"
       },
       {
-        "command": "todoex.configureTicketPriorityFilter",
+        "command": "redmine-client.configureTicketPriorityFilter",
         "title": "Redmine: Configure Ticket Priority Filter"
       },
       {
-        "command": "todoex.configureTicketStatusFilter",
+        "command": "redmine-client.configureTicketStatusFilter",
         "title": "Redmine: Configure Ticket Status Filter"
       },
       {
-        "command": "todoex.configureTicketTrackerFilter",
+        "command": "redmine-client.configureTicketTrackerFilter",
         "title": "Redmine: Configure Ticket Tracker Filter"
       },
       {
-        "command": "todoex.configureTicketAssigneeFilter",
+        "command": "redmine-client.configureTicketAssigneeFilter",
         "title": "Redmine: Configure Ticket Assignee Filter"
       },
       {
-        "command": "todoex.configureTicketSort",
+        "command": "redmine-client.configureTicketSort",
         "title": "Redmine: Configure Ticket Sort"
       },
       {
-        "command": "todoex.configureTicketDueDateDisplay",
+        "command": "redmine-client.configureTicketDueDateDisplay",
         "title": "Redmine: Configure Ticket Due Date Display"
       },
       {
-        "command": "todoex.resetTicketListSettings",
+        "command": "redmine-client.resetTicketListSettings",
         "title": "Redmine: Reset Ticket Settings"
       },
       {
-        "command": "todoex.configureEditorDefaultSubject",
+        "command": "redmine-client.configureEditorDefaultSubject",
         "title": "Redmine: Configure Editor Default Subject"
       },
       {
-        "command": "todoex.configureEditorDefaultDescription",
+        "command": "redmine-client.configureEditorDefaultDescription",
         "title": "Redmine: Configure Editor Default Description"
       },
       {
-        "command": "todoex.configureEditorDefaultTracker",
+        "command": "redmine-client.configureEditorDefaultTracker",
         "title": "Redmine: Configure Editor Default Tracker"
       },
       {
-        "command": "todoex.configureEditorDefaultPriority",
+        "command": "redmine-client.configureEditorDefaultPriority",
         "title": "Redmine: Configure Editor Default Priority"
       },
       {
-        "command": "todoex.configureEditorDefaultStatus",
+        "command": "redmine-client.configureEditorDefaultStatus",
         "title": "Redmine: Configure Editor Default Status"
       },
       {
-        "command": "todoex.configureEditorDefaultDueDate",
+        "command": "redmine-client.configureEditorDefaultDueDate",
         "title": "Redmine: Configure Editor Default Due Date"
       },
       {
-        "command": "todoex.resetEditorDefaults",
+        "command": "redmine-client.resetEditorDefaults",
         "title": "Redmine: Reset Editor Defaults"
       },
       {
-        "command": "todoex.createTicket",
+        "command": "redmine-client.createTicket",
         "title": "Redmine: Create Ticket from Editor"
       },
       {
-        "command": "todoex.createTicketFromList",
+        "command": "redmine-client.createTicketFromList",
         "title": "Redmine: New Ticket",
         "icon": "$(add)"
       },
       {
-        "command": "todoex.createChildTicketFromList",
+        "command": "redmine-client.createChildTicketFromList",
         "title": "Redmine: Add Child Ticket",
         "icon": "$(add)"
       },
       {
-        "command": "todoex.openProjectInBrowser",
+        "command": "redmine-client.openProjectInBrowser",
         "title": "Redmine: Open Project in Browser",
         "icon": "$(link-external)"
       },
       {
-        "command": "todoex.openTicketInBrowser",
+        "command": "redmine-client.openTicketInBrowser",
         "title": "Redmine: Open Ticket in Browser",
         "icon": "$(link-external)"
       },
       {
-        "command": "todoex.openCommentInBrowser",
+        "command": "redmine-client.openCommentInBrowser",
         "title": "Redmine: Open Comment in Browser",
         "icon": "$(link-external)"
       },
       {
-        "command": "todoex.editComment",
+        "command": "redmine-client.editComment",
         "title": "Redmine: Edit Comment"
       },
       {
-        "command": "todoex.addComment",
+        "command": "redmine-client.addComment",
         "title": "Redmine: Add Comment"
       },
       {
-        "command": "todoex.addCommentFromComments",
+        "command": "redmine-client.addCommentFromComments",
         "title": "Redmine: Add Comment",
         "icon": "$(add)"
       }
     ],
     "views": {
-      "todoexActivity": [
+      "redmine-clientActivity": [
         {
-          "id": "todoexActivityTicketSettings",
+          "id": "redmine-clientActivityTicketSettings",
           "name": "Ticket Settings"
         },
         {
-          "id": "todoexActivityProjects",
+          "id": "redmine-clientActivityProjects",
           "name": "Projects"
         },
         {
-          "id": "todoexActivityTickets",
+          "id": "redmine-clientActivityTickets",
           "name": "Tickets"
         },
         {
-          "id": "todoexActivityComments",
+          "id": "redmine-clientActivityComments",
           "name": "Comments"
         }
       ]
@@ -227,72 +227,72 @@
     "menus": {
       "view/title": [
         {
-          "command": "todoex.collapseAllProjects",
-          "when": "view == todoexActivityProjects",
+          "command": "redmine-client.collapseAllProjects",
+          "when": "view == redmine-clientActivityProjects",
           "group": "navigation"
         },
         {
-          "command": "todoex.createTicketFromList",
-          "when": "view == todoexActivityTickets",
+          "command": "redmine-client.createTicketFromList",
+          "when": "view == redmine-clientActivityTickets",
           "group": "navigation",
-          "enablement": "todoex.canCreateTickets"
+          "enablement": "redmine-client.canCreateTickets"
         },
         {
-          "command": "todoex.reloadTicket",
-          "when": "view == todoexActivityTickets",
+          "command": "redmine-client.reloadTicket",
+          "when": "view == redmine-clientActivityTickets",
           "group": "navigation@2"
         },
         {
-          "command": "todoex.collapseAllTickets",
-          "when": "view == todoexActivityTickets",
+          "command": "redmine-client.collapseAllTickets",
+          "when": "view == redmine-clientActivityTickets",
           "group": "navigation@3"
         },
         {
-          "command": "todoex.addCommentFromComments",
-          "when": "view == todoexActivityComments",
+          "command": "redmine-client.addCommentFromComments",
+          "when": "view == redmine-clientActivityComments",
           "group": "navigation",
-          "enablement": "todoex.canAddComments"
+          "enablement": "redmine-client.canAddComments"
         },
         {
-          "command": "todoex.reloadComment",
-          "when": "view == todoexActivityComments",
+          "command": "redmine-client.reloadComment",
+          "when": "view == redmine-clientActivityComments",
           "group": "navigation@1"
         }
       ],
       "view/item/context": [
         {
-          "command": "todoex.openTicketPreview",
-          "when": "view == todoexTickets && viewItem == redmineTicket",
+          "command": "redmine-client.openTicketPreview",
+          "when": "view == redmine-clientTickets && viewItem == redmineTicket",
           "group": "navigation"
         },
         {
-          "command": "todoex.openExtraTicketEditor",
-          "when": "view == todoexTickets && viewItem == redmineTicket",
+          "command": "redmine-client.openExtraTicketEditor",
+          "when": "view == redmine-clientTickets && viewItem == redmineTicket",
           "group": "navigation@1"
         },
         {
-          "command": "todoex.createChildTicketFromList",
-          "when": "view == todoexTickets && viewItem == redmineTicket && todoex.canCreateTickets",
+          "command": "redmine-client.createChildTicketFromList",
+          "when": "view == redmine-clientTickets && viewItem == redmineTicket && redmine-client.canCreateTickets",
           "group": "inline@1"
         },
         {
-          "command": "todoex.createChildTicketFromList",
-          "when": "view == todoexActivityTickets && viewItem == redmineTicket && todoex.canCreateTickets",
+          "command": "redmine-client.createChildTicketFromList",
+          "when": "view == redmine-clientActivityTickets && viewItem == redmineTicket && redmine-client.canCreateTickets",
           "group": "inline@1"
         },
         {
-          "command": "todoex.openProjectInBrowser",
-          "when": "view == todoexActivityProjects && (viewItem == redmineProject || viewItem == redmineProjectSelected)",
+          "command": "redmine-client.openProjectInBrowser",
+          "when": "view == redmine-clientActivityProjects && (viewItem == redmineProject || viewItem == redmineProjectSelected)",
           "group": "inline@1"
         },
         {
-          "command": "todoex.openTicketInBrowser",
-          "when": "view == todoexActivityTickets && viewItem == redmineTicket",
+          "command": "redmine-client.openTicketInBrowser",
+          "when": "view == redmine-clientActivityTickets && viewItem == redmineTicket",
           "group": "inline@2"
         },
         {
-          "command": "todoex.openCommentInBrowser",
-          "when": "view == todoexActivityComments && (viewItem == redmineComment || viewItem == redmineCommentEditable)",
+          "command": "redmine-client.openCommentInBrowser",
+          "when": "view == redmine-clientActivityComments && (viewItem == redmineComment || viewItem == redmineCommentEditable)",
           "group": "inline@1"
         }
       ]
@@ -300,49 +300,49 @@
     "configuration": {
       "title": "Redmine Client",
       "properties": {
-        "todoex.baseUrl": {
+        "redmine-client.baseUrl": {
           "type": "string",
           "default": "",
           "description": "Base URL of the Redmine instance."
         },
-        "todoex.apiKey": {
+        "redmine-client.apiKey": {
           "type": "string",
           "default": "",
           "description": "Redmine API key for authentication."
         },
-        "todoex.defaultProjectId": {
+        "redmine-client.defaultProjectId": {
           "type": "string",
           "default": "",
           "description": "Default project identifier or ID used in ticket listing."
         },
-        "todoex.selectedProjectId": {
+        "redmine-client.selectedProjectId": {
           "type": "string",
           "default": "",
           "scope": "machine",
           "description": "Last selected project ID (used for restoring selection)."
         },
-        "todoex.selectedProjectName": {
+        "redmine-client.selectedProjectName": {
           "type": "string",
           "default": "",
           "scope": "machine",
           "description": "Last selected project name (used for restoring selection)."
         },
-        "todoex.includeChildProjects": {
+        "redmine-client.includeChildProjects": {
           "type": "boolean",
           "default": false,
           "description": "Include child projects when listing tickets."
         },
-        "todoex.ticketListLimit": {
+        "redmine-client.ticketListLimit": {
           "type": "number",
           "default": 50,
           "description": "Default number of tickets to load per request."
         },
-        "todoex.editorStorageDirectory": {
+        "redmine-client.editorStorageDirectory": {
           "type": "string",
           "default": "",
           "description": "Absolute path to store ticket editor files. When empty, the default workspace location is used."
         },
-        "todoex.newTicketTemplatePath": {
+        "redmine-client.newTicketTemplatePath": {
           "type": "string",
           "default": "",
           "description": "Absolute path to the new ticket editor template file."

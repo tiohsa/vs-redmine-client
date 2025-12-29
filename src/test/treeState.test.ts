@@ -44,7 +44,7 @@ suite("Tree state", () => {
     const nodeIds = Array.from({ length: 6000 }, (_, index) => String(index));
     setTreeExpandedBulk("projects", nodeIds, true);
 
-    const stored = memento.get<Record<string, string[]>>("todoex.treeExpansionState", {});
+    const stored = memento.get<Record<string, string[]>>("redmine-client.treeExpansionState", {});
     assert.ok(stored.projects, "projects state must be stored");
     assert.strictEqual(stored.projects.length, 5000);
   });

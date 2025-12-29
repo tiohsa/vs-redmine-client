@@ -14,16 +14,16 @@ const findViewTitleEntry = (commandId: string): MenuItem | undefined =>
 
 suite("Projects view title actions", () => {
   test("declares collapse command and view title action", () => {
-    const collapseCommand = findCommand("todoex.collapseAllProjects");
-    assert.ok(collapseCommand, "todoex.collapseAllProjects command must exist");
+    const collapseCommand = findCommand("redmine-client.collapseAllProjects");
+    assert.ok(collapseCommand, "redmine-client.collapseAllProjects command must exist");
 
-    const collapseEntry = findViewTitleEntry("todoex.collapseAllProjects");
+    const collapseEntry = findViewTitleEntry("redmine-client.collapseAllProjects");
     assert.ok(collapseEntry, "collapse projects view/title entry must exist");
-    assert.strictEqual(collapseEntry?.when, "view == todoexActivityProjects");
+    assert.strictEqual(collapseEntry?.when, "view == redmine-clientActivityProjects");
   });
 
   test("uses collapse icon for projects action", () => {
-    const collapseCommand = findCommand("todoex.collapseAllProjects");
+    const collapseCommand = findCommand("redmine-client.collapseAllProjects");
     assert.ok(collapseCommand, "collapse projects command must exist");
     assert.ok(collapseCommand?.icon, "collapse projects command must include an icon");
     assert.strictEqual(collapseCommand?.icon, "$(collapse-all)");

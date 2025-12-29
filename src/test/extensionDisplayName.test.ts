@@ -34,8 +34,8 @@ suite("Extension display name", () => {
   test("uses Redmine Client in Activity Bar container", () => {
     const packageJson = loadPackageJson();
     const containers = packageJson.contributes?.viewsContainers?.activitybar ?? [];
-    const container = containers.find((entry) => entry.id === "todoexActivity");
-    assert.ok(container, "todoexActivity container must exist");
+    const container = containers.find((entry) => entry.id === "redmine-clientActivity");
+    assert.ok(container, "redmine-clientActivity container must exist");
     assert.strictEqual(container?.title, "Redmine Client");
   });
 

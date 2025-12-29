@@ -84,19 +84,19 @@ suite("Editor filename builder", () => {
   });
 
   test("parses new comment draft filename", () => {
-    const ticketId = parseNewCommentDraftFilename("todoex-new-comment-42.md");
+    const ticketId = parseNewCommentDraftFilename("redmine-client-new-comment-42.md");
 
     assert.strictEqual(ticketId, 42);
   });
 
   test("parses new comment draft filename with suffix", () => {
-    const ticketId = parseNewCommentDraftFilename("todoex-new-comment-42-2.md");
+    const ticketId = parseNewCommentDraftFilename("redmine-client-new-comment-42-2.md");
 
     assert.strictEqual(ticketId, 42);
   });
 
   test("ignores unrelated new comment draft filename", () => {
-    const ticketId = parseNewCommentDraftFilename("todoex-new-comment.md");
+    const ticketId = parseNewCommentDraftFilename("redmine-client-new-comment.md");
 
     assert.strictEqual(ticketId, undefined);
   });

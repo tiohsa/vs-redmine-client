@@ -1,48 +1,45 @@
 # Redmine Client
 
-Manage Redmine 6.1 tickets directly inside VS Code. Browse project tickets,
-preview details, create new tickets from editor content with attachments, and
-edit your own comments without leaving the editor.
+Redmine Client brings Redmine 6.1 ticket workflows into VS Code. Browse projects, triage tickets, preview details, create new issues from your editor content, and manage your own comments without leaving the editor.
 
 Japanese README: `README.ja.md`
 
-## Features
+## Highlights
 
-- Sidebar ticket list with status/assignee filters
-- Sidebar project list with selection highlight
-- Child project inclusion toggle
+- Dedicated Activity Bar views for Projects, Tickets, and Comments
+- Fast ticket browsing with status/assignee filters
 - Read-only ticket preview in the editor
-- Create tickets from active editor content
-- Image attachments from file selection or clipboard data URI
-- Mermaid block conversion for redmica_ui_extension (`{{mermaid ... }}`)
-- Edit only your own ticket comments
-- Comments list in a dedicated sidebar view
+- Create new tickets from the active editor content
+- Add attachments from files or clipboard data URI
+- Mermaid blocks converted to redmica_ui_extension format (`{{mermaid ... }}`)
+- Edit only your own comments safely
 
 ## Requirements
 
 - Redmine 6.1 server
 - Redmine API key with access to target projects
 
+## Quick Start
+
+1. Configure `redmine-client.baseUrl` and `redmine-client.apiKey`.
+2. Set `redmine-client.defaultProjectId` or pick a project via command.
+3. Open the **Projects** view and select a project.
+4. Browse tickets in **Tickets** and open previews.
+5. Use commands to create or update tickets/comments.
+
+## Activity Bar Views
+
+- **Projects**: Select the active project
+- **Tickets**: Browse and filter project tickets
+- **Comments**: View and edit your own comments
+
 ## Extension Settings
 
-This extension contributes the following settings:
-
-- `todoex.baseUrl`: Base URL of the Redmine instance (include http:// or https://)
-- `todoex.apiKey`: Redmine API key
-- `todoex.defaultProjectId`: Default project identifier or ID
-- `todoex.includeChildProjects`: Include child projects in ticket list
-- `todoex.ticketListLimit`: Default number of tickets to load per request
-
-## Usage
-
-1. Configure `todoex.baseUrl` (include http:// or https://) and `todoex.apiKey`.
-2. Set `todoex.defaultProjectId` or use the command to select a project.
-3. Browse tickets in the "Redmine Tickets" view.
-4. Select a project in the "Redmine Projects" view to load tickets.
-5. Select a ticket to preview details and load comments.
-6. Use the "Redmine: Create Ticket from Editor" command to create a ticket.
-7. Use the "Redmine: Edit Comment" command to update your own comments from
-   the active editor content.
+- `redmine-client.baseUrl`: Base URL of the Redmine instance (include http:// or https://)
+- `redmine-client.apiKey`: Redmine API key
+- `redmine-client.defaultProjectId`: Default project identifier or ID
+- `redmine-client.includeChildProjects`: Include child projects in ticket list
+- `redmine-client.ticketListLimit`: Default number of tickets to load per request
 
 ## Commands
 
@@ -55,74 +52,27 @@ This extension contributes the following settings:
 - `Redmine: Edit Comment`
 - `Redmine: Add Comment`
 
-### Command Usage Details
+## Tips
 
-#### Redmine: Refresh Projects
-
-1. Open the "Redmine Projects" view in the Explorer sidebar.
-2. Run the command to reload the project list.
-
-#### Redmine: Refresh Tickets
-
-1. Ensure a project is selected.
-2. Open the "Redmine Tickets" view.
-3. Run the command to reload tickets for the selected project.
-
-#### Redmine: Select Project
-
-1. Run the command.
-2. Enter a numeric project ID.
-3. Tickets and comments refresh for the selected project.
-
-#### Redmine: Toggle Child Projects
-
-1. Run the command.
-2. Ticket list reloads with or without child projects, based on the new toggle.
-
-#### Redmine: Open Ticket Preview
-
-1. Select a ticket in the "Redmine Tickets" view.
-2. Run the command to open a read-only preview in the editor.
-
-#### Redmine: Create Ticket from Editor
-
-1. Open an editor with the content you want as the description.
-2. Run the command and enter a subject.
-3. Choose attachment sources (files or clipboard data URI).
-4. The ticket is created with Mermaid blocks converted to `{{mermaid ... }}`.
-
-#### Redmine: Edit Comment
-
-1. Select a ticket and choose one of your own comments in "Redmine Comments".
-2. The comment opens in a dedicated editor for editing.
-3. Update the content and run the command to save the changes.
-
-#### Redmine: Add Comment
-
-1. Select a ticket in "Redmine Tickets".
-2. Open an editor with the comment body (up to 20000 characters).
-3. Run the command to post the active editor content.
-4. Empty or whitespace-only content is blocked with a message.
+- Attachments: choose files or use a clipboard data URI
+- Mermaid: blocks are converted to `{{mermaid ... }}` during submission
 
 ## Debug
 
 1. Open this repo in VS Code.
 2. Run the "Run Extension" debug configuration (F5).
 3. Configure settings in the Extension Host.
-4. Use the commands above to verify behavior.
+4. Verify behavior with the commands above.
 
 ## Tests
 
 - `pnpm test`: compile + lint + VS Code integration tests
-- `pnpm run test:unsafe`: uses no-sandbox flags for environments that block
-  the VS Code test runner
+- `pnpm run test:unsafe`: uses no-sandbox flags for environments that block the VS Code test runner
 
 ## Known Issues
 
 - Clipboard attachments require a data URI in the clipboard.
 
-## Release Notes
+## License
 
-### 0.0.1
-
-Initial release.
+MIT

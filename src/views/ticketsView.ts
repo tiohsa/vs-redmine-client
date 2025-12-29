@@ -29,18 +29,18 @@ import {
 } from "./projectListSettings";
 
 export const TICKET_SETTINGS_COMMANDS = {
-  priorityFilter: "todoex.configureTicketPriorityFilter",
-  statusFilter: "todoex.configureTicketStatusFilter",
-  trackerFilter: "todoex.configureTicketTrackerFilter",
-  assigneeFilter: "todoex.configureTicketAssigneeFilter",
-  sort: "todoex.configureTicketSort",
-  dueDate: "todoex.configureTicketDueDateDisplay",
-  reset: "todoex.resetTicketListSettings",
+  priorityFilter: "redmine-client.configureTicketPriorityFilter",
+  statusFilter: "redmine-client.configureTicketStatusFilter",
+  trackerFilter: "redmine-client.configureTicketTrackerFilter",
+  assigneeFilter: "redmine-client.configureTicketAssigneeFilter",
+  sort: "redmine-client.configureTicketSort",
+  dueDate: "redmine-client.configureTicketDueDateDisplay",
+  reset: "redmine-client.resetTicketListSettings",
 };
 
-export const TICKET_RELOAD_COMMAND = "todoex.reloadTicket";
+export const TICKET_RELOAD_COMMAND = "redmine-client.reloadTicket";
 
-export const CREATE_TICKET_CONTEXT_KEY = "todoex.canCreateTickets";
+export const CREATE_TICKET_CONTEXT_KEY = "redmine-client.canCreateTickets";
 const TICKETS_VIEW_KEY = "tickets";
 
 export const evaluateCreateTicketPermission = (
@@ -691,7 +691,7 @@ export class TicketTreeItem extends vscode.TreeItem {
     }
     this.contextValue = "redmineTicket";
     this.command = {
-      command: "todoex.openTicketPreview",
+      command: "redmine-client.openTicketPreview",
       title: "Open Ticket Preview",
       arguments: [this],
     };

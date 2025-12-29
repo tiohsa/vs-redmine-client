@@ -18,7 +18,7 @@ import { buildEmptyTicketDraftContent } from "../views/ticketDraftStore";
 import { TicketEditorContent } from "../views/ticketEditorContent";
 import { showError } from "../utils/notifications";
 
-const DRAFT_FILENAME = "todoex-new-ticket.md";
+const DRAFT_FILENAME = "redmine-client-new-ticket.md";
 
 const findOpenDocument = (uri: vscode.Uri): vscode.TextDocument | undefined =>
   vscode.workspace.textDocuments.find(

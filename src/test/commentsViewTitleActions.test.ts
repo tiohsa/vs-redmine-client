@@ -14,47 +14,47 @@ const findViewTitleEntry = (commandId: string): MenuItem | undefined =>
 
 suite("Comments view title actions", () => {
   test("declares add comment command and view title action", () => {
-    const addCommand = findCommand("todoex.addCommentFromComments");
-    assert.ok(addCommand, "todoex.addCommentFromComments command must exist");
+    const addCommand = findCommand("redmine-client.addCommentFromComments");
+    assert.ok(addCommand, "redmine-client.addCommentFromComments command must exist");
     assert.strictEqual(addCommand?.title, "Redmine: Add Comment");
 
-    const entry = findViewTitleEntry("todoex.addCommentFromComments");
+    const entry = findViewTitleEntry("redmine-client.addCommentFromComments");
     assert.ok(entry, "add comment view/title entry must exist");
-    assert.strictEqual(entry?.when, "view == todoexActivityComments");
-    assert.strictEqual(entry?.enablement, "todoex.canAddComments");
+    assert.strictEqual(entry?.when, "view == redmine-clientActivityComments");
+    assert.strictEqual(entry?.enablement, "redmine-client.canAddComments");
   });
 
   test("declares comment view title icons and tooltip sources", () => {
-    const addCommand = findCommand("todoex.addCommentFromComments");
-    const reloadCommand = findCommand("todoex.reloadComment");
+    const addCommand = findCommand("redmine-client.addCommentFromComments");
+    const reloadCommand = findCommand("redmine-client.reloadComment");
     assert.ok(addCommand?.title, "add comment command must include a title");
     assert.ok(reloadCommand?.title, "reload comment command must include a title");
     assert.ok(addCommand?.icon, "add comment command must include an icon");
     assert.ok(reloadCommand?.icon, "reload comment command must include an icon");
 
-    const addEntry = findViewTitleEntry("todoex.addCommentFromComments");
-    const reloadEntry = findViewTitleEntry("todoex.reloadComment");
+    const addEntry = findViewTitleEntry("redmine-client.addCommentFromComments");
+    const reloadEntry = findViewTitleEntry("redmine-client.reloadComment");
     assert.ok(addEntry, "add comment view/title entry must exist");
     assert.ok(reloadEntry, "reload comment view/title entry must exist");
   });
 
   test("uses new-file icon for comment add action", () => {
-    const addCommand = findCommand("todoex.addCommentFromComments");
+    const addCommand = findCommand("redmine-client.addCommentFromComments");
     assert.ok(addCommand, "add comment command must exist");
     assert.strictEqual(addCommand?.icon, "$(add)");
   });
 
   test("uses refresh icon for comment reload action", () => {
-    const reloadCommand = findCommand("todoex.reloadComment");
+    const reloadCommand = findCommand("redmine-client.reloadComment");
     assert.ok(reloadCommand, "reload comment command must exist");
     assert.strictEqual(reloadCommand?.icon, "$(refresh)");
   });
 
   test("keeps existing comment commands", () => {
-    const addComment = findCommand("todoex.addComment");
-    assert.ok(addComment, "todoex.addComment command must exist");
+    const addComment = findCommand("redmine-client.addComment");
+    assert.ok(addComment, "redmine-client.addComment command must exist");
 
-    const editComment = findCommand("todoex.editComment");
-    assert.ok(editComment, "todoex.editComment command must exist");
+    const editComment = findCommand("redmine-client.editComment");
+    assert.ok(editComment, "redmine-client.editComment command must exist");
   });
 });

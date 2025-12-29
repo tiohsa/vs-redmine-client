@@ -6,8 +6,8 @@ const ticketPattern = /^project-(\d+)_ticket-(\d+)(?:_extra)?(?:-\d+)?\.md$/;
 const commentPattern = new RegExp(
   `^project-(\\d+)_ticket-(\\d+)_${COMMENT_TYPE_LABEL}-(\\d+)(?:-\\d+)?\\.md$`,
 );
-const newCommentDraftPattern = /^todoex-new-comment-(\d+)(?:-\d+)?\.md$/;
-const newTicketDraftPattern = /^todoex-new-ticket(?:-\d+)?\.md$/;
+const newCommentDraftPattern = /^redmine-client-new-comment-(\d+)(?:-\d+)?\.md$/;
+const newTicketDraftPattern = /^redmine-client-new-ticket(?:-\d+)?\.md$/;
 
 export type ParsedEditorFilename =
   | {

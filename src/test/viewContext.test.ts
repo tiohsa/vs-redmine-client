@@ -7,16 +7,16 @@ suite("View context helpers", () => {
   });
 
   test("stores and retrieves context values", async () => {
-    await setViewContext("todoex.testContext", true);
+    await setViewContext("redmine-client.testContext", true);
 
-    assert.strictEqual(getViewContext("todoex.testContext"), true);
+    assert.strictEqual(getViewContext("redmine-client.testContext"), true);
   });
 
   test("clears stored values", async () => {
-    await setViewContext("todoex.testContext", "value");
+    await setViewContext("redmine-client.testContext", "value");
 
     clearViewContext();
 
-    assert.strictEqual(getViewContext("todoex.testContext"), undefined);
+    assert.strictEqual(getViewContext("redmine-client.testContext"), undefined);
   });
 });

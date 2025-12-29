@@ -11,9 +11,9 @@ const findContextItem = (commandId: string, when: string): MenuItem | undefined 
 
 suite("Open in browser actions", () => {
   test("declares commands with icons", () => {
-    const project = findCommand("todoex.openProjectInBrowser");
-    const ticket = findCommand("todoex.openTicketInBrowser");
-    const comment = findCommand("todoex.openCommentInBrowser");
+    const project = findCommand("redmine-client.openProjectInBrowser");
+    const ticket = findCommand("redmine-client.openTicketInBrowser");
+    const comment = findCommand("redmine-client.openCommentInBrowser");
 
     assert.ok(project, "project open command must exist");
     assert.ok(ticket, "ticket open command must exist");
@@ -25,16 +25,16 @@ suite("Open in browser actions", () => {
 
   test("declares Activity Bar item actions only", () => {
     const projectItem = findContextItem(
-      "todoex.openProjectInBrowser",
-      "view == todoexActivityProjects && (viewItem == redmineProject || viewItem == redmineProjectSelected)",
+      "redmine-client.openProjectInBrowser",
+      "view == redmine-clientActivityProjects && (viewItem == redmineProject || viewItem == redmineProjectSelected)",
     );
     const ticketItem = findContextItem(
-      "todoex.openTicketInBrowser",
-      "view == todoexActivityTickets && viewItem == redmineTicket",
+      "redmine-client.openTicketInBrowser",
+      "view == redmine-clientActivityTickets && viewItem == redmineTicket",
     );
     const commentItem = findContextItem(
-      "todoex.openCommentInBrowser",
-      "view == todoexActivityComments && (viewItem == redmineComment || viewItem == redmineCommentEditable)",
+      "redmine-client.openCommentInBrowser",
+      "view == redmine-clientActivityComments && (viewItem == redmineComment || viewItem == redmineCommentEditable)",
     );
 
     assert.ok(projectItem, "project activity item action must exist");

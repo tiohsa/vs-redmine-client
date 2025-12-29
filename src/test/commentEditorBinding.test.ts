@@ -28,7 +28,7 @@ suite("Comment editor binding", () => {
 
   test("finalizes draft state even when editor is closed", () => {
     const document = createDocumentStub(
-      vscode.Uri.parse("untitled:todoex-new-comment-7.md"),
+      vscode.Uri.parse("untitled:redmine-client-new-comment-7.md"),
       "Body",
     );
 

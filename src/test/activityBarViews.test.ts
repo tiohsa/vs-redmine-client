@@ -20,11 +20,11 @@ suite("Activity Bar view container", () => {
     assert.ok(viewsContainers?.activitybar, "viewsContainers.activitybar must be defined");
 
     const container = viewsContainers.activitybar.find(
-      (entry) => entry.id === "todoexActivity",
+      (entry) => entry.id === "redmine-clientActivity",
     );
-    assert.ok(container, "todoexActivity container must exist");
+    assert.ok(container, "redmine-clientActivity container must exist");
     assert.strictEqual(container?.title, "Redmine Client");
-    assert.ok(container?.icon, "todoexActivity container icon must be defined");
+    assert.ok(container?.icon, "redmine-clientActivity container icon must be defined");
   });
 
   test("activates on Activity Bar views", () => {
@@ -33,25 +33,25 @@ suite("Activity Bar view container", () => {
     assert.ok(activationEvents, "activationEvents must be defined");
 
     assert.ok(
-      activationEvents.includes("onView:todoexActivityTicketSettings"),
-      "onView:todoexActivityTicketSettings activation missing",
+      activationEvents.includes("onView:redmine-clientActivityTicketSettings"),
+      "onView:redmine-clientActivityTicketSettings activation missing",
     );
     assert.ok(
-      activationEvents.includes("onView:todoexActivityProjects"),
-      "onView:todoexActivityProjects activation missing",
+      activationEvents.includes("onView:redmine-clientActivityProjects"),
+      "onView:redmine-clientActivityProjects activation missing",
     );
     assert.ok(
-      activationEvents.includes("onView:todoexActivityTickets"),
-      "onView:todoexActivityTickets activation missing",
+      activationEvents.includes("onView:redmine-clientActivityTickets"),
+      "onView:redmine-clientActivityTickets activation missing",
     );
     assert.ok(
-      activationEvents.includes("onView:todoexActivityComments"),
-      "onView:todoexActivityComments activation missing",
+      activationEvents.includes("onView:redmine-clientActivityComments"),
+      "onView:redmine-clientActivityComments activation missing",
     );
   });
 
   test("uses the updated Activity Bar SVG icon", () => {
-    const svgPath = path.resolve(__dirname, "../../media/todoex-activitybar.svg");
+    const svgPath = path.resolve(__dirname, "../../media/redmine-client-activitybar.svg");
     const raw = fs.readFileSync(svgPath, "utf8");
 
     assert.ok(raw.includes('viewBox="2 2 20 20"'), "SVG viewBox must match");

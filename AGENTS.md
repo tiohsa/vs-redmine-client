@@ -1,4 +1,4 @@
-# todoex Development Guidelines
+# redmine-client Development Guidelines
 
 Auto-generated from all feature plans. Last updated: 2025-12-26
 日本語で回答する

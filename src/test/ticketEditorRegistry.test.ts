@@ -101,23 +101,23 @@ suite("Ticket editor registry", () => {
   });
 
   test("returns the new ticket draft uri when registered", () => {
-    const draft = createEditorStub(vscode.Uri.parse("untitled:todoex-new-ticket.md"), "");
+    const draft = createEditorStub(vscode.Uri.parse("untitled:redmine-client-new-ticket.md"), "");
 
     registerNewTicketDraft(draft);
 
     const uri = getNewTicketDraftUri();
-    assert.strictEqual(uri?.toString(), "untitled:todoex-new-ticket.md");
+    assert.strictEqual(uri?.toString(), "untitled:redmine-client-new-ticket.md");
   });
 
   test("returns the new comment draft uri when registered", () => {
     const draft = createEditorStub(
-      vscode.Uri.parse("untitled:todoex-new-comment-9.md"),
+      vscode.Uri.parse("untitled:redmine-client-new-comment-9.md"),
       "",
     );
 
     registerNewCommentDraft(9, draft);
 
     const uri = getNewCommentDraftUri(9);
-    assert.strictEqual(uri?.toString(), "untitled:todoex-new-comment-9.md");
+    assert.strictEqual(uri?.toString(), "untitled:redmine-client-new-comment-9.md");
   });
 });

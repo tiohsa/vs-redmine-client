@@ -447,19 +447,19 @@ export async function activate(context: vscode.ExtensionContext) {
   );
 
   context.subscriptions.push(
-    vscode.commands.registerCommand("todoex.refreshProjects", () =>
+    vscode.commands.registerCommand("redmine-client.refreshProjects", () =>
       projectsProvider.refresh(),
     ),
   );
 
   context.subscriptions.push(
-    vscode.commands.registerCommand("todoex.refreshTickets", () =>
+    vscode.commands.registerCommand("redmine-client.refreshTickets", () =>
       ticketsProvider.refresh(),
     ),
   );
 
   context.subscriptions.push(
-    vscode.commands.registerCommand("todoex.collapseAllProjects", async () => {
+    vscode.commands.registerCommand("redmine-client.collapseAllProjects", async () => {
       projectsProvider.collapseAllVisible();
       const selected =
         activityProjectsView.selection[0] ??
@@ -477,7 +477,7 @@ export async function activate(context: vscode.ExtensionContext) {
   );
 
   context.subscriptions.push(
-    vscode.commands.registerCommand("todoex.collapseAllTickets", async () => {
+    vscode.commands.registerCommand("redmine-client.collapseAllTickets", async () => {
       ticketsProvider.collapseAllVisible();
       const usedListCommand = await runTreeCollapseCommand(
         VIEW_ID_ACTIVITY_TICKETS,
@@ -495,13 +495,13 @@ export async function activate(context: vscode.ExtensionContext) {
   );
 
   context.subscriptions.push(
-    vscode.commands.registerCommand("todoex.reloadTicket", async () => {
+    vscode.commands.registerCommand("redmine-client.reloadTicket", async () => {
       await reloadTicketFromEditor();
     }),
   );
 
   context.subscriptions.push(
-    vscode.commands.registerCommand("todoex.reloadComment", async () => {
+    vscode.commands.registerCommand("redmine-client.reloadComment", async () => {
       await reloadCommentFromEditor();
     }),
   );
@@ -605,7 +605,7 @@ export async function activate(context: vscode.ExtensionContext) {
   );
 
   context.subscriptions.push(
-    vscode.commands.registerCommand("todoex.selectProject", async () => {
+    vscode.commands.registerCommand("redmine-client.selectProject", async () => {
       const projectId = await vscode.window.showInputBox({
         prompt: "Enter Redmine project ID",
         placeHolder: "e.g. 123",
@@ -629,8 +629,8 @@ export async function activate(context: vscode.ExtensionContext) {
   );
 
   context.subscriptions.push(
-    vscode.commands.registerCommand("todoex.toggleChildProjects", async () => {
-      const config = vscode.workspace.getConfiguration("todoex");
+    vscode.commands.registerCommand("redmine-client.toggleChildProjects", async () => {
+      const config = vscode.workspace.getConfiguration("redmine-client");
       const current = config.get<boolean>("includeChildProjects", false);
       await config.update(
         "includeChildProjects",
@@ -643,7 +643,7 @@ export async function activate(context: vscode.ExtensionContext) {
 
   context.subscriptions.push(
     vscode.commands.registerCommand(
-      "todoex.openTicketPreview",
+      "redmine-client.openTicketPreview",
       async (item?: TicketTreeItem) => {
         const selected =
           item ?? (activityTicketsView.selection[0] as TicketTreeItem | undefined);
@@ -660,7 +660,7 @@ export async function activate(context: vscode.ExtensionContext) {
 
   context.subscriptions.push(
     vscode.commands.registerCommand(
-      "todoex.openExtraTicketEditor",
+      "redmine-client.openExtraTicketEditor",
       async (item?: TicketTreeItem) => {
         const selected =
           item ?? (activityTicketsView.selection[0] as TicketTreeItem | undefined);
@@ -676,25 +676,25 @@ export async function activate(context: vscode.ExtensionContext) {
   );
 
   context.subscriptions.push(
-    vscode.commands.registerCommand("todoex.createTicket", async () => {
+    vscode.commands.registerCommand("redmine-client.createTicket", async () => {
       await createTicketFromEditor();
     }),
   );
 
   context.subscriptions.push(
-    vscode.commands.registerCommand("todoex.createTicketFromList", async () => {
+    vscode.commands.registerCommand("redmine-client.createTicketFromList", async () => {
       await createTicketFromList();
     }),
   );
   context.subscriptions.push(
-    vscode.commands.registerCommand("todoex.createChildTicketFromList", async (item) => {
+    vscode.commands.registerCommand("redmine-client.createChildTicketFromList", async (item) => {
       await createChildTicketFromList(item as TicketTreeItem | undefined);
     }),
   );
 
   context.subscriptions.push(
     vscode.commands.registerCommand(
-      "todoex.openProjectInBrowser",
+      "redmine-client.openProjectInBrowser",
       async (item?: ProjectTreeItem) => {
         const selected =
           item ?? (activityProjectsView.selection[0] as ProjectTreeItem | undefined);
@@ -705,7 +705,7 @@ export async function activate(context: vscode.ExtensionContext) {
 
   context.subscriptions.push(
     vscode.commands.registerCommand(
-      "todoex.openTicketInBrowser",
+      "redmine-client.openTicketInBrowser",
       async (item?: TicketTreeItem) => {
         const selected =
           item ?? (activityTicketsView.selection[0] as TicketTreeItem | undefined);
@@ -716,7 +716,7 @@ export async function activate(context: vscode.ExtensionContext) {
 
   context.subscriptions.push(
     vscode.commands.registerCommand(
-      "todoex.openCommentInBrowser",
+      "redmine-client.openCommentInBrowser",
       async (item?: CommentTreeItem) => {
         const selected =
           item ?? (activityCommentsView.selection[0] as CommentTreeItem | undefined);
@@ -727,7 +727,7 @@ export async function activate(context: vscode.ExtensionContext) {
 
   context.subscriptions.push(
     vscode.commands.registerCommand(
-      "todoex.editComment",
+      "redmine-client.editComment",
       async (item?: CommentTreeItem) => {
         const selected = getSelectedComment(item);
         if (!selected || !(selected instanceof CommentTreeItem)) {
@@ -750,7 +750,7 @@ export async function activate(context: vscode.ExtensionContext) {
   );
 
   context.subscriptions.push(
-    vscode.commands.registerCommand("todoex.addComment", async () => {
+    vscode.commands.registerCommand("redmine-client.addComment", async () => {
       const selected =
         activityTicketsView.selection[0] as TicketTreeItem | undefined;
       if (!selected) {
@@ -763,7 +763,7 @@ export async function activate(context: vscode.ExtensionContext) {
   );
 
   context.subscriptions.push(
-    vscode.commands.registerCommand("todoex.addCommentFromComments", async () => {
+    vscode.commands.registerCommand("redmine-client.addCommentFromComments", async () => {
       const ticketId = commentsProvider.getTicketId();
       await addCommentFromList(ticketId);
     }),

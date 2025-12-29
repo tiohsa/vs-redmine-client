@@ -12,7 +12,7 @@ import { createEditorStub } from "./helpers/editorStubs";
 suite("Comment save rename", () => {
   test("finalizes draft by switching to comment mode", () => {
     const editor = createEditorStub(
-      vscode.Uri.parse("untitled:todoex-new-comment-10.md"),
+      vscode.Uri.parse("untitled:redmine-client-new-comment-10.md"),
       "Body",
     );
     registerNewCommentDraft(10, editor);

@@ -1,6 +1,6 @@
 import * as vscode from "vscode";
 
-const CONFIG_SECTION = "todoex";
+const CONFIG_SECTION = "redmine-client";
 
 export const getSettings = (): vscode.WorkspaceConfiguration =>
   vscode.workspace.getConfiguration(CONFIG_SECTION);

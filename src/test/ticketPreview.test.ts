@@ -69,7 +69,7 @@ suite("Ticket preview", () => {
     assert.ok(resolution.errorMessage);
     assert.strictEqual(
       resolution.uri?.toString(),
-      vscode.Uri.joinPath(workspace[0].uri, ".todoex", "editors").toString(),
+      vscode.Uri.joinPath(workspace[0].uri, ".redmine-client", "editors").toString(),
     );
   });
 

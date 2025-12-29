@@ -9,7 +9,7 @@ import { formatCommentDescription, formatCommentLabel } from "./commentListForma
 import { MAX_VIEW_ITEMS } from "./viewLimits";
 import { createEmptyStateItem, createErrorStateItem } from "./viewState";
 
-export const COMMENT_RELOAD_COMMAND = "todoex.reloadComment";
+export const COMMENT_RELOAD_COMMAND = "redmine-client.reloadComment";
 
 export const evaluateAddCommentPermission = (
   ticketId: number | undefined,

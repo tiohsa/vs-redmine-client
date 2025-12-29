@@ -162,7 +162,7 @@ export const resolveEditorStorageDir = (
       return { uri: validation.uri, usedFallback: false };
     }
     const fallbackUri = workspaceFolders?.[0]
-      ? vscode.Uri.joinPath(workspaceFolders[0].uri, ".todoex", "editors")
+      ? vscode.Uri.joinPath(workspaceFolders[0].uri, ".redmine-client", "editors")
       : undefined;
     return {
       uri: fallbackUri,
@@ -177,7 +177,7 @@ export const resolveEditorStorageDir = (
   }
 
   return {
-    uri: vscode.Uri.joinPath(workspace.uri, ".todoex", "editors"),
+    uri: vscode.Uri.joinPath(workspace.uri, ".redmine-client", "editors"),
     usedFallback: true,
   };
 };

@@ -1,7 +1,7 @@
 import type { Memento } from "vscode";
 
 const MAX_TREE_STATE_NODES = 5000;
-const STORAGE_KEY = "todoex.treeExpansionState";
+const STORAGE_KEY = "redmine-client.treeExpansionState";
 
 const expansionState = new Map<string, Set<string>>();
 let expansionStorage: Memento | undefined;
