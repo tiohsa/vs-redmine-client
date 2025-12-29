@@ -32,6 +32,23 @@ suite("Ticket editor defaults application", () => {
     });
   });
 
+  test("uses empty defaults when no defaults are defined", () => {
+    resetTicketEditorDefaults();
+
+    const content = buildNewTicketDraftContent();
+    assert.deepStrictEqual(content, {
+      subject: "",
+      description: "",
+      metadata: {
+        tracker: "",
+        priority: "",
+        status: "",
+        due_date: "",
+        children: [],
+      },
+    });
+  });
+
   test("applies parent metadata to child ticket draft content", () => {
     const content = buildNewChildTicketDraftContent({
       id: 123,

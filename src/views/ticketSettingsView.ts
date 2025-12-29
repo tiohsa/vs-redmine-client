@@ -6,7 +6,7 @@ import {
   updateTicketEditorDefaultField,
 } from "./ticketEditorDefaultsStore";
 import { validateEditorDefaultValue } from "./ticketEditorDefaultsValidation";
-import { TicketSettingsItem, TicketsTreeProvider } from "./ticketsView";
+import { TicketsTreeProvider } from "./ticketsView";
 
 export const EDITOR_DEFAULT_COMMANDS = {
   subject: "todoex.configureEditorDefaultSubject",
@@ -25,17 +25,6 @@ const DEFAULT_FIELD_LABELS: Record<EditorDefaultField, string> = {
   priority: "Priority",
   status: "Status",
   due_date: "Due date",
-};
-
-const formatDefaultValue = (value: string, maxLength = 28): string => {
-  const trimmed = value.trim();
-  if (trimmed.length === 0) {
-    return "Blank";
-  }
-  if (trimmed.length <= maxLength) {
-    return trimmed;
-  }
-  return `${trimmed.slice(0, maxLength - 3)}...`;
 };
 
 const getFieldValue = (field: EditorDefaultField): string => {
@@ -59,52 +48,6 @@ const getFieldValue = (field: EditorDefaultField): string => {
 const getFieldPrompt = (field: EditorDefaultField): string =>
   `Enter default ${DEFAULT_FIELD_LABELS[field].toLowerCase()} (leave blank for none)`;
 
-const getCommandForField = (field: EditorDefaultField): string => {
-  switch (field) {
-    case "subject":
-      return EDITOR_DEFAULT_COMMANDS.subject;
-    case "description":
-      return EDITOR_DEFAULT_COMMANDS.description;
-    case "tracker":
-      return EDITOR_DEFAULT_COMMANDS.tracker;
-    case "priority":
-      return EDITOR_DEFAULT_COMMANDS.priority;
-    case "status":
-      return EDITOR_DEFAULT_COMMANDS.status;
-    case "due_date":
-      return EDITOR_DEFAULT_COMMANDS.dueDate;
-  }
-};
-
-export const buildEditorDefaultsItems = (): vscode.TreeItem[] => {
-  const fields: EditorDefaultField[] = [
-    "subject",
-    "description",
-    "tracker",
-    "priority",
-    "status",
-    "due_date",
-  ];
-
-  const items = fields.map(
-    (field) =>
-      new TicketSettingsItem(
-        `Editor default: ${DEFAULT_FIELD_LABELS[field]}`,
-        formatDefaultValue(getFieldValue(field)),
-        { command: getCommandForField(field), title: `Set default ${field}` },
-      ),
-  );
-
-  items.push(
-    new TicketSettingsItem(
-      "Editor defaults: Reset",
-      "Clear saved defaults",
-      { command: EDITOR_DEFAULT_COMMANDS.reset, title: "Reset editor defaults" },
-    ),
-  );
-
-  return items;
-};
 
 export const configureEditorDefaultField = async (
   field: EditorDefaultField,
@@ -178,6 +121,6 @@ export class TicketSettingsTreeProvider implements vscode.TreeDataProvider<vscod
       return [];
     }
 
-    return [...buildEditorDefaultsItems(), ...this.ticketsProvider.getSettingsItems()];
+    return this.ticketsProvider.getSettingsItems();
   }
 }
