@@ -11,4 +11,5 @@ export type CommentSaveStatus =
 export interface CommentSaveResult {
   status: CommentSaveStatus;
   message: string;
+  createdCommentId?: number;
 }

@@ -1,5 +1,6 @@
 import { requestJson } from "./client";
 import { Comment, RedmineIssueDetailResponse } from "./types";
+import { getCurrentUserId } from "./users";
 
 export const filterEditableComments = <T extends { editableByCurrentUser: boolean }>(
   comments: T[],
@@ -49,10 +50,34 @@ export const buildAddCommentPayload = (notes: string): Record<string, unknown> =
   },
 });
 
-export const addComment = async (issueId: number, notes: string): Promise<void> => {
+export const addComment = async (
+  issueId: number,
+  notes: string,
+): Promise<number | null> => {
   await requestJson({
     method: "PUT",
     path: `/issues/${issueId}.json`,
     body: buildAddCommentPayload(notes),
   });
+
+  try {
+    const currentUserId = await getCurrentUserId();
+    const response = await requestJson<RedmineIssueDetailResponse>({
+      method: "GET",
+      path: `/issues/${issueId}.json`,
+      query: { include: "journals" },
+    });
+
+    const journals = response.issue.journals ?? [];
+    journals.sort((a, b) => b.id - a.id);
+
+    const match = journals.find(
+      (j) => j.user?.id === currentUserId && j.notes === notes,
+    );
+
+    return match ? match.id : null;
+  } catch (error) {
+    console.error("Failed to retrieve new comment ID", error);
+    return null;
+  }
 };

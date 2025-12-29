@@ -104,6 +104,7 @@ suite("Comment save sync", () => {
       deps: {
         addComment: async () => {
           added = true;
+          return 123;
         },
         updateComment: async () => {
           throw new Error("should not update");
@@ -113,6 +114,7 @@ suite("Comment save sync", () => {
 
     assert.strictEqual(added, true);
     assert.strictEqual(result.status, "created");
+    assert.strictEqual(result.createdCommentId, 123);
   });
 
   test("reload replaces comment body with saved content", async () => {

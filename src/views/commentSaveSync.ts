@@ -7,8 +7,14 @@ import {
   getCommentIdForEditor,
   getTicketIdForEditor,
   isTicketEditor,
+  setEditorContentType,
+  setEditorCommentId,
 } from "./ticketEditorRegistry";
-import { getCommentEdit, updateCommentEdit } from "./commentEditStore";
+import {
+  getCommentEdit,
+  updateCommentEdit,
+  setCommentDraftBody,
+} from "./commentEditStore";
 import { CommentSaveResult } from "./commentSaveTypes";
 import { applyEditorContent } from "./ticketPreview";
 
@@ -100,12 +106,15 @@ export const syncNewCommentDraft = async (input: {
   }
 
   try {
-    await deps.addComment(input.ticketId, input.content);
+    const createdId = await deps.addComment(input.ticketId, input.content);
+    return {
+      status: "created",
+      message: "Comment added.",
+      createdCommentId: createdId ?? undefined,
+    };
   } catch (error) {
     return mapErrorToResult(error);
   }
-
-  return buildResult("created", "Comment added.");
 };
 
 export const handleCommentEditorSave = async (
@@ -126,10 +135,18 @@ export const handleCommentEditorSave = async (
       return undefined;
     }
 
-    return syncNewCommentDraft({
+    const result = await syncNewCommentDraft({
       ticketId,
       content: editor.document.getText(),
     });
+
+    if (result.status === "created" && result.createdCommentId) {
+      setEditorContentType(editor, "comment");
+      setEditorCommentId(editor, result.createdCommentId);
+      setCommentDraftBody(result.createdCommentId, editor.document.getText());
+    }
+
+    return result;
   }
 
   const commentId = getCommentIdForEditor(editor);
