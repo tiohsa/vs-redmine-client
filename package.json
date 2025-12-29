@@ -1,6 +1,6 @@
 {
   "name": "todoex",
-  "displayName": "TodoEx",
+  "displayName": "Redmine Client",
   "description": "",
   "version": "0.0.1",
   "engines": {
@@ -51,7 +51,7 @@
       "activitybar": [
         {
           "id": "todoexActivity",
-          "title": "TodoEx",
+          "title": "Redmine Client",
           "icon": "media/todoex-activitybar.svg"
         }
       ]
@@ -212,15 +212,15 @@
         },
         {
           "id": "todoexActivityProjects",
-          "name": "Redmine Projects"
+          "name": "Projects"
         },
         {
           "id": "todoexActivityTickets",
-          "name": "Redmine Tickets"
+          "name": "Tickets"
         },
         {
           "id": "todoexActivityComments",
-          "name": "Redmine Comments"
+          "name": "Comments"
         }
       ]
     },
@@ -298,7 +298,7 @@
       ]
     },
     "configuration": {
-      "title": "TodoEx",
+      "title": "Redmine Client",
       "properties": {
         "todoex.baseUrl": {
           "type": "string",

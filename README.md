@@ -1,4 +1,4 @@
-# TodoEx
+# Redmine Client
 
 Manage Redmine 6.1 tickets directly inside VS Code. Browse project tickets,
 preview details, create new tickets from editor content with attachments, and

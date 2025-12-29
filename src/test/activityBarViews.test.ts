@@ -23,7 +23,7 @@ suite("Activity Bar view container", () => {
       (entry) => entry.id === "todoexActivity",
     );
     assert.ok(container, "todoexActivity container must exist");
-    assert.strictEqual(container?.title, "TodoEx");
+    assert.strictEqual(container?.title, "Redmine Client");
     assert.ok(container?.icon, "todoexActivity container icon must be defined");
   });
 
