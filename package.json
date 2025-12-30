@@ -6,7 +6,11 @@
   "publisher": "your-publisher-id",
   "author": {
     "name": "tiohsa",
-    "url": "git@github.com:tiohsa/vs-redmine-client.git"
+    "url": "https://github.com/tiohsa/vs-redmine-client"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/tiohsa/vs-redmine-client"
   },
   "engines": {
     "vscode": "^1.107.0"
