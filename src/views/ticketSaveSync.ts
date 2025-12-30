@@ -1,4 +1,3 @@
-import * as path from "path";
 import * as vscode from "vscode";
 import { getDefaultProjectId } from "../config/settings";
 import { getProjectSelection } from "../config/projectSelection";
@@ -35,9 +34,12 @@ import { TicketEditorContent } from "./ticketEditorContent";
 import { TicketSaveResult } from "./ticketSaveTypes";
 import { applyEditorContent, buildTicketPreviewContent } from "./ticketPreview";
 import {
+  buildMarkdownImageUploadFailureMessage,
+  hasMarkdownImageUploadFailure,
   MarkdownImageUploadSummary,
   processMarkdownImageUploads,
 } from "../utils/markdownImageUpload";
+import { resolveEditorBaseDir } from "../utils/editorBaseDir";
 import { UploadSummary } from "./saveUploadTypes";
 
 export interface TicketSaveDependencies {
@@ -137,22 +139,23 @@ const resolveProjectIdForCreate = (projectId?: number): number | undefined => {
 const resolveProjectIdForEditor = (editor: vscode.TextEditor): number | undefined =>
   resolveProjectIdForCreate(getProjectIdForEditor(editor));
 
-const resolveBaseDir = (
-  editor?: vscode.TextEditor,
-  documentUri?: vscode.Uri,
-): string | undefined => {
-  const uri = editor?.document.uri ?? documentUri;
-  if (uri?.scheme === "file") {
-    return path.dirname(uri.fsPath);
-  }
-  const workspace = vscode.workspace.workspaceFolders?.[0];
-  return workspace ? workspace.uri.fsPath : undefined;
-};
-
 const resolveUploadSummary = (
   summary: MarkdownImageUploadSummary,
 ): UploadSummary | undefined =>
   summary.permissionDenied || summary.failures.length > 0 ? summary : undefined;
+
+const handleTicketUploadFailure = (
+  summary: MarkdownImageUploadSummary,
+): TicketSaveResult | undefined => {
+  if (!hasMarkdownImageUploadFailure(summary)) {
+    return undefined;
+  }
+  return buildResult(
+    "failed",
+    buildMarkdownImageUploadFailureMessage(summary),
+    { uploadSummary: resolveUploadSummary(summary) },
+  );
+};
 
 const computeChanges = (
   baseSubject: string,
@@ -307,9 +310,13 @@ export const syncTicketDraft = async (input: {
   const subject = parsed.subject || draft.baseSubject;
   const uploadResult = await processMarkdownImageUploads({
     content: parsed.description,
-    baseDir: resolveBaseDir(input.editor, input.documentUri),
+    baseDir: resolveEditorBaseDir({ editor: input.editor, documentUri: input.documentUri }),
     uploadFile: deps.uploadFile,
   });
+  const failureResult = handleTicketUploadFailure(uploadResult.summary);
+  if (failureResult) {
+    return failureResult;
+  }
   const uploadSummary = resolveUploadSummary(uploadResult.summary);
   const description = uploadResult.content;
   const metadata = parsed.metadata;
@@ -482,7 +489,7 @@ export const syncNewTicketDraft = async (input: {
   deps?: Partial<TicketCreateDependencies>;
 }): Promise<TicketSaveResult> => {
   const deps = { ...defaultCreateDeps, ...input.deps };
-  const baseDir = resolveBaseDir(input.editor);
+  const baseDir = resolveEditorBaseDir({ editor: input.editor });
   const projectId = resolveProjectIdForEditor(input.editor);
   const { result, createdId, parsed } = await createTicketFromContent({
     content: input.editor.document.getText(),
@@ -511,7 +518,7 @@ export const syncNewTicketDraftContent = async (input: {
   onCreated?: (createdId: number, parsed: TicketEditorContent) => void;
 }): Promise<TicketSaveResult> => {
   const deps = { ...defaultCreateDeps, ...input.deps };
-  const baseDir = resolveBaseDir(undefined, input.documentUri);
+  const baseDir = resolveEditorBaseDir({ documentUri: input.documentUri });
   const { result, createdId, parsed } = await createTicketFromContent({
     content: input.content,
     projectId: input.projectId,
@@ -573,6 +580,10 @@ const createTicketFromContent = async (input: {
     baseDir: input.baseDir,
     uploadFile: input.deps.uploadFile,
   });
+  const failureResult = handleTicketUploadFailure(uploadResult.summary);
+  if (failureResult) {
+    return { result: failureResult };
+  }
   const uploadSummary = resolveUploadSummary(uploadResult.summary);
   parsed = {
     ...parsed,

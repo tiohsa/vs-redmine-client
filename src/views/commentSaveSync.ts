@@ -1,15 +1,17 @@
-import * as path from "path";
 import * as vscode from "vscode";
 import { addComment, updateComment } from "../redmine/comments";
-import { getIssueDetail } from "../redmine/issues";
+import { getIssueDetail, updateIssue } from "../redmine/issues";
 import { getCurrentUserId } from "../redmine/users";
 import { Comment } from "../redmine/types";
 import { validateComment } from "../utils/commentValidation";
 import { uploadFileAttachment } from "../redmine/attachments";
 import {
+  buildMarkdownImageUploadFailureMessage,
+  hasMarkdownImageUploadFailure,
   MarkdownImageUploadSummary,
   processMarkdownImageUploads,
 } from "../utils/markdownImageUpload";
+import { resolveEditorBaseDir } from "../utils/editorBaseDir";
 import {
   getEditorContentType,
   getCommentIdForEditor,
@@ -28,6 +30,7 @@ import { UploadSummary } from "./saveUploadTypes";
 export interface CommentSaveDependencies {
   addComment: typeof addComment;
   updateComment: typeof updateComment;
+  updateIssue: typeof updateIssue;
   getIssueDetail: typeof getIssueDetail;
   getCurrentUserId: typeof getCurrentUserId;
   uploadFile: typeof uploadFileAttachment;
@@ -36,6 +39,7 @@ export interface CommentSaveDependencies {
 const defaultDeps: CommentSaveDependencies = {
   addComment,
   updateComment,
+  updateIssue,
   getIssueDetail,
   getCurrentUserId,
   uploadFile: uploadFileAttachment,
@@ -60,18 +64,6 @@ const buildResult = (
   message,
   ...extras,
 });
-
-const resolveBaseDir = (
-  editor?: vscode.TextEditor,
-  documentUri?: vscode.Uri,
-): string | undefined => {
-  const uri = editor?.document.uri ?? documentUri;
-  if (uri?.scheme === "file") {
-    return path.dirname(uri.fsPath);
-  }
-  const workspace = vscode.workspace.workspaceFolders?.[0];
-  return workspace ? workspace.uri.fsPath : undefined;
-};
 
 const resolveUploadSummary = (
   summary: MarkdownImageUploadSummary,
@@ -176,12 +168,23 @@ export const syncCommentDraft = async (input: {
     return buildResult("failed", "Missing comment edit state.");
   }
 
+  const baseDir = resolveEditorBaseDir({ editor: input.editor, documentUri: input.documentUri });
+  console.log('[DEBUG syncCommentDraft] baseDir:', baseDir);
+  console.log('[DEBUG syncCommentDraft] content:', input.content);
   const uploadResult = await processMarkdownImageUploads({
     content: input.content,
-    baseDir: resolveBaseDir(input.editor, input.documentUri),
+    baseDir,
     uploadFile: deps.uploadFile,
   });
+  console.log('[DEBUG syncCommentDraft] uploadResult:', JSON.stringify(uploadResult, null, 2));
   const uploadSummary = resolveUploadSummary(uploadResult.summary);
+  if (hasMarkdownImageUploadFailure(uploadResult.summary)) {
+    return buildResult(
+      "failed",
+      buildMarkdownImageUploadFailureMessage(uploadResult.summary),
+      { uploadSummary },
+    );
+  }
   const nextContent = uploadResult.content;
 
   const validation = validateComment(nextContent);
@@ -194,10 +197,18 @@ export const syncCommentDraft = async (input: {
   }
 
   try {
+    // Redmine's journal update API doesn't support uploads.
+    // We need to attach files to the issue first, then update the journal.
+    if (uploadResult.uploads.length > 0) {
+      console.log('[DEBUG syncCommentDraft] Attaching uploads to issue:', edit.ticketId);
+      await deps.updateIssue({
+        issueId: edit.ticketId,
+        fields: { uploads: uploadResult.uploads },
+      });
+    }
     await deps.updateComment(
       input.commentId,
       nextContent,
-      uploadResult.uploads.length > 0 ? uploadResult.uploads : undefined,
     );
   } catch (error) {
     return mapErrorToResult(error);
@@ -219,12 +230,23 @@ export const syncNewCommentDraft = async (input: {
   onCreated?: (created: { commentId: number; projectId: number }) => Promise<void>;
 }): Promise<CommentSaveResult> => {
   const deps = { ...defaultDeps, ...input.deps };
+  const baseDir = resolveEditorBaseDir({ editor: input.editor, documentUri: input.documentUri });
+  console.log('[DEBUG syncNewCommentDraft] baseDir:', baseDir);
+  console.log('[DEBUG syncNewCommentDraft] content:', input.content);
   const uploadResult = await processMarkdownImageUploads({
     content: input.content,
-    baseDir: resolveBaseDir(input.editor, input.documentUri),
+    baseDir,
     uploadFile: deps.uploadFile,
   });
+  console.log('[DEBUG syncNewCommentDraft] uploadResult:', JSON.stringify(uploadResult, null, 2));
   const uploadSummary = resolveUploadSummary(uploadResult.summary);
+  if (hasMarkdownImageUploadFailure(uploadResult.summary)) {
+    return buildResult(
+      "failed",
+      buildMarkdownImageUploadFailureMessage(uploadResult.summary),
+      { uploadSummary },
+    );
+  }
   const nextContent = uploadResult.content;
 
   const validation = validateComment(nextContent);

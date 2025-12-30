@@ -27,6 +27,7 @@ Auto-generated from all feature plans. Last updated: 2025-12-26
 - N/A (in-memory state; editor file naming only) (001-comment-save-rename)
 - ファイル（既定値定義）, その他はN/A (001-remove-activitybar-default)
 - Local filesystem (`redmine-client.editorStorageDirectory/templates`) (001-project-template)
+- RedmineサーバーのアップロードAPI（/uploads.json）と既存のコメント更新APIを利用 (001-comment-image-upload)
 
 - TypeScript 5.9 + VS Code Extension API, webpack, @vscode/test-cli (001-redmine-ticket-workflow)
 
@@ -46,9 +47,9 @@ npm test && npm run lint
 TypeScript 5.9: Follow standard conventions
 
 ## Recent Changes
+- 001-comment-image-upload: Added TypeScript 5.9 + VS Code Extension API, webpack 5, @vscode/test-cli, ESLint
 - 001-upload-markdown-images: Added TypeScript 5.9 + VS Code Extension API, webpack 5, @vscode/test-cli, ESLint
 - 001-project-template: Added TypeScript 5.9 + VS Code Extension API, webpack 5, @vscode/test-cli, ESLint
-- 001-blue-highlight: Added TypeScript 5.9 + VS Code Extension API, webpack 5, @vscode/test-cli, ESLint
 
 
 <!-- MANUAL ADDITIONS START -->

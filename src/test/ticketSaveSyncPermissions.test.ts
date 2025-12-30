@@ -50,9 +50,8 @@ suite("Ticket attachment permission gate", () => {
       },
     });
 
+    assert.strictEqual(result.status, "failed");
     assert.strictEqual(result.uploadSummary?.permissionDenied, true);
-    assert.ok(updateFields);
-    assert.strictEqual(updateFields?.description, "![img](./image.png)");
-    assert.strictEqual(updateFields?.uploads, undefined);
+    assert.strictEqual(updateFields, undefined);
   });
 });

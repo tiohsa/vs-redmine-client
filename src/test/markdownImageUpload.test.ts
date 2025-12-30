@@ -66,4 +66,25 @@ suite("Markdown image upload", () => {
     assert.strictEqual(result.uploads.length, 0);
     assert.strictEqual(result.content, MARKDOWN_IMAGE_FIXTURES.singleLocal);
   });
+
+  test("falls back to images directory for plain filenames", async () => {
+    const result = await processMarkdownImageUploads({
+      content: "![img](image-25.png)",
+      baseDir: "/repo",
+      uploadFile: async () => ({
+        token: "t1",
+        filename: "image-25.png",
+        contentType: "image/png",
+      }),
+      validatePath: async (filePath) => {
+        if (filePath === "/repo/images/image-25.png") {
+          return { valid: true };
+        }
+        return { valid: false, reason: "File not found." };
+      },
+    });
+
+    assert.strictEqual(result.uploads.length, 1);
+    assert.strictEqual(result.content, "![img](image-25.png)");
+  });
 });

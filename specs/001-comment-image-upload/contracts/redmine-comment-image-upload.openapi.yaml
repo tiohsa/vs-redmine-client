@@ -1,0 +1,118 @@
+openapi: 3.0.3
+info:
+  title: Redmine Comment Image Upload
+  version: 1.0.0
+paths:
+  /uploads.json:
+    post:
+      summary: Upload attachment and return token
+      requestBody:
+        required: true
+        content:
+          application/octet-stream:
+            schema:
+              type: string
+              format: binary
+      parameters:
+        - in: query
+          name: filename
+          required: true
+          schema:
+            type: string
+      responses:
+        "201":
+          description: Upload token created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UploadResponse"
+  /issues/{issueId}.json:
+    put:
+      summary: Add comment with uploads to an issue
+      parameters:
+        - in: path
+          name: issueId
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AddCommentRequest"
+      responses:
+        "204":
+          description: Comment added
+  /journals/{journalId}.json:
+    put:
+      summary: Update comment with uploads
+      parameters:
+        - in: path
+          name: journalId
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateCommentRequest"
+      responses:
+        "204":
+          description: Comment updated
+components:
+  schemas:
+    UploadToken:
+      type: object
+      required:
+        - token
+        - filename
+        - content_type
+      properties:
+        token:
+          type: string
+        filename:
+          type: string
+        content_type:
+          type: string
+    UploadResponse:
+      type: object
+      required:
+        - upload
+      properties:
+        upload:
+          $ref: "#/components/schemas/UploadToken"
+    AddCommentRequest:
+      type: object
+      required:
+        - issue
+      properties:
+        issue:
+          type: object
+          required:
+            - notes
+          properties:
+            notes:
+              type: string
+            uploads:
+              type: array
+              items:
+                $ref: "#/components/schemas/UploadToken"
+    UpdateCommentRequest:
+      type: object
+      required:
+        - journal
+      properties:
+        journal:
+          type: object
+          required:
+            - notes
+          properties:
+            notes:
+              type: string
+            uploads:
+              type: array
+              items:
+                $ref: "#/components/schemas/UploadToken"

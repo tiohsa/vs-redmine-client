@@ -1,16 +1,7 @@
 import * as assert from "assert";
-import * as fs from "fs";
-import * as os from "os";
-import * as path from "path";
-import * as vscode from "vscode";
-import { syncNewCommentDraft } from "../views/commentSaveSync";
-
-const createTempImage = (): { dir: string; documentUri: vscode.Uri } => {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "todoex-mdimg-"));
-  const filePath = path.join(dir, "image.png");
-  fs.writeFileSync(filePath, Buffer.from([1, 2, 3]));
-  return { dir, documentUri: vscode.Uri.file(path.join(dir, "comment.md")) };
-};
+import { syncCommentDraft, syncNewCommentDraft } from "../views/commentSaveSync";
+import { initializeCommentEdit } from "../views/commentEditStore";
+import { createTempImage } from "./helpers/markdownImageTestUtils";
 
 suite("Comment markdown image upload", () => {
   test("uploads images for new comments and replaces links", async () => {
@@ -59,5 +50,118 @@ suite("Comment markdown image upload", () => {
     assert.deepStrictEqual(addedUploads, [
       { token: "token", filename: "image.png", content_type: "image/png" },
     ]);
+  });
+
+  test("fails new comment save when image upload fails", async () => {
+    const temp = createTempImage();
+    let addCalled = false;
+
+    const result = await syncNewCommentDraft({
+      ticketId: 10,
+      content: "![img](./image.png)",
+      documentUri: temp.documentUri,
+      deps: {
+        addComment: async () => {
+          addCalled = true;
+        },
+        updateComment: async () => {
+          throw new Error("should not update");
+        },
+        getCurrentUserId: async () => 9,
+        getIssueDetail: async () => ({
+          ticket: { id: 10, subject: "T", projectId: 4 },
+          comments: [],
+        }),
+        uploadFile: async () => {
+          throw new Error("Upload failed.");
+        },
+      },
+    });
+
+    assert.strictEqual(result.status, "failed");
+    assert.strictEqual(addCalled, false);
+  });
+
+  test("uploads images for comment edits", async () => {
+    const temp = createTempImage();
+    initializeCommentEdit(101, 10, "Old");
+    let updatedUploads:
+      | Array<{ token: string; filename: string; content_type: string }>
+      | undefined;
+
+    const result = await syncCommentDraft({
+      commentId: 101,
+      content: "![img](./image.png)",
+      documentUri: temp.documentUri,
+      deps: {
+        addComment: async () => {
+          throw new Error("should not add");
+        },
+        updateComment: async (_commentId, _body, uploads) => {
+          updatedUploads = uploads;
+        },
+        getCurrentUserId: async () => 9,
+        getIssueDetail: async () => ({
+          ticket: { id: 10, subject: "T", projectId: 4 },
+          comments: [],
+        }),
+        uploadFile: async () => ({
+          token: "token",
+          filename: "image.png",
+          contentType: "image/png",
+        }),
+      },
+    });
+
+    assert.strictEqual(result.status, "success");
+    assert.deepStrictEqual(updatedUploads, [
+      { token: "token", filename: "image.png", content_type: "image/png" },
+    ]);
+  });
+
+  test("skips uploads when no image links are present", async () => {
+    const temp = createTempImage();
+    let uploadCalled = false;
+    let addUploads:
+      | Array<{ token: string; filename: string; content_type: string }>
+      | undefined;
+
+    const result = await syncNewCommentDraft({
+      ticketId: 10,
+      content: "No images here.",
+      documentUri: temp.documentUri,
+      deps: {
+        addComment: async (_ticketId, _body, uploads) => {
+          addUploads = uploads;
+        },
+        updateComment: async () => {
+          throw new Error("should not update");
+        },
+        getCurrentUserId: async () => 9,
+        getIssueDetail: async () => ({
+          ticket: { id: 10, subject: "T", projectId: 4 },
+          comments: [
+            {
+              id: 77,
+              ticketId: 10,
+              authorId: 9,
+              authorName: "Tester",
+              body: "No images here.",
+              createdAt: "t1",
+              updatedAt: "t2",
+              editableByCurrentUser: true,
+            },
+          ],
+        }),
+        uploadFile: async () => {
+          uploadCalled = true;
+          return { token: "token", filename: "image.png", contentType: "image/png" };
+        },
+      },
+    });
+
+    assert.strictEqual(result.status, "created");
+    assert.strictEqual(uploadCalled, false);
+    assert.strictEqual(addUploads, undefined);
   });
 });
