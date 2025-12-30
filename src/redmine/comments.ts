@@ -1,13 +1,18 @@
 import { requestJson } from "./client";
+import { UploadToken } from "./types";
 import { Comment, RedmineIssueDetailResponse, RedmineIssueDetailResponseIssue } from "./types";
 
 export const filterEditableComments = <T extends { editableByCurrentUser: boolean }>(
   comments: T[],
 ): T[] => comments.filter((comment) => comment.editableByCurrentUser);
 
-export const buildCommentUpdatePayload = (notes: string): Record<string, unknown> => ({
+export const buildCommentUpdatePayload = (
+  notes: string,
+  uploads?: UploadToken[],
+): Record<string, unknown> => ({
   journal: {
     notes,
+    ...(uploads ? { uploads } : {}),
   },
 });
 
@@ -53,24 +58,36 @@ export const mapIssueJournalsToComments = (
   return comments;
 };
 
-export const updateComment = async (journalId: number, notes: string): Promise<void> => {
+export const updateComment = async (
+  journalId: number,
+  notes: string,
+  uploads?: UploadToken[],
+): Promise<void> => {
   await requestJson({
     method: "PUT",
     path: `/journals/${journalId}.json`,
-    body: buildCommentUpdatePayload(notes),
+    body: buildCommentUpdatePayload(notes, uploads),
   });
 };
 
-export const buildAddCommentPayload = (notes: string): Record<string, unknown> => ({
+export const buildAddCommentPayload = (
+  notes: string,
+  uploads?: UploadToken[],
+): Record<string, unknown> => ({
   issue: {
     notes,
+    ...(uploads ? { uploads } : {}),
   },
 });
 
-export const addComment = async (issueId: number, notes: string): Promise<void> => {
+export const addComment = async (
+  issueId: number,
+  notes: string,
+  uploads?: UploadToken[],
+): Promise<void> => {
   await requestJson({
     method: "PUT",
     path: `/issues/${issueId}.json`,
-    body: buildAddCommentPayload(notes),
+    body: buildAddCommentPayload(notes, uploads),
   });
 };

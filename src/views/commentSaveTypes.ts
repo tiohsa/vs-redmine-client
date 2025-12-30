@@ -14,6 +14,8 @@ export interface CommentSaveResult {
   message: string;
   commentId?: number;
   projectId?: number;
+  uploadSummary?: UploadSummary;
 }
 
 export const COMMENT_TYPE_LABEL = "comment";
+import { UploadSummary } from "./saveUploadTypes";

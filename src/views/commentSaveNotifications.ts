@@ -1,4 +1,5 @@
 import { CommentSaveResult } from "./commentSaveTypes";
+import { buildUploadWarningMessage } from "./saveUploadNotifications";
 
 export type CommentSaveNotification = {
   type: "info" | "warning" | "error";
@@ -8,6 +9,18 @@ export type CommentSaveNotification = {
 export const getCommentSaveNotification = (
   result: CommentSaveResult,
 ): CommentSaveNotification | undefined => {
+  if (
+    result.uploadSummary &&
+    (result.uploadSummary.permissionDenied || result.uploadSummary.failures.length > 0) &&
+    result.status !== "failed" &&
+    result.status !== "forbidden" &&
+    result.status !== "not_found" &&
+    result.status !== "unreachable" &&
+    result.status !== "conflict"
+  ) {
+    return { type: "warning", message: buildUploadWarningMessage(result.uploadSummary) };
+  }
+
   switch (result.status) {
     case "success":
       return { type: "info", message: "Comment updated." };

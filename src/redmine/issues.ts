@@ -8,6 +8,7 @@ import {
   RedmineTrackerResponse,
   Ticket,
   TicketUpdateFields,
+  UploadToken,
 } from "./types";
 
 export interface IssuesListInput {
@@ -83,11 +84,7 @@ export interface IssueDetailResult {
   comments: Comment[];
 }
 
-export interface IssueUploadInput {
-  token: string;
-  filename: string;
-  content_type: string;
-}
+export type IssueUploadInput = UploadToken;
 
 export interface IssueCreateInput {
   projectId: number;
@@ -160,6 +157,9 @@ export const buildIssueUpdatePayload = (
   }
   if (fields.dueDate !== undefined) {
     payload.due_date = fields.dueDate;
+  }
+  if (fields.uploads !== undefined) {
+    payload.uploads = fields.uploads;
   }
 
   return { issue: payload };

@@ -46,4 +46,20 @@ suite("Comment save notifications", () => {
       message: "Comment added, but ID missing.",
     });
   });
+
+  test("maps upload failures to warning", () => {
+    const notification = getCommentSaveNotification({
+      status: "success",
+      message: "Updated",
+      uploadSummary: {
+        permissionDenied: false,
+        failures: [{ path: "./bad.png", reason: "Missing file" }],
+      },
+    });
+
+    assert.deepStrictEqual(notification, {
+      type: "warning",
+      message: "Saved with upload failures. Failed images: ./bad.png.",
+    });
+  });
 });

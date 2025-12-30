@@ -330,6 +330,7 @@ export async function activate(context: vscode.ExtensionContext) {
         const commentResult = await syncCommentDraft({
           commentId: commentIdForDocument,
           content: document.getText(),
+          documentUri: document.uri,
         });
         notifyCommentSaveResult(commentResult);
         if (shouldRefreshComments(commentResult.status)) {
@@ -347,6 +348,7 @@ export async function activate(context: vscode.ExtensionContext) {
           const result = await syncNewTicketDraftContent({
             content: document.getText(),
             projectId,
+            documentUri: document.uri,
             onCreated: (createdId) => {
               removeTicketEditorByDocument(document);
               registerTicketDocument(createdId, document, "ticket", projectId);
@@ -362,6 +364,7 @@ export async function activate(context: vscode.ExtensionContext) {
         const result = await syncTicketDraft({
           ticketId: ticketIdForDocument,
           content: document.getText(),
+          documentUri: document.uri,
           onSubjectUpdated: updateTicketListSubject,
         });
         notifyTicketSaveResult(result);
@@ -388,6 +391,7 @@ export async function activate(context: vscode.ExtensionContext) {
 
           const result = await syncNewTicketDraftContent({
             content: document.getText(),
+            documentUri: document.uri,
             onCreated: (createdId) => {
               removeTicketEditorByDocument(document);
               registerTicketDocument(createdId, document, "ticket");
@@ -403,6 +407,7 @@ export async function activate(context: vscode.ExtensionContext) {
         const result = await syncNewCommentDraft({
           ticketId: draftTicketId,
           content: document.getText(),
+          documentUri: document.uri,
           onCreated: async ({ commentId, projectId }) => {
             finalizeNewCommentDraftDocument({
               document,
@@ -423,6 +428,7 @@ export async function activate(context: vscode.ExtensionContext) {
         const result = await syncTicketDraft({
           ticketId: parsed.ticketId,
           content: document.getText(),
+          documentUri: document.uri,
           onSubjectUpdated: updateTicketListSubject,
         });
         notifyTicketSaveResult(result);
@@ -432,6 +438,7 @@ export async function activate(context: vscode.ExtensionContext) {
       const commentResult = await syncCommentDraft({
         commentId: parsed.commentId,
         content: document.getText(),
+        documentUri: document.uri,
       });
       notifyCommentSaveResult(commentResult);
       if (shouldRefreshComments(commentResult.status)) {

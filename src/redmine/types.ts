@@ -34,6 +34,7 @@ export interface TicketUpdateFields {
   trackerId?: number;
   priorityId?: number;
   dueDate?: string | null;
+  uploads?: UploadToken[];
 }
 
 export interface Comment {
@@ -56,6 +57,12 @@ export interface Attachment {
   sizeBytes?: number;
   uploadToken?: string;
   downloadUrl?: string;
+}
+
+export interface UploadToken {
+  token: string;
+  filename: string;
+  content_type: string;
 }
 
 export interface Filter {

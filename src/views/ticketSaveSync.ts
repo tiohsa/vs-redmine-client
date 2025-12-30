@@ -1,3 +1,4 @@
+import * as path from "path";
 import * as vscode from "vscode";
 import { getDefaultProjectId } from "../config/settings";
 import { getProjectSelection } from "../config/projectSelection";
@@ -11,6 +12,7 @@ import {
   listTrackers,
   updateIssue,
 } from "../redmine/issues";
+import { uploadFileAttachment } from "../redmine/attachments";
 import { TicketUpdateFields } from "../redmine/types";
 import {
   getTicketDraft,
@@ -32,6 +34,11 @@ import {
 import { TicketEditorContent } from "./ticketEditorContent";
 import { TicketSaveResult } from "./ticketSaveTypes";
 import { applyEditorContent, buildTicketPreviewContent } from "./ticketPreview";
+import {
+  MarkdownImageUploadSummary,
+  processMarkdownImageUploads,
+} from "../utils/markdownImageUpload";
+import { UploadSummary } from "./saveUploadTypes";
 
 export interface TicketSaveDependencies {
   getIssueDetail: typeof getIssueDetail;
@@ -41,6 +48,7 @@ export interface TicketSaveDependencies {
   listIssueStatuses: typeof listIssueStatuses;
   listTrackers: typeof listTrackers;
   listIssuePriorities: typeof listIssuePriorities;
+  uploadFile: typeof uploadFileAttachment;
 }
 
 const defaultDeps: TicketSaveDependencies = {
@@ -51,6 +59,7 @@ const defaultDeps: TicketSaveDependencies = {
   listIssueStatuses,
   listTrackers,
   listIssuePriorities,
+  uploadFile: uploadFileAttachment,
 };
 
 export interface TicketCreateDependencies {
@@ -59,6 +68,7 @@ export interface TicketCreateDependencies {
   listIssueStatuses: typeof listIssueStatuses;
   listTrackers: typeof listTrackers;
   listIssuePriorities: typeof listIssuePriorities;
+  uploadFile: typeof uploadFileAttachment;
 }
 
 const defaultCreateDeps: TicketCreateDependencies = {
@@ -67,6 +77,7 @@ const defaultCreateDeps: TicketCreateDependencies = {
   listIssueStatuses,
   listTrackers,
   listIssuePriorities,
+  uploadFile: uploadFileAttachment,
 };
 
 export interface TicketReloadDependencies {
@@ -79,9 +90,14 @@ const defaultReloadDeps: TicketReloadDependencies = {
   applyEditorContent,
 };
 
-const buildResult = (status: TicketSaveResult["status"], message: string): TicketSaveResult => ({
+const buildResult = (
+  status: TicketSaveResult["status"],
+  message: string,
+  extras: Partial<TicketSaveResult> = {},
+): TicketSaveResult => ({
   status,
   message,
+  ...extras,
 });
 
 const mapErrorToResult = (error: unknown): TicketSaveResult => {
@@ -120,6 +136,23 @@ const resolveProjectIdForCreate = (projectId?: number): number | undefined => {
 
 const resolveProjectIdForEditor = (editor: vscode.TextEditor): number | undefined =>
   resolveProjectIdForCreate(getProjectIdForEditor(editor));
+
+const resolveBaseDir = (
+  editor?: vscode.TextEditor,
+  documentUri?: vscode.Uri,
+): string | undefined => {
+  const uri = editor?.document.uri ?? documentUri;
+  if (uri?.scheme === "file") {
+    return path.dirname(uri.fsPath);
+  }
+  const workspace = vscode.workspace.workspaceFolders?.[0];
+  return workspace ? workspace.uri.fsPath : undefined;
+};
+
+const resolveUploadSummary = (
+  summary: MarkdownImageUploadSummary,
+): UploadSummary | undefined =>
+  summary.permissionDenied || summary.failures.length > 0 ? summary : undefined;
 
 const computeChanges = (
   baseSubject: string,
@@ -250,10 +283,11 @@ export const syncTicketDraft = async (input: {
   ticketId: number;
   content: string;
   editor?: vscode.TextEditor;
-  deps?: TicketSaveDependencies;
+  documentUri?: vscode.Uri;
+  deps?: Partial<TicketSaveDependencies>;
   onSubjectUpdated?: (ticketId: number, subject: string) => void;
 }): Promise<TicketSaveResult> => {
-  const deps = input.deps ?? defaultDeps;
+  const deps = { ...defaultDeps, ...input.deps };
   const draft = getTicketDraft(input.ticketId);
   if (!draft) {
     return buildResult("failed", "Missing draft state for ticket.");
@@ -271,7 +305,13 @@ export const syncTicketDraft = async (input: {
   }
 
   const subject = parsed.subject || draft.baseSubject;
-  const description = parsed.description;
+  const uploadResult = await processMarkdownImageUploads({
+    content: parsed.description,
+    baseDir: resolveBaseDir(input.editor, input.documentUri),
+    uploadFile: deps.uploadFile,
+  });
+  const uploadSummary = resolveUploadSummary(uploadResult.summary);
+  const description = uploadResult.content;
   const metadata = parsed.metadata;
   const children = metadata.children ?? [];
   const uniqueChildren: string[] = [];
@@ -301,8 +341,12 @@ export const syncTicketDraft = async (input: {
   }
   const changes = { ...contentChanges, ...metadataFields };
 
+  if (uploadResult.uploads.length > 0) {
+    changes.uploads = uploadResult.uploads;
+  }
+
   if (Object.keys(changes).length === 0 && children.length === 0) {
-    return buildResult("no_change", "No changes to save.");
+    return buildResult("no_change", "No changes to save.", { uploadSummary });
   }
 
   markDraftStatus(input.ticketId, "dirty");
@@ -426,21 +470,24 @@ export const syncTicketDraft = async (input: {
     return buildResult(
       "success",
       `Redmine updated. Skipped duplicate children: ${duplicates}`,
+      { uploadSummary },
     );
   }
 
-  return buildResult("success", "Redmine updated.");
+  return buildResult("success", "Redmine updated.", { uploadSummary });
 };
 
 export const syncNewTicketDraft = async (input: {
   editor: vscode.TextEditor;
-  deps?: TicketCreateDependencies;
+  deps?: Partial<TicketCreateDependencies>;
 }): Promise<TicketSaveResult> => {
-  const deps = input.deps ?? defaultCreateDeps;
+  const deps = { ...defaultCreateDeps, ...input.deps };
+  const baseDir = resolveBaseDir(input.editor);
   const projectId = resolveProjectIdForEditor(input.editor);
   const { result, createdId, parsed } = await createTicketFromContent({
     content: input.editor.document.getText(),
     projectId,
+    baseDir,
     deps,
   });
 
@@ -459,13 +506,16 @@ export const syncNewTicketDraft = async (input: {
 export const syncNewTicketDraftContent = async (input: {
   content: string;
   projectId?: number;
-  deps?: TicketCreateDependencies;
+  documentUri?: vscode.Uri;
+  deps?: Partial<TicketCreateDependencies>;
   onCreated?: (createdId: number, parsed: TicketEditorContent) => void;
 }): Promise<TicketSaveResult> => {
-  const deps = input.deps ?? defaultCreateDeps;
+  const deps = { ...defaultCreateDeps, ...input.deps };
+  const baseDir = resolveBaseDir(undefined, input.documentUri);
   const { result, createdId, parsed } = await createTicketFromContent({
     content: input.content,
     projectId: input.projectId,
+    baseDir,
     deps,
   });
   if (result.status === "created" && createdId && parsed) {
@@ -478,6 +528,7 @@ export const syncNewTicketDraftContent = async (input: {
 const createTicketFromContent = async (input: {
   content: string;
   projectId?: number;
+  baseDir?: string;
   deps: TicketCreateDependencies;
 }): Promise<{
   result: TicketSaveResult;
@@ -517,6 +568,17 @@ const createTicketFromContent = async (input: {
     return { result: buildResult("failed", message) };
   }
 
+  const uploadResult = await processMarkdownImageUploads({
+    content: parsed.description,
+    baseDir: input.baseDir,
+    uploadFile: input.deps.uploadFile,
+  });
+  const uploadSummary = resolveUploadSummary(uploadResult.summary);
+  parsed = {
+    ...parsed,
+    description: uploadResult.content,
+  };
+
   let createdId: number | undefined;
   try {
     const dueDate =
@@ -524,7 +586,8 @@ const createTicketFromContent = async (input: {
     createdId = await input.deps.createIssue({
       projectId,
       subject,
-      description: parsed.description,
+      description: uploadResult.content,
+      uploads: uploadResult.uploads.length > 0 ? uploadResult.uploads : undefined,
       statusId: metadataFields.statusId,
       trackerId: metadataFields.trackerId,
       priorityId: metadataFields.priorityId,
@@ -561,12 +624,12 @@ const createTicketFromContent = async (input: {
           input.deps.deleteIssue(issueId),
         ),
       );
-      return { result: buildResult("failed", message) };
+      return { result: buildResult("failed", message, { uploadSummary }) };
     }
   }
 
   return {
-    result: buildResult("created", "Ticket created."),
+    result: buildResult("created", "Ticket created.", { uploadSummary }),
     createdId,
     parsed,
   };

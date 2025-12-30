@@ -1,5 +1,5 @@
 import * as assert from "assert";
-import { parseClipboardImageDataUri } from "../redmine/attachments";
+import { getAttachmentContentType, parseClipboardImageDataUri } from "../redmine/attachments";
 
 suite("Attachment helpers", () => {
   test("parses clipboard image data URI", () => {
@@ -9,5 +9,9 @@ suite("Attachment helpers", () => {
     assert.strictEqual(result.contentType, "image/png");
     assert.strictEqual(result.filename, "clipboard-image.png");
     assert.ok(result.buffer.length > 0);
+  });
+
+  test("supports webp content type", () => {
+    assert.strictEqual(getAttachmentContentType("image.webp"), "image/webp");
   });
 });

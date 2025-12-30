@@ -1,4 +1,5 @@
 import { IssueMetadata } from "./ticketMetadataTypes";
+import { UploadSummary } from "./saveUploadTypes";
 
 export type TicketSaveStatus =
   | "created"
@@ -13,6 +14,7 @@ export type TicketSaveStatus =
 export interface TicketSaveResult {
   status: TicketSaveStatus;
   message: string;
+  uploadSummary?: UploadSummary;
 }
 
 export type TicketDraftStatus = "clean" | "dirty" | "conflict";

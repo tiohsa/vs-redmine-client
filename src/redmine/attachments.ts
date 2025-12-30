@@ -16,7 +16,7 @@ export interface ClipboardImageData {
   filename: string;
 }
 
-const getContentType = (filename: string): string => {
+export const getAttachmentContentType = (filename: string): string => {
   const ext = path.extname(filename).toLowerCase();
   if (ext === ".png") {
     return "image/png";
@@ -26,6 +26,9 @@ const getContentType = (filename: string): string => {
   }
   if (ext === ".gif") {
     return "image/gif";
+  }
+  if (ext === ".webp") {
+    return "image/webp";
   }
   return "application/octet-stream";
 };
@@ -56,7 +59,7 @@ const uploadBuffer = async (
 export const uploadFileAttachment = async (filePath: string): Promise<UploadResult> => {
   const bytes = await vscode.workspace.fs.readFile(vscode.Uri.file(filePath));
   const filename = path.basename(filePath);
-  const contentType = getContentType(filename);
+  const contentType = getAttachmentContentType(filename);
   return uploadBuffer(bytes, filename, contentType);
 };
 

@@ -62,19 +62,23 @@ export const resolveProjectTemplateContent = (options: {
 }): ProjectTemplateResolution => {
   const exists = options.existsSync ?? fs.existsSync;
   const readDir = options.readdirSync ?? fs.readdirSync;
-  const stat = options.statSync ?? fs.statSync;
   const defaultFileName = options.defaultTemplateFileName ?? DEFAULT_TEMPLATE_FILE;
 
   let fileNames: string[];
   try {
-    fileNames = readDir(options.templatesDir).filter((entry) => {
-      const candidate = path.join(options.templatesDir, entry);
-      try {
-        return stat(candidate).isFile();
-      } catch {
-        return false;
-      }
-    });
+    const entries = readDir(options.templatesDir);
+    if (!options.statSync) {
+      fileNames = entries;
+    } else {
+      fileNames = entries.filter((entry) => {
+        const candidate = path.join(options.templatesDir, entry);
+        try {
+          return options.statSync?.(candidate).isFile();
+        } catch {
+          return false;
+        }
+      });
+    }
   } catch {
     return {
       errorMessage: "Template directory could not be read.",

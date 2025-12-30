@@ -34,4 +34,20 @@ suite("Ticket save notifications", () => {
       message: "Remote changes detected. Refresh before saving.",
     });
   });
+
+  test("maps upload failures to warning", () => {
+    const notification = getSaveNotification({
+      status: "success",
+      message: "Updated",
+      uploadSummary: {
+        permissionDenied: false,
+        failures: [{ path: "./bad.png", reason: "Missing file" }],
+      },
+    });
+
+    assert.deepStrictEqual(notification, {
+      type: "warning",
+      message: "Saved with upload failures. Failed images: ./bad.png.",
+    });
+  });
 });

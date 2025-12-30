@@ -1,4 +1,5 @@
 import { TicketSaveResult } from "./ticketSaveTypes";
+import { buildUploadWarningMessage } from "./saveUploadNotifications";
 
 export type TicketSaveNotification = {
   type: "info" | "warning" | "error";
@@ -8,6 +9,18 @@ export type TicketSaveNotification = {
 export const getSaveNotification = (
   result: TicketSaveResult,
 ): TicketSaveNotification | undefined => {
+  if (
+    result.uploadSummary &&
+    (result.uploadSummary.permissionDenied || result.uploadSummary.failures.length > 0) &&
+    result.status !== "failed" &&
+    result.status !== "forbidden" &&
+    result.status !== "not_found" &&
+    result.status !== "unreachable" &&
+    result.status !== "conflict"
+  ) {
+    return { type: "warning", message: buildUploadWarningMessage(result.uploadSummary) };
+  }
+
   switch (result.status) {
     case "created":
       return { type: "info", message: "Ticket created." };

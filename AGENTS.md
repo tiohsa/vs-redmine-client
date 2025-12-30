@@ -46,9 +46,9 @@ npm test && npm run lint
 TypeScript 5.9: Follow standard conventions
 
 ## Recent Changes
+- 001-upload-markdown-images: Added TypeScript 5.9 + VS Code Extension API, webpack 5, @vscode/test-cli, ESLint
 - 001-project-template: Added TypeScript 5.9 + VS Code Extension API, webpack 5, @vscode/test-cli, ESLint
 - 001-blue-highlight: Added TypeScript 5.9 + VS Code Extension API, webpack 5, @vscode/test-cli, ESLint
-- 001-rename-view-titles: Added TypeScript 5.9 + VS Code Extension API, webpack 5, @vscode/test-cli, ESLint
 
 
 <!-- MANUAL ADDITIONS START -->

@@ -1,9 +1,15 @@
+import * as path from "path";
 import * as vscode from "vscode";
 import { addComment, updateComment } from "../redmine/comments";
 import { getIssueDetail } from "../redmine/issues";
 import { getCurrentUserId } from "../redmine/users";
 import { Comment } from "../redmine/types";
 import { validateComment } from "../utils/commentValidation";
+import { uploadFileAttachment } from "../redmine/attachments";
+import {
+  MarkdownImageUploadSummary,
+  processMarkdownImageUploads,
+} from "../utils/markdownImageUpload";
 import {
   getEditorContentType,
   getCommentIdForEditor,
@@ -17,12 +23,14 @@ import {
 import { ensureCommentEdit, getCommentEdit, updateCommentEdit } from "./commentEditStore";
 import { CommentSaveResult } from "./commentSaveTypes";
 import { applyEditorContent } from "./ticketPreview";
+import { UploadSummary } from "./saveUploadTypes";
 
 export interface CommentSaveDependencies {
   addComment: typeof addComment;
   updateComment: typeof updateComment;
   getIssueDetail: typeof getIssueDetail;
   getCurrentUserId: typeof getCurrentUserId;
+  uploadFile: typeof uploadFileAttachment;
 }
 
 const defaultDeps: CommentSaveDependencies = {
@@ -30,6 +38,7 @@ const defaultDeps: CommentSaveDependencies = {
   updateComment,
   getIssueDetail,
   getCurrentUserId,
+  uploadFile: uploadFileAttachment,
 };
 
 export interface CommentReloadDependencies {
@@ -51,6 +60,23 @@ const buildResult = (
   message,
   ...extras,
 });
+
+const resolveBaseDir = (
+  editor?: vscode.TextEditor,
+  documentUri?: vscode.Uri,
+): string | undefined => {
+  const uri = editor?.document.uri ?? documentUri;
+  if (uri?.scheme === "file") {
+    return path.dirname(uri.fsPath);
+  }
+  const workspace = vscode.workspace.workspaceFolders?.[0];
+  return workspace ? workspace.uri.fsPath : undefined;
+};
+
+const resolveUploadSummary = (
+  summary: MarkdownImageUploadSummary,
+): UploadSummary | undefined =>
+  summary.permissionDenied || summary.failures.length > 0 ? summary : undefined;
 
 export const shouldRefreshComments = (status: CommentSaveResult["status"]): boolean =>
   status === "created" || status === "created_unresolved" || status === "success";
@@ -105,8 +131,10 @@ const resolveCreatedCommentId = (
   return candidates[candidates.length - 1].id;
 };
 
-const buildUnresolvedResult = (message: string): CommentSaveResult =>
-  buildResult("created_unresolved", message);
+const buildUnresolvedResult = (
+  message: string,
+  extras: Partial<CommentSaveResult> = {},
+): CommentSaveResult => buildResult("created_unresolved", message, extras);
 
 export const finalizeNewCommentDraftState = (input: {
   editor: vscode.TextEditor;
@@ -138,6 +166,8 @@ export const finalizeNewCommentDraftDocument = (input: {
 export const syncCommentDraft = async (input: {
   commentId: number;
   content: string;
+  editor?: vscode.TextEditor;
+  documentUri?: vscode.Uri;
   deps?: Partial<CommentSaveDependencies>;
 }): Promise<CommentSaveResult> => {
   const deps = { ...defaultDeps, ...input.deps };
@@ -146,39 +176,68 @@ export const syncCommentDraft = async (input: {
     return buildResult("failed", "Missing comment edit state.");
   }
 
-  const validation = validateComment(input.content);
+  const uploadResult = await processMarkdownImageUploads({
+    content: input.content,
+    baseDir: resolveBaseDir(input.editor, input.documentUri),
+    uploadFile: deps.uploadFile,
+  });
+  const uploadSummary = resolveUploadSummary(uploadResult.summary);
+  const nextContent = uploadResult.content;
+
+  const validation = validateComment(nextContent);
   if (!validation.valid) {
     return buildResult("failed", validation.message ?? "Invalid comment.");
   }
 
-  if (input.content === edit.baseBody) {
-    return buildResult("no_change", "No changes to save.");
+  if (nextContent === edit.baseBody) {
+    return buildResult("no_change", "No changes to save.", { uploadSummary });
   }
 
   try {
-    await deps.updateComment(input.commentId, input.content);
+    await deps.updateComment(
+      input.commentId,
+      nextContent,
+      uploadResult.uploads.length > 0 ? uploadResult.uploads : undefined,
+    );
   } catch (error) {
     return mapErrorToResult(error);
   }
 
-  updateCommentEdit(input.commentId, input.content);
-  return buildResult("success", "Comment updated.");
+  updateCommentEdit(input.commentId, nextContent);
+  if (input.editor && nextContent !== input.content) {
+    await applyEditorContent(input.editor, nextContent);
+  }
+  return buildResult("success", "Comment updated.", { uploadSummary });
 };
 
 export const syncNewCommentDraft = async (input: {
   ticketId: number;
   content: string;
+  editor?: vscode.TextEditor;
+  documentUri?: vscode.Uri;
   deps?: Partial<CommentSaveDependencies>;
   onCreated?: (created: { commentId: number; projectId: number }) => Promise<void>;
 }): Promise<CommentSaveResult> => {
   const deps = { ...defaultDeps, ...input.deps };
-  const validation = validateComment(input.content);
+  const uploadResult = await processMarkdownImageUploads({
+    content: input.content,
+    baseDir: resolveBaseDir(input.editor, input.documentUri),
+    uploadFile: deps.uploadFile,
+  });
+  const uploadSummary = resolveUploadSummary(uploadResult.summary);
+  const nextContent = uploadResult.content;
+
+  const validation = validateComment(nextContent);
   if (!validation.valid) {
     return buildResult("failed", validation.message ?? "Invalid comment.");
   }
 
   try {
-    await deps.addComment(input.ticketId, input.content);
+    await deps.addComment(
+      input.ticketId,
+      nextContent,
+      uploadResult.uploads.length > 0 ? uploadResult.uploads : undefined,
+    );
   } catch (error) {
     return mapErrorToResult(error);
   }
@@ -194,12 +253,13 @@ export const syncNewCommentDraft = async (input: {
     const detail = await deps.getIssueDetail(input.ticketId);
     const commentId = resolveCreatedCommentId(
       detail.comments,
-      input.content,
+      nextContent,
       currentUserId,
     );
     if (!commentId) {
       return buildUnresolvedResult(
         "Comment added, but the comment ID could not be resolved.",
+        { uploadSummary },
       );
     }
 
@@ -209,14 +269,21 @@ export const syncNewCommentDraft = async (input: {
         await input.onCreated({ commentId, projectId });
       } catch (error) {
         const message = error instanceof Error ? error.message : "Rename failed.";
-        return buildUnresolvedResult(`Comment added, but ${message}`);
+        return buildUnresolvedResult(`Comment added, but ${message}`, { uploadSummary });
       }
     }
 
-    return buildResult("created", "Comment added.", { commentId, projectId });
+    if (input.editor && nextContent !== input.content) {
+      await applyEditorContent(input.editor, nextContent);
+    }
+    return buildResult("created", "Comment added.", {
+      commentId,
+      projectId,
+      uploadSummary,
+    });
   } catch (error) {
     const message = error instanceof Error ? error.message : "Failed to resolve comment ID.";
-    return buildUnresolvedResult(`Comment added, but ${message}`);
+    return buildUnresolvedResult(`Comment added, but ${message}`, { uploadSummary });
   }
 };
 
@@ -242,6 +309,7 @@ export const handleCommentEditorSave = async (
     return syncNewCommentDraft({
       ticketId,
       content: editor.document.getText(),
+      editor,
       deps,
       onCreated: async ({ commentId, projectId }) => {
         finalizeNewCommentDraftState({
@@ -262,6 +330,7 @@ export const handleCommentEditorSave = async (
   return syncCommentDraft({
     commentId,
     content: editor.document.getText(),
+    editor,
     deps,
   });
 };
