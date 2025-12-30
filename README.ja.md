@@ -11,6 +11,7 @@ English README: `README.md`
 - エディタ内の読み取り専用プレビュー
 - アクティブエディタの内容からチケットを作成
 - ファイルまたはクリップボード data URI から添付
+- **Markdown画像の自動アップロード**: エディタに貼り付けた画像は保存時に自動でアップロード
 - Mermaid ブロックを redmica_ui_extension 形式（`{{mermaid ... }}`）に変換
 - 自分のコメントのみ安全に編集
 
@@ -34,6 +35,8 @@ English README: `README.md`
 - **Tickets**: チケットの一覧とフィルタ
 - **Comments**: コメントの参照と編集
 
+![alt text](image.png)
+
 ## 設定項目
 
 - `redmine-client.baseUrl`: Redmine のベースURL（http:// または https:// を含める）
@@ -43,12 +46,55 @@ English README: `README.md`
 - `redmine-client.ticketListLimit`: 取得するチケット件数（デフォルト50）
 - `redmine-client.editorStorageDirectory`: エディタファイルとテンプレートの保存先ディレクトリ
 
+## チケット一覧設定
+
+Ticket Settings ビューからチケット一覧の表示をカスタマイズできます。
+
+### フィルタ
+
+- **ステータス**: 特定のステータスのチケットのみ表示
+- **優先度**: 特定の優先度のチケットのみ表示
+- **トラッカー**: 特定のトラッカーのチケットのみ表示
+- **担当者**: 特定の担当者のチケットのみ表示
+
+### 並び替え
+
+- **ソート**: チケットを優先度、ステータス、期日などで並び替え
+- **期日表示**: チケット一覧に期日を表示
+
+### エディタのデフォルト値
+
+新規チケット作成時のデフォルト値を設定できます:
+
+- **Subject**: デフォルトの件名
+- **Description**: デフォルトの説明文
+- **Tracker**: デフォルトのトラッカー
+- **Priority**: デフォルトの優先度
+- **Status**: デフォルトのステータス
+- **Due date**: デフォルトの期日
+
 ## テンプレート
 
 テンプレートは `<editorStorageDirectory>/templates` 配下に配置します。
 
 - プロジェクト別テンプレート: ファイル名にプロジェクト名の完全一致を含める（大文字小文字は無視）。
 - 既定テンプレート: `default.md`（該当テンプレートがない、または複数一致時に使用）。
+
+### テンプレートサンプル
+
+```markdown
+---
+issue:
+  tracker:   Bug
+  priority:  Low
+  status:    New
+  due_date:  
+---
+
+# Subproject issue two
+
+This is a second issue on a cookbook subproject
+```
 
 ## コマンド
 
@@ -60,11 +106,18 @@ English README: `README.md`
 - `Redmine: Create Ticket from Editor`
 - `Redmine: Edit Comment`
 - `Redmine: Add Comment`
+- `Redmine: Configure Ticket Priority Filter`
+- `Redmine: Configure Ticket Status Filter`
+- `Redmine: Configure Ticket Tracker Filter`
+- `Redmine: Configure Ticket Assignee Filter`
+- `Redmine: Configure Ticket Sort`
+- `Redmine: Reset Ticket Settings`
 
 ## ヒント
 
 - 添付はファイルまたはクリップボードの data URI を利用できます。
 - Mermaid ブロックは `{{mermaid ... }}` に変換して投稿されます。
+- 画像ペースト: エディタに直接画像を貼り付けると、保存時に自動でアップロードされます。
 
 ## デバッグ
 
@@ -81,6 +134,7 @@ English README: `README.md`
 ## 既知の問題
 
 - クリップボード添付は data URI 形式が必要。
+- 画像ペーストはファイルベースのエディタでのみ利用可能。新規チケット/コメントのドラフト（untitledエディタ）では、一度保存してから画像をペーストしてください。
 
 ## ライセンス
 

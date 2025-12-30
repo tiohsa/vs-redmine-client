@@ -169,14 +169,11 @@ export const syncCommentDraft = async (input: {
   }
 
   const baseDir = resolveEditorBaseDir({ editor: input.editor, documentUri: input.documentUri });
-  console.log('[DEBUG syncCommentDraft] baseDir:', baseDir);
-  console.log('[DEBUG syncCommentDraft] content:', input.content);
   const uploadResult = await processMarkdownImageUploads({
     content: input.content,
     baseDir,
     uploadFile: deps.uploadFile,
   });
-  console.log('[DEBUG syncCommentDraft] uploadResult:', JSON.stringify(uploadResult, null, 2));
   const uploadSummary = resolveUploadSummary(uploadResult.summary);
   if (hasMarkdownImageUploadFailure(uploadResult.summary)) {
     return buildResult(
@@ -200,7 +197,6 @@ export const syncCommentDraft = async (input: {
     // Redmine's journal update API doesn't support uploads.
     // We need to attach files to the issue first, then update the journal.
     if (uploadResult.uploads.length > 0) {
-      console.log('[DEBUG syncCommentDraft] Attaching uploads to issue:', edit.ticketId);
       await deps.updateIssue({
         issueId: edit.ticketId,
         fields: { uploads: uploadResult.uploads },
@@ -231,14 +227,11 @@ export const syncNewCommentDraft = async (input: {
 }): Promise<CommentSaveResult> => {
   const deps = { ...defaultDeps, ...input.deps };
   const baseDir = resolveEditorBaseDir({ editor: input.editor, documentUri: input.documentUri });
-  console.log('[DEBUG syncNewCommentDraft] baseDir:', baseDir);
-  console.log('[DEBUG syncNewCommentDraft] content:', input.content);
   const uploadResult = await processMarkdownImageUploads({
     content: input.content,
     baseDir,
     uploadFile: deps.uploadFile,
   });
-  console.log('[DEBUG syncNewCommentDraft] uploadResult:', JSON.stringify(uploadResult, null, 2));
   const uploadSummary = resolveUploadSummary(uploadResult.summary);
   if (hasMarkdownImageUploadFailure(uploadResult.summary)) {
     return buildResult(
