@@ -19,7 +19,6 @@ import {
 } from "./ticketDraftStore";
 import {
   buildTicketEditorContent,
-  parseTicketEditorContent,
   resolveTicketEditorDisplay,
   TicketEditorContent,
 } from "./ticketEditorContent";
@@ -28,8 +27,10 @@ import {
   buildCommentEditorFilename,
   buildTicketEditorFilename,
 } from "./editorFilename";
-import { getEditorStorageDirectory, getNewTicketTemplatePath } from "../config/settings";
+import { getEditorStorageDirectory } from "../config/settings";
 import { showError } from "../utils/notifications";
+import { DEFAULT_TEMPLATE_FILE, TEMPLATE_DIR_NAME } from "../utils/templateConstants";
+import { resolveProjectTemplateContent } from "../utils/templateResolver";
 
 export const buildTicketPreviewContent = (
   ticket: Pick<Ticket, "subject" | "description" | "trackerName" | "priorityName" | "statusName" | "dueDate">,
@@ -182,11 +183,6 @@ export const resolveEditorStorageDir = (
   };
 };
 
-type TemplateResolution = {
-  content?: TicketEditorContent;
-  errorMessage?: string;
-};
-
 type NewTicketDraftResolution = {
   content: TicketEditorContent;
   errorMessage?: string;
@@ -194,48 +190,30 @@ type NewTicketDraftResolution = {
   isTemplateConfigured: boolean;
 };
 
-export const resolveNewTicketTemplateContent = (input: {
-  templatePath: string;
-  readFileSync?: (targetPath: string) => string;
-  existsSync?: (targetPath: string) => boolean;
-}): TemplateResolution => {
-  const templatePath = input.templatePath.trim();
-  if (!path.isAbsolute(templatePath)) {
-    return { errorMessage: "Template file path must be an absolute path." };
-  }
-
-  const exists = input.existsSync ?? fs.existsSync;
-  if (!exists(templatePath)) {
-    return { errorMessage: "Template file does not exist." };
-  }
-
-  const readFile =
-    input.readFileSync ?? ((targetPath: string) => fs.readFileSync(targetPath, "utf8"));
-  let raw: string;
-  try {
-    raw = readFile(templatePath);
-  } catch {
-    return { errorMessage: "Template file could not be read." };
-  }
-
-  if (raw.trim().length === 0) {
-    return { errorMessage: "Template file is empty." };
-  }
-
-  try {
-    return { content: parseTicketEditorContent(raw, { allowMissingSubject: true }) };
-  } catch {
-    return { errorMessage: "Template content is invalid." };
-  }
-};
-
 export const resolveNewTicketDraftContent = (options: {
-  templatePath?: string;
+  projectName?: string;
+  templatesDir?: string;
   readFileSync?: (targetPath: string) => string;
   existsSync?: (targetPath: string) => boolean;
+  readdirSync?: (targetPath: string) => string[];
+  statSync?: (targetPath: string) => fs.Stats;
 } = {}): NewTicketDraftResolution => {
-  const templatePath = options.templatePath ?? getNewTicketTemplatePath();
-  if (templatePath.length === 0) {
+  const exists = options.existsSync ?? fs.existsSync;
+  const storageResolution = resolveEditorStorageDir();
+  if (!options.templatesDir && !storageResolution.uri) {
+    return {
+      content: buildNewTicketDraftContent(),
+      usedTemplate: false,
+      isTemplateConfigured: false,
+      errorMessage: storageResolution.errorMessage,
+    };
+  }
+
+  const templatesDir =
+    options.templatesDir ??
+    path.join(storageResolution.uri?.fsPath ?? "", TEMPLATE_DIR_NAME);
+
+  if (!exists(templatesDir)) {
     return {
       content: buildNewTicketDraftContent(),
       usedTemplate: false,
@@ -243,16 +221,22 @@ export const resolveNewTicketDraftContent = (options: {
     };
   }
 
-  const template = resolveNewTicketTemplateContent({
-    templatePath,
+  const template = resolveProjectTemplateContent({
+    templatesDir,
+    projectName: options.projectName,
+    defaultTemplateFileName: DEFAULT_TEMPLATE_FILE,
     readFileSync: options.readFileSync,
-    existsSync: options.existsSync,
+    existsSync: exists,
+    readdirSync: options.readdirSync,
+    statSync: options.statSync,
   });
+
   if (template.content) {
     return {
       content: template.content,
       usedTemplate: true,
       isTemplateConfigured: true,
+      errorMessage: template.errorMessage,
     };
   }
 

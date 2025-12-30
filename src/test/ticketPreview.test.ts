@@ -8,6 +8,7 @@ import {
   resolveNewTicketDraftContent,
   withTrailingEditLines,
 } from "../views/ticketPreview";
+import { createTemplateFixture } from "./helpers/templateFixtures";
 
 suite("Ticket preview", () => {
   test("renders subject and description", () => {
@@ -109,10 +110,17 @@ suite("Ticket preview", () => {
       "Template body",
     ].join("\n");
 
+    const fixture = createTemplateFixture("/templates", {
+      "Project Alpha.md": template,
+      "default.md": template,
+    });
+
     const resolution = resolveNewTicketDraftContent({
-      templatePath: "/abs/template.md",
-      existsSync: () => true,
-      readFileSync: () => template,
+      templatesDir: fixture.templatesDir,
+      projectName: "Project Alpha",
+      existsSync: fixture.existsSync,
+      readFileSync: fixture.readFileSync,
+      readdirSync: fixture.readdirSync,
     });
 
     assert.strictEqual(resolution.usedTemplate, true);

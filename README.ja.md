@@ -26,6 +26,7 @@ English README: `README.md`
 3. **Projects** ビューでプロジェクトを選ぶ。
 4. **Tickets** でチケットを確認し、プレビューを開く。
 5. コマンドで作成・更新を行う。
+6. （任意）`<editorStorageDirectory>/templates` にテンプレートを置くと新規作成に適用される。
 
 ## Activity Bar ビュー
 
@@ -40,6 +41,14 @@ English README: `README.md`
 - `redmine-client.defaultProjectId`: デフォルトのプロジェクトID/識別子
 - `redmine-client.includeChildProjects`: 子プロジェクトを一覧に含めるか
 - `redmine-client.ticketListLimit`: 取得するチケット件数（デフォルト50）
+- `redmine-client.editorStorageDirectory`: エディタファイルとテンプレートの保存先ディレクトリ
+
+## テンプレート
+
+テンプレートは `<editorStorageDirectory>/templates` 配下に配置します。
+
+- プロジェクト別テンプレート: ファイル名にプロジェクト名の完全一致を含める（大文字小文字は無視）。
+- 既定テンプレート: `default.md`（該当テンプレートがない、または複数一致時に使用）。
 
 ## コマンド
 

@@ -26,6 +26,7 @@ Japanese README: `README.ja.md`
 3. Open the **Projects** view and select a project.
 4. Browse tickets in **Tickets** and open previews.
 5. Use commands to create or update tickets/comments.
+6. (Optional) Place ticket templates in `<editorStorageDirectory>/templates` to apply them on new tickets.
 
 ## Activity Bar Views
 
@@ -40,6 +41,14 @@ Japanese README: `README.ja.md`
 - `redmine-client.defaultProjectId`: Default project identifier or ID
 - `redmine-client.includeChildProjects`: Include child projects in ticket list
 - `redmine-client.ticketListLimit`: Default number of tickets to load per request
+- `redmine-client.editorStorageDirectory`: Storage directory for editor files and templates
+
+## Ticket Templates
+
+Templates are stored under `<editorStorageDirectory>/templates`.
+
+- Project templates: file name must include the project name (case-insensitive exact match).
+- Default template: `default.md` (used when no project template matches or matches are duplicated).
 
 ## Commands
 

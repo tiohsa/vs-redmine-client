@@ -1,8 +1,7 @@
 import * as assert from "assert";
-import {
-  resolveNewTicketDraftContent,
-  resolveNewTicketTemplateContent,
-} from "../views/ticketPreview";
+import { resolveNewTicketDraftContent } from "../views/ticketPreview";
+import { resolveNewTicketTemplateContent } from "../utils/templateResolver";
+import { createTemplateFixture } from "./helpers/templateFixtures";
 import { buildTicketEditorContent } from "../views/ticketEditorContent";
 
 const buildTemplateContent = (): string =>
@@ -117,14 +116,57 @@ suite("New ticket template resolution", () => {
   });
 
   test("falls back to empty content when template is empty", () => {
+    const fixture = createTemplateFixture("/templates", {
+      "Alpha.md": "   ",
+      "default.md": buildTemplateContent(),
+    });
+
     const result = resolveNewTicketDraftContent({
-      templatePath: "/empty/template.md",
-      existsSync: () => true,
-      readFileSync: () => "   ",
+      templatesDir: fixture.templatesDir,
+      projectName: "Alpha",
+      existsSync: fixture.existsSync,
+      readFileSync: fixture.readFileSync,
+      readdirSync: fixture.readdirSync,
     });
 
     assert.strictEqual(result.usedTemplate, false);
     assert.strictEqual(result.errorMessage, "Template file is empty.");
     assert.deepStrictEqual(result.content, EMPTY_CONTENT);
+  });
+
+  test("uses project template content when matching project name exists", () => {
+    const fixture = createTemplateFixture("/templates", {
+      "Project Alpha.md": buildTemplateContent(),
+      "default.md": buildTemplateContent(),
+    });
+
+    const result = resolveNewTicketDraftContent({
+      templatesDir: fixture.templatesDir,
+      projectName: "project alpha",
+      existsSync: fixture.existsSync,
+      readFileSync: fixture.readFileSync,
+      readdirSync: fixture.readdirSync,
+    });
+
+    assert.strictEqual(result.usedTemplate, true);
+    assert.strictEqual(result.isTemplateConfigured, true);
+    assert.strictEqual(result.content.subject, "Template subject");
+  });
+
+  test("falls back to default template when no project match exists", () => {
+    const fixture = createTemplateFixture("/templates", {
+      "default.md": buildTemplateContent(),
+    });
+
+    const result = resolveNewTicketDraftContent({
+      templatesDir: fixture.templatesDir,
+      projectName: "missing",
+      existsSync: fixture.existsSync,
+      readFileSync: fixture.readFileSync,
+      readdirSync: fixture.readdirSync,
+    });
+
+    assert.strictEqual(result.usedTemplate, true);
+    assert.strictEqual(result.isTemplateConfigured, true);
   });
 });

@@ -1,0 +1,92 @@
+openapi: 3.0.3
+info:
+  title: Project Template Resolution
+  version: 1.0.0
+paths:
+  /templates:
+    get:
+      summary: List available templates
+      responses:
+        "200":
+          description: List of templates
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/TemplateSummary"
+  /templates/{projectName}/resolve:
+    get:
+      summary: Resolve template for a project
+      parameters:
+        - name: projectName
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Resolved template
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResolvedTemplate"
+  /templates/{fileName}:
+    put:
+      summary: Update a template by file name
+      parameters:
+        - name: fileName
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/TemplateUpdate"
+      responses:
+        "200":
+          description: Updated template
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TemplateSummary"
+components:
+  schemas:
+    TemplateSummary:
+      type: object
+      properties:
+        fileName:
+          type: string
+        projectName:
+          type: string
+        isDefault:
+          type: boolean
+      required:
+        - fileName
+        - isDefault
+    TemplateUpdate:
+      type: object
+      properties:
+        content:
+          type: string
+      required:
+        - content
+    ResolvedTemplate:
+      type: object
+      properties:
+        fileName:
+          type: string
+        content:
+          type: string
+        isDefault:
+          type: boolean
+        resolutionReason:
+          type: string
+      required:
+        - fileName
+        - content
+        - isDefault
+        - resolutionReason

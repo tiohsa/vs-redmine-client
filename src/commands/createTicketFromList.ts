@@ -1,7 +1,7 @@
 import * as fs from "fs";
 import * as vscode from "vscode";
 import { getDefaultProjectId } from "../config/settings";
-import { getProjectSelection } from "../config/projectSelection";
+import { getProjectSelection, ProjectSelection } from "../config/projectSelection";
 import {
   getNewTicketDraftUri,
   registerNewTicketDraft,
@@ -31,8 +31,7 @@ const getWorkspacePath = (): string | undefined =>
 const buildNewTicketTemplate = (content: TicketEditorContent): string =>
   buildTicketEditorContent(content);
 
-const resolveProjectId = (): number | undefined => {
-  const selection = getProjectSelection();
+const resolveProjectId = (selection: ProjectSelection): number | undefined => {
   if (selection.id) {
     return selection.id;
   }
@@ -90,8 +89,11 @@ export const openNewTicketDraft = async (input: {
 };
 
 export const createTicketFromList = async (): Promise<void> => {
-  const projectId = resolveProjectId();
-  const templateResolution = resolveNewTicketDraftContent();
+  const selection = getProjectSelection();
+  const projectId = resolveProjectId(selection);
+  const templateResolution = resolveNewTicketDraftContent({
+    projectName: selection.name,
+  });
   if (templateResolution.isTemplateConfigured && templateResolution.errorMessage) {
     showError(templateResolution.errorMessage);
   }

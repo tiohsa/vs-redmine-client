@@ -1,3 +1,4 @@
+import { getProjectSelection } from "../config/projectSelection";
 import { buildNewChildTicketDraftContent } from "../views/ticketDraftStore";
 import { TicketTreeItem } from "../views/ticketsView";
 import { showError } from "../utils/notifications";
@@ -19,7 +20,10 @@ export const createChildTicketFromList = async (
     return;
   }
 
-  const templateResolution = resolveNewTicketDraftContent();
+  const selection = getProjectSelection();
+  const templateResolution = resolveNewTicketDraftContent({
+    projectName: selection.name,
+  });
   if (templateResolution.isTemplateConfigured && templateResolution.errorMessage) {
     showError(templateResolution.errorMessage);
   }
