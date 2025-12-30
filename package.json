@@ -1,8 +1,13 @@
 {
   "name": "redmine-client",
   "displayName": "Redmine Client",
-  "description": "",
+  "description": "Redmine ticket workflows into VS Code",
   "version": "0.0.1",
+  "publisher": "your-publisher-id",
+  "author": {
+    "name": "tiohsa",
+    "url": "git@github.com:tiohsa/vs-redmine-client.git"
+  },
   "engines": {
     "vscode": "^1.107.0"
   },
