@@ -84,7 +84,7 @@ suite("Comment markdown image upload", () => {
 
   test("uploads images for comment edits", async () => {
     const temp = createTempImage();
-    initializeCommentEdit(101, 10, "Old");
+    initializeCommentEdit(101, 10, "Old", "2024-01-01T00:00:00Z");
     let updatedUploads:
       | Array<{ token: string; filename: string; content_type: string }>
       | undefined;
@@ -97,8 +97,13 @@ suite("Comment markdown image upload", () => {
         addComment: async () => {
           throw new Error("should not add");
         },
-        updateComment: async (_commentId, _body, uploads) => {
-          updatedUploads = uploads;
+        updateComment: async (_commentId, _body) => {
+          // updateComment doesn't handle uploads in this flow
+        },
+        updateIssue: async (params) => {
+          if (params.fields?.uploads) {
+            updatedUploads = params.fields.uploads;
+          }
         },
         getCurrentUserId: async () => 9,
         getIssueDetail: async () => ({
@@ -113,7 +118,13 @@ suite("Comment markdown image upload", () => {
       },
     });
 
-    assert.strictEqual(result.status, "success");
+    if (result.status !== "success") {
+      console.error("Test failed: " + result.message);
+      if (result.conflictContext) {
+        console.error("Conflict context: ", result.conflictContext);
+      }
+    }
+    assert.strictEqual(result.status, "success", result.message);
     assert.deepStrictEqual(updatedUploads, [
       { token: "token", filename: "image.png", content_type: "image/png" },
     ]);
