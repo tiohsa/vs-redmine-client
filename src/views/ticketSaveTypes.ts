@@ -11,10 +11,20 @@ export type TicketSaveStatus =
   | "not_found"
   | "failed";
 
+export interface ConflictContext {
+  ticketId: number;
+  localSubject: string;
+  localDescription: string;
+  remoteSubject: string;
+  remoteDescription: string;
+  remoteUpdatedAt: string;
+}
+
 export interface TicketSaveResult {
   status: TicketSaveStatus;
   message: string;
   uploadSummary?: UploadSummary;
+  conflictContext?: ConflictContext;
 }
 
 export type TicketDraftStatus = "clean" | "dirty" | "conflict";

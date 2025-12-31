@@ -4,6 +4,7 @@ export interface CommentEditState {
   baseBody: string;
   draftBody?: string;
   lastSavedAt?: number;
+  lastKnownRemoteUpdatedAt?: string;
 }
 
 const edits = new Map<number, CommentEditState>();
@@ -15,12 +16,14 @@ export const initializeCommentEdit = (
   commentId: number,
   ticketId: number,
   body: string,
+  remoteUpdatedAt?: string,
 ): CommentEditState => {
   const state: CommentEditState = {
     commentId,
     ticketId,
     baseBody: body,
     lastSavedAt: Date.now(),
+    lastKnownRemoteUpdatedAt: remoteUpdatedAt,
   };
   edits.set(commentId, state);
   return state;
@@ -30,18 +33,26 @@ export const ensureCommentEdit = (
   commentId: number,
   ticketId: number,
   body: string,
+  remoteUpdatedAt?: string,
 ): CommentEditState => {
   const state = edits.get(commentId);
   if (!state) {
-    return initializeCommentEdit(commentId, ticketId, body);
+    return initializeCommentEdit(commentId, ticketId, body, remoteUpdatedAt);
   }
 
   state.baseBody = body;
   state.ticketId = ticketId;
+  if (remoteUpdatedAt) {
+    state.lastKnownRemoteUpdatedAt = remoteUpdatedAt;
+  }
   return state;
 };
 
-export const updateCommentEdit = (commentId: number, body: string): void => {
+export const updateCommentEdit = (
+  commentId: number,
+  body: string,
+  remoteUpdatedAt?: string,
+): void => {
   const state = edits.get(commentId);
   if (!state) {
     return;
@@ -50,6 +61,9 @@ export const updateCommentEdit = (commentId: number, body: string): void => {
   state.baseBody = body;
   state.lastSavedAt = Date.now();
   state.draftBody = undefined;
+  if (remoteUpdatedAt) {
+    state.lastKnownRemoteUpdatedAt = remoteUpdatedAt;
+  }
 };
 
 export const setCommentDraftBody = (commentId: number, body: string): void => {
@@ -85,3 +99,4 @@ export const clearCommentEdit = (commentId: number): void => {
 export const clearCommentEdits = (): void => {
   edits.clear();
 };
+

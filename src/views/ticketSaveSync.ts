@@ -365,7 +365,16 @@ export const syncTicketDraft = async (input: {
       const remoteUpdatedAt = remoteDetail.ticket.updatedAt;
       if (remoteUpdatedAt && remoteUpdatedAt !== draft.lastKnownRemoteUpdatedAt) {
         markDraftStatus(input.ticketId, "conflict");
-        return buildResult("conflict", "Remote changes detected. Refresh before saving.");
+        return buildResult("conflict", "Remote changes detected. Refresh before saving.", {
+          conflictContext: {
+            ticketId: input.ticketId,
+            localSubject: subject,
+            localDescription: description,
+            remoteSubject: remoteDetail.ticket.subject,
+            remoteDescription: remoteDetail.ticket.description ?? "",
+            remoteUpdatedAt,
+          },
+        });
       }
     } catch (error) {
       const result = mapErrorToResult(error);

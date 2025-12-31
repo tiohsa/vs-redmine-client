@@ -193,6 +193,27 @@ export const syncCommentDraft = async (input: {
     return buildResult("no_change", "No changes to save.", { uploadSummary });
   }
 
+  // Pre-save conflict detection: check if remote was updated since we loaded
+  if (edit.lastKnownRemoteUpdatedAt) {
+    try {
+      const detail = await deps.getIssueDetail(edit.ticketId);
+      const remoteComment = detail.comments.find((c) => c.id === input.commentId);
+      if (remoteComment && remoteComment.updatedAt !== edit.lastKnownRemoteUpdatedAt) {
+        return buildResult("conflict", "Remote changes detected. Refresh before saving.", {
+          conflictContext: {
+            commentId: input.commentId,
+            ticketId: edit.ticketId,
+            localBody: nextContent,
+            remoteBody: remoteComment.body,
+            remoteUpdatedAt: remoteComment.updatedAt,
+          },
+        });
+      }
+    } catch {
+      // If we can't fetch remote, continue with save attempt
+    }
+  }
+
   try {
     // Redmine's journal update API doesn't support uploads.
     // We need to attach files to the issue first, then update the journal.
@@ -207,7 +228,28 @@ export const syncCommentDraft = async (input: {
       nextContent,
     );
   } catch (error) {
-    return mapErrorToResult(error);
+    const result = mapErrorToResult(error);
+    // If conflict, try to fetch the remote comment for diff display
+    if (result.status === "conflict") {
+      try {
+        const detail = await deps.getIssueDetail(edit.ticketId);
+        const remoteComment = detail.comments.find((c) => c.id === input.commentId);
+        if (remoteComment) {
+          return buildResult("conflict", result.message, {
+            conflictContext: {
+              commentId: input.commentId,
+              ticketId: edit.ticketId,
+              localBody: nextContent,
+              remoteBody: remoteComment.body,
+              remoteUpdatedAt: remoteComment.updatedAt,
+            },
+          });
+        }
+      } catch {
+        // Ignore fetch error, return original conflict result
+      }
+    }
+    return result;
   }
 
   updateCommentEdit(input.commentId, nextContent);

@@ -77,9 +77,12 @@ import {
   VIEW_ID_ACTIVITY_TICKET_SETTINGS,
   VIEW_ID_ACTIVITY_TICKETS,
 } from "./views/viewIds";
+import { registerConflictDiffProvider } from "./views/conflictDiffProvider";
+import { handleConflict, handleCommentConflict } from "./views/conflictResolver";
 
 export async function activate(context: vscode.ExtensionContext) {
   initializeTreeExpansionState(context.workspaceState);
+  registerConflictDiffProvider(context);
   const ticketsProvider = new TicketsTreeProvider();
   const settingsProvider = new TicketSettingsTreeProvider(ticketsProvider);
   const commentsProvider = new CommentsTreeProvider();
@@ -196,6 +199,7 @@ export async function activate(context: vscode.ExtensionContext) {
         detail.ticket,
         selected.comment.body,
         selected.comment.id,
+        selected.comment.updatedAt,
       );
       selectedCommentDocumentUri = editor.document.uri.toString();
     } catch (error) {
@@ -295,10 +299,14 @@ export async function activate(context: vscode.ExtensionContext) {
 
     void (async () => {
       if (editor) {
-        const ticketResult = await handleTicketEditorSave(editor, {
+        let ticketResult = await handleTicketEditorSave(editor, {
           onSubjectUpdated: updateTicketListSubject,
         });
         if (ticketResult) {
+          // Handle conflict with dialog
+          if (ticketResult.status === "conflict" && ticketResult.conflictContext) {
+            ticketResult = await handleConflict(ticketResult, editor);
+          }
           notifyTicketSaveResult(ticketResult);
           if (ticketResult.status === "created") {
             ticketsProvider.refresh();
@@ -306,8 +314,12 @@ export async function activate(context: vscode.ExtensionContext) {
           return;
         }
 
-        const commentResult = await handleCommentEditorSave(editor);
+        let commentResult = await handleCommentEditorSave(editor);
         if (commentResult) {
+          // Handle comment conflict with dialog
+          if (commentResult.status === "conflict" && commentResult.conflictContext) {
+            commentResult = await handleCommentConflict(commentResult, editor);
+          }
           notifyCommentSaveResult(commentResult);
           if (shouldRefreshComments(commentResult.status)) {
             const ticketId = getTicketIdForEditor(editor);
@@ -361,12 +373,21 @@ export async function activate(context: vscode.ExtensionContext) {
           return;
         }
 
-        const result = await syncTicketDraft({
+        let result = await syncTicketDraft({
           ticketId: ticketIdForDocument,
           content: document.getText(),
           documentUri: document.uri,
           onSubjectUpdated: updateTicketListSubject,
         });
+        // Handle conflict - try to find associated editor
+        if (result.status === "conflict" && result.conflictContext) {
+          const docEditor = vscode.window.visibleTextEditors.find(
+            (e) => e.document === document,
+          );
+          if (docEditor) {
+            result = await handleConflict(result, docEditor);
+          }
+        }
         notifyTicketSaveResult(result);
         return;
       }
@@ -425,12 +446,21 @@ export async function activate(context: vscode.ExtensionContext) {
       }
 
       if (parsed.type === "ticket") {
-        const result = await syncTicketDraft({
+        let result = await syncTicketDraft({
           ticketId: parsed.ticketId,
           content: document.getText(),
           documentUri: document.uri,
           onSubjectUpdated: updateTicketListSubject,
         });
+        // Handle conflict - try to find associated editor
+        if (result.status === "conflict" && result.conflictContext) {
+          const docEditor = vscode.window.visibleTextEditors.find(
+            (e) => e.document === document,
+          );
+          if (docEditor) {
+            result = await handleConflict(result, docEditor);
+          }
+        }
         notifyTicketSaveResult(result);
         return;
       }
@@ -745,7 +775,7 @@ export async function activate(context: vscode.ExtensionContext) {
         if (
           selectedCommentDocumentUri &&
           vscode.window.activeTextEditor?.document?.uri.toString() !==
-            selectedCommentDocumentUri
+          selectedCommentDocumentUri
         ) {
           vscode.window.showErrorMessage("Open the comment editor before updating.");
           return;
@@ -823,4 +853,4 @@ export async function activate(context: vscode.ExtensionContext) {
   ticketsProvider.refresh();
 }
 
-export function deactivate() {}
+export function deactivate() { }

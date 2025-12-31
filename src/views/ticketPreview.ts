@@ -325,6 +325,7 @@ export const showTicketComment = async (
   ticket: Ticket,
   comment: string,
   commentId: number,
+  updatedAt?: string,
 ): Promise<vscode.TextEditor> => {
   const display = resolveCommentEditorBody(commentId, comment);
   const filename = buildCommentEditorFilename(ticket.projectId, ticket.id, commentId);
@@ -337,9 +338,10 @@ export const showTicketComment = async (
   setEditorProjectId(editor, ticket.projectId);
   setEditorCommentId(editor, commentId);
   setEditorDisplaySource(editor, display.source);
-  ensureCommentEdit(commentId, ticket.id, comment);
+  ensureCommentEdit(commentId, ticket.id, comment, updatedAt);
   if (content.trim().length > 0) {
     moveCursorToEnd(editor);
   }
   return editor;
 };
+
