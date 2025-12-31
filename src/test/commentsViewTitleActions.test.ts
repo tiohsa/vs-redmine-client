@@ -26,16 +26,16 @@ suite("Comments view title actions", () => {
 
   test("declares comment view title icons and tooltip sources", () => {
     const addCommand = findCommand("redmine-client.addCommentFromComments");
-    const reloadCommand = findCommand("redmine-client.reloadComment");
+    const refreshCommand = findCommand("redmine-client.refreshComments");
     assert.ok(addCommand?.title, "add comment command must include a title");
-    assert.ok(reloadCommand?.title, "reload comment command must include a title");
+    assert.ok(refreshCommand?.title, "refresh comments command must include a title");
     assert.ok(addCommand?.icon, "add comment command must include an icon");
-    assert.ok(reloadCommand?.icon, "reload comment command must include an icon");
+    assert.ok(refreshCommand?.icon, "refresh comments command must include an icon");
 
     const addEntry = findViewTitleEntry("redmine-client.addCommentFromComments");
-    const reloadEntry = findViewTitleEntry("redmine-client.reloadComment");
+    const refreshEntry = findViewTitleEntry("redmine-client.refreshComments");
     assert.ok(addEntry, "add comment view/title entry must exist");
-    assert.ok(reloadEntry, "reload comment view/title entry must exist");
+    assert.ok(refreshEntry, "refresh comments view/title entry must exist");
   });
 
   test("uses new-file icon for comment add action", () => {

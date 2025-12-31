@@ -1,0 +1,14 @@
+{
+    "Conflict detected in ticket #{0}. Remote has been updated.": "Conflict detected in ticket #{0}. Remote has been updated.",
+    "Conflict detected in comment #{0}. Remote has been updated.": "Conflict detected in comment #{0}. Remote has been updated.",
+    "Local Priority": "Local Priority",
+    "Remote Priority": "Remote Priority",
+    "View Diff": "View Diff",
+    "Cancel": "Cancel",
+    "Diff editor opened. Please save again after editing.": "Diff editor opened. Please save again after editing.",
+    "Conflict resolution was cancelled.": "Conflict resolution was cancelled.",
+    "Overwritten with remote content.": "Overwritten with remote content.",
+    "Missing draft state for ticket.": "Missing draft state for ticket.",
+    "Missing comment edit state.": "Missing comment edit state.",
+    "Remote changes detected. Refresh before saving.": "Remote changes detected. Refresh before saving."
+}

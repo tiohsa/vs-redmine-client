@@ -1,0 +1,14 @@
+{
+    "Conflict detected in ticket #{0}. Remote has been updated.": "チケット #{0} に競合が検出されました。リモートで更新があります。",
+    "Conflict detected in comment #{0}. Remote has been updated.": "コメント #{0} に競合が検出されました。リモートで更新があります。",
+    "Local Priority": "ローカル優先",
+    "Remote Priority": "リモート優先",
+    "View Diff": "差分を確認",
+    "Cancel": "キャンセル",
+    "Diff editor opened. Please save again after editing.": "差分エディタを開きました。編集後に再度保存してください。",
+    "Conflict resolution was cancelled.": "競合解決がキャンセルされました。",
+    "Overwritten with remote content.": "リモート内容で上書きしました。",
+    "Missing draft state for ticket.": "チケットのドラフト状態がありません。",
+    "Missing comment edit state.": "コメントの編集状態がありません。",
+    "Remote changes detected. Refresh before saving.": "リモートで変更が検出されました。保存前に更新してください。"
+}

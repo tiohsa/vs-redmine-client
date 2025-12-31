@@ -27,16 +27,16 @@ suite("Tickets view title actions", () => {
 
   test("declares ticket view title icons and tooltip sources", () => {
     const addCommand = findCommand("redmine-client.createTicketFromList");
-    const reloadCommand = findCommand("redmine-client.reloadTicket");
+    const refreshCommand = findCommand("redmine-client.refreshTickets");
     assert.ok(addCommand?.title, "add ticket command must include a title");
-    assert.ok(reloadCommand?.title, "reload ticket command must include a title");
+    assert.ok(refreshCommand?.title, "refresh tickets command must include a title");
     assert.ok(addCommand?.icon, "add ticket command must include an icon");
-    assert.ok(reloadCommand?.icon, "reload ticket command must include an icon");
+    assert.ok(refreshCommand?.icon, "refresh tickets command must include an icon");
 
     const addEntry = findViewTitleEntry("redmine-client.createTicketFromList");
-    const reloadEntry = findViewTitleEntry("redmine-client.reloadTicket");
+    const refreshEntry = findViewTitleEntry("redmine-client.refreshTickets");
     assert.ok(addEntry, "add ticket view/title entry must exist");
-    assert.ok(reloadEntry, "reload ticket view/title entry must exist");
+    assert.ok(refreshEntry, "refresh tickets view/title entry must exist");
   });
 
   test("uses new-file icon for ticket add action", () => {
@@ -56,7 +56,7 @@ suite("Tickets view title actions", () => {
       (item) =>
         item.command === "redmine-client.createChildTicketFromList" &&
         item.when ===
-          "view == redmine-clientTickets && viewItem == redmineTicket && redmine-client.canCreateTickets",
+        "view == redmine-clientTickets && viewItem == redmineTicket && redmine-client.canCreateTickets",
     );
     assert.ok(explorerEntry, "child ticket item action must exist in explorer view");
     assert.strictEqual(explorerEntry?.group, "inline@1");
@@ -65,7 +65,7 @@ suite("Tickets view title actions", () => {
       (item) =>
         item.command === "redmine-client.createChildTicketFromList" &&
         item.when ===
-          "view == redmine-clientActivityTickets && viewItem == redmineTicket && redmine-client.canCreateTickets",
+        "view == redmine-clientActivityTickets && viewItem == redmineTicket && redmine-client.canCreateTickets",
     );
     assert.ok(activityEntry, "child ticket item action must exist in activity view");
     assert.strictEqual(activityEntry?.group, "inline@1");

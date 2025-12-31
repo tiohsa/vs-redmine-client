@@ -30,13 +30,12 @@ const defaultDeps: ConflictResolverDeps = {
 export async function showConflictDialog(
     context: ConflictContext,
 ): Promise<ConflictResolution> {
-    const localLabel = "ローカル優先";
-    const remoteLabel = "リモート優先";
-    const diffLabel = "差分を確認";
-    const cancelLabel = "キャンセル";
+    const localLabel = vscode.l10n.t("Local Priority");
+    const remoteLabel = vscode.l10n.t("Remote Priority");
+    const diffLabel = vscode.l10n.t("View Diff");
 
     const result = await vscode.window.showWarningMessage(
-        `チケット #${context.ticketId} に競合が検出されました。リモートで更新があります。`,
+        vscode.l10n.t("Conflict detected in ticket #{0}. Remote has been updated.", context.ticketId),
         { modal: true },
         localLabel,
         remoteLabel,
@@ -76,7 +75,7 @@ export async function openDiffEditor(
         "vscode.diff",
         remoteUri,
         localUri,
-        `Redmine #${context.ticketId}: リモート ↔ ローカル`,
+        `Redmine #${context.ticketId}: Remote ↔ Local`,
     );
 }
 
@@ -154,7 +153,7 @@ export async function handleConflict(
             // After opening diff, user needs to manually save again.
             return {
                 status: "conflict",
-                message: "差分エディタを開きました。編集後に再度保存してください。",
+                message: vscode.l10n.t("Diff editor opened. Please save again after editing."),
                 conflictContext: context,
             };
 
@@ -162,7 +161,7 @@ export async function handleConflict(
         default:
             return {
                 status: "conflict",
-                message: "競合解決がキャンセルされました。",
+                message: vscode.l10n.t("Conflict resolution was cancelled."),
                 conflictContext: context,
             };
     }
@@ -184,12 +183,12 @@ import { applyEditorContent } from "./ticketPreview";
 export async function showCommentConflictDialog(
     context: CommentConflictContext,
 ): Promise<ConflictResolution> {
-    const localLabel = "ローカル優先";
-    const remoteLabel = "リモート優先";
-    const diffLabel = "差分を確認";
+    const localLabel = vscode.l10n.t("Local Priority");
+    const remoteLabel = vscode.l10n.t("Remote Priority");
+    const diffLabel = vscode.l10n.t("View Diff");
 
     const result = await vscode.window.showWarningMessage(
-        `コメント #${context.commentId} に競合が検出されました。リモートで更新があります。`,
+        vscode.l10n.t("Conflict detected in comment #{0}. Remote has been updated.", context.commentId),
         { modal: true },
         localLabel,
         remoteLabel,
@@ -227,7 +226,7 @@ export async function openCommentDiffEditor(
         "vscode.diff",
         remoteUri,
         localUri,
-        `コメント #${context.commentId}: リモート ↔ ローカル`,
+        `Comment #${context.commentId}: Remote ↔ Local`,
     );
 }
 
@@ -240,7 +239,7 @@ export async function applyRemoteCommentContent(
 ): Promise<CommentSaveResult> {
     await applyEditorContent(editor, context.remoteBody);
     updateCommentEdit(context.commentId, context.remoteBody);
-    return { status: "success", message: "リモート内容で上書きしました。" };
+    return { status: "success", message: vscode.l10n.t("Overwritten with remote content.") };
 }
 
 /**
@@ -294,7 +293,7 @@ export async function handleCommentConflict(
             await openCommentDiffEditor(context, editor);
             return {
                 status: "conflict",
-                message: "差分エディタを開きました。編集後に再度保存してください。",
+                message: vscode.l10n.t("Diff editor opened. Please save again after editing."),
                 conflictContext: context,
             };
 
@@ -302,7 +301,7 @@ export async function handleCommentConflict(
         default:
             return {
                 status: "conflict",
-                message: "競合解決がキャンセルされました。",
+                message: vscode.l10n.t("Conflict resolution was cancelled."),
                 conflictContext: context,
             };
     }
