@@ -2,7 +2,7 @@
   "name": "redmine-client",
   "displayName": "Redmine Client",
   "description": "Redmine ticket workflows into VS Code",
-  "version": "0.0.2",
+  "version": "0.0.3",
   "publisher": "your-publisher-id",
   "author": {
     "name": "tiohsa",
