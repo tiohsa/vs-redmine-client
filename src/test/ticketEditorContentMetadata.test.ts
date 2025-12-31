@@ -15,6 +15,7 @@ suite("Ticket editor content metadata", () => {
     });
 
     const parsed = parseTicketEditorContent(content);
-    assert.deepStrictEqual(parsed.metadata, metadata);
+    const { keyOrder, ...parsedMetadata } = parsed.metadata;
+    assert.deepStrictEqual(parsedMetadata, metadata);
   });
 });

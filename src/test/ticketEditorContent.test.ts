@@ -53,7 +53,10 @@ suite("Ticket editor content", () => {
     assert.deepStrictEqual(parsed, {
       subject: "Title",
       description: "Line 1\nLine 2",
-      metadata: buildIssueMetadataFixture(),
+      metadata: {
+        ...buildIssueMetadataFixture(),
+        keyOrder: ["tracker", "priority", "status", "due_date"],
+      },
       layout: "metadata-first",
       metadataBlock: "present",
     });
@@ -80,7 +83,10 @@ suite("Ticket editor content", () => {
     assert.deepStrictEqual(parsed, {
       subject: "Title",
       description: "Line 1\nLine 2",
-      metadata: buildIssueMetadataFixture(),
+      metadata: {
+        ...buildIssueMetadataFixture(),
+        keyOrder: ["tracker", "priority", "status", "due_date"],
+      },
       layout: "subject-first",
       metadataBlock: "present",
     });

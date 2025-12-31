@@ -44,6 +44,7 @@ export const parseIssueMetadataYaml = (text: string): IssueMetadata => {
   const lines = text.split(/\r?\n/);
   const values: Partial<IssueMetadata> = {};
   const seen = new Set<IssueMetadataKey>();
+  const keyOrder: IssueMetadataKey[] = [];
   let sawIssue = false;
   let readingChildren = false;
 
@@ -105,6 +106,7 @@ export const parseIssueMetadataYaml = (text: string): IssueMetadata => {
       throw new Error(`Duplicate metadata key: ${key}`);
     }
     seen.add(key);
+    keyOrder.push(key);
 
     const rawValue = stripInlineComment(match[2]);
     const value = rawValue.trim();
@@ -171,37 +173,87 @@ export const parseIssueMetadataYaml = (text: string): IssueMetadata => {
     }
   });
 
-  return values as IssueMetadata;
+  return { ...values, keyOrder } as IssueMetadata;
 };
 
 export const serializeIssueMetadataYaml = (metadata: IssueMetadata): string => {
-  const dueDate = metadata.due_date ?? "";
-  const lines = [
-    "issue:",
-    `  tracker:   ${metadata.tracker}`,
-    `  priority:  ${metadata.priority}`,
-    `  status:    ${metadata.status}`,
-    `  due_date:  ${dueDate}`,
+  const lines = ["issue:"];
+  const defaultOrder: IssueMetadataKey[] = [
+    "tracker",
+    "priority",
+    "status",
+    "due_date",
+    "start_date",
+    "done_ratio",
+    "estimated_hours",
+    "parent",
+    "children",
   ];
-  if (metadata.start_date) {
-    lines.push(`  start_date: ${metadata.start_date}`);
-  }
-  if (metadata.done_ratio !== undefined) {
-    lines.push(`  done_ratio: ${metadata.done_ratio}`);
-  }
-  if (metadata.estimated_hours !== undefined) {
-    lines.push(`  estimated_hours: ${metadata.estimated_hours}`);
-  }
 
-  if (metadata.parent !== undefined) {
-    lines.push(`  parent:    ${metadata.parent}`);
-  }
-  if (metadata.children && metadata.children.length > 0) {
-    lines.push("  children:");
-    metadata.children.forEach((child) => {
-      lines.push(`    - ${child}`);
-    });
-  }
+  const order = metadata.keyOrder && metadata.keyOrder.length > 0 ? metadata.keyOrder : defaultOrder;
+  const processed = new Set<IssueMetadataKey>();
+
+  // Process keys in order
+  order.forEach((key) => {
+    if (processed.has(key)) {
+      return;
+    }
+    serializeField(lines, key, metadata);
+    processed.add(key);
+  });
+
+  // Process any remaining keys (e.g. newly added optional fields not in template)
+  defaultOrder.forEach((key) => {
+    if (processed.has(key)) {
+      return;
+    }
+    serializeField(lines, key, metadata);
+    processed.add(key);
+  });
 
   return lines.join("\n");
+};
+
+const serializeField = (lines: string[], key: IssueMetadataKey, metadata: IssueMetadata): void => {
+  const value = metadata[key];
+  if (value === undefined) {
+    return;
+  }
+
+  switch (key) {
+    case "tracker":
+      lines.push(`  tracker:   ${value}`);
+      break;
+    case "priority":
+      lines.push(`  priority:  ${value}`);
+      break;
+    case "status":
+      lines.push(`  status:    ${value}`);
+      break;
+    case "due_date":
+      lines.push(`  due_date:  ${value ?? ""}`);
+      break;
+    case "start_date":
+      if (value) {
+        lines.push(`  start_date: ${value}`);
+      }
+      break;
+    case "done_ratio":
+      lines.push(`  done_ratio: ${value}`);
+      break;
+    case "estimated_hours":
+      lines.push(`  estimated_hours: ${value}`);
+      break;
+    case "parent":
+      lines.push(`  parent:    ${value}`);
+      break;
+    case "children":
+      if (Array.isArray(value) && value.length > 0) {
+        lines.push("  children:");
+        value.forEach((child: string) => {
+          lines.push(`    - ${child}`);
+        });
+      }
+      break;
+  }
 };

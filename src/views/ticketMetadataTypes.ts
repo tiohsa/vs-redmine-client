@@ -1,4 +1,5 @@
 export type IssueMetadata = {
+  keyOrder?: IssueMetadataKey[];
   tracker: string;
   priority: string;
   status: string;
