@@ -39,4 +39,21 @@ suite("Ticket update payload", () => {
       },
     });
   });
+
+  test("includes new metadata fields", () => {
+    const payload = buildIssueUpdatePayload({
+      startDate: "2025-01-01",
+      doneRatio: 50,
+      estimatedHours: 4.5,
+      authorId: 99,
+    });
+
+    assert.deepStrictEqual(payload, {
+      issue: {
+        start_date: "2025-01-01",
+        done_ratio: 50,
+        estimated_hours: 4.5,
+      },
+    });
+  });
 });

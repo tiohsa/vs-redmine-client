@@ -37,6 +37,31 @@ suite("Ticket creation payload", () => {
     });
   });
 
+  test("includes new metadata fields in payload", () => {
+    const payload = buildIssueCreatePayload({
+      projectId: 10,
+      subject: "Sample",
+      description: "Body",
+      startDate: "2025-01-01",
+      doneRatio: 50,
+      estimatedHours: 8,
+    });
+
+    assert.deepStrictEqual(payload, {
+      issue: {
+        project_id: 10,
+        subject: "Sample",
+        description: "Body",
+        uploads: [],
+        start_date: "2025-01-01",
+        done_ratio: 50,
+        estimated_hours: 8,
+      },
+    });
+  });
+
+
+
   test("creates parent and children tickets", async () => {
     const created: Array<{
       projectId: number;
@@ -47,6 +72,9 @@ suite("Ticket creation payload", () => {
       priorityId?: number;
       dueDate?: string;
       parentId?: number;
+      startDate?: string;
+      doneRatio?: number;
+      estimatedHours?: number;
     }> = [];
     let nextId = 100;
 
@@ -59,12 +87,20 @@ suite("Ticket creation payload", () => {
       listIssueStatuses: async () => [{ id: 1, name: "In Progress" }],
       listTrackers: async () => [{ id: 2, name: "Task" }],
       listIssuePriorities: async () => [{ id: 3, name: "Normal" }],
+      listIssueCategories: async () => [{ id: 4, name: "Development" }],
+      searchUsers: async () => [{ id: 7, name: "John Doe" }],
+      uploadFile: async () => ({ token: "token", filename: "foo.png", contentType: "image/png" }),
     };
 
-    const content = buildTicketEditorMetadataContentWithChildren(
+    let content = buildTicketEditorMetadataContentWithChildren(
       "Parent Ticket",
       "Parent body",
       ["Child task 1", "Child task 2"],
+    );
+    // Inject metadata
+    content = content.replace(
+      "issue:",
+      "issue:\n  start_date: 2025-12-01\n  done_ratio: 10\n  estimated_hours: 2",
     );
 
     const result = await syncNewTicketDraftContent({
@@ -76,6 +112,10 @@ suite("Ticket creation payload", () => {
     assert.strictEqual(result.status, "created");
     assert.strictEqual(created.length, 3);
     assert.strictEqual(created[0].subject, "Parent Ticket");
+    assert.strictEqual(created[0].startDate, "2025-12-01");
+    assert.strictEqual(created[0].doneRatio, 10);
+    assert.strictEqual(created[0].estimatedHours, 2);
+    // Ensure nested properties are preserved or mapped
     assert.strictEqual(created[1].parentId, 100);
     assert.strictEqual(created[2].parentId, 100);
   });
@@ -188,4 +228,6 @@ suite("Ticket creation payload", () => {
     assert.strictEqual(created.length, 2);
     assert.deepStrictEqual(deleted, [300, 301]);
   });
+
+  // Relaxed matching test removed
 });

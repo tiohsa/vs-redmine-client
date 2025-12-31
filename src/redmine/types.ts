@@ -24,6 +24,11 @@ export interface Ticket {
   createdAt?: string;
   updatedAt?: string;
   dueDate?: string;
+  startDate?: string;
+  estimatedHours?: number;
+  doneRatio?: number;
+  // authorId?: number; // Removed
+  authorName?: string;
 }
 
 export interface TicketUpdateFields {
@@ -35,6 +40,10 @@ export interface TicketUpdateFields {
   priorityId?: number;
   dueDate?: string | null;
   uploads?: UploadToken[];
+  startDate?: string | null;
+  doneRatio?: number;
+  estimatedHours?: number;
+  authorId?: number;
 }
 
 export interface Comment {
@@ -93,9 +102,13 @@ export interface RedmineIssueListResponse {
     priority?: { id: number; name: string };
     tracker?: { id: number; name: string };
     assigned_to?: RedmineUserRef;
+    author?: RedmineUserRef;
     created_on?: string;
     updated_on?: string;
     due_date?: string;
+    start_date?: string;
+    done_ratio?: number;
+    estimated_hours?: number;
   }>;
   total_count?: number;
   limit?: number;
@@ -113,9 +126,13 @@ export interface RedmineIssueDetailResponse {
     priority?: { id: number; name: string };
     tracker?: { id: number; name: string };
     assigned_to?: RedmineUserRef;
+    author?: RedmineUserRef;
     created_on?: string;
     updated_on?: string;
     due_date?: string;
+    start_date?: string;
+    done_ratio?: number;
+    estimated_hours?: number;
     journals?: Array<{
       id: number;
       notes?: string;

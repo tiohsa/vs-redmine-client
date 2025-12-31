@@ -167,4 +167,92 @@ suite("Ticket metadata validation", () => {
       /children exceeds limit/,
     );
   });
+
+  test("rejects invalid start_date format", () => {
+    assert.throws(
+      () =>
+        parseIssueMetadataYaml(
+          [
+            "issue:",
+            "  tracker: Task",
+            "  priority: Normal",
+            "  status: In Progress",
+            "  due_date: 2025-12-31",
+            "  start_date: 2025/01/01",
+          ].join("\n"),
+        ),
+      /start_date must be YYYY-MM-DD/,
+    );
+  });
+
+  test("rejects invalid done_ratio", () => {
+    assert.throws(
+      () =>
+        parseIssueMetadataYaml(
+          [
+            "issue:",
+            "  tracker: Task",
+            "  priority: Normal",
+            "  status: In Progress",
+            "  due_date: 2025-12-31",
+            "  done_ratio: 101",
+          ].join("\n"),
+        ),
+      /done_ratio must be a number between 0 and 100/,
+    );
+  });
+
+  test("rejects non-numeric done_ratio", () => {
+    assert.throws(
+      () =>
+        parseIssueMetadataYaml(
+          [
+            "issue:",
+            "  tracker: Task",
+            "  priority: Normal",
+            "  status: In Progress",
+            "  due_date: 2025-12-31",
+            "  done_ratio: fifty",
+          ].join("\n"),
+        ),
+      /done_ratio must be a number/,
+    );
+  });
+
+  test("rejects invalid estimated_hours", () => {
+    assert.throws(
+      () =>
+        parseIssueMetadataYaml(
+          [
+            "issue:",
+            "  tracker: Task",
+            "  priority: Normal",
+            "  status: In Progress",
+            "  due_date: 2025-12-31",
+            "  estimated_hours: lots",
+          ].join("\n"),
+        ),
+      /estimated_hours must be a number/,
+    );
+  });
+
+  test("allows valid new fields", () => {
+    const parsed = parseIssueMetadataYaml(
+      [
+        "issue:",
+        "  tracker: Task",
+        "  priority: Normal",
+        "  status: New",
+        "  due_date: 2025-12-31",
+        "  start_date: 2025-01-01",
+        "  done_ratio: 50",
+        "  estimated_hours: 8.5",
+      ].join("\n"),
+    );
+
+    assert.strictEqual(parsed.start_date, "2025-01-01");
+    assert.strictEqual(parsed.done_ratio, 50);
+    assert.strictEqual(parsed.estimated_hours, 8.5);
+    // assert.strictEqual(parsed.author, "John Doe"); // Removed
+  });
 });

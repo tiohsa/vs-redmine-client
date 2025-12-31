@@ -12,6 +12,7 @@ import {
   updateIssue,
 } from "../redmine/issues";
 import { uploadFileAttachment } from "../redmine/attachments";
+import { searchUsers } from "../redmine/users";
 import { TicketUpdateFields } from "../redmine/types";
 import {
   getTicketDraft,
@@ -50,6 +51,7 @@ export interface TicketSaveDependencies {
   listIssueStatuses: typeof listIssueStatuses;
   listTrackers: typeof listTrackers;
   listIssuePriorities: typeof listIssuePriorities;
+  searchUsers: typeof searchUsers;
   uploadFile: typeof uploadFileAttachment;
 }
 
@@ -61,6 +63,7 @@ const defaultDeps: TicketSaveDependencies = {
   listIssueStatuses,
   listTrackers,
   listIssuePriorities,
+  searchUsers,
   uploadFile: uploadFileAttachment,
 };
 
@@ -70,6 +73,7 @@ export interface TicketCreateDependencies {
   listIssueStatuses: typeof listIssueStatuses;
   listTrackers: typeof listTrackers;
   listIssuePriorities: typeof listIssuePriorities;
+  searchUsers: typeof searchUsers;
   uploadFile: typeof uploadFileAttachment;
 }
 
@@ -79,6 +83,7 @@ const defaultCreateDeps: TicketCreateDependencies = {
   listIssueStatuses,
   listTrackers,
   listIssuePriorities,
+  searchUsers,
   uploadFile: uploadFileAttachment,
 };
 
@@ -190,19 +195,32 @@ const computeMetadataChanges = (
   if (baseMetadata.due_date !== nextMetadata.due_date) {
     changes.due_date = nextMetadata.due_date;
   }
+  if (baseMetadata.start_date !== nextMetadata.start_date) {
+    changes.start_date = nextMetadata.start_date;
+  }
+  if (baseMetadata.done_ratio !== nextMetadata.done_ratio) {
+    changes.done_ratio = nextMetadata.done_ratio;
+  }
+  if (baseMetadata.estimated_hours !== nextMetadata.estimated_hours) {
+    changes.estimated_hours = nextMetadata.estimated_hours;
+  }
   return changes;
 };
 
 const resolveMetadataUpdates = async (
   changes: Partial<IssueMetadata>,
   deps: TicketSaveDependencies,
+  projectId?: number,
 ): Promise<TicketUpdateFields> => {
   const updateFields: TicketUpdateFields = {};
   if (
     changes.tracker === undefined &&
     changes.priority === undefined &&
     changes.status === undefined &&
-    changes.due_date === undefined
+    changes.due_date === undefined &&
+    changes.start_date === undefined &&
+    changes.done_ratio === undefined &&
+    changes.estimated_hours === undefined
   ) {
     return updateFields;
   }
@@ -241,12 +259,23 @@ const resolveMetadataUpdates = async (
     updateFields.dueDate = changes.due_date.length === 0 ? null : changes.due_date;
   }
 
+  if (changes.start_date !== undefined) {
+    updateFields.startDate = changes.start_date.length === 0 ? null : changes.start_date;
+  }
+  if (changes.done_ratio !== undefined) {
+    updateFields.doneRatio = changes.done_ratio;
+  }
+  if (changes.estimated_hours !== undefined) {
+    updateFields.estimatedHours = changes.estimated_hours;
+  }
+
   return updateFields;
 };
 
 const resolveMetadataForCreate = async (
   metadata: IssueMetadata,
   deps: TicketCreateDependencies,
+  projectId?: number,
 ): Promise<TicketUpdateFields> => {
   const [statuses, trackers, priorities] = await Promise.all([
     deps.listIssueStatuses(),
@@ -277,6 +306,16 @@ const resolveMetadataForCreate = async (
 
   if (metadata.due_date.length > 0) {
     fields.dueDate = metadata.due_date;
+  }
+
+  if (metadata.start_date && metadata.start_date.length > 0) {
+    fields.startDate = metadata.start_date;
+  }
+  if (metadata.done_ratio !== undefined) {
+    fields.doneRatio = metadata.done_ratio;
+  }
+  if (metadata.estimated_hours !== undefined) {
+    fields.estimatedHours = metadata.estimated_hours;
   }
 
   return fields;
@@ -339,9 +378,12 @@ export const syncTicketDraft = async (input: {
     description,
   );
   const metadataChanges = computeMetadataChanges(draft.baseMetadata, metadata);
+
+  let remoteDetail: IssueDetailResult | undefined;
+
   let metadataFields: TicketUpdateFields = {};
   try {
-    metadataFields = await resolveMetadataUpdates(metadataChanges, deps);
+    metadataFields = await resolveMetadataUpdates(metadataChanges, deps, remoteDetail?.ticket.projectId);
   } catch (error) {
     const message = error instanceof Error ? error.message : "Invalid metadata.";
     return buildResult("failed", message);
@@ -357,11 +399,12 @@ export const syncTicketDraft = async (input: {
   }
 
   markDraftStatus(input.ticketId, "dirty");
-  let remoteDetail: IssueDetailResult | undefined;
 
   if (draft.lastKnownRemoteUpdatedAt) {
     try {
-      remoteDetail = await deps.getIssueDetail(input.ticketId);
+      if (!remoteDetail) {
+        remoteDetail = await deps.getIssueDetail(input.ticketId);
+      }
       const remoteUpdatedAt = remoteDetail.ticket.updatedAt;
       if (remoteUpdatedAt && remoteUpdatedAt !== draft.lastKnownRemoteUpdatedAt) {
         markDraftStatus(input.ticketId, "conflict");
@@ -388,24 +431,23 @@ export const syncTicketDraft = async (input: {
   const createdChildIds: number[] = [];
   let childCreateFields: TicketUpdateFields | undefined;
   if (uniqueChildren.length > 0) {
-    try {
-      childCreateFields = await resolveMetadataForCreate(metadata, deps);
-    } catch (error) {
-      const message = error instanceof Error ? error.message : "Invalid metadata.";
-      return buildResult("failed", message);
-    }
-
-    let projectId = remoteDetail?.ticket.projectId;
-    if (!projectId) {
+    if (!remoteDetail) {
       try {
         remoteDetail = await deps.getIssueDetail(input.ticketId);
-        projectId = remoteDetail.ticket.projectId;
       } catch (error) {
         return mapErrorToResult(error);
       }
     }
+    const projectId = remoteDetail?.ticket.projectId;
     if (!projectId) {
       return buildResult("failed", "Missing project ID for child tickets.");
+    }
+
+    try {
+      childCreateFields = await resolveMetadataForCreate(metadata, deps, projectId);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Invalid metadata.";
+      return buildResult("failed", message);
     }
 
     try {
@@ -438,6 +480,7 @@ export const syncTicketDraft = async (input: {
     }
   }
 
+
   try {
     if (Object.keys(changes).length > 0) {
       await deps.updateIssue({ issueId: input.ticketId, fields: changes });
@@ -456,6 +499,7 @@ export const syncTicketDraft = async (input: {
   }
 
   let updatedAt = draft.lastKnownRemoteUpdatedAt;
+
   if (Object.keys(changes).length > 0) {
     try {
       const detail = await deps.getIssueDetail(input.ticketId);
@@ -578,7 +622,7 @@ const createTicketFromContent = async (input: {
 
   let metadataFields: TicketUpdateFields = {};
   try {
-    metadataFields = await resolveMetadataForCreate(parsed.metadata, input.deps);
+    metadataFields = await resolveMetadataForCreate(parsed.metadata, input.deps, projectId);
   } catch (error) {
     const message = error instanceof Error ? error.message : "Invalid metadata.";
     return { result: buildResult("failed", message) };
@@ -613,6 +657,9 @@ const createTicketFromContent = async (input: {
       priorityId: metadataFields.priorityId,
       dueDate,
       parentId: parsed.metadata.parent,
+      startDate: metadataFields.startDate as string | undefined, // Type assertion if needed, but strictNullChecks likely standard
+      doneRatio: metadataFields.doneRatio,
+      estimatedHours: metadataFields.estimatedHours,
     });
   } catch (error) {
     return { result: mapErrorToResult(error) };

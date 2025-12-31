@@ -23,6 +23,21 @@ const requireValue = (key: IssueMetadataKey, value: string): void => {
   if (key === "parent" && value.length > 0 && !/^\d+$/.test(value)) {
     throw new Error("parent must be a numeric ID.");
   }
+  if (key === "start_date" && value.length > 0 && !/^\d{4}-\d{2}-\d{2}$/.test(value)) {
+    throw new Error("start_date must be YYYY-MM-DD");
+  }
+  if (key === "done_ratio" && value.length > 0) {
+    const ratio = Number(value);
+    if (Number.isNaN(ratio) || ratio < 0 || ratio > 100) {
+      throw new Error("done_ratio must be a number between 0 and 100.");
+    }
+  }
+  if (key === "estimated_hours" && value.length > 0) {
+    const hours = Number(value);
+    if (Number.isNaN(hours)) {
+      throw new Error("estimated_hours must be a number.");
+    }
+  }
 };
 
 export const parseIssueMetadataYaml = (text: string): IssueMetadata => {
@@ -110,6 +125,30 @@ export const parseIssueMetadataYaml = (text: string): IssueMetadata => {
       return;
     }
 
+    if (key === "done_ratio") {
+      readingChildren = false;
+      if (value.length > 0) {
+        const ratio = Number(value);
+        if (Number.isNaN(ratio) || ratio < 0 || ratio > 100) {
+          throw new Error("done_ratio must be a number between 0 and 100.");
+        }
+        values.done_ratio = ratio;
+      }
+      return;
+    }
+
+    if (key === "estimated_hours") {
+      readingChildren = false;
+      if (value.length > 0) {
+        const hours = Number(value);
+        if (Number.isNaN(hours)) {
+          throw new Error("estimated_hours must be a number.");
+        }
+        values.estimated_hours = hours;
+      }
+      return;
+    }
+
     readingChildren = false;
     requireValue(key, value);
     values[key] = value;
@@ -144,6 +183,16 @@ export const serializeIssueMetadataYaml = (metadata: IssueMetadata): string => {
     `  status:    ${metadata.status}`,
     `  due_date:  ${dueDate}`,
   ];
+  if (metadata.start_date) {
+    lines.push(`  start_date: ${metadata.start_date}`);
+  }
+  if (metadata.done_ratio !== undefined) {
+    lines.push(`  done_ratio: ${metadata.done_ratio}`);
+  }
+  if (metadata.estimated_hours !== undefined) {
+    lines.push(`  estimated_hours: ${metadata.estimated_hours}`);
+  }
+
   if (metadata.parent !== undefined) {
     lines.push(`  parent:    ${metadata.parent}`);
   }

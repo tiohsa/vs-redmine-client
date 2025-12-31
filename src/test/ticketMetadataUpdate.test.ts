@@ -48,4 +48,6 @@ suite("Ticket metadata update", () => {
       dueDate: null,
     });
   });
+
+  // Author verification test removed
 });

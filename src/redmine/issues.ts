@@ -68,7 +68,11 @@ export const listIssues = async (input: IssuesListInput): Promise<IssuesListResu
     assigneeName: issue.assigned_to?.name,
     createdAt: issue.created_on,
     updatedAt: issue.updated_on,
+    startDate: issue.start_date,
     dueDate: issue.due_date,
+    doneRatio: issue.done_ratio,
+    estimatedHours: issue.estimated_hours,
+    authorName: issue.author?.name,
   }));
 
   return {
@@ -96,6 +100,10 @@ export interface IssueCreateInput {
   priorityId?: number;
   dueDate?: string;
   parentId?: number;
+  startDate?: string;
+  doneRatio?: number;
+  estimatedHours?: number;
+  // authorId?: number; // Removed
 }
 
 export const buildIssueCreatePayload = (input: IssueCreateInput): Record<string, unknown> => ({
@@ -109,6 +117,9 @@ export const buildIssueCreatePayload = (input: IssueCreateInput): Record<string,
     ...(input.priorityId !== undefined ? { priority_id: input.priorityId } : {}),
     ...(input.dueDate !== undefined ? { due_date: input.dueDate } : {}),
     ...(input.parentId !== undefined ? { parent_issue_id: input.parentId } : {}),
+    ...(input.startDate !== undefined ? { start_date: input.startDate } : {}),
+    ...(input.doneRatio !== undefined ? { done_ratio: input.doneRatio } : {}),
+    ...(input.estimatedHours !== undefined ? { estimated_hours: input.estimatedHours } : {}),
   },
 });
 
@@ -158,9 +169,19 @@ export const buildIssueUpdatePayload = (
   if (fields.dueDate !== undefined) {
     payload.due_date = fields.dueDate;
   }
+  if (fields.startDate !== undefined) {
+    payload.start_date = fields.startDate;
+  }
+  if (fields.doneRatio !== undefined) {
+    payload.done_ratio = fields.doneRatio;
+  }
+  if (fields.estimatedHours !== undefined) {
+    payload.estimated_hours = fields.estimatedHours;
+  }
   if (fields.uploads !== undefined) {
     payload.uploads = fields.uploads;
   }
+  // author removed
 
   return { issue: payload };
 };
@@ -200,6 +221,9 @@ export const getIssueDetail = async (issueId: number): Promise<IssueDetailResult
     createdAt: issue.created_on,
     updatedAt: issue.updated_on,
     dueDate: issue.due_date,
+    startDate: issue.start_date,
+    doneRatio: issue.done_ratio,
+    // authorId removed
   };
 
   const comments: Comment[] = (issue.journals ?? []).map((journal) => ({
