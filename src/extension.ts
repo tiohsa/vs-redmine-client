@@ -538,6 +538,21 @@ export async function activate(context: vscode.ExtensionContext) {
   );
 
   context.subscriptions.push(
+    vscode.commands.registerCommand(
+      "redmine-client.reloadProject",
+      async (item?: ProjectTreeItem) => {
+        const selected =
+          item ?? (activityProjectsView.selection[0] as ProjectTreeItem | undefined);
+        if (!selected || !(selected instanceof ProjectTreeItem)) {
+          return;
+        }
+        // Reload the project info by refreshing projects provider
+        projectsProvider.refresh();
+      },
+    ),
+  );
+
+  context.subscriptions.push(
     vscode.commands.registerCommand("redmine-client.reloadTicket", async () => {
       await reloadTicketFromEditor();
     }),

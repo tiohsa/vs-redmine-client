@@ -96,6 +96,11 @@
         "icon": "$(collapse-all)"
       },
       {
+        "command": "redmine-client.reloadProject",
+        "title": "Redmine: Reload Project",
+        "icon": "$(refresh)"
+      },
+      {
         "command": "redmine-client.reloadTicket",
         "title": "Redmine: Reload Ticket",
         "icon": "$(refresh)"
@@ -307,14 +312,29 @@
           "group": "inline@1"
         },
         {
+          "command": "redmine-client.reloadProject",
+          "when": "view == redmine-clientActivityProjects && (viewItem == redmineProject || viewItem == redmineProjectSelected)",
+          "group": "inline@2"
+        },
+        {
           "command": "redmine-client.openTicketInBrowser",
           "when": "view == redmine-clientActivityTickets && viewItem == redmineTicket",
           "group": "inline@2"
         },
         {
+          "command": "redmine-client.reloadTicket",
+          "when": "view == redmine-clientActivityTickets && viewItem == redmineTicket",
+          "group": "inline@3"
+        },
+        {
           "command": "redmine-client.openCommentInBrowser",
           "when": "view == redmine-clientActivityComments && (viewItem == redmineComment || viewItem == redmineCommentEditable)",
           "group": "inline@1"
+        },
+        {
+          "command": "redmine-client.reloadComment",
+          "when": "view == redmine-clientActivityComments && viewItem == redmineCommentEditable",
+          "group": "inline@2"
         }
       ]
     },
