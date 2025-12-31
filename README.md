@@ -14,6 +14,7 @@ Japanese README: `README.ja.md`
 - **Automatic image upload**: paste images in Markdown editors and they are automatically uploaded on save
 - Mermaid blocks converted to redmica_ui_extension format (`{{mermaid ... }}`)
 - Edit only your own comments safely
+- **Conflict detection with diff view**: detect remote changes before saving and resolve conflicts via diff editor
 
 ## Requirements
 
@@ -31,9 +32,9 @@ Japanese README: `README.ja.md`
 
 ## Activity Bar Views
 
-- **Projects**: Select the active project
-- **Tickets**: Browse and filter project tickets
-- **Comments**: View and edit your own comments
+- **Projects**: Select the active project (refresh and reload icons available)
+- **Tickets**: Browse and filter project tickets (refresh, reload, and collapse icons available)
+- **Comments**: View and edit your own comments (refresh and reload icons available)
 
 ![alt text](./images/view.png)
 
@@ -100,6 +101,10 @@ This is a second issue on a cookbook subproject
 
 - `Redmine: Refresh Projects`
 - `Redmine: Refresh Tickets`
+- `Redmine: Refresh Comments`
+- `Redmine: Reload Project`
+- `Redmine: Reload Ticket`
+- `Redmine: Reload Comment`
 - `Redmine: Select Project`
 - `Redmine: Toggle Child Projects`
 - `Redmine: Open Ticket Preview`
@@ -118,6 +123,7 @@ This is a second issue on a cookbook subproject
 - Attachments: choose files or use a clipboard data URI
 - Mermaid: blocks are converted to `{{mermaid ... }}` during submission
 - Image paste: paste images directly into the editor, they are saved locally and uploaded when you save the comment/ticket
+- Conflict resolution: when remote changes are detected, choose "Local Priority", "Remote Priority", or "View Diff" to resolve conflicts
 
 ## Debug
 

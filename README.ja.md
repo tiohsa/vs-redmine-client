@@ -14,6 +14,7 @@ English README: `README.md`
 - **Markdown画像の自動アップロード**: エディタに貼り付けた画像は保存時に自動でアップロード
 - Mermaid ブロックを redmica_ui_extension 形式（`{{mermaid ... }}`）に変換
 - 自分のコメントのみ安全に編集
+- **競合検出と差分表示**: リモートの変更を保存前に検出し、差分エディタで競合解決
 
 ## 必要要件
 
@@ -31,9 +32,9 @@ English README: `README.md`
 
 ## Activity Bar ビュー
 
-- **Projects**: プロジェクト選択
-- **Tickets**: チケットの一覧とフィルタ
-- **Comments**: コメントの参照と編集
+- **Projects**: プロジェクト選択（リフレッシュ・リロードアイコン）
+- **Tickets**: チケットの一覧とフィルタ（リフレッシュ・リロード・折りたたみアイコン）
+- **Comments**: コメントの参照と編集（リフレッシュ・リロードアイコン）
 
 ![alt text](image.png)
 
@@ -100,6 +101,10 @@ This is a second issue on a cookbook subproject
 
 - `Redmine: Refresh Projects`
 - `Redmine: Refresh Tickets`
+- `Redmine: Refresh Comments`
+- `Redmine: Reload Project`
+- `Redmine: Reload Ticket`
+- `Redmine: Reload Comment`
 - `Redmine: Select Project`
 - `Redmine: Toggle Child Projects`
 - `Redmine: Open Ticket Preview`
@@ -118,6 +123,7 @@ This is a second issue on a cookbook subproject
 - 添付はファイルまたはクリップボードの data URI を利用できます。
 - Mermaid ブロックは `{{mermaid ... }}` に変換して投稿されます。
 - 画像ペースト: エディタに直接画像を貼り付けると、保存時に自動でアップロードされます。
+- 競合解決: リモートで変更が検出された場合、「ローカル優先」「リモート優先」「差分を確認」から選択できます。
 
 ## デバッグ
 
