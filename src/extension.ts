@@ -496,6 +496,12 @@ export async function activate(context: vscode.ExtensionContext) {
   );
 
   context.subscriptions.push(
+    vscode.commands.registerCommand("redmine-client.refreshComments", () =>
+      commentsProvider.refresh(),
+    ),
+  );
+
+  context.subscriptions.push(
     vscode.commands.registerCommand("redmine-client.collapseAllProjects", async () => {
       projectsProvider.collapseAllVisible();
       const selected =

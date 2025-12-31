@@ -72,11 +72,18 @@
       },
       {
         "command": "redmine-client.refreshProjects",
-        "title": "Redmine: Refresh Projects"
+        "title": "Redmine: Refresh Projects",
+        "icon": "$(refresh)"
       },
       {
         "command": "redmine-client.refreshTickets",
-        "title": "Redmine: Refresh Tickets"
+        "title": "Redmine: Refresh Tickets",
+        "icon": "$(refresh)"
+      },
+      {
+        "command": "redmine-client.refreshComments",
+        "title": "Redmine: Refresh Comments",
+        "icon": "$(refresh)"
       },
       {
         "command": "redmine-client.collapseAllProjects",
@@ -236,9 +243,14 @@
     "menus": {
       "view/title": [
         {
+          "command": "redmine-client.refreshProjects",
+          "when": "view == redmine-clientActivityProjects",
+          "group": "navigation@1"
+        },
+        {
           "command": "redmine-client.collapseAllProjects",
           "when": "view == redmine-clientActivityProjects",
-          "group": "navigation"
+          "group": "navigation@2"
         },
         {
           "command": "redmine-client.createTicketFromList",
@@ -247,7 +259,7 @@
           "enablement": "redmine-client.canCreateTickets"
         },
         {
-          "command": "redmine-client.reloadTicket",
+          "command": "redmine-client.refreshTickets",
           "when": "view == redmine-clientActivityTickets",
           "group": "navigation@2"
         },
@@ -263,7 +275,7 @@
           "enablement": "redmine-client.canAddComments"
         },
         {
-          "command": "redmine-client.reloadComment",
+          "command": "redmine-client.refreshComments",
           "when": "view == redmine-clientActivityComments",
           "group": "navigation@1"
         }
