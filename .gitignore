@@ -14,3 +14,7 @@ Thumbs.db
 .vscode-test/
 .todoex/
 *.vsix
+.codex/
+.specify
+.vscode/
+
