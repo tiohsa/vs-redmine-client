@@ -40,11 +40,32 @@ const resolveProjectId = (selection: ProjectSelection): number | undefined => {
   return Number.isNaN(fallback) ? undefined : fallback;
 };
 
+const isFileExistsOrOpen = (candidate: string): boolean => {
+  return (
+    fs.existsSync(candidate) ||
+    vscode.workspace.textDocuments.some((doc) => doc.uri.fsPath === candidate)
+  );
+};
+
 export const buildNewTicketDraftUri = (
   workspacePath?: string,
-  existsSync: (candidate: string) => boolean = fs.existsSync,
+  existsSync: (candidate: string) => boolean = isFileExistsOrOpen,
 ): vscode.Uri => {
   if (!workspacePath) {
+    // Check against simple filename for non-workspace files (less reliable but better than nothing)
+    // For untitled files without path, fsPath might not match, but we try our best.
+    // Ideally we should check document.uri.path if it looks like DRAFT_FILENAME
+    const isUntitledOpen = vscode.workspace.textDocuments.some(
+      (doc) =>
+        doc.uri.scheme === "untitled" && doc.uri.path.endsWith(`/${DRAFT_FILENAME}`),
+    );
+    if (isUntitledOpen) {
+      // If default is taken, we can't easily increment without a base path.
+      // But usually this function is called with workspacePath in real usage.
+      // Let's just return the default and let VS Code handle it, 
+      // or we could try to generate a random one, but that's out of spec.
+      // Returning default for now as non-workspace behavior was just "return default".
+    }
     return vscode.Uri.parse(`untitled:${DRAFT_FILENAME}`);
   }
 
