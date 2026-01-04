@@ -11,6 +11,9 @@ export const getBaseUrl = (): string =>
 export const getApiKey = (): string =>
   getSettings().get<string>("apiKey", "").trim();
 
+export const getIgnoreSSLErrors = (): boolean =>
+  getSettings().get<boolean>("ignoreSSLErrors", false);
+
 export const getDefaultProjectId = (): string =>
   getSettings().get<string>("defaultProjectId", "").trim();
 

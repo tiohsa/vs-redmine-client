@@ -1,4 +1,6 @@
-import { getApiKey, getBaseUrl } from "../config/settings";
+import * as https from "https";
+import * as http from "http";
+import { getApiKey, getBaseUrl, getIgnoreSSLErrors } from "../config/settings";
 
 type HttpMethod = "GET" | "POST" | "PUT" | "DELETE";
 type FetchBody = string | Uint8Array;
@@ -53,48 +55,91 @@ const buildUrl = (baseUrl: string, path: string, query?: QueryParams): string =>
   return url.toString();
 };
 
-const buildHeaders = (apiKey: string, headers?: Record<string, string>): Headers => {
-  const merged = {
+const buildHeaders = (apiKey: string, headers?: Record<string, string>): Record<string, string> => {
+  return {
     "X-Redmine-API-Key": apiKey,
     ...headers,
   };
-  return new Headers(merged);
+};
+
+const performRequest = (
+  urlStr: string,
+  options: RequestOptions,
+  headers: Record<string, string>,
+): Promise<{ statusCode: number; statusText: string; body: string }> => {
+  return new Promise((resolve, reject) => {
+    const url = new URL(urlStr);
+    const isHttps = url.protocol === "https:";
+    const requestModule = isHttps ? https : http;
+    const ignoreSSL = getIgnoreSSLErrors();
+
+    const contentType = options.contentType ?? "application/json";
+    let bodyContent: string | Uint8Array | undefined;
+
+    if (options.body !== undefined) {
+      headers["Content-Type"] = contentType;
+      bodyContent =
+        contentType === "application/json"
+          ? JSON.stringify(options.body)
+          : (options.body as FetchBody);
+      headers["Content-Length"] = String(Buffer.byteLength(bodyContent));
+    }
+
+    const reqOptions: https.RequestOptions = {
+      method: options.method,
+      headers: headers,
+      rejectUnauthorized: isHttps ? !ignoreSSL : undefined,
+    };
+
+    const req = requestModule.request(url, reqOptions, (res) => {
+      const chunks: Buffer[] = [];
+      res.on("data", (chunk) => chunks.push(chunk));
+      res.on("end", () => {
+        const buffer = Buffer.concat(chunks);
+        resolve({
+          statusCode: res.statusCode || 0,
+          statusText: res.statusMessage || "",
+          body: buffer.toString("utf-8"),
+        });
+      });
+    });
+
+    req.on("error", (err) => {
+      reject(new Error(`Network request failed: ${err.message}`));
+    });
+
+    req.on("timeout", () => {
+      req.destroy();
+      reject(new Error("Request timed out"));
+    });
+
+    if (bodyContent !== undefined) {
+      req.write(bodyContent);
+    }
+
+    req.end();
+  });
 };
 
 export const requestJson = async <T>(options: RequestOptions): Promise<T> => {
   const { baseUrl, apiKey } = ensureConfig();
   const url = buildUrl(baseUrl, options.path, options.query);
   const headers = buildHeaders(apiKey, options.headers);
-  const contentType = options.contentType ?? "application/json";
 
-  let body: FetchBody | undefined;
-  if (options.body !== undefined) {
-    headers.set("Content-Type", contentType);
-    body =
-      contentType === "application/json"
-        ? JSON.stringify(options.body)
-        : (options.body as FetchBody);
-  }
+  const response = await performRequest(url, options, headers);
 
-  const response = await fetch(url, {
-    method: options.method,
-    headers,
-    body,
-  });
-
-  if (!response.ok) {
-    const errorText = await response.text();
+  if (response.statusCode < 200 || response.statusCode >= 300) {
     throw new Error(
-      `Redmine request failed (${response.status}): ${errorText || response.statusText}`,
+      `Redmine request failed (${response.statusCode}): ${response.body || response.statusText}`,
     );
   }
 
-  const text = await response.text();
-  if (!text) {
+  if (!response.body) {
     return {} as T;
   }
+
   try {
-    return JSON.parse(text) as T;
+    return JSON.parse(response.body) as T;
   } catch (error) {
     throw new Error(
       `Redmine response was not valid JSON. (${(error as Error).message})`,
@@ -108,24 +153,16 @@ export const requestText = async (options: RequestOptions): Promise<string> => {
   const headers = buildHeaders(apiKey, options.headers);
   const contentType = options.contentType ?? "text/plain";
 
-  let body: FetchBody | undefined;
-  if (options.body !== undefined) {
-    headers.set("Content-Type", contentType);
-    body = options.body as FetchBody;
-  }
+  // Override content type for text request if body is present
+  const textOptions = { ...options, contentType };
 
-  const response = await fetch(url, {
-    method: options.method,
-    headers,
-    body,
-  });
+  const response = await performRequest(url, textOptions, headers);
 
-  if (!response.ok) {
-    const errorText = await response.text();
+  if (response.statusCode < 200 || response.statusCode >= 300) {
     throw new Error(
-      `Redmine request failed (${response.status}): ${errorText || response.statusText}`,
+      `Redmine request failed (${response.statusCode}): ${response.body || response.statusText}`,
     );
   }
 
-  return response.text();
+  return response.body;
 };

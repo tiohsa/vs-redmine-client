@@ -2,7 +2,7 @@
   "name": "redmine-client",
   "displayName": "Redmine Client",
   "description": "Redmine ticket workflows into VS Code",
-  "version": "0.0.4",
+  "version": "0.0.5",
   "publisher": "your-publisher-id",
   "author": {
     "name": "tiohsa",
@@ -351,6 +351,11 @@
           "type": "string",
           "default": "",
           "description": "Redmine API key for authentication."
+        },
+        "redmine-client.ignoreSSLErrors": {
+          "type": "boolean",
+          "default": false,
+          "description": "Ignore SSL certificate errors (e.g. for self-signed certificates)."
         },
         "redmine-client.defaultProjectId": {
           "type": "string",
