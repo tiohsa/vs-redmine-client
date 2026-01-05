@@ -64,17 +64,17 @@ export const runOfflineSync = async (): Promise<void> => {
   const failedNewTickets: typeof queue.newTickets = [];
 
   for (const entry of queue.newTickets) {
-    const result = await createTicketFromQueuedContent({
+    const { result, createdId } = await createTicketFromQueuedContent({
       content: entry.content,
       projectId: entry.projectId,
       baseDir: entry.baseDir,
     });
-    if (result.status === "created" && result.createdId && entry.documentUri) {
+    if (result.status === "created" && createdId && entry.documentUri) {
       const document = vscode.workspace.textDocuments.find(
         (doc) => doc.uri.toString() === entry.documentUri,
       );
       if (document) {
-        registerTicketDocument(result.createdId, document, "ticket", entry.projectId);
+        registerTicketDocument(createdId, document, "ticket", entry.projectId);
       }
     }
 

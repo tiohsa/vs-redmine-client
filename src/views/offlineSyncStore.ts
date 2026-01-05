@@ -1,4 +1,5 @@
 import { IssueMetadata } from "./ticketMetadataTypes";
+import { TicketEditorLayout, TicketEditorMetadataBlock } from "./ticketEditorContent";
 
 export type OfflineTicketUpdate = {
   ticketId: number;
@@ -9,8 +10,8 @@ export type OfflineTicketUpdate = {
   subject: string;
   description: string;
   metadata: IssueMetadata;
-  layout?: string[];
-  metadataBlock?: string[];
+  layout?: TicketEditorLayout;
+  metadataBlock?: TicketEditorMetadataBlock;
   baseDir?: string;
 };
 
