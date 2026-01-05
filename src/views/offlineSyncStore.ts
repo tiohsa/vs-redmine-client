@@ -57,7 +57,36 @@ export const addOfflineTicketUpdate = (
   });
 };
 
+const replaceFirstMatch = (
+  updates: OfflineCommentUpdate[],
+  matcher: (candidate: OfflineCommentUpdate) => boolean,
+  update: OfflineCommentUpdate,
+): boolean => {
+  const index = updates.findIndex(matcher);
+  if (index === -1) {
+    return false;
+  }
+  updates[index] = { ...updates[index], ...update };
+  return true;
+};
+
 export const addOfflineCommentUpdate = (update: OfflineCommentUpdate): void => {
+  if (update.commentId !== undefined) {
+    if (replaceFirstMatch(queue.comments, (item) => item.commentId === update.commentId, update)) {
+      return;
+    }
+  }
+  if (update.documentUri) {
+    if (
+      replaceFirstMatch(
+        queue.comments,
+        (item) => item.documentUri === update.documentUri,
+        update,
+      )
+    ) {
+      return;
+    }
+  }
   queue.comments.push(update);
 };
 
@@ -67,6 +96,15 @@ export const addOfflineNewTicket = (update: {
   documentUri?: string;
   baseDir?: string;
 }): void => {
+  if (update.documentUri) {
+    const index = queue.newTickets.findIndex(
+      (item) => item.documentUri === update.documentUri,
+    );
+    if (index !== -1) {
+      queue.newTickets[index] = { ...queue.newTickets[index], ...update };
+      return;
+    }
+  }
   queue.newTickets.push(update);
 };
 

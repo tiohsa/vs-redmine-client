@@ -182,6 +182,7 @@ export const syncCommentDraft = async (input: {
       lastKnownRemoteUpdatedAt: edit.lastKnownRemoteUpdatedAt,
       body: input.content,
       baseDir,
+      documentUri: input.documentUri?.toString() ?? input.editor?.document.uri.toString(),
     });
     updateCommentEdit(input.commentId, input.content, edit.lastKnownRemoteUpdatedAt);
     if (input.editor) {
@@ -304,7 +305,7 @@ export const syncNewCommentDraft = async (input: {
       ticketId: input.ticketId,
       body: input.content,
       baseDir,
-      documentUri: input.documentUri?.toString(),
+      documentUri: input.documentUri?.toString() ?? input.editor?.document.uri.toString(),
     });
     if (input.editor) {
       setEditorDisplaySource(input.editor, "saved");
