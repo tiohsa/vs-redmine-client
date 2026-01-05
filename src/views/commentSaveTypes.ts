@@ -2,6 +2,7 @@ export type CommentSaveStatus =
   | "success"
   | "created"
   | "created_unresolved"
+  | "queued"
   | "no_change"
   | "conflict"
   | "unreachable"
@@ -28,4 +29,3 @@ export interface CommentSaveResult {
 
 export const COMMENT_TYPE_LABEL = "comment";
 import { UploadSummary } from "./saveUploadTypes";
-

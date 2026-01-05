@@ -4,6 +4,7 @@ import { UploadSummary } from "./saveUploadTypes";
 export type TicketSaveStatus =
   | "created"
   | "success"
+  | "queued"
   | "no_change"
   | "conflict"
   | "unreachable"

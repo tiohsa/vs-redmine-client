@@ -13,20 +13,28 @@ const appendSuffix = (filename: string, suffix: number): string => {
   return `${base}-${suffix}${ext}`;
 };
 
+export const buildUniqueUntitledName = (
+  filename: string,
+  isTaken: (candidate: string) => boolean,
+): string => {
+  let candidateName = filename;
+  let counter = 1;
+
+  while (isTaken(candidateName)) {
+    candidateName = appendSuffix(filename, counter);
+    counter += 1;
+  }
+
+  return candidateName;
+};
+
 export const buildUniqueUntitledPath = (
   basePath: string,
   filename: string,
   existsSync: ExistsSync,
 ): string => {
-  let candidateName = filename;
-  let candidatePath = path.posix.join(basePath, candidateName);
-  let counter = 1;
-
-  while (existsSync(candidatePath)) {
-    candidateName = appendSuffix(filename, counter);
-    candidatePath = path.posix.join(basePath, candidateName);
-    counter += 1;
-  }
-
-  return candidatePath;
+  const candidateName = buildUniqueUntitledName(filename, (candidate) =>
+    existsSync(path.posix.join(basePath, candidate)),
+  );
+  return path.posix.join(basePath, candidateName);
 };

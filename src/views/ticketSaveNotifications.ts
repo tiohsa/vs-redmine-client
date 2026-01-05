@@ -26,6 +26,8 @@ export const getSaveNotification = (
       return { type: "info", message: "Ticket created." };
     case "success":
       return { type: "info", message: result.message || "Redmine updated." };
+    case "queued":
+      return { type: "info", message: result.message || "Saved for offline sync." };
     case "no_change":
       return undefined;
     case "conflict":

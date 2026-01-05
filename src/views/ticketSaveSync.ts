@@ -42,6 +42,12 @@ import {
 } from "../utils/markdownImageUpload";
 import { resolveEditorBaseDir } from "../utils/editorBaseDir";
 import { UploadSummary } from "./saveUploadTypes";
+import { getOfflineSyncMode } from "../config/settings";
+import {
+  addOfflineTicketUpdate,
+  addOfflineNewTicket,
+  OfflineTicketUpdate,
+} from "./offlineSyncStore";
 
 export interface TicketSaveDependencies {
   getIssueDetail: typeof getIssueDetail;
@@ -329,6 +335,9 @@ export const syncTicketDraft = async (input: {
   deps?: Partial<TicketSaveDependencies>;
   onSubjectUpdated?: (ticketId: number, subject: string) => void;
 }): Promise<TicketSaveResult> => {
+  if (getOfflineSyncMode() === "manual") {
+    return queueTicketDraft(input);
+  }
   const deps = { ...defaultDeps, ...input.deps };
   const draft = getTicketDraft(input.ticketId);
   if (!draft) {
@@ -537,10 +546,89 @@ export const syncTicketDraft = async (input: {
   return buildResult("success", "Redmine updated.", { uploadSummary });
 };
 
+export const queueTicketDraft = async (input: {
+  ticketId: number;
+  content: string;
+  editor?: vscode.TextEditor;
+  documentUri?: vscode.Uri;
+  onSubjectUpdated?: (ticketId: number, subject: string) => void;
+}): Promise<TicketSaveResult> => {
+  const draft = getTicketDraft(input.ticketId);
+  if (!draft) {
+    return buildResult("failed", "Missing draft state for ticket.");
+  }
+
+  let parsed;
+  try {
+    parsed = parseTicketEditorContent(input.content, {
+      allowMissingMetadata: true,
+      fallbackMetadata: draft.baseMetadata,
+    });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Invalid metadata.";
+    return buildResult("failed", message);
+  }
+
+  const subject = parsed.subject || draft.baseSubject;
+  const contentChanges = computeChanges(
+    draft.baseSubject,
+    draft.baseDescription,
+    subject,
+    parsed.description,
+  );
+  const metadataChanges = computeMetadataChanges(draft.baseMetadata, parsed.metadata);
+  const hasChanges =
+    Object.keys(contentChanges).length > 0 || Object.keys(metadataChanges).length > 0;
+  const children = parsed.metadata.children ?? [];
+  if (!hasChanges && children.length === 0) {
+    return buildResult("no_change", "No changes to save.");
+  }
+
+  const baseDir = resolveEditorBaseDir({
+    editor: input.editor,
+    documentUri: input.documentUri,
+  });
+
+  addOfflineTicketUpdate(input.ticketId, {
+    ticketId: input.ticketId,
+    baseSubject: draft.baseSubject,
+    baseDescription: draft.baseDescription,
+    baseMetadata: draft.baseMetadata,
+    lastKnownRemoteUpdatedAt: draft.lastKnownRemoteUpdatedAt,
+    subject,
+    description: parsed.description,
+    metadata: parsed.metadata,
+    layout: parsed.layout,
+    metadataBlock: parsed.metadataBlock,
+    baseDir,
+  });
+  markDraftStatus(input.ticketId, "dirty");
+  if (input.editor) {
+    const clearedMetadata: IssueMetadata = { ...parsed.metadata, children: [] };
+    const nextContent = buildTicketEditorContent({
+      subject,
+      description: parsed.description,
+      metadata: clearedMetadata,
+      layout: parsed.layout,
+      metadataBlock: parsed.metadataBlock,
+    });
+    await applyEditorContent(input.editor, nextContent);
+    setEditorDisplaySource(input.editor, "saved");
+  }
+  if (hasChanges && input.onSubjectUpdated) {
+    input.onSubjectUpdated(input.ticketId, subject);
+  }
+
+  return buildResult("queued", "Saved for offline sync.");
+};
+
 export const syncNewTicketDraft = async (input: {
   editor: vscode.TextEditor;
   deps?: Partial<TicketCreateDependencies>;
 }): Promise<TicketSaveResult> => {
+  if (getOfflineSyncMode() === "manual") {
+    return queueNewTicketDraft({ editor: input.editor });
+  }
   const deps = { ...defaultCreateDeps, ...input.deps };
   const baseDir = resolveEditorBaseDir({ editor: input.editor });
   const projectId = resolveProjectIdForEditor(input.editor);
@@ -570,6 +658,9 @@ export const syncNewTicketDraftContent = async (input: {
   deps?: Partial<TicketCreateDependencies>;
   onCreated?: (createdId: number, parsed: TicketEditorContent) => void;
 }): Promise<TicketSaveResult> => {
+  if (getOfflineSyncMode() === "manual") {
+    return queueNewTicketDraftContent(input);
+  }
   const deps = { ...defaultCreateDeps, ...input.deps };
   const baseDir = resolveEditorBaseDir({ documentUri: input.documentUri });
   const { result, createdId, parsed } = await createTicketFromContent({
@@ -702,6 +793,253 @@ const createTicketFromContent = async (input: {
   };
 };
 
+export const createTicketFromQueuedContent = async (input: {
+  content: string;
+  projectId?: number;
+  baseDir?: string;
+  deps?: Partial<TicketCreateDependencies>;
+}): Promise<{
+  result: TicketSaveResult;
+  createdId?: number;
+  parsed?: TicketEditorContent;
+}> => {
+  const deps = { ...defaultCreateDeps, ...input.deps };
+  return createTicketFromContent({
+    content: input.content,
+    projectId: input.projectId,
+    baseDir: input.baseDir,
+    deps,
+  });
+};
+
+export const applyQueuedTicketUpdate = async (input: {
+  update: OfflineTicketUpdate;
+  deps?: Partial<TicketSaveDependencies>;
+}): Promise<TicketSaveResult> => {
+  const deps = { ...defaultDeps, ...input.deps };
+  const update = input.update;
+  const uploadResult = await processMarkdownImageUploads({
+    content: update.description,
+    baseDir: update.baseDir,
+    uploadFile: deps.uploadFile,
+  });
+  const failureResult = handleTicketUploadFailure(uploadResult.summary);
+  if (failureResult) {
+    return failureResult;
+  }
+  const uploadSummary = resolveUploadSummary(uploadResult.summary);
+  const description = uploadResult.content;
+  const contentChanges = computeChanges(
+    update.baseSubject,
+    update.baseDescription,
+    update.subject,
+    description,
+  );
+  const metadataChanges = computeMetadataChanges(update.baseMetadata, update.metadata);
+  const children = update.metadata.children ?? [];
+  const uniqueChildren: string[] = [];
+  const duplicateChildren: string[] = [];
+  const seenChildren = new Set<string>();
+  children.forEach((child) => {
+    if (seenChildren.has(child)) {
+      duplicateChildren.push(child);
+    } else {
+      seenChildren.add(child);
+      uniqueChildren.push(child);
+    }
+  });
+
+  let remoteDetail: IssueDetailResult | undefined;
+
+  let metadataFields: TicketUpdateFields = {};
+  try {
+    metadataFields = await resolveMetadataUpdates(metadataChanges, deps, remoteDetail?.ticket.projectId);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Invalid metadata.";
+    return buildResult("failed", message);
+  }
+  const changes = { ...contentChanges, ...metadataFields };
+  if (uploadResult.uploads.length > 0) {
+    changes.uploads = uploadResult.uploads;
+  }
+
+  if (Object.keys(changes).length === 0 && children.length === 0) {
+    return buildResult("no_change", "No changes to save.", { uploadSummary });
+  }
+
+  if (update.lastKnownRemoteUpdatedAt) {
+    try {
+      if (!remoteDetail) {
+        remoteDetail = await deps.getIssueDetail(update.ticketId);
+      }
+      const remoteUpdatedAt = remoteDetail.ticket.updatedAt;
+      if (remoteUpdatedAt && remoteUpdatedAt !== update.lastKnownRemoteUpdatedAt) {
+        return buildResult("conflict", "Remote changes detected. Refresh before saving.", {
+          conflictContext: {
+            ticketId: update.ticketId,
+            localSubject: update.subject,
+            localDescription: description,
+            remoteSubject: remoteDetail.ticket.subject,
+            remoteDescription: remoteDetail.ticket.description ?? "",
+            remoteUpdatedAt,
+          },
+        });
+      }
+    } catch (error) {
+      return mapErrorToResult(error);
+    }
+  }
+
+  const createdChildIds: number[] = [];
+  let childCreateFields: TicketUpdateFields | undefined;
+  if (uniqueChildren.length > 0) {
+    if (!remoteDetail) {
+      try {
+        remoteDetail = await deps.getIssueDetail(update.ticketId);
+      } catch (error) {
+        return mapErrorToResult(error);
+      }
+    }
+    const projectId = remoteDetail?.ticket.projectId;
+    if (!projectId) {
+      return buildResult("failed", "Missing project ID for child tickets.");
+    }
+
+    try {
+      childCreateFields = await resolveMetadataForCreate(update.metadata, deps, projectId);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Invalid metadata.";
+      return buildResult("failed", message);
+    }
+
+    try {
+      for (const childSubject of uniqueChildren) {
+        const childId = await deps.createIssue({
+          projectId,
+          subject: childSubject,
+          description: "",
+          statusId: childCreateFields.statusId,
+          trackerId: childCreateFields.trackerId,
+          priorityId: childCreateFields.priorityId,
+          dueDate:
+            typeof childCreateFields.dueDate === "string"
+              ? childCreateFields.dueDate
+              : undefined,
+          parentId: update.ticketId,
+        });
+        if (!childId) {
+          throw new Error("Child ticket creation failed.");
+        }
+        createdChildIds.push(childId);
+      }
+    } catch (error) {
+      const message =
+        error instanceof Error ? error.message : "Child ticket creation failed.";
+      await Promise.allSettled(
+        createdChildIds.map((issueId) => deps.deleteIssue(issueId)),
+      );
+      return buildResult("failed", message);
+    }
+  }
+
+  try {
+    if (Object.keys(changes).length > 0) {
+      await deps.updateIssue({ issueId: update.ticketId, fields: changes });
+    }
+  } catch (error) {
+    if (createdChildIds.length > 0) {
+      await Promise.allSettled(
+        createdChildIds.map((issueId) => deps.deleteIssue(issueId)),
+      );
+    }
+    return mapErrorToResult(error);
+  }
+
+  let updatedAt = update.lastKnownRemoteUpdatedAt;
+
+  if (Object.keys(changes).length > 0) {
+    try {
+      const detail = await deps.getIssueDetail(update.ticketId);
+      updatedAt = detail.ticket.updatedAt ?? updatedAt;
+    } catch {
+      // Ignore refresh errors after successful update.
+    }
+  }
+
+  const clearedMetadata: IssueMetadata = { ...update.metadata, children: [] };
+  updateDraftAfterSave(
+    update.ticketId,
+    update.subject,
+    description,
+    clearedMetadata,
+    updatedAt,
+  );
+
+  if (duplicateChildren.length > 0) {
+    const duplicates = Array.from(new Set(duplicateChildren)).join(", ");
+    return buildResult(
+      "success",
+      `Redmine updated. Skipped duplicate children: ${duplicates}`,
+      { uploadSummary },
+    );
+  }
+
+  return buildResult("success", "Redmine updated.", { uploadSummary });
+};
+
+const validateNewTicketContent = (content: string): TicketSaveResult | undefined => {
+  let parsed: TicketEditorContent;
+  try {
+    parsed = parseTicketEditorContent(content);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Invalid metadata.";
+    return buildResult("failed", message);
+  }
+
+  const subject = parsed.subject.trim();
+  if (!subject) {
+    return buildResult("failed", "Ticket subject is required.");
+  }
+
+  return undefined;
+};
+
+export const queueNewTicketDraft = async (input: {
+  editor: vscode.TextEditor;
+}): Promise<TicketSaveResult> => {
+  const content = input.editor.document.getText();
+  const validation = validateNewTicketContent(content);
+  if (validation) {
+    return validation;
+  }
+  addOfflineNewTicket({
+    content,
+    projectId: resolveProjectIdForEditor(input.editor),
+    documentUri: input.editor.document.uri.toString(),
+    baseDir: resolveEditorBaseDir({ editor: input.editor }),
+  });
+  setEditorDisplaySource(input.editor, "saved");
+  return buildResult("queued", "Saved for offline sync.");
+};
+
+export const queueNewTicketDraftContent = async (input: {
+  content: string;
+  projectId?: number;
+  documentUri?: vscode.Uri;
+}): Promise<TicketSaveResult> => {
+  const validation = validateNewTicketContent(input.content);
+  if (validation) {
+    return validation;
+  }
+  addOfflineNewTicket({
+    content: input.content,
+    projectId: input.projectId,
+    documentUri: input.documentUri?.toString(),
+    baseDir: resolveEditorBaseDir({ documentUri: input.documentUri }),
+  });
+  return buildResult("queued", "Saved for offline sync.");
+};
+
 export const reloadTicketEditor = async (input: {
   ticketId: number;
   editor: vscode.TextEditor;
@@ -750,6 +1088,15 @@ export const handleTicketEditorSave = async (
 
   if (ticketId === NEW_TICKET_DRAFT_ID) {
     return syncNewTicketDraft({ editor });
+  }
+
+  if (getOfflineSyncMode() === "manual") {
+    return queueTicketDraft({
+      ticketId,
+      content: editor.document.getText(),
+      editor,
+      onSubjectUpdated: options.onSubjectUpdated,
+    });
   }
 
   return syncTicketDraft({

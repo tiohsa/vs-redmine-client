@@ -15,6 +15,7 @@ Japanese README: `README.ja.md`
 - Mermaid blocks converted to redmica_ui_extension format (`{{mermaid ... }}`)
 - Edit only your own comments safely
 - **Conflict detection with diff view**: detect remote changes before saving and resolve conflicts via diff editor
+- **Offline sync mode**: queue ticket/comment saves and manually upload later
 
 ## Requirements
 
@@ -35,6 +36,7 @@ Japanese README: `README.ja.md`
 - **Projects**: Select the active project (refresh and reload icons available)
 - **Tickets**: Browse and filter project tickets (refresh, reload, and collapse icons available)
 - **Comments**: View and edit your own comments (refresh and reload icons available)
+- **Projects**: Manual offline sync icon appears when offline sync mode is set to manual
 
 ![alt text](./images/view.png)
 
@@ -46,6 +48,7 @@ Japanese README: `README.ja.md`
 - `redmine-client.includeChildProjects`: Include child projects in ticket list
 - `redmine-client.ticketListLimit`: Default number of tickets to load per request
 - `redmine-client.editorStorageDirectory`: Storage directory for editor files and templates
+- `redmine-client.offlineSyncMode`: Sync mode for ticket/comment saves (`auto` or `manual`)
 
 ## Ticket List Settings
 
@@ -116,6 +119,8 @@ This is a second issue on a cookbook subproject
 - `Redmine: Configure Ticket Tracker Filter`
 - `Redmine: Configure Ticket Assignee Filter`
 - `Redmine: Configure Ticket Sort`
+- `Redmine: Run Offline Sync`
+- `Redmine: Configure Offline Sync Mode`
 - `Redmine: Reset Ticket Settings`
 
 ## Tips
@@ -124,6 +129,7 @@ This is a second issue on a cookbook subproject
 - Mermaid: blocks are converted to `{{mermaid ... }}` during submission
 - Image paste: paste images directly into the editor, they are saved locally and uploaded when you save the comment/ticket
 - Conflict resolution: when remote changes are detected, choose "Local Priority", "Remote Priority", or "View Diff" to resolve conflicts
+- Offline sync: set mode to manual to queue saves, then use "Redmine: Run Offline Sync" or the Projects view title icon to upload
 
 ## Debug
 

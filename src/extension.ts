@@ -5,6 +5,11 @@ import { createTicketFromEditor } from "./commands/createTicket";
 import { createChildTicketFromList } from "./commands/createChildTicketFromList";
 import { createTicketFromList } from "./commands/createTicketFromList";
 import { editComment } from "./commands/editComment";
+import { runOfflineSync } from "./commands/offlineSync";
+import {
+  configureOfflineSyncMode,
+  refreshOfflineSyncContext,
+} from "./commands/offlineSyncMode";
 import {
   openCommentInBrowser,
   openProjectInBrowser,
@@ -243,6 +248,16 @@ export async function activate(context: vscode.ExtensionContext) {
   context.subscriptions.push(
     vscode.workspace.onDidCloseTextDocument((document) => {
       removeTicketEditorByDocument(document);
+    }),
+  );
+
+  void refreshOfflineSyncContext();
+  context.subscriptions.push(
+    vscode.workspace.onDidChangeConfiguration((event) => {
+      if (event.affectsConfiguration("redmine-client.offlineSyncMode")) {
+        void refreshOfflineSyncContext();
+        settingsProvider.refresh();
+      }
     }),
   );
 
@@ -490,6 +505,14 @@ export async function activate(context: vscode.ExtensionContext) {
   );
 
   context.subscriptions.push(
+    vscode.commands.registerCommand("redmine-client.runOfflineSync", async () => {
+      await runOfflineSync();
+      ticketsProvider.refresh();
+      commentsProvider.refresh();
+    }),
+  );
+
+  context.subscriptions.push(
     vscode.commands.registerCommand("redmine-client.refreshTickets", () =>
       ticketsProvider.refresh(),
     ),
@@ -604,6 +627,16 @@ export async function activate(context: vscode.ExtensionContext) {
       await ticketsProvider.configureDueDateDisplay();
       settingsProvider.refresh();
     }),
+  );
+
+  context.subscriptions.push(
+    vscode.commands.registerCommand(
+      TICKET_SETTINGS_COMMANDS.offlineSyncMode,
+      async () => {
+        await configureOfflineSyncMode();
+        settingsProvider.refresh();
+      },
+    ),
   );
 
   context.subscriptions.push(

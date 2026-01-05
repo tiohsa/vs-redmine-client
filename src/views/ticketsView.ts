@@ -4,6 +4,7 @@ import {
   getBaseUrl,
   getDefaultProjectId,
   getIncludeChildProjects,
+  getOfflineSyncMode,
   getTicketListLimit,
 } from "../config/settings";
 import { getProjectSelection } from "../config/projectSelection";
@@ -36,6 +37,7 @@ export const TICKET_SETTINGS_COMMANDS = {
   assigneeFilter: "redmine-client.configureTicketAssigneeFilter",
   sort: "redmine-client.configureTicketSort",
   dueDate: "redmine-client.configureTicketDueDateDisplay",
+  offlineSyncMode: "redmine-client.configureOfflineSyncMode",
   reset: "redmine-client.resetTicketListSettings",
 };
 
@@ -595,6 +597,7 @@ export class TicketsTreeProvider implements vscode.TreeDataProvider<vscode.TreeI
   }
 
   getSettingsItems(): vscode.TreeItem[] {
+    const offlineMode = getOfflineSyncMode();
     const priorityOptions = collectOptions(
       this.tickets,
       (ticket) => ticket.priorityId,
@@ -622,6 +625,14 @@ export class TicketsTreeProvider implements vscode.TreeDataProvider<vscode.TreeI
       (this.settings.filters.includeUnassigned ? 1 : 0);
 
     return [
+      new TicketSettingsItem(
+        "Offline sync mode",
+        offlineMode === "manual" ? "Manual" : "Auto",
+        {
+          command: TICKET_SETTINGS_COMMANDS.offlineSyncMode,
+          title: "Offline sync mode",
+        },
+      ),
       new TicketSettingsItem(
         "Filter: Priority",
         formatSelectionSummary(this.settings.filters.priorityIds.length, priorityOptions.length),
