@@ -52,7 +52,9 @@
     "onCommand:redmine-client.createChildTicketFromList",
     "onCommand:redmine-client.addCommentFromComments",
     "onCommand:redmine-client.editComment",
-    "onCommand:redmine-client.addComment"
+    "onCommand:redmine-client.addComment",
+    "onCommand:redmine-client.runOfflineSync",
+    "onCommand:redmine-client.configureOfflineSyncMode"
   ],
   "main": "./dist/extension.js",
   "l10n": "./l10n",
@@ -224,6 +226,15 @@
         "command": "redmine-client.addCommentFromComments",
         "title": "Redmine: Add Comment",
         "icon": "$(add)"
+      },
+      {
+        "command": "redmine-client.runOfflineSync",
+        "title": "Redmine: Run Offline Sync",
+        "icon": "$(cloud-upload)"
+      },
+      {
+        "command": "redmine-client.configureOfflineSyncMode",
+        "title": "Redmine: Configure Offline Sync Mode"
       }
     ],
     "views": {
@@ -257,6 +268,11 @@
           "command": "redmine-client.collapseAllProjects",
           "when": "view == redmine-clientActivityProjects",
           "group": "navigation@2"
+        },
+        {
+          "command": "redmine-client.runOfflineSync",
+          "when": "view == redmine-clientActivityProjects && redmine-client.offlineSyncManual",
+          "group": "navigation@3"
         },
         {
           "command": "redmine-client.createTicketFromList",
@@ -393,6 +409,12 @@
           "type": "string",
           "default": "",
           "description": "Absolute path to the new ticket editor template file."
+        },
+        "redmine-client.offlineSyncMode": {
+          "type": "string",
+          "default": "auto",
+          "enum": ["auto", "manual"],
+          "description": "Sync mode for ticket/comment saves. Auto sends to Redmine, manual queues for offline sync."
         }
       }
     }

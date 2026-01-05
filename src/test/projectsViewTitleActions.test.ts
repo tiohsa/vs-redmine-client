@@ -28,4 +28,23 @@ suite("Projects view title actions", () => {
     assert.ok(collapseCommand?.icon, "collapse projects command must include an icon");
     assert.strictEqual(collapseCommand?.icon, "$(collapse-all)");
   });
+
+  test("declares offline sync command and view title action", () => {
+    const syncCommand = findCommand("redmine-client.runOfflineSync");
+    assert.ok(syncCommand, "redmine-client.runOfflineSync command must exist");
+
+    const syncEntry = findViewTitleEntry("redmine-client.runOfflineSync");
+    assert.ok(syncEntry, "offline sync view/title entry must exist");
+    assert.strictEqual(
+      syncEntry?.when,
+      "view == redmine-clientActivityProjects && redmine-client.offlineSyncManual",
+    );
+  });
+
+  test("uses cloud icon for offline sync action", () => {
+    const syncCommand = findCommand("redmine-client.runOfflineSync");
+    assert.ok(syncCommand, "offline sync command must exist");
+    assert.ok(syncCommand?.icon, "offline sync command must include an icon");
+    assert.strictEqual(syncCommand?.icon, "$(cloud-upload)");
+  });
 });

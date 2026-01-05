@@ -29,6 +29,21 @@ export const getEditorStorageDirectory = (): string =>
 export const getNewTicketTemplatePath = (): string =>
   getSettings().get<string>("newTicketTemplatePath", "").trim();
 
+export type OfflineSyncMode = "auto" | "manual";
+
+export const getOfflineSyncMode = (): OfflineSyncMode => {
+  const value = getSettings().get<string>("offlineSyncMode", "auto");
+  return value === "manual" ? "manual" : "auto";
+};
+
+export const setOfflineSyncMode = async (mode: OfflineSyncMode): Promise<void> => {
+  await getSettings().update(
+    "offlineSyncMode",
+    mode,
+    vscode.ConfigurationTarget.Workspace,
+  );
+};
+
 export const EDITOR_DEFAULT_FIELDS = [
   "subject",
   "description",

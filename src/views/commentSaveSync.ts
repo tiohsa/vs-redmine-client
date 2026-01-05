@@ -21,11 +21,14 @@ import {
   setEditorCommentId,
   setEditorContentType,
   setEditorProjectId,
+  setEditorDisplaySource,
 } from "./ticketEditorRegistry";
 import { ensureCommentEdit, getCommentEdit, updateCommentEdit } from "./commentEditStore";
 import { CommentSaveResult } from "./commentSaveTypes";
 import { applyEditorContent } from "./ticketPreview";
 import { UploadSummary } from "./saveUploadTypes";
+import { getOfflineSyncMode } from "../config/settings";
+import { addOfflineCommentUpdate, OfflineCommentUpdate } from "./offlineSyncStore";
 
 export interface CommentSaveDependencies {
   addComment: typeof addComment;
@@ -162,6 +165,30 @@ export const syncCommentDraft = async (input: {
   documentUri?: vscode.Uri;
   deps?: Partial<CommentSaveDependencies>;
 }): Promise<CommentSaveResult> => {
+  if (getOfflineSyncMode() === "manual") {
+    const validation = validateComment(input.content);
+    if (!validation.valid) {
+      return buildResult("failed", validation.message ?? "Invalid comment.");
+    }
+    const edit = getCommentEdit(input.commentId);
+    if (!edit) {
+      return buildResult("failed", "Missing comment edit state.");
+    }
+    const baseDir = resolveEditorBaseDir({ editor: input.editor, documentUri: input.documentUri });
+    addOfflineCommentUpdate({
+      ticketId: edit.ticketId,
+      commentId: input.commentId,
+      baseBody: edit.baseBody,
+      lastKnownRemoteUpdatedAt: edit.lastKnownRemoteUpdatedAt,
+      body: input.content,
+      baseDir,
+    });
+    updateCommentEdit(input.commentId, input.content, edit.lastKnownRemoteUpdatedAt);
+    if (input.editor) {
+      setEditorDisplaySource(input.editor, "saved");
+    }
+    return buildResult("queued", "Saved for offline sync.");
+  }
   const deps = { ...defaultDeps, ...input.deps };
   const edit = getCommentEdit(input.commentId);
   if (!edit) {
@@ -267,6 +294,23 @@ export const syncNewCommentDraft = async (input: {
   deps?: Partial<CommentSaveDependencies>;
   onCreated?: (created: { commentId: number; projectId: number }) => Promise<void>;
 }): Promise<CommentSaveResult> => {
+  if (getOfflineSyncMode() === "manual") {
+    const validation = validateComment(input.content);
+    if (!validation.valid) {
+      return buildResult("failed", validation.message ?? "Invalid comment.");
+    }
+    const baseDir = resolveEditorBaseDir({ editor: input.editor, documentUri: input.documentUri });
+    addOfflineCommentUpdate({
+      ticketId: input.ticketId,
+      body: input.content,
+      baseDir,
+      documentUri: input.documentUri?.toString(),
+    });
+    if (input.editor) {
+      setEditorDisplaySource(input.editor, "saved");
+    }
+    return buildResult("queued", "Saved for offline sync.");
+  }
   const deps = { ...defaultDeps, ...input.deps };
   const baseDir = resolveEditorBaseDir({ editor: input.editor, documentUri: input.documentUri });
   const uploadResult = await processMarkdownImageUploads({
@@ -390,6 +434,112 @@ export const handleCommentEditorSave = async (
     editor,
     deps,
   });
+};
+
+export const applyQueuedCommentUpdate = async (input: {
+  update: OfflineCommentUpdate;
+  deps?: Partial<CommentSaveDependencies>;
+}): Promise<CommentSaveResult> => {
+  const deps = { ...defaultDeps, ...input.deps };
+  const update = input.update;
+  const uploadResult = await processMarkdownImageUploads({
+    content: update.body,
+    baseDir: update.baseDir,
+    uploadFile: deps.uploadFile,
+  });
+  const uploadSummary = resolveUploadSummary(uploadResult.summary);
+  if (hasMarkdownImageUploadFailure(uploadResult.summary)) {
+    return buildResult(
+      "failed",
+      buildMarkdownImageUploadFailureMessage(uploadResult.summary),
+      { uploadSummary },
+    );
+  }
+  const nextContent = uploadResult.content;
+
+  const validation = validateComment(nextContent);
+  if (!validation.valid) {
+    return buildResult("failed", validation.message ?? "Invalid comment.");
+  }
+
+  if (update.commentId) {
+    if (update.baseBody && nextContent === update.baseBody) {
+      return buildResult("no_change", "No changes to save.", { uploadSummary });
+    }
+
+    if (update.lastKnownRemoteUpdatedAt) {
+      try {
+        const detail = await deps.getIssueDetail(update.ticketId);
+        const remoteComment = detail.comments.find((c) => c.id === update.commentId);
+        if (remoteComment && remoteComment.updatedAt !== update.lastKnownRemoteUpdatedAt) {
+          return buildResult("conflict", "Remote changes detected. Refresh before saving.", {
+            conflictContext: {
+              commentId: update.commentId,
+              ticketId: update.ticketId,
+              localBody: nextContent,
+              remoteBody: remoteComment.body,
+              remoteUpdatedAt: remoteComment.updatedAt,
+            },
+          });
+        }
+      } catch {
+        // Ignore fetch error, continue update attempt
+      }
+    }
+
+    try {
+      await deps.updateComment(
+        update.commentId,
+        nextContent,
+        uploadResult.uploads.length > 0 ? uploadResult.uploads : undefined,
+      );
+    } catch (error) {
+      return mapErrorToResult(error);
+    }
+
+    updateCommentEdit(update.commentId, nextContent, update.lastKnownRemoteUpdatedAt);
+    return buildResult("success", "Comment updated.", { uploadSummary });
+  }
+
+  try {
+    await deps.addComment(
+      update.ticketId,
+      nextContent,
+      uploadResult.uploads.length > 0 ? uploadResult.uploads : undefined,
+    );
+  } catch (error) {
+    return mapErrorToResult(error);
+  }
+
+  let currentUserId: number | undefined;
+  try {
+    currentUserId = await deps.getCurrentUserId();
+  } catch {
+    currentUserId = undefined;
+  }
+
+  try {
+    const detail = await deps.getIssueDetail(update.ticketId);
+    const commentId = resolveCreatedCommentId(
+      detail.comments,
+      nextContent,
+      currentUserId,
+    );
+    if (!commentId) {
+      return buildUnresolvedResult(
+        "Comment added, but the comment ID could not be resolved.",
+        { uploadSummary },
+      );
+    }
+    return buildResult("created", "Comment added.", {
+      commentId,
+      projectId: detail.ticket.projectId,
+      uploadSummary,
+    });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Failed to resolve comment ID.";
+    return buildUnresolvedResult(`Comment added, but ${message}`, { uploadSummary });
+  }
 };
 
 export const reloadCommentEditor = async (input: {
