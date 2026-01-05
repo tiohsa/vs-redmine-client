@@ -1,4 +1,5 @@
 import * as fs from "fs";
+import * as path from "path";
 import * as vscode from "vscode";
 import { getDefaultProjectId } from "../config/settings";
 import { getProjectSelection, ProjectSelection } from "../config/projectSelection";
@@ -13,7 +14,7 @@ import {
   findEmptySubjectPosition,
   resolveNewTicketDraftContent,
 } from "../views/ticketPreview";
-import { buildUniqueUntitledPath } from "../views/untitledPath";
+import { buildUniqueUntitledName, buildUniqueUntitledPath } from "../views/untitledPath";
 import { buildEmptyTicketDraftContent } from "../views/ticketDraftStore";
 import { TicketEditorContent } from "../views/ticketEditorContent";
 import { showError } from "../utils/notifications";
@@ -40,33 +41,28 @@ const resolveProjectId = (selection: ProjectSelection): number | undefined => {
   return Number.isNaN(fallback) ? undefined : fallback;
 };
 
-const isFileExistsOrOpen = (candidate: string): boolean => {
-  return (
-    fs.existsSync(candidate) ||
-    vscode.workspace.textDocuments.some((doc) => doc.uri.fsPath === candidate)
+const isFileExistsOrOpen = (candidate: string): boolean =>
+  fs.existsSync(candidate) ||
+  vscode.workspace.textDocuments.some((doc) => doc.uri.fsPath === candidate);
+
+const getOpenUntitledNames = (): Set<string> =>
+  new Set(
+    vscode.workspace.textDocuments
+      .filter((doc) => doc.uri.scheme === "untitled")
+      .map((doc) => path.posix.basename(doc.uri.path)),
   );
-};
 
 export const buildNewTicketDraftUri = (
   workspacePath?: string,
   existsSync: (candidate: string) => boolean = isFileExistsOrOpen,
 ): vscode.Uri => {
   if (!workspacePath) {
-    // Check against simple filename for non-workspace files (less reliable but better than nothing)
-    // For untitled files without path, fsPath might not match, but we try our best.
-    // Ideally we should check document.uri.path if it looks like DRAFT_FILENAME
-    const isUntitledOpen = vscode.workspace.textDocuments.some(
-      (doc) =>
-        doc.uri.scheme === "untitled" && doc.uri.path.endsWith(`/${DRAFT_FILENAME}`),
+    const takenNames = getOpenUntitledNames();
+    const uniqueName = buildUniqueUntitledName(
+      DRAFT_FILENAME,
+      (candidate) => takenNames.has(candidate),
     );
-    if (isUntitledOpen) {
-      // If default is taken, we can't easily increment without a base path.
-      // But usually this function is called with workspacePath in real usage.
-      // Let's just return the default and let VS Code handle it, 
-      // or we could try to generate a random one, but that's out of spec.
-      // Returning default for now as non-workspace behavior was just "return default".
-    }
-    return vscode.Uri.parse(`untitled:${DRAFT_FILENAME}`);
+    return vscode.Uri.parse(`untitled:${uniqueName}`);
   }
 
   const targetPath = buildUniqueUntitledPath(workspacePath, DRAFT_FILENAME, existsSync);
