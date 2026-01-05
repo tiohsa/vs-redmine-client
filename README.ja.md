@@ -15,6 +15,7 @@ English README: `README.md`
 - Mermaid ブロックを redmica_ui_extension 形式（`{{mermaid ... }}`）に変換
 - 自分のコメントのみ安全に編集
 - **競合検出と差分表示**: リモートの変更を保存前に検出し、差分エディタで競合解決
+- **オフライン同期モード**: チケット/コメントの保存をキューに貯めて手動で反映
 
 ## 必要要件
 
@@ -35,6 +36,7 @@ English README: `README.md`
 - **Projects**: プロジェクト選択（リフレッシュ・リロードアイコン）
 - **Tickets**: チケットの一覧とフィルタ（リフレッシュ・リロード・折りたたみアイコン）
 - **Comments**: コメントの参照と編集（リフレッシュ・リロードアイコン）
+- **Projects**: オフライン同期モードを手動にすると同期アイコンが表示
 
 ![alt text](image.png)
 
@@ -46,6 +48,7 @@ English README: `README.md`
 - `redmine-client.includeChildProjects`: 子プロジェクトを一覧に含めるか
 - `redmine-client.ticketListLimit`: 取得するチケット件数（デフォルト50）
 - `redmine-client.editorStorageDirectory`: エディタファイルとテンプレートの保存先ディレクトリ
+- `redmine-client.offlineSyncMode`: 保存の同期モード（`auto` / `manual`）
 
 ## チケット一覧設定
 
@@ -116,6 +119,8 @@ This is a second issue on a cookbook subproject
 - `Redmine: Configure Ticket Tracker Filter`
 - `Redmine: Configure Ticket Assignee Filter`
 - `Redmine: Configure Ticket Sort`
+- `Redmine: Run Offline Sync`
+- `Redmine: Configure Offline Sync Mode`
 - `Redmine: Reset Ticket Settings`
 
 ## ヒント
@@ -124,6 +129,7 @@ This is a second issue on a cookbook subproject
 - Mermaid ブロックは `{{mermaid ... }}` に変換して投稿されます。
 - 画像ペースト: エディタに直接画像を貼り付けると、保存時に自動でアップロードされます。
 - 競合解決: リモートで変更が検出された場合、「ローカル優先」「リモート優先」「差分を確認」から選択できます。
+- オフライン同期: モードを manual にすると保存がキューされ、`Redmine: Run Offline Sync` か Projects ビューのアイコンで反映できます。
 
 ## デバッグ
 
