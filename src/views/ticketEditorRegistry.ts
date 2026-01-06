@@ -1,3 +1,4 @@
+import * as path from "path";
 import * as vscode from "vscode";
 import {
   TicketEditorContentType,
@@ -18,9 +19,15 @@ const syncRecordUri = (record: TicketEditorRecord, nextUri: string): void => {
     return;
   }
 
+  const oldUri = record.uri;
+
+  // Update editorByUri map key
+  editorByUri.delete(oldUri);
+  editorByUri.set(nextUri, record);
+
   const set = editorsByTicket.get(record.ticketId);
   if (set) {
-    set.delete(record.uri);
+    set.delete(oldUri);
     set.add(nextUri);
   }
   record.uri = nextUri;
@@ -34,6 +41,9 @@ const getRecord = (editor: vscode.TextEditor): TicketEditorRecord | undefined =>
     editorByUri.get(uri);
   if (record) {
     syncRecordUri(record, uri);
+    // Keep all maps in sync with the current editor/document
+    editorByEditor.set(editor, record);
+    editorByDocument.set(editor.document, record);
   }
   return record;
 };
@@ -141,6 +151,56 @@ export const getNewCommentDraftUri = (ticketId: number): vscode.Uri | undefined 
 export const getTicketEditors = (ticketId: number): TicketEditorRecord[] =>
   Array.from(editorsByTicket.get(ticketId) ?? []).map((uri) => editorByUri.get(uri))
     .filter((record): record is TicketEditorRecord => Boolean(record));
+
+const normalizeUriPath = (value: string): string => value.replace(/\\/g, "/");
+
+const extractBasename = (uri: string): string => {
+  try {
+    const parsed = vscode.Uri.parse(uri);
+    // Use path.posix.basename for URI paths as they use forward slashes
+    return path.posix.basename(normalizeUriPath(parsed.path));
+  } catch {
+    // Fallback for simple strings or unexpected formats
+    const normalized = normalizeUriPath(uri);
+    return normalized.split("/").pop() ?? "";
+  }
+};
+
+export const getCommentIdForDraftUri = (
+  ticketId: number,
+  currentUri: string,
+): number | undefined => {
+  const currentBasename = extractBasename(currentUri).toLowerCase();
+  const record = getTicketEditors(ticketId).find((r) => {
+    if (r.commentId === undefined) {
+      return false;
+    }
+    // Match by filename to handle URI scheme changes (untitled: -> file:)
+    // normalization for Windows safety
+    const recordBasename = extractBasename(r.uri).toLowerCase();
+    return currentBasename === recordBasename;
+  });
+  return record?.commentId;
+};
+
+export const getTicketIdForDraftUri = (currentUri: string): number | undefined => {
+  const currentBasename = extractBasename(currentUri).toLowerCase();
+  if (!currentBasename) {
+    return undefined;
+  }
+
+  for (const record of editorByUri.values()) {
+    if (record.contentType !== "ticket") {
+      continue;
+    }
+    const recordBasename = extractBasename(record.uri).toLowerCase();
+    if (currentBasename === recordBasename) {
+      return record.ticketId;
+    }
+  }
+
+  return undefined;
+};
 
 export const getPrimaryEditor = (ticketId: number): TicketEditorRecord | undefined =>
   getTicketEditors(ticketId).find((record) => record.kind === "primary");

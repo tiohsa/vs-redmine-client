@@ -61,7 +61,7 @@ const getOpenUntitledNames = (): Set<string> =>
   new Set(
     vscode.workspace.textDocuments
       .filter((doc) => doc.uri.scheme === "untitled")
-      .map((doc) => path.posix.basename(doc.uri.path)),
+      .map((doc) => path.posix.basename(doc.uri.path.replace(/\\/g, "/"))),
   );
 
 export const buildNewTicketDraftUri = (
@@ -78,7 +78,7 @@ export const buildNewTicketDraftUri = (
   }
 
   const targetPath = buildUniqueUntitledPath(workspacePath, DRAFT_FILENAME, existsSync);
-  return vscode.Uri.from({ scheme: "untitled", path: targetPath });
+  return vscode.Uri.file(targetPath).with({ scheme: "untitled" });
 };
 
 export const openNewTicketDraft = async (input: {

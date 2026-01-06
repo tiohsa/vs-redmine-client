@@ -13,7 +13,7 @@ const getOpenUntitledNames = (): Set<string> =>
   new Set(
     vscode.workspace.textDocuments
       .filter((doc) => doc.uri.scheme === "untitled")
-      .map((doc) => path.posix.basename(doc.uri.path)),
+      .map((doc) => path.posix.basename(doc.uri.path.replace(/\\/g, "/"))),
   );
 
 export const addCommentFromList = async (ticketId?: number): Promise<void> => {
@@ -34,7 +34,10 @@ export const addCommentFromList = async (ticketId?: number): Promise<void> => {
       getOpenUntitledNames().has(candidate),
     );
   const draftUri =
-    getNewCommentDraftUri(ticketId) ?? vscode.Uri.parse(`untitled:${targetPath}`);
+    getNewCommentDraftUri(ticketId) ??
+    (workspacePath
+      ? vscode.Uri.file(targetPath).with({ scheme: "untitled" })
+      : vscode.Uri.parse(`untitled:${targetPath}`));
   const existing = vscode.workspace.textDocuments.find(
     (document) => document.uri.toString() === draftUri.toString(),
   );

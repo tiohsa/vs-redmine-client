@@ -2,10 +2,12 @@ import * as assert from "assert";
 import * as vscode from "vscode";
 import {
   clearRegistry,
+  getCommentIdForDraftUri,
   getLastActiveEditor,
   getNewTicketDraftUri,
   getNewCommentDraftUri,
   getPrimaryEditor,
+  getTicketIdForDraftUri,
   getTicketEditors,
   getTicketIdForEditor,
   getTicketIdForDocument,
@@ -13,6 +15,8 @@ import {
   getProjectIdForDocument,
   getProjectIdForUri,
   markEditorActive,
+  NEW_TICKET_DRAFT_ID,
+  registerCommentDocument,
   registerTicketDocument,
   registerNewCommentDraft,
   registerNewTicketDraft,
@@ -119,5 +123,32 @@ suite("Ticket editor registry", () => {
 
     const uri = getNewCommentDraftUri(9);
     assert.strictEqual(uri?.toString(), "untitled:redmine-client-new-comment-9.md");
+  });
+
+  test("matches comment draft uri when scheme changes on Windows path", () => {
+    const document = createDocumentStub(
+      vscode.Uri.parse("untitled:C:\\tmp\\redmine-client-new-comment-9.md"),
+      "",
+    );
+    registerCommentDocument(9, 77, document);
+
+    const resolved = getCommentIdForDraftUri(
+      9,
+      "file:///C:/tmp/redmine-client-new-comment-9.md",
+    );
+    assert.strictEqual(resolved, 77);
+  });
+
+  test("matches ticket draft uri when scheme changes on Windows path", () => {
+    const draft = createEditorStub(
+      vscode.Uri.parse("untitled:C:\\tmp\\redmine-client-new-ticket.md"),
+      "",
+    );
+    registerNewTicketDraft(draft);
+
+    const resolved = getTicketIdForDraftUri(
+      "file:///C:/tmp/redmine-client-new-ticket.md",
+    );
+    assert.strictEqual(resolved, NEW_TICKET_DRAFT_ID);
   });
 });
