@@ -1,4 +1,5 @@
 import * as assert from "assert";
+import * as path from "path";
 import { processMarkdownImageUploads } from "../utils/markdownImageUpload";
 import { MARKDOWN_IMAGE_FIXTURES } from "./helpers/markdownImageFixtures";
 
@@ -68,6 +69,7 @@ suite("Markdown image upload", () => {
   });
 
   test("falls back to images directory for plain filenames", async () => {
+    const fallbackPath = path.resolve("/repo", "images", "image-25.png");
     const result = await processMarkdownImageUploads({
       content: "![img](image-25.png)",
       baseDir: "/repo",
@@ -77,7 +79,7 @@ suite("Markdown image upload", () => {
         contentType: "image/png",
       }),
       validatePath: async (filePath) => {
-        if (filePath === "/repo/images/image-25.png") {
+        if (filePath === fallbackPath) {
           return { valid: true };
         }
         return { valid: false, reason: "File not found." };

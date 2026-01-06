@@ -1,7 +1,7 @@
 import * as fs from "fs";
 import * as path from "path";
 import * as vscode from "vscode";
-import { getDefaultProjectId } from "../config/settings";
+import { getDefaultProjectId, getEditorStorageDirectory } from "../config/settings";
 import { getProjectSelection, ProjectSelection } from "../config/projectSelection";
 import {
   getNewTicketDraftUri,
@@ -27,7 +27,15 @@ const findOpenDocument = (uri: vscode.Uri): vscode.TextDocument | undefined =>
   );
 
 const getWorkspacePath = (): string | undefined =>
-  vscode.workspace.workspaceFolders?.[0]?.uri.path;
+  vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+
+const getEditorBasePath = (): string | undefined => {
+  const configured = getEditorStorageDirectory();
+  if (configured && path.isAbsolute(configured)) {
+    return configured;
+  }
+  return getWorkspacePath();
+};
 
 const buildNewTicketTemplate = (content: TicketEditorContent): string =>
   buildTicketEditorContent(content);
@@ -41,15 +49,19 @@ const resolveProjectId = (selection: ProjectSelection): number | undefined => {
   return Number.isNaN(fallback) ? undefined : fallback;
 };
 
-const isFileExistsOrOpen = (candidate: string): boolean =>
-  fs.existsSync(candidate) ||
-  vscode.workspace.textDocuments.some((doc) => doc.uri.fsPath === candidate);
+const isFileExistsOrOpen = (candidate: string): boolean => {
+  const fsPath = vscode.Uri.file(candidate).fsPath;
+  return (
+    fs.existsSync(fsPath) ||
+    vscode.workspace.textDocuments.some((doc) => doc.uri.fsPath === fsPath)
+  );
+};
 
 const getOpenUntitledNames = (): Set<string> =>
   new Set(
     vscode.workspace.textDocuments
       .filter((doc) => doc.uri.scheme === "untitled")
-      .map((doc) => path.posix.basename(doc.uri.path)),
+      .map((doc) => path.posix.basename(doc.uri.path.replace(/\\/g, "/"))),
   );
 
 export const buildNewTicketDraftUri = (
@@ -66,7 +78,7 @@ export const buildNewTicketDraftUri = (
   }
 
   const targetPath = buildUniqueUntitledPath(workspacePath, DRAFT_FILENAME, existsSync);
-  return vscode.Uri.parse(`untitled:${targetPath}`);
+  return vscode.Uri.file(targetPath).with({ scheme: "untitled" });
 };
 
 export const openNewTicketDraft = async (input: {
@@ -74,7 +86,7 @@ export const openNewTicketDraft = async (input: {
   projectId?: number;
 }): Promise<void> => {
   const knownUri =
-    getNewTicketDraftUri() ?? buildNewTicketDraftUri(getWorkspacePath());
+    getNewTicketDraftUri() ?? buildNewTicketDraftUri(getEditorBasePath());
   const existing = findOpenDocument(knownUri);
   const document = existing ?? (await vscode.workspace.openTextDocument(knownUri));
   const editor = await vscode.window.showTextDocument(document, { preview: false });

@@ -46,11 +46,13 @@ import {
   getCommentIdForEditor,
   getCommentIdForDocument,
   getCommentIdForUri,
+  getCommentIdForDraftUri,
   getEditorContentType,
   getProjectIdForDocument,
   getProjectIdForUri,
   getTicketIdForEditor,
   getTicketIdForDocument,
+  getTicketIdForDraftUri,
   getTicketIdForUri,
   isTicketEditor,
   markEditorActive,
@@ -416,6 +418,26 @@ export async function activate(context: vscode.ExtensionContext) {
             return;
           }
 
+          const existingTicketId = getTicketIdForDraftUri(document.uri.toString());
+          if (existingTicketId && existingTicketId !== NEW_TICKET_DRAFT_ID) {
+            let result = await syncTicketDraft({
+              ticketId: existingTicketId,
+              content: document.getText(),
+              documentUri: document.uri,
+              onSubjectUpdated: updateTicketListSubject,
+            });
+            if (result.status === "conflict" && result.conflictContext) {
+              const docEditor = vscode.window.visibleTextEditors.find(
+                (e) => e.document === document,
+              );
+              if (docEditor) {
+                result = await handleConflict(result, docEditor);
+              }
+            }
+            notifyTicketSaveResult(result);
+            return;
+          }
+
           if (editor) {
             const result = await syncNewTicketDraft({ editor });
             notifyTicketSaveResult(result);
@@ -436,6 +458,26 @@ export async function activate(context: vscode.ExtensionContext) {
           notifyTicketSaveResult(result);
           if (result.status === "created") {
             ticketsProvider.refresh();
+          }
+          return;
+        }
+
+        // Check if this document already has a registered commentId (from a previous save)
+        // Also check by ticketId + filename in case the URI scheme changed after save
+        const existingCommentId =
+          getCommentIdForDocument(document) ??
+          getCommentIdForUri(document.uri) ??
+          getCommentIdForDraftUri(draftTicketId, document.uri.toString());
+        if (existingCommentId) {
+          // Already added comment - sync as update
+          const commentResult = await syncCommentDraft({
+            commentId: existingCommentId,
+            content: document.getText(),
+            documentUri: document.uri,
+          });
+          notifyCommentSaveResult(commentResult);
+          if (shouldRefreshComments(commentResult.status)) {
+            commentsProvider.refreshForTicket(draftTicketId);
           }
           return;
         }
