@@ -41,9 +41,13 @@ const resolveProjectId = (selection: ProjectSelection): number | undefined => {
   return Number.isNaN(fallback) ? undefined : fallback;
 };
 
-const isFileExistsOrOpen = (candidate: string): boolean =>
-  fs.existsSync(candidate) ||
-  vscode.workspace.textDocuments.some((doc) => doc.uri.fsPath === candidate);
+const isFileExistsOrOpen = (candidate: string): boolean => {
+  const fsPath = vscode.Uri.file(candidate).fsPath;
+  return (
+    fs.existsSync(fsPath) ||
+    vscode.workspace.textDocuments.some((doc) => doc.uri.fsPath === fsPath)
+  );
+};
 
 const getOpenUntitledNames = (): Set<string> =>
   new Set(
