@@ -1,6 +1,7 @@
 import * as fs from "fs";
 import * as path from "path";
 import * as vscode from "vscode";
+import { getEditorStorageDirectory } from "../config/settings";
 import { showError } from "../utils/notifications";
 import {
   getNewCommentDraftUri,
@@ -21,13 +22,17 @@ export const addCommentFromList = async (ticketId?: number): Promise<void> => {
     return;
   }
 
-  const workspacePath = vscode.workspace.workspaceFolders?.[0]?.uri.path;
+  const configured = getEditorStorageDirectory();
+  const workspacePath =
+    configured && path.isAbsolute(configured)
+      ? configured
+      : vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
   const filename = `redmine-client-new-comment-${ticketId}.md`;
   const targetPath = workspacePath
     ? buildUniqueUntitledPath(workspacePath, filename, fs.existsSync)
     : buildUniqueUntitledName(filename, (candidate) =>
-        getOpenUntitledNames().has(candidate),
-      );
+      getOpenUntitledNames().has(candidate),
+    );
   const draftUri =
     getNewCommentDraftUri(ticketId) ?? vscode.Uri.parse(`untitled:${targetPath}`);
   const existing = vscode.workspace.textDocuments.find(

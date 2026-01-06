@@ -1,7 +1,7 @@
 import * as fs from "fs";
 import * as path from "path";
 import * as vscode from "vscode";
-import { getDefaultProjectId } from "../config/settings";
+import { getDefaultProjectId, getEditorStorageDirectory } from "../config/settings";
 import { getProjectSelection, ProjectSelection } from "../config/projectSelection";
 import {
   getNewTicketDraftUri,
@@ -28,6 +28,14 @@ const findOpenDocument = (uri: vscode.Uri): vscode.TextDocument | undefined =>
 
 const getWorkspacePath = (): string | undefined =>
   vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+
+const getEditorBasePath = (): string | undefined => {
+  const configured = getEditorStorageDirectory();
+  if (configured && path.isAbsolute(configured)) {
+    return configured;
+  }
+  return getWorkspacePath();
+};
 
 const buildNewTicketTemplate = (content: TicketEditorContent): string =>
   buildTicketEditorContent(content);
@@ -78,7 +86,7 @@ export const openNewTicketDraft = async (input: {
   projectId?: number;
 }): Promise<void> => {
   const knownUri =
-    getNewTicketDraftUri() ?? buildNewTicketDraftUri(getWorkspacePath());
+    getNewTicketDraftUri() ?? buildNewTicketDraftUri(getEditorBasePath());
   const existing = findOpenDocument(knownUri);
   const document = existing ?? (await vscode.workspace.openTextDocument(knownUri));
   const editor = await vscode.window.showTextDocument(document, { preview: false });
