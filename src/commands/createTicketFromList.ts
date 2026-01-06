@@ -27,7 +27,7 @@ const findOpenDocument = (uri: vscode.Uri): vscode.TextDocument | undefined =>
   );
 
 const getWorkspacePath = (): string | undefined =>
-  vscode.workspace.workspaceFolders?.[0]?.uri.path;
+  vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
 
 const buildNewTicketTemplate = (content: TicketEditorContent): string =>
   buildTicketEditorContent(content);
@@ -70,7 +70,7 @@ export const buildNewTicketDraftUri = (
   }
 
   const targetPath = buildUniqueUntitledPath(workspacePath, DRAFT_FILENAME, existsSync);
-  return vscode.Uri.parse(`untitled:${targetPath}`);
+  return vscode.Uri.from({ scheme: "untitled", path: targetPath });
 };
 
 export const openNewTicketDraft = async (input: {

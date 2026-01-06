@@ -34,7 +34,7 @@ export const buildUniqueUntitledPath = (
   existsSync: ExistsSync,
 ): string => {
   const candidateName = buildUniqueUntitledName(filename, (candidate) =>
-    existsSync(path.posix.join(basePath, candidate)),
+    existsSync(path.join(basePath, candidate)),
   );
-  return path.posix.join(basePath, candidateName);
+  return path.join(basePath, candidateName);
 };
