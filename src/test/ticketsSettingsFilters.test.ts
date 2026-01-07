@@ -2,6 +2,7 @@ import * as assert from "assert";
 import { applyTicketFilters, TicketFilterSelection } from "../views/projectListSettings";
 
 const baseFilters: TicketFilterSelection = {
+  subjectQuery: "",
   priorityIds: [],
   statusIds: [],
   trackerIds: [],
@@ -76,6 +77,24 @@ suite("Ticket settings filters", () => {
     assert.deepStrictEqual(
       withoutUnassigned.map((ticket) => ticket.id),
       [1],
+    );
+  });
+
+  test("filters by title keyword when provided", () => {
+    const tickets = [
+      { id: 1, subject: "Fix login issue", projectId: 1 },
+      { id: 2, subject: "Update documentation", projectId: 1 },
+      { id: 3, subject: "Login UI polish", projectId: 1 },
+    ];
+
+    const result = applyTicketFilters(tickets, {
+      ...baseFilters,
+      subjectQuery: "login",
+    });
+
+    assert.deepStrictEqual(
+      result.map((ticket) => ticket.id),
+      [1, 3],
     );
   });
 });

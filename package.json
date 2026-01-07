@@ -34,6 +34,7 @@
     "onCommand:redmine-client.reloadTicket",
     "onCommand:redmine-client.reloadComment",
     "onCommand:redmine-client.configureTicketPriorityFilter",
+    "onCommand:redmine-client.configureTicketTitleFilter",
     "onCommand:redmine-client.configureTicketStatusFilter",
     "onCommand:redmine-client.configureTicketTrackerFilter",
     "onCommand:redmine-client.configureTicketAssigneeFilter",
@@ -132,6 +133,10 @@
       {
         "command": "redmine-client.configureTicketPriorityFilter",
         "title": "Redmine: Configure Ticket Priority Filter"
+      },
+      {
+        "command": "redmine-client.configureTicketTitleFilter",
+        "title": "Redmine: Configure Ticket Title Filter"
       },
       {
         "command": "redmine-client.configureTicketStatusFilter",

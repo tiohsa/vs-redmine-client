@@ -630,6 +630,13 @@ export async function activate(context: vscode.ExtensionContext) {
   );
 
   context.subscriptions.push(
+    vscode.commands.registerCommand(TICKET_SETTINGS_COMMANDS.titleFilter, async () => {
+      await ticketsProvider.configureTitleFilter();
+      settingsProvider.refresh();
+    }),
+  );
+
+  context.subscriptions.push(
     vscode.commands.registerCommand(TICKET_SETTINGS_COMMANDS.priorityFilter, async () => {
       await ticketsProvider.configurePriorityFilter();
       settingsProvider.refresh();

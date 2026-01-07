@@ -31,6 +31,7 @@ import {
 } from "./projectListSettings";
 
 export const TICKET_SETTINGS_COMMANDS = {
+  titleFilter: "redmine-client.configureTicketTitleFilter",
   priorityFilter: "redmine-client.configureTicketPriorityFilter",
   statusFilter: "redmine-client.configureTicketStatusFilter",
   trackerFilter: "redmine-client.configureTicketTrackerFilter",
@@ -42,6 +43,7 @@ export const TICKET_SETTINGS_COMMANDS = {
 };
 
 const TICKET_SETTINGS_ICON_IDS = {
+  titleFilter: "search",
   offlineSyncMode: "cloud-upload",
   priorityFilter: "symbol-number",
   statusFilter: "check",
@@ -93,6 +95,9 @@ const formatSelectionSummary = (selectedCount: number, totalCount: number): stri
   }
   return `${selectedCount} selected`;
 };
+
+const formatTitleFilterSummary = (query: string): string =>
+  query.length > 0 ? query : "All";
 
 const formatSortSummary = (sort: TicketListSettings["sort"]): string => {
   if (!sort.field) {
@@ -433,6 +438,28 @@ export class TicketsTreeProvider implements vscode.TreeDataProvider<vscode.TreeI
     this.emitter.fire();
   }
 
+  async configureTitleFilter(): Promise<void> {
+    const current = this.settings.filters.subjectQuery;
+    const next = await vscode.window.showInputBox({
+      title: "Filter by title",
+      prompt: "Enter title keyword (leave blank for all)",
+      value: current,
+    });
+
+    if (next === undefined) {
+      return;
+    }
+
+    this.settings = {
+      ...this.settings,
+      filters: {
+        ...this.settings.filters,
+        subjectQuery: next.trim(),
+      },
+    };
+    this.emitter.fire();
+  }
+
   async configureStatusFilter(): Promise<void> {
     const options = collectOptions(
       this.tickets,
@@ -652,6 +679,12 @@ export class TicketsTreeProvider implements vscode.TreeDataProvider<vscode.TreeI
           title: "Offline sync mode",
         },
         TICKET_SETTINGS_ICON_IDS.offlineSyncMode,
+      ),
+      new TicketSettingsItem(
+        "Filter: Title",
+        formatTitleFilterSummary(this.settings.filters.subjectQuery),
+        { command: TICKET_SETTINGS_COMMANDS.titleFilter, title: "Filter by title" },
+        TICKET_SETTINGS_ICON_IDS.titleFilter,
       ),
       new TicketSettingsItem(
         "Filter: Priority",

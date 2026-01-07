@@ -5,6 +5,7 @@ export type SortDirection = "asc" | "desc";
 export type DueDateWindow = "within1Day" | "within3Days" | "within7Days" | "overdue";
 
 export interface TicketFilterSelection {
+  subjectQuery: string;
   priorityIds: number[];
   statusIds: number[];
   trackerIds: number[];
@@ -32,6 +33,7 @@ export interface TicketListSettings {
 
 export const DEFAULT_TICKET_LIST_SETTINGS: TicketListSettings = {
   filters: {
+    subjectQuery: "",
     priorityIds: [],
     statusIds: [],
     trackerIds: [],
@@ -61,6 +63,8 @@ export const applyTicketFilters = (
   tickets: Ticket[],
   filters: TicketFilterSelection,
 ): Ticket[] => {
+  const normalizedSubjectQuery = filters.subjectQuery.trim().toLowerCase();
+
   const matchesSelection = (value: number | undefined, selections: number[]): boolean => {
     if (selections.length === 0) {
       return true;
@@ -79,6 +83,12 @@ export const applyTicketFilters = (
   };
 
   return tickets.filter((ticket) => {
+    if (
+      normalizedSubjectQuery.length > 0 &&
+      !ticket.subject.toLowerCase().includes(normalizedSubjectQuery)
+    ) {
+      return false;
+    }
     if (!matchesSelection(ticket.priorityId, filters.priorityIds)) {
       return false;
     }
