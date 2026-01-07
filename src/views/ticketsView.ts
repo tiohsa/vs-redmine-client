@@ -18,7 +18,7 @@ import { buildTree, collectTreeNodeIds } from "./treeBuilder";
 import { TreeBuildResult, TreeNode, TreeSource } from "./treeTypes";
 import { isTreeExpanded, setTreeExpandedBulk } from "./treeState";
 import { createCycleWarningItem } from "./treeWarnings";
-import { SELECTION_HIGHLIGHT_ICON } from "./selectionHighlight";
+import { createSelectionIcon } from "./selectionHighlight";
 import {
   applyTicketFilters,
   applyTicketSort,
@@ -39,6 +39,17 @@ export const TICKET_SETTINGS_COMMANDS = {
   dueDate: "redmine-client.configureTicketDueDateDisplay",
   offlineSyncMode: "redmine-client.configureOfflineSyncMode",
   reset: "redmine-client.resetTicketListSettings",
+};
+
+const TICKET_SETTINGS_ICON_IDS = {
+  offlineSyncMode: "cloud-upload",
+  priorityFilter: "symbol-number",
+  statusFilter: "check",
+  trackerFilter: "tag",
+  assigneeFilter: "account",
+  sort: "list-ordered",
+  dueDate: "calendar",
+  reset: "refresh",
 };
 
 export const TICKET_RELOAD_COMMAND = "redmine-client.reloadTicket";
@@ -177,11 +188,19 @@ const collectOptions = (
 };
 
 export class TicketSettingsItem extends vscode.TreeItem {
-  constructor(label: string, description: string, command: vscode.Command) {
+  constructor(
+    label: string,
+    description: string,
+    command: vscode.Command,
+    iconId?: string,
+  ) {
     super(label, vscode.TreeItemCollapsibleState.None);
     this.description = description;
     this.command = command;
     this.contextValue = "ticketSettingsItem";
+    if (iconId) {
+      this.iconPath = new vscode.ThemeIcon(iconId);
+    }
   }
 }
 
@@ -632,41 +651,49 @@ export class TicketsTreeProvider implements vscode.TreeDataProvider<vscode.TreeI
           command: TICKET_SETTINGS_COMMANDS.offlineSyncMode,
           title: "Offline sync mode",
         },
+        TICKET_SETTINGS_ICON_IDS.offlineSyncMode,
       ),
       new TicketSettingsItem(
         "Filter: Priority",
         formatSelectionSummary(this.settings.filters.priorityIds.length, priorityOptions.length),
         { command: TICKET_SETTINGS_COMMANDS.priorityFilter, title: "Filter by priority" },
+        TICKET_SETTINGS_ICON_IDS.priorityFilter,
       ),
       new TicketSettingsItem(
         "Filter: Status",
         formatSelectionSummary(this.settings.filters.statusIds.length, statusOptions.length),
         { command: TICKET_SETTINGS_COMMANDS.statusFilter, title: "Filter by status" },
+        TICKET_SETTINGS_ICON_IDS.statusFilter,
       ),
       new TicketSettingsItem(
         "Filter: Tracker",
         formatSelectionSummary(this.settings.filters.trackerIds.length, trackerOptions.length),
         { command: TICKET_SETTINGS_COMMANDS.trackerFilter, title: "Filter by tracker" },
+        TICKET_SETTINGS_ICON_IDS.trackerFilter,
       ),
       new TicketSettingsItem(
         "Filter: Assignee",
         formatSelectionSummary(assigneeSelected, assigneeTotal),
         { command: TICKET_SETTINGS_COMMANDS.assigneeFilter, title: "Filter by assignee" },
+        TICKET_SETTINGS_ICON_IDS.assigneeFilter,
       ),
       new TicketSettingsItem(
         "Sort order",
         formatSortSummary(this.settings.sort),
         { command: TICKET_SETTINGS_COMMANDS.sort, title: "Sort order" },
+        TICKET_SETTINGS_ICON_IDS.sort,
       ),
       new TicketSettingsItem(
         "Due date indicators",
         formatDueDateSummary(this.settings.dueDate),
         { command: TICKET_SETTINGS_COMMANDS.dueDate, title: "Due date indicators" },
+        TICKET_SETTINGS_ICON_IDS.dueDate,
       ),
       new TicketSettingsItem(
         "Reset settings",
         "Restore defaults",
         { command: TICKET_SETTINGS_COMMANDS.reset, title: "Reset settings" },
+        TICKET_SETTINGS_ICON_IDS.reset,
       ),
     ];
   }
@@ -723,7 +750,10 @@ export class TicketTreeItem extends vscode.TreeItem {
       this.description = status || dueDateIndicator || "";
     }
     this.contextValue = "redmineTicket";
-    this.iconPath = isSelected ? SELECTION_HIGHLIGHT_ICON : undefined;
+    this.iconPath = createSelectionIcon(
+      node.children.length > 0 ? "folder" : "file-text",
+      isSelected,
+    );
     this.command = {
       command: "redmine-client.openTicketPreview",
       title: "Open Ticket Preview",

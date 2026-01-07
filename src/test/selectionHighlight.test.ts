@@ -3,19 +3,24 @@ import * as vscode from "vscode";
 import { buildCommentsViewItems } from "../views/commentsView";
 import { buildProjectsViewItems, ProjectTreeItem } from "../views/projectsView";
 import { buildTicketsViewItems, TicketTreeItem } from "../views/ticketsView";
-import {
-  SELECTION_HIGHLIGHT_COLOR_ID,
-  SELECTION_HIGHLIGHT_ICON_ID,
-} from "../views/selectionHighlight";
+import { SELECTION_HIGHLIGHT_COLOR_ID } from "../views/selectionHighlight";
 import { buildProjectFixture, buildTicketFixture } from "./helpers/treeFixtures";
 import { Comment } from "../redmine/types";
 
-const assertHighlightIcon = (item: vscode.TreeItem | undefined): void => {
+const assertTreeIcon = (
+  item: vscode.TreeItem | undefined,
+  iconId: string,
+  selected: boolean,
+): void => {
   assert.ok(item, "expected item to be defined");
   assert.ok(item?.iconPath instanceof vscode.ThemeIcon);
   const icon = item?.iconPath as vscode.ThemeIcon;
-  assert.strictEqual(icon.id, SELECTION_HIGHLIGHT_ICON_ID);
-  assert.strictEqual(icon.color?.id, SELECTION_HIGHLIGHT_COLOR_ID);
+  assert.strictEqual(icon.id, iconId);
+  if (selected) {
+    assert.strictEqual(icon.color?.id, SELECTION_HIGHLIGHT_COLOR_ID);
+  } else {
+    assert.ok(!icon.color);
+  }
 };
 
 suite("Selection highlight", () => {
@@ -26,7 +31,7 @@ suite("Selection highlight", () => {
       | ProjectTreeItem
       | undefined;
 
-    assertHighlightIcon(selected);
+    assertTreeIcon(selected, "project", true);
   });
 
   test("uses blue highlight for selected ticket", () => {
@@ -36,7 +41,7 @@ suite("Selection highlight", () => {
       | TicketTreeItem
       | undefined;
 
-    assertHighlightIcon(selected);
+    assertTreeIcon(selected, "file-text", true);
   });
 
   test("uses blue highlight for selected comment", () => {
@@ -50,17 +55,16 @@ suite("Selection highlight", () => {
     };
     const [item] = buildCommentsViewItems([comment], comment.ticketId, undefined, comment.id);
 
-    assertHighlightIcon(item);
+    assertTreeIcon(item, "comment", true);
   });
 
-  test("does not apply highlight to unselected items", () => {
+  test("uses default icon without highlight for unselected items", () => {
     const project = buildProjectFixture({ id: 11 });
     const items = buildProjectsViewItems([project], undefined);
     const selected = items.find((item) => item instanceof ProjectTreeItem) as
       | ProjectTreeItem
       | undefined;
 
-    assert.ok(selected);
-    assert.ok(!selected?.iconPath);
+    assertTreeIcon(selected, "project", false);
   });
 });

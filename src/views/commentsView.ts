@@ -8,7 +8,7 @@ import { setCommentAddContext } from "./commentViewContext";
 import { formatCommentDescription, formatCommentLabel } from "./commentListFormat";
 import { MAX_VIEW_ITEMS } from "./viewLimits";
 import { createEmptyStateItem, createErrorStateItem } from "./viewState";
-import { SELECTION_HIGHLIGHT_ICON } from "./selectionHighlight";
+import { createSelectionIcon } from "./selectionHighlight";
 
 export const COMMENT_RELOAD_COMMAND = "redmine-client.reloadComment";
 
@@ -139,6 +139,6 @@ export class CommentTreeItem extends vscode.TreeItem {
     this.contextValue = comment.editableByCurrentUser
       ? "redmineCommentEditable"
       : "redmineComment";
-    this.iconPath = isSelected ? SELECTION_HIGHLIGHT_ICON : undefined;
+    this.iconPath = createSelectionIcon("comment", isSelected);
   }
 }

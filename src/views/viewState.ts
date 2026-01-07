@@ -7,6 +7,7 @@ const editorDisplayState = new Map<string, EditorDisplayState>();
 export const createEmptyStateItem = (message: string): vscode.TreeItem => {
   const item = new vscode.TreeItem(message, vscode.TreeItemCollapsibleState.None);
   item.contextValue = "viewStateEmpty";
+  item.iconPath = new vscode.ThemeIcon("info");
   return item;
 };
 
@@ -14,6 +15,7 @@ export const createErrorStateItem = (message: string): vscode.TreeItem => {
   const item = new vscode.TreeItem(message, vscode.TreeItemCollapsibleState.None);
   item.contextValue = "viewStateError";
   item.tooltip = message;
+  item.iconPath = new vscode.ThemeIcon("error");
   return item;
 };
 
