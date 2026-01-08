@@ -23,6 +23,10 @@ suite("Activity Bar view titles", () => {
     const viewById = (id: string): ViewContribution | undefined =>
       views.find((view) => view.id === id);
 
+    assert.strictEqual(
+      viewById("redmine-clientActivityOpenTickets")?.name,
+      "Open Editors",
+    );
     assert.strictEqual(viewById("redmine-clientActivityProjects")?.name, "Projects");
     assert.strictEqual(viewById("redmine-clientActivityTickets")?.name, "Tickets");
     assert.strictEqual(viewById("redmine-clientActivityComments")?.name, "Comments");

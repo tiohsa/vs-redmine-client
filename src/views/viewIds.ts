@@ -7,6 +7,7 @@ export const VIEW_ID_ACTIVITY_TICKET_SETTINGS = "redmine-clientActivityTicketSet
 export const VIEW_ID_ACTIVITY_PROJECTS = "redmine-clientActivityProjects";
 export const VIEW_ID_ACTIVITY_TICKETS = "redmine-clientActivityTickets";
 export const VIEW_ID_ACTIVITY_COMMENTS = "redmine-clientActivityComments";
+export const VIEW_ID_ACTIVITY_OPEN_TICKETS = "redmine-clientActivityOpenTickets";
 
 export const ACTIVITY_VIEW_PAIRS = [
   {

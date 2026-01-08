@@ -19,6 +19,7 @@ import { TreeBuildResult, TreeNode, TreeSource } from "./treeTypes";
 import { isTreeExpanded, setTreeExpandedBulk } from "./treeState";
 import { createCycleWarningItem } from "./treeWarnings";
 import { createSelectionIcon } from "./selectionHighlight";
+import { rememberTicketSummaries, setTicketSummary } from "./ticketSummaryStore";
 import {
   applyTicketFilters,
   applyTicketSort,
@@ -138,21 +139,75 @@ const buildTicketTreeSources = (tickets: Ticket[]): Array<TreeSource<Ticket>> =>
     data: ticket,
   }));
 
+const collectTicketNodes = (
+  nodes: Array<TreeNode<Ticket>>,
+  bucket: Array<TreeNode<Ticket>> = [],
+): Array<TreeNode<Ticket>> => {
+  nodes.forEach((node) => {
+    bucket.push(node);
+    if (node.children.length > 0) {
+      collectTicketNodes(node.children, bucket);
+    }
+  });
+  return bucket;
+};
+
+const ensureTicketItem = (
+  node: TreeNode<Ticket>,
+  dueIndicators: Map<number, string | undefined>,
+  selectedTicketId: number | undefined,
+  itemCache: Map<number, TicketTreeItem>,
+): TicketTreeItem => {
+  const isExpanded =
+    node.children.length > 0 && isTreeExpanded(TICKETS_VIEW_KEY, String(node.data.id));
+  const dueIndicator = dueIndicators.get(node.data.id);
+  const isSelected = node.data.id === selectedTicketId;
+  const existing = itemCache.get(node.data.id);
+  if (existing) {
+    existing.update(node, dueIndicator, isSelected, isExpanded);
+    return existing;
+  }
+  const created = new TicketTreeItem(node, dueIndicator, isSelected, isExpanded);
+  itemCache.set(node.data.id, created);
+  return created;
+};
+
 const buildTicketTreeItems = (
   nodes: Array<TreeNode<Ticket>>,
   dueIndicators: Map<number, string | undefined>,
   selectedTicketId?: number,
+  itemCache?: Map<number, TicketTreeItem>,
+  pruneCache = false,
 ): TicketTreeItem[] =>
-  nodes.map(
-    (node) =>
-      new TicketTreeItem(
-        node,
-        dueIndicators.get(node.data.id),
-        node.data.id === selectedTicketId,
-        node.children.length > 0 &&
-          isTreeExpanded(TICKETS_VIEW_KEY, String(node.data.id)),
-      ),
-  );
+  itemCache
+    ? (() => {
+        const nodesToCache = collectTicketNodes(nodes);
+        const visibleIds = new Set<number>();
+        nodesToCache.forEach((node) => {
+          visibleIds.add(node.data.id);
+          ensureTicketItem(node, dueIndicators, selectedTicketId, itemCache);
+        });
+        if (pruneCache) {
+          Array.from(itemCache.keys()).forEach((id) => {
+            if (!visibleIds.has(id)) {
+              itemCache.delete(id);
+            }
+          });
+        }
+        return nodes.map((node) =>
+          ensureTicketItem(node, dueIndicators, selectedTicketId, itemCache),
+        );
+      })()
+    : nodes.map(
+        (node) =>
+          new TicketTreeItem(
+            node,
+            dueIndicators.get(node.data.id),
+            node.data.id === selectedTicketId,
+            node.children.length > 0 &&
+              isTreeExpanded(TICKETS_VIEW_KEY, String(node.data.id)),
+          ),
+      );
 
 const buildTicketCycleWarnings = (
   tickets: Ticket[],
@@ -216,16 +271,26 @@ export const buildTicketsViewItems = (
   settings: TicketListSettings = DEFAULT_TICKET_LIST_SETTINGS,
   now: Date = new Date(),
   selectedTicketId?: number,
+  itemCache?: Map<number, TicketTreeItem>,
 ): vscode.TreeItem[] => {
   if (errorMessage) {
+    if (itemCache) {
+      itemCache.clear();
+    }
     return [createErrorStateItem(errorMessage)];
   }
 
   if (!selectedProjectId) {
+    if (itemCache) {
+      itemCache.clear();
+    }
     return [createEmptyStateItem("Select a project to view tickets.")];
   }
 
   if (tickets.length === 0) {
+    if (itemCache) {
+      itemCache.clear();
+    }
     return [createEmptyStateItem("No tickets for the selected project.")];
   }
 
@@ -234,6 +299,9 @@ export const buildTicketsViewItems = (
   const visibleTickets = sortedTickets.slice(0, MAX_VIEW_ITEMS);
 
   if (visibleTickets.length === 0) {
+    if (itemCache) {
+      itemCache.clear();
+    }
     return [createEmptyStateItem("No tickets match the current filters.")];
   }
 
@@ -249,6 +317,8 @@ export const buildTicketsViewItems = (
     treeResult.roots,
     dueIndicators,
     selectedTicketId,
+    itemCache,
+    true,
   );
   return [...warningItems, ...ticketItems];
 };
@@ -264,6 +334,7 @@ export class TicketsTreeProvider implements vscode.TreeDataProvider<vscode.TreeI
   private selectedTicketId?: number;
   private settings = getDefaultTicketListSettings();
   private rootNodes: Array<TreeNode<Ticket>> = [];
+  private ticketItemsById = new Map<number, TicketTreeItem>();
 
   readonly onDidChangeTreeData = this.emitter.event;
 
@@ -294,6 +365,7 @@ export class TicketsTreeProvider implements vscode.TreeDataProvider<vscode.TreeI
       });
 
       this.tickets = result.tickets;
+      rememberTicketSummaries(this.tickets);
       this.emitter.fire();
     } catch (error) {
       const message = (error as Error).message;
@@ -334,6 +406,7 @@ export class TicketsTreeProvider implements vscode.TreeDataProvider<vscode.TreeI
         element.childNodes,
         dueIndicators,
         this.selectedTicketId,
+        this.ticketItemsById,
       );
     }
 
@@ -344,6 +417,7 @@ export class TicketsTreeProvider implements vscode.TreeDataProvider<vscode.TreeI
     this.tickets = tickets;
     this.selectedProjectId = selectedProjectId;
     this.errorMessage = undefined;
+    rememberTicketSummaries(this.tickets);
   }
 
   updateTicketSubject(ticketId: number, subject: string): boolean {
@@ -355,6 +429,7 @@ export class TicketsTreeProvider implements vscode.TreeDataProvider<vscode.TreeI
       return false;
     }
     ticket.subject = subject;
+    setTicketSummary(ticketId, subject);
     this.emitter.fire();
     return true;
   }
@@ -377,6 +452,7 @@ export class TicketsTreeProvider implements vscode.TreeDataProvider<vscode.TreeI
       this.settings,
       new Date(),
       this.selectedTicketId,
+      this.ticketItemsById,
     );
 
     if (this.errorMessage || !this.selectedProjectId) {
@@ -387,6 +463,18 @@ export class TicketsTreeProvider implements vscode.TreeDataProvider<vscode.TreeI
     const { treeResult } = this.getVisibleTreeResult();
     this.rootNodes = treeResult.roots;
     return items;
+  }
+
+  getTicketItemById(ticketId: number): TicketTreeItem | undefined {
+    return this.ticketItemsById.get(ticketId);
+  }
+
+  getTickets(): Ticket[] {
+    return this.tickets;
+  }
+
+  getSelectedProjectId(): number | undefined {
+    return this.selectedProjectId;
   }
 
   private getVisibleTreeResult(): {
@@ -762,36 +850,46 @@ export class TicketsTreeProvider implements vscode.TreeDataProvider<vscode.TreeI
 
 export class TicketTreeItem extends vscode.TreeItem {
   constructor(
-    public readonly node: TreeNode<Ticket>,
+    public node: TreeNode<Ticket>,
     dueDateIndicator: string | undefined,
     isSelected: boolean,
     isExpanded: boolean,
   ) {
-    super(
-      `#${node.data.id} ${node.data.subject}`,
+    super("", vscode.TreeItemCollapsibleState.None);
+    this.id = String(node.data.id);
+    this.contextValue = "redmineTicket";
+    this.command = {
+      command: "redmine-client.openTicketPreview",
+      title: "Open Ticket Preview",
+      arguments: [this],
+    };
+    this.update(node, dueDateIndicator, isSelected, isExpanded);
+  }
+
+  update(
+    node: TreeNode<Ticket>,
+    dueDateIndicator: string | undefined,
+    isSelected: boolean,
+    isExpanded: boolean,
+  ): void {
+    this.node = node;
+    this.label = `#${node.data.id} ${node.data.subject}`;
+    this.collapsibleState =
       node.children.length > 0
         ? isExpanded
           ? vscode.TreeItemCollapsibleState.Expanded
           : vscode.TreeItemCollapsibleState.Collapsed
-        : vscode.TreeItemCollapsibleState.None,
-    );
-    this.id = String(node.data.id);
+        : vscode.TreeItemCollapsibleState.None;
     const status = node.data.statusName ?? "";
     if (status && dueDateIndicator) {
       this.description = `${status} \u00b7 ${dueDateIndicator}`;
     } else {
       this.description = status || dueDateIndicator || "";
     }
-    this.contextValue = "redmineTicket";
     this.iconPath = createSelectionIcon(
       node.children.length > 0 ? "folder" : "file-text",
       isSelected,
     );
-    this.command = {
-      command: "redmine-client.openTicketPreview",
-      title: "Open Ticket Preview",
-      arguments: [this],
-    };
   }
 
   get ticket(): Ticket {

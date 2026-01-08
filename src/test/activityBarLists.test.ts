@@ -11,7 +11,7 @@ const loadPackageJson = (): Record<string, unknown> => {
 type ViewContribution = { id: string; name: string };
 
 suite("Activity Bar views", () => {
-  test("declares settings/projects/tickets/comments views under the Activity Bar container", () => {
+  test("declares open editors/settings/projects/tickets/comments views under the Activity Bar container", () => {
     const packageJson = loadPackageJson();
     const contributes = packageJson.contributes as Record<string, unknown> | undefined;
     assert.ok(contributes, "contributes must be defined");
@@ -26,6 +26,7 @@ suite("Activity Bar views", () => {
     assert.strictEqual(viewIds[0], "redmine-clientActivityTicketSettings");
     assert.ok(viewIds.includes("redmine-clientActivityProjects"));
     assert.ok(viewIds.includes("redmine-clientActivityTickets"));
+    assert.ok(viewIds.includes("redmine-clientActivityOpenTickets"));
     assert.ok(viewIds.includes("redmine-clientActivityComments"));
   });
 });

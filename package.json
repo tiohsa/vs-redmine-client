@@ -22,6 +22,7 @@
     "onView:redmine-clientActivityTicketSettings",
     "onView:redmine-clientActivityProjects",
     "onView:redmine-clientActivityTickets",
+    "onView:redmine-clientActivityOpenTickets",
     "onView:redmine-clientActivityComments",
     "onCommand:redmine-client.refreshTickets",
     "onCommand:redmine-client.refreshProjects",
@@ -55,7 +56,10 @@
     "onCommand:redmine-client.editComment",
     "onCommand:redmine-client.addComment",
     "onCommand:redmine-client.runOfflineSync",
-    "onCommand:redmine-client.configureOfflineSyncMode"
+    "onCommand:redmine-client.configureOfflineSyncMode",
+    "onCommand:redmine-client.searchTickets",
+    "onCommand:redmine-client.revealActiveTicket",
+    "onCommand:redmine-client.focusTicketEditor"
   ],
   "main": "./dist/extension.js",
   "l10n": "./l10n",
@@ -83,6 +87,11 @@
         "command": "redmine-client.refreshTickets",
         "title": "Redmine: Refresh Tickets",
         "icon": "$(refresh)"
+      },
+      {
+        "command": "redmine-client.searchTickets",
+        "title": "Redmine: Search Tickets",
+        "icon": "$(search)"
       },
       {
         "command": "redmine-client.refreshComments",
@@ -240,6 +249,14 @@
       {
         "command": "redmine-client.configureOfflineSyncMode",
         "title": "Redmine: Configure Offline Sync Mode"
+      },
+      {
+        "command": "redmine-client.revealActiveTicket",
+        "title": "Redmine: Focus Active Ticket in Tree"
+      },
+      {
+        "command": "redmine-client.focusTicketEditor",
+        "title": "Redmine: Focus Open Ticket Editor"
       }
     ],
     "views": {
@@ -247,6 +264,10 @@
         {
           "id": "redmine-clientActivityTicketSettings",
           "name": "Ticket Settings"
+        },
+        {
+          "id": "redmine-clientActivityOpenTickets",
+          "name": "Open Editors"
         },
         {
           "id": "redmine-clientActivityProjects",
@@ -284,6 +305,11 @@
           "when": "view == redmine-clientActivityTickets",
           "group": "navigation",
           "enablement": "redmine-client.canCreateTickets"
+        },
+        {
+          "command": "redmine-client.searchTickets",
+          "when": "view == redmine-clientActivityTickets",
+          "group": "navigation@1"
         },
         {
           "command": "redmine-client.refreshTickets",

@@ -5,6 +5,7 @@ import { createTicketFromEditor } from "./commands/createTicket";
 import { createChildTicketFromList } from "./commands/createChildTicketFromList";
 import { createTicketFromList } from "./commands/createTicketFromList";
 import { editComment } from "./commands/editComment";
+import { focusTicketEditor } from "./commands/focusTicketEditor";
 import { runOfflineSync } from "./commands/offlineSync";
 import {
   configureOfflineSyncMode,
@@ -17,6 +18,7 @@ import {
 } from "./commands/openInBrowser";
 import { reloadCommentFromEditor } from "./commands/reloadComment";
 import { reloadTicketFromEditor } from "./commands/reloadTicket";
+import { searchTickets } from "./commands/searchTickets";
 import { setProjectSelection, getProjectSelection } from "./config/projectSelection";
 import { getIssueDetail } from "./redmine/issues";
 import { showError, showSuccess, showWarning } from "./utils/notifications";
@@ -31,6 +33,8 @@ import {
 import { ProjectTreeItem, ProjectsTreeProvider } from "./views/projectsView";
 import { parseTicketEditorContent } from "./views/ticketEditorContent";
 import { setTicketDraftContent } from "./views/ticketDraftStore";
+import { formatTicketLabel } from "./views/ticketLabel";
+import { OpenEditorsTreeProvider } from "./views/openTicketsView";
 import {
   configureEditorDefaultField,
   EDITOR_DEFAULT_COMMANDS,
@@ -57,6 +61,7 @@ import {
   isTicketEditor,
   markEditorActive,
   NEW_TICKET_DRAFT_ID,
+  registerCommentDocument,
   registerTicketDocument,
   removeTicketEditorByDocument,
 } from "./views/ticketEditorRegistry";
@@ -83,6 +88,7 @@ import {
   VIEW_ID_ACTIVITY_PROJECTS,
   VIEW_ID_ACTIVITY_TICKET_SETTINGS,
   VIEW_ID_ACTIVITY_TICKETS,
+  VIEW_ID_ACTIVITY_OPEN_TICKETS,
 } from "./views/viewIds";
 import { registerConflictDiffProvider } from "./views/conflictDiffProvider";
 import { handleConflict, handleCommentConflict } from "./views/conflictResolver";
@@ -91,6 +97,7 @@ export async function activate(context: vscode.ExtensionContext) {
   initializeTreeExpansionState(context.workspaceState);
   registerConflictDiffProvider(context);
   const ticketsProvider = new TicketsTreeProvider();
+  const openTicketsProvider = new OpenEditorsTreeProvider();
   const settingsProvider = new TicketSettingsTreeProvider(ticketsProvider);
   const commentsProvider = new CommentsTreeProvider();
   const projectsProvider = new ProjectsTreeProvider();
@@ -112,6 +119,12 @@ export async function activate(context: vscode.ExtensionContext) {
     VIEW_ID_ACTIVITY_TICKETS,
     {
       treeDataProvider: ticketsProvider,
+    },
+  );
+  const activityOpenTicketsView = vscode.window.createTreeView(
+    VIEW_ID_ACTIVITY_OPEN_TICKETS,
+    {
+      treeDataProvider: openTicketsProvider,
     },
   );
   const activityCommentsView = vscode.window.createTreeView(
@@ -164,10 +177,12 @@ export async function activate(context: vscode.ExtensionContext) {
     activityProjectsView,
     activitySettingsView,
     activityTicketsView,
+    activityOpenTicketsView,
     activityCommentsView,
     registerFocusRefresh(activityProjectsView, () => projectsProvider.refresh()),
     registerFocusRefresh(activitySettingsView, () => settingsProvider.refresh()),
     registerFocusRefresh(activityTicketsView, () => ticketsProvider.refresh()),
+    registerFocusRefresh(activityOpenTicketsView, () => openTicketsProvider.refresh()),
     registerFocusRefresh(activityCommentsView, () => commentsProvider.refresh()),
   );
   trackExpansionState(activityProjectsView, "projects");
@@ -214,6 +229,65 @@ export async function activate(context: vscode.ExtensionContext) {
     }
   };
 
+  const registerEditorDocument = (document: vscode.TextDocument): void => {
+    if (document.uri.scheme !== "file" && document.uri.scheme !== "untitled") {
+      return;
+    }
+    const existingTicketId =
+      getTicketIdForDocument(document) ?? getTicketIdForUri(document.uri);
+    if (existingTicketId !== undefined) {
+      return;
+    }
+
+    const filename = path.basename(document.uri.path);
+    const parsed = parseEditorFilename(filename);
+    if (parsed) {
+      if (parsed.type === "ticket") {
+        registerTicketDocument(parsed.ticketId, document, "ticket", parsed.projectId);
+      } else {
+        registerCommentDocument(
+          parsed.ticketId,
+          parsed.commentId,
+          document,
+          parsed.projectId,
+        );
+      }
+      return;
+    }
+
+    const draftTicketId = parseNewCommentDraftFilename(filename);
+    if (draftTicketId) {
+      registerTicketDocument(draftTicketId, document, "commentDraft");
+      return;
+    }
+
+    if (isNewTicketDraftFilename(filename)) {
+      registerTicketDocument(NEW_TICKET_DRAFT_ID, document, "ticket");
+    }
+  };
+
+  const ticketStatusItem = vscode.window.createStatusBarItem(
+    vscode.StatusBarAlignment.Left,
+    100,
+  );
+  ticketStatusItem.name = "Redmine Ticket";
+  context.subscriptions.push(ticketStatusItem);
+
+  const updateTicketStatus = (editor?: vscode.TextEditor): void => {
+    if (!editor || !isTicketEditor(editor)) {
+      ticketStatusItem.hide();
+      return;
+    }
+    const ticketId = getTicketIdForEditor(editor);
+    if (!ticketId) {
+      ticketStatusItem.hide();
+      return;
+    }
+    ticketStatusItem.text = formatTicketLabel(ticketId);
+    ticketStatusItem.tooltip = "Redmine ticket";
+    ticketStatusItem.show();
+  };
+
   let previousActiveEditor = vscode.window.activeTextEditor;
   context.subscriptions.push(
     vscode.window.onDidChangeActiveTextEditor((editor) => {
@@ -240,16 +314,26 @@ export async function activate(context: vscode.ExtensionContext) {
       }
 
       if (editor) {
+        registerEditorDocument(editor.document);
         markEditorActive(editor);
       }
 
       previousActiveEditor = editor;
+      openTicketsProvider.refresh();
+      updateTicketStatus(editor);
     }),
   );
 
   context.subscriptions.push(
     vscode.workspace.onDidCloseTextDocument((document) => {
       removeTicketEditorByDocument(document);
+      openTicketsProvider.refresh();
+    }),
+  );
+  context.subscriptions.push(
+    vscode.workspace.onDidOpenTextDocument((document) => {
+      registerEditorDocument(document);
+      openTicketsProvider.refresh();
     }),
   );
 
@@ -280,6 +364,7 @@ export async function activate(context: vscode.ExtensionContext) {
     } else {
       showError(notification.message);
     }
+    openTicketsProvider.refresh();
   };
 
   const notifyCommentSaveResult = (
@@ -301,10 +386,18 @@ export async function activate(context: vscode.ExtensionContext) {
     } else {
       showError(notification.message);
     }
+    openTicketsProvider.refresh();
   };
 
   const updateTicketListSubject = (ticketId: number, subject: string): void => {
-    ticketsProvider.updateTicketSubject(ticketId, subject);
+    const updated = ticketsProvider.updateTicketSubject(ticketId, subject);
+    if (updated) {
+      openTicketsProvider.refresh();
+    }
+    const active = vscode.window.activeTextEditor;
+    if (active && getTicketIdForEditor(active) === ticketId) {
+      updateTicketStatus(active);
+    }
   };
 
   const syncOnSave = (document: vscode.TextDocument): void => {
@@ -558,6 +651,58 @@ export async function activate(context: vscode.ExtensionContext) {
     vscode.commands.registerCommand("redmine-client.refreshTickets", () =>
       ticketsProvider.refresh(),
     ),
+  );
+
+  context.subscriptions.push(
+    vscode.commands.registerCommand("redmine-client.searchTickets", async () => {
+      await searchTickets(ticketsProvider, commentsProvider);
+    }),
+  );
+
+  context.subscriptions.push(
+    vscode.commands.registerCommand("redmine-client.focusTicketEditor", async (input) => {
+      const payload = input as { ticketId?: number; uri?: string } | number | undefined;
+      const ticketId =
+        typeof payload === "number" ? payload : payload?.ticketId;
+      if (!payload || (!ticketId && !(payload as { uri?: string })?.uri)) {
+        showError("Select an open ticket to focus.");
+        return;
+      }
+      await focusTicketEditor(payload);
+      if (ticketId && ticketId !== NEW_TICKET_DRAFT_ID) {
+        commentsProvider.setTicketId(ticketId);
+      }
+    }),
+  );
+
+  context.subscriptions.push(
+    vscode.commands.registerCommand("redmine-client.revealActiveTicket", async () => {
+      const editor = vscode.window.activeTextEditor;
+      if (!editor || !isTicketEditor(editor)) {
+        showError("Open a ticket editor to focus its ticket.");
+        return;
+      }
+      const ticketId = getTicketIdForEditor(editor);
+      if (!ticketId || ticketId === NEW_TICKET_DRAFT_ID) {
+        showError("New ticket drafts are not listed in the ticket tree.");
+        return;
+      }
+
+      await ticketsProvider.loadTickets();
+      if (!ticketsProvider.getSelectedProjectId()) {
+        showError("Select a project to focus tickets.");
+        return;
+      }
+      ticketsProvider.getViewItems();
+      const item = ticketsProvider.getTicketItemById(ticketId);
+      if (!item) {
+        showError("Ticket is not visible in the current ticket list.");
+        return;
+      }
+
+      ticketsProvider.setSelectedTicketId(ticketId);
+      await activityTicketsView.reveal(item, { focus: true, select: true, expand: true });
+    }),
   );
 
   context.subscriptions.push(
@@ -953,7 +1098,12 @@ export async function activate(context: vscode.ExtensionContext) {
     ticketsProvider.setSelectedProjectId(initialSelection.id);
   }
 
+  vscode.workspace.textDocuments.forEach((document) => {
+    registerEditorDocument(document);
+  });
+  openTicketsProvider.refresh();
   ticketsProvider.refresh();
+  updateTicketStatus(vscode.window.activeTextEditor);
 }
 
 export function deactivate() { }

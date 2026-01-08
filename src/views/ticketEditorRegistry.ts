@@ -152,6 +152,12 @@ export const getTicketEditors = (ticketId: number): TicketEditorRecord[] =>
   Array.from(editorsByTicket.get(ticketId) ?? []).map((uri) => editorByUri.get(uri))
     .filter((record): record is TicketEditorRecord => Boolean(record));
 
+export const getTrackedTicketIds = (): number[] =>
+  Array.from(editorsByTicket.keys());
+
+export const getAllEditorRecords = (): TicketEditorRecord[] =>
+  Array.from(editorByUri.values());
+
 const normalizeUriPath = (value: string): string => value.replace(/\\/g, "/");
 
 const extractBasename = (uri: string): string => {

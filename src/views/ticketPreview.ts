@@ -31,6 +31,7 @@ import { getEditorStorageDirectory } from "../config/settings";
 import { showError } from "../utils/notifications";
 import { DEFAULT_TEMPLATE_FILE, TEMPLATE_DIR_NAME } from "../utils/templateConstants";
 import { resolveProjectTemplateContent } from "../utils/templateResolver";
+import { rememberTicketSummary } from "./ticketSummaryStore";
 
 export const buildTicketPreviewContent = (
   ticket: Pick<Ticket, "subject" | "description" | "trackerName" | "priorityName" | "statusName" | "dueDate">,
@@ -283,6 +284,7 @@ export const showTicketPreview = async (
   ticket: Ticket,
   options?: { kind?: TicketEditorKind },
 ): Promise<vscode.TextEditor> => {
+  rememberTicketSummary(ticket);
   const savedContent: TicketEditorContent = {
     subject: ticket.subject,
     description: ticket.description ?? "",
@@ -327,6 +329,7 @@ export const showTicketComment = async (
   commentId: number,
   updatedAt?: string,
 ): Promise<vscode.TextEditor> => {
+  rememberTicketSummary(ticket);
   const display = resolveCommentEditorBody(commentId, comment);
   const filename = buildCommentEditorFilename(ticket.projectId, ticket.id, commentId);
   const content =
