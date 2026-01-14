@@ -35,10 +35,23 @@ const syncRecordUri = (record: TicketEditorRecord, nextUri: string): void => {
 
 const getRecord = (editor: vscode.TextEditor): TicketEditorRecord | undefined => {
   const uri = editor.document.uri.toString();
-  const record =
-    editorByEditor.get(editor) ??
-    editorByDocument.get(editor.document) ??
-    editorByUri.get(uri);
+  const recordFromEditor = editorByEditor.get(editor);
+  const recordFromDocument = editorByDocument.get(editor.document);
+  const recordFromUri = editorByUri.get(uri);
+  let record = recordFromEditor ?? recordFromDocument ?? recordFromUri;
+
+  if (record?.ticketId === NEW_TICKET_DRAFT_ID) {
+    const preferred =
+      recordFromDocument?.ticketId !== NEW_TICKET_DRAFT_ID
+        ? recordFromDocument
+        : recordFromUri?.ticketId !== NEW_TICKET_DRAFT_ID
+          ? recordFromUri
+          : undefined;
+    if (preferred) {
+      record = preferred;
+    }
+  }
+
   if (record) {
     syncRecordUri(record, uri);
     // Keep all maps in sync with the current editor/document

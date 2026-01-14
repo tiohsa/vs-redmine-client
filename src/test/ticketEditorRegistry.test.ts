@@ -87,6 +87,18 @@ suite("Ticket editor registry", () => {
     assert.strictEqual(getProjectIdForDocument(primary.document), 20);
   });
 
+  test("prefers non-draft record when editor mapping is stale", () => {
+    const editor = createEditorStub(
+      vscode.Uri.parse("untitled:redmine-client-new-ticket.md"),
+      "",
+    );
+
+    registerNewTicketDraft(editor);
+    registerTicketDocument(42, editor.document, "ticket", 9);
+
+    assert.strictEqual(getTicketIdForEditor(editor), 42);
+  });
+
   test("resolves ticket and project from uri", () => {
     const primary = createEditorStub(vscode.Uri.parse("untitled:ticket-6"), "");
     registerTicketEditor(6, primary, "primary", "ticket", 30);
