@@ -52,6 +52,8 @@ import {
   getCommentIdForUri,
   getCommentIdForDraftUri,
   getEditorContentType,
+  getEditorContentTypeForDocument,
+  getEditorContentTypeForUri,
   getProjectIdForDocument,
   getProjectIdForUri,
   getTicketIdForEditor,
@@ -463,7 +465,10 @@ export async function activate(context: vscode.ExtensionContext) {
 
       const ticketIdForDocument =
         getTicketIdForDocument(document) ?? getTicketIdForUri(document.uri);
-      if (ticketIdForDocument) {
+      const contentTypeForDocument =
+        getEditorContentTypeForDocument(document) ??
+        getEditorContentTypeForUri(document.uri);
+      if (ticketIdForDocument && contentTypeForDocument === "ticket") {
         if (ticketIdForDocument === NEW_TICKET_DRAFT_ID) {
           const projectId =
             getProjectIdForDocument(document) ?? getProjectIdForUri(document.uri);

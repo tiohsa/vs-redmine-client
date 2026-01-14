@@ -12,6 +12,9 @@ import {
   getTicketIdForEditor,
   getTicketIdForDocument,
   getTicketIdForUri,
+  getEditorContentType,
+  getEditorContentTypeForDocument,
+  getEditorContentTypeForUri,
   getProjectIdForDocument,
   getProjectIdForUri,
   markEditorActive,
@@ -97,6 +100,30 @@ suite("Ticket editor registry", () => {
     registerTicketDocument(42, editor.document, "ticket", 9);
 
     assert.strictEqual(getTicketIdForEditor(editor), 42);
+  });
+
+  test("prefers comment draft record when editor mapping differs", () => {
+    const editor = createEditorStub(vscode.Uri.parse("untitled:ticket-8"), "");
+
+    registerTicketEditor(8, editor, "primary", "ticket");
+    registerTicketDocument(8, editor.document, "commentDraft");
+
+    assert.strictEqual(getEditorContentType(editor), "commentDraft");
+  });
+
+  test("resolves content type from document and uri", () => {
+    const editor = createEditorStub(
+      vscode.Uri.parse("untitled:redmine-client-new-comment-11.md"),
+      "",
+    );
+
+    registerNewCommentDraft(11, editor);
+
+    assert.strictEqual(getEditorContentTypeForDocument(editor.document), "commentDraft");
+    assert.strictEqual(
+      getEditorContentTypeForUri(editor.document.uri),
+      "commentDraft",
+    );
   });
 
   test("resolves ticket and project from uri", () => {

@@ -40,6 +40,22 @@ const getRecord = (editor: vscode.TextEditor): TicketEditorRecord | undefined =>
   const recordFromUri = editorByUri.get(uri);
   let record = recordFromEditor ?? recordFromDocument ?? recordFromUri;
 
+  const hasMismatch = (
+    left?: TicketEditorRecord,
+    right?: TicketEditorRecord,
+  ): boolean =>
+    Boolean(
+      left &&
+        right &&
+        (left.ticketId !== right.ticketId || left.contentType !== right.contentType),
+    );
+
+  if (recordFromEditor && hasMismatch(recordFromEditor, recordFromDocument)) {
+    record = recordFromDocument;
+  } else if (recordFromEditor && hasMismatch(recordFromEditor, recordFromUri)) {
+    record = recordFromUri;
+  }
+
   if (record?.ticketId === NEW_TICKET_DRAFT_ID) {
     const preferred =
       recordFromDocument?.ticketId !== NEW_TICKET_DRAFT_ID
@@ -357,6 +373,10 @@ export const getCommentIdForDocument = (
   document: vscode.TextDocument,
 ): number | undefined => editorByDocument.get(document)?.commentId;
 
+export const getEditorContentTypeForDocument = (
+  document: vscode.TextDocument,
+): TicketEditorContentType | undefined => editorByDocument.get(document)?.contentType;
+
 export const getTicketIdForUri = (uri: vscode.Uri): number | undefined =>
   editorByUri.get(uri.toString())?.ticketId;
 
@@ -365,6 +385,10 @@ export const getProjectIdForUri = (uri: vscode.Uri): number | undefined =>
 
 export const getCommentIdForUri = (uri: vscode.Uri): number | undefined =>
   editorByUri.get(uri.toString())?.commentId;
+
+export const getEditorContentTypeForUri = (
+  uri: vscode.Uri,
+): TicketEditorContentType | undefined => editorByUri.get(uri.toString())?.contentType;
 
 export const getCommentIdForEditor = (editor: vscode.TextEditor): number | undefined =>
   getRecord(editor)?.commentId;
