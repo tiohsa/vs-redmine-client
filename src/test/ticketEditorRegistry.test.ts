@@ -178,6 +178,20 @@ suite("Ticket editor registry", () => {
     assert.strictEqual(resolved, 77);
   });
 
+  test("matches comment draft uri when current uri uses Windows backslashes", () => {
+    const document = createDocumentStub(
+      vscode.Uri.parse("file:///C:/tmp/redmine-client-new-comment-12.md"),
+      "",
+    );
+    registerCommentDocument(12, 88, document);
+
+    const resolved = getCommentIdForDraftUri(
+      12,
+      "untitled:C:\\tmp\\redmine-client-new-comment-12.md",
+    );
+    assert.strictEqual(resolved, 88);
+  });
+
   test("matches ticket draft uri when scheme changes on Windows path", () => {
     const draft = createEditorStub(
       vscode.Uri.parse("untitled:C:\\tmp\\redmine-client-new-ticket.md"),
@@ -187,6 +201,19 @@ suite("Ticket editor registry", () => {
 
     const resolved = getTicketIdForDraftUri(
       "file:///C:/tmp/redmine-client-new-ticket.md",
+    );
+    assert.strictEqual(resolved, NEW_TICKET_DRAFT_ID);
+  });
+
+  test("matches ticket draft uri when current uri uses Windows backslashes", () => {
+    const draft = createEditorStub(
+      vscode.Uri.parse("file:///C:/tmp/redmine-client-new-ticket.md"),
+      "",
+    );
+    registerNewTicketDraft(draft);
+
+    const resolved = getTicketIdForDraftUri(
+      "untitled:C:\\tmp\\redmine-client-new-ticket.md",
     );
     assert.strictEqual(resolved, NEW_TICKET_DRAFT_ID);
   });
