@@ -3,14 +3,42 @@ import { applyTicketEditorDefaults, TicketEditorContent } from "./ticketEditorCo
 import { getTicketEditorDefaults } from "./ticketEditorDefaultsStore";
 import { IssueMetadata, isIssueMetadataEqual } from "./ticketMetadataTypes";
 import { Ticket } from "../redmine/types";
+import { createInMemoryDraftStorage, DraftStorage } from "./draftPersistence";
 
-const drafts = new Map<number, TicketDraftState>();
+// インメモリキャッシュ（高速読み取り用）
+let cache = new Map<number, TicketDraftState>();
+let persistentStorage: DraftStorage = createInMemoryDraftStorage();
+
+/** 起動時に永続ストレージを注入し、保存済みドラフトをキャッシュに読み込む */
+export const initializeDraftStore = (storage: DraftStorage): void => {
+  persistentStorage = storage;
+  cache = storage.loadAll();
+};
+
+const persist = (ticketId: number, draft: TicketDraftState): void => {
+  persistentStorage.save(ticketId, draft);
+};
 
 export const getTicketDraft = (ticketId: number): TicketDraftState | undefined =>
-  drafts.get(ticketId);
+  cache.get(ticketId);
 
-export const buildNewTicketDraftContent = (): TicketEditorContent =>
-  applyTicketEditorDefaults(getTicketEditorDefaults());
+export const buildNewTicketDraftContent = (options?: {
+  draftId?: string;
+  projectId?: number;
+}): TicketEditorContent => {
+  const base = applyTicketEditorDefaults(getTicketEditorDefaults());
+  if (!options || (!options.draftId && !options.projectId)) {
+    return base;
+  }
+  return {
+    ...base,
+    controlFields: {
+      mode: "new-ticket",
+      ...(options.draftId ? { draft_id: options.draftId } : {}),
+      ...(options.projectId ? { project_id: options.projectId } : {}),
+    },
+  };
+};
 
 export const buildEmptyTicketDraftContent = (): TicketEditorContent => ({
   subject: "",
@@ -56,9 +84,10 @@ export const initializeTicketDraft = (
     baseMetadata: metadata,
     lastKnownRemoteUpdatedAt,
     lastSyncedAt: Date.now(),
-    status: "clean",
+    status: "Synced",
   };
-  drafts.set(ticketId, draft);
+  cache.set(ticketId, draft);
+  persist(ticketId, draft);
   return draft;
 };
 
@@ -69,7 +98,7 @@ export const ensureTicketDraft = (
   metadata: IssueMetadata,
   lastKnownRemoteUpdatedAt?: string,
 ): TicketDraftState => {
-  const draft = drafts.get(ticketId);
+  const draft = cache.get(ticketId);
   if (!draft) {
     return initializeTicketDraft(
       ticketId,
@@ -84,13 +113,14 @@ export const ensureTicketDraft = (
   draft.baseDescription = description;
   draft.baseMetadata = metadata;
   draft.lastKnownRemoteUpdatedAt = lastKnownRemoteUpdatedAt ?? draft.lastKnownRemoteUpdatedAt;
+  persist(ticketId, draft);
   return draft;
 };
 
 export const getTicketDraftContent = (
   ticketId: number,
 ): TicketEditorContent | undefined => {
-  const draft = drafts.get(ticketId);
+  const draft = cache.get(ticketId);
   if (
     !draft ||
     (!draft.draftSubject && !draft.draftDescription && !draft.draftMetadata)
@@ -109,7 +139,7 @@ export const setTicketDraftContent = (
   ticketId: number,
   content: TicketEditorContent,
 ): void => {
-  const draft = drafts.get(ticketId);
+  const draft = cache.get(ticketId);
   if (!draft) {
     return;
   }
@@ -122,16 +152,16 @@ export const setTicketDraftContent = (
     draft.draftSubject = undefined;
     draft.draftDescription = undefined;
     draft.draftMetadata = undefined;
-    return;
+  } else {
+    draft.draftSubject = content.subject;
+    draft.draftDescription = content.description;
+    draft.draftMetadata = content.metadata;
   }
-
-  draft.draftSubject = content.subject;
-  draft.draftDescription = content.description;
-  draft.draftMetadata = content.metadata;
+  persist(ticketId, draft);
 };
 
 export const clearTicketDraftContent = (ticketId: number): void => {
-  const draft = drafts.get(ticketId);
+  const draft = cache.get(ticketId);
   if (!draft) {
     return;
   }
@@ -139,6 +169,7 @@ export const clearTicketDraftContent = (ticketId: number): void => {
   draft.draftSubject = undefined;
   draft.draftDescription = undefined;
   draft.draftMetadata = undefined;
+  persist(ticketId, draft);
 };
 
 export const updateDraftAfterSave = (
@@ -148,7 +179,7 @@ export const updateDraftAfterSave = (
   metadata: IssueMetadata,
   lastKnownRemoteUpdatedAt?: string,
 ): void => {
-  const draft = drafts.get(ticketId);
+  const draft = cache.get(ticketId);
   if (!draft) {
     initializeTicketDraft(
       ticketId,
@@ -165,25 +196,29 @@ export const updateDraftAfterSave = (
   draft.baseMetadata = metadata;
   draft.lastKnownRemoteUpdatedAt = lastKnownRemoteUpdatedAt ?? draft.lastKnownRemoteUpdatedAt;
   draft.lastSyncedAt = Date.now();
-  draft.status = "clean";
+  draft.status = "Synced";
   draft.draftSubject = undefined;
   draft.draftDescription = undefined;
   draft.draftMetadata = undefined;
+  persist(ticketId, draft);
 };
 
 export const markDraftStatus = (ticketId: number, status: TicketDraftStatus): void => {
-  const draft = drafts.get(ticketId);
+  const draft = cache.get(ticketId);
   if (!draft) {
     return;
   }
 
   draft.status = status;
+  persist(ticketId, draft);
 };
 
 export const clearTicketDraft = (ticketId: number): void => {
-  drafts.delete(ticketId);
+  cache.delete(ticketId);
+  persistentStorage.delete(ticketId);
 };
 
 export const clearTicketDrafts = (): void => {
-  drafts.clear();
+  cache.clear();
+  persistentStorage.clear();
 };

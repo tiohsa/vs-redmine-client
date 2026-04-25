@@ -32,7 +32,9 @@ import {
 } from "./views/editorFilename";
 import { ProjectTreeItem, ProjectsTreeProvider } from "./views/projectsView";
 import { parseTicketEditorContent } from "./views/ticketEditorContent";
-import { setTicketDraftContent } from "./views/ticketDraftStore";
+import { initializeDraftStore, setTicketDraftContent } from "./views/ticketDraftStore";
+import { createGlobalStateDraftStorage } from "./views/draftPersistence";
+import { initializeNewTicketDraftStore } from "./views/newTicketDraftStore";
 import { formatTicketLabel } from "./views/ticketLabel";
 import { OpenEditorsTreeProvider } from "./views/openTicketsView";
 import {
@@ -83,6 +85,7 @@ import {
   syncNewTicketDraftContent,
   syncTicketDraft,
 } from "./views/ticketSaveSync";
+import { syncEditorToRedmine } from "./commands/syncToRedmine";
 import { registerFocusRefresh } from "./views/viewFocusRefresh";
 import { initializeTreeExpansionState, setTreeExpanded } from "./views/treeState";
 import {
@@ -94,8 +97,13 @@ import {
 } from "./views/viewIds";
 import { registerConflictDiffProvider } from "./views/conflictDiffProvider";
 import { handleConflict, handleCommentConflict } from "./views/conflictResolver";
+import { setViewContext } from "./views/viewContext";
+
+const TICKET_EDITOR_CONTEXT_KEY = "redmine-client.isTicketEditor";
 
 export async function activate(context: vscode.ExtensionContext) {
+  initializeDraftStore(createGlobalStateDraftStorage(context.globalState));
+  initializeNewTicketDraftStore(context.globalState);
   initializeTreeExpansionState(context.workspaceState);
   registerConflictDiffProvider(context);
   const ticketsProvider = new TicketsTreeProvider();
@@ -321,6 +329,7 @@ export async function activate(context: vscode.ExtensionContext) {
       }
 
       previousActiveEditor = editor;
+      void setViewContext(TICKET_EDITOR_CONTEXT_KEY, !!editor && isTicketEditor(editor));
       openTicketsProvider.refresh();
       updateTicketStatus(editor);
     }),
@@ -780,6 +789,48 @@ export async function activate(context: vscode.ExtensionContext) {
   );
 
   context.subscriptions.push(
+    vscode.commands.registerCommand("redmine-client.toggleRelevantTickets", () => {
+      ticketsProvider.toggleRelevantView();
+    }),
+  );
+
+  context.subscriptions.push(
+    vscode.commands.registerCommand("redmine-client.syncToRedmine", async () => {
+      const editor = vscode.window.activeTextEditor;
+      if (!editor) {
+        return;
+      }
+      const syncResult = await syncEditorToRedmine(editor, {
+        onSubjectUpdated: updateTicketListSubject,
+        onTicketCreated: () => ticketsProvider.refresh(),
+        onCommentsRefresh: (ticketId) => commentsProvider.refreshForTicket(ticketId),
+      });
+      if (!syncResult) {
+        return;
+      }
+      if (syncResult.kind === "ticket") {
+        let result = syncResult.result;
+        if (result.status === "conflict" && result.conflictContext) {
+          result = await handleConflict(result, editor);
+        }
+        notifyTicketSaveResult(result);
+        if (result.status === "created") {
+          ticketsProvider.refresh();
+        }
+      } else {
+        let result = syncResult.result;
+        if (result.status === "conflict" && result.conflictContext) {
+          result = await handleCommentConflict(result, editor);
+        }
+        notifyCommentSaveResult(result);
+        if (shouldRefreshComments(result.status)) {
+          commentsProvider.refreshForTicket(syncResult.ticketId);
+        }
+      }
+    }),
+  );
+
+  context.subscriptions.push(
     vscode.commands.registerCommand(TICKET_SETTINGS_COMMANDS.titleFilter, async () => {
       await ticketsProvider.configureTitleFilter();
       settingsProvider.refresh();
@@ -1108,7 +1159,9 @@ export async function activate(context: vscode.ExtensionContext) {
   });
   openTicketsProvider.refresh();
   ticketsProvider.refresh();
-  updateTicketStatus(vscode.window.activeTextEditor);
+  const initialEditor = vscode.window.activeTextEditor;
+  void setViewContext(TICKET_EDITOR_CONTEXT_KEY, !!initialEditor && isTicketEditor(initialEditor));
+  updateTicketStatus(initialEditor);
 }
 
 export function deactivate() { }

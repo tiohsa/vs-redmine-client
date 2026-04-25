@@ -1,6 +1,13 @@
 import { IssueMetadata } from "./ticketMetadataTypes";
 import { TicketEditorDefaults } from "./ticketEditorTypes";
-import { parseIssueMetadataYaml, serializeIssueMetadataYaml } from "./ticketMetadataYaml";
+import {
+  parseIssueMetadataYaml,
+  serializeIssueMetadataYaml,
+  parseFrontmatterControlFields,
+  serializeFrontmatterControlFields,
+  splitMetadataBlockText,
+} from "./ticketMetadataYaml";
+import { FrontmatterControlFields } from "./ticketMetadataControlFields";
 
 export interface TicketEditorContent {
   subject: string;
@@ -8,6 +15,7 @@ export interface TicketEditorContent {
   metadata: IssueMetadata;
   layout?: TicketEditorLayout;
   metadataBlock?: TicketEditorMetadataBlock;
+  controlFields?: FrontmatterControlFields;
 }
 
 export type TicketEditorDisplaySource = "draft" | "saved";
@@ -53,11 +61,26 @@ const extractSubjectLine = (
   return { subject: "", subjectIndex: -1 };
 };
 
+const parseMetadataBlockText = (
+  metadataLines: string,
+): { metadata: IssueMetadata; controlFields: FrontmatterControlFields } => {
+  const { controlText, issueText } = splitMetadataBlockText(metadataLines);
+  const controlFields = parseFrontmatterControlFields(controlText);
+  const textToParse = issueText.length > 0 ? issueText : metadataLines;
+  const metadata = parseIssueMetadataYaml(textToParse);
+  return { metadata, controlFields };
+};
+
 const extractMetadataBlock = (
   lines: string[],
   startIndex: number,
   options: TicketEditorParseOptions,
-): { metadata: IssueMetadata; description: string; metadataBlock: TicketEditorMetadataBlock } => {
+): {
+  metadata: IssueMetadata;
+  description: string;
+  metadataBlock: TicketEditorMetadataBlock;
+  controlFields: FrontmatterControlFields;
+} => {
   const blockStart = lines.findIndex(
     (line, index) => index >= startIndex && line.trim() === "---",
   );
@@ -67,6 +90,7 @@ const extractMetadataBlock = (
         metadata: options.fallbackMetadata,
         description: normalizeDescription(lines.slice(startIndex)),
         metadataBlock: "missing",
+        controlFields: {},
       };
     }
     throw new Error("Metadata block is missing.");
@@ -85,15 +109,15 @@ const extractMetadataBlock = (
   }
 
   const metadataLines = lines.slice(blockStart + 1, blockEnd).join("\n");
-  const metadata = parseIssueMetadataYaml(metadataLines);
+  const { metadata, controlFields } = parseMetadataBlockText(metadataLines);
   const description = normalizeDescription(lines.slice(blockEnd + 1));
 
-  return { metadata, description, metadataBlock: "present" };
+  return { metadata, description, metadataBlock: "present", controlFields };
 };
 
 const extractMetadataFromStart = (
   lines: string[],
-): { metadata: IssueMetadata; nextIndex: number } => {
+): { metadata: IssueMetadata; nextIndex: number; controlFields: FrontmatterControlFields } => {
   if (lines[0]?.trim() !== "---") {
     throw new Error("Metadata block must appear at the start.");
   }
@@ -106,8 +130,8 @@ const extractMetadataFromStart = (
   }
 
   const metadataLines = lines.slice(1, blockEnd).join("\n");
-  const metadata = parseIssueMetadataYaml(metadataLines);
-  return { metadata, nextIndex: blockEnd + 1 };
+  const { metadata, controlFields } = parseMetadataBlockText(metadataLines);
+  return { metadata, nextIndex: blockEnd + 1, controlFields };
 };
 
 export const parseTicketEditorContent = (
@@ -118,7 +142,7 @@ export const parseTicketEditorContent = (
   const isMetadataFirst = lines[0]?.trim() === "---";
 
   if (isMetadataFirst) {
-    const { metadata, nextIndex } = extractMetadataFromStart(lines);
+    const { metadata, nextIndex, controlFields } = extractMetadataFromStart(lines);
     const { subject, subjectIndex } = extractSubjectLine(lines, nextIndex);
     if (subjectIndex === -1) {
       if (options.allowMissingSubject) {
@@ -128,6 +152,7 @@ export const parseTicketEditorContent = (
           metadata,
           layout: "metadata-first",
           metadataBlock: "present",
+          controlFields,
         };
       }
       throw new Error("Subject line must appear after the metadata block.");
@@ -139,6 +164,7 @@ export const parseTicketEditorContent = (
       metadata,
       layout: "metadata-first",
       metadataBlock: "present",
+      controlFields,
     };
   }
 
@@ -146,7 +172,7 @@ export const parseTicketEditorContent = (
   if (subjectIndex === -1) {
     throw new Error("Subject line is missing.");
   }
-  const { metadata, description, metadataBlock } = extractMetadataBlock(
+  const { metadata, description, metadataBlock, controlFields } = extractMetadataBlock(
     lines,
     subjectIndex + 1,
     options,
@@ -158,21 +184,24 @@ export const parseTicketEditorContent = (
     metadata,
     layout: "subject-first",
     metadataBlock,
+    controlFields,
   };
 };
 
 export const buildTicketEditorContent = (content: TicketEditorContent): string => {
   const description = content.description ?? "";
-  const metadataBlock =
-    content.metadataBlock === "missing"
-      ? ""
-      : `---\n${serializeIssueMetadataYaml(content.metadata)}\n---`;
   const descriptionSuffix = description.length > 0 ? `\n\n${description}` : "";
   const layout = content.layout ?? "metadata-first";
 
   if (content.metadataBlock === "missing") {
     return `# ${content.subject}${descriptionSuffix}`;
   }
+
+  const controlSerialized =
+    content.controlFields && Object.keys(content.controlFields).length > 0
+      ? serializeFrontmatterControlFields(content.controlFields) + "\n"
+      : "";
+  const metadataBlock = `---\n${controlSerialized}${serializeIssueMetadataYaml(content.metadata)}\n---`;
 
   if (layout === "metadata-first") {
     return `${metadataBlock}\n\n# ${content.subject}${descriptionSuffix}`;

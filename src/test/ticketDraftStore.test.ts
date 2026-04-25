@@ -27,10 +27,10 @@ suite("Ticket draft store", () => {
     assert.strictEqual(draft?.baseSubject, "Subject");
     assert.strictEqual(draft?.baseDescription, "Body");
     assert.strictEqual(draft?.lastKnownRemoteUpdatedAt, "2024-01-01T00:00:00Z");
-    assert.strictEqual(draft?.status, "clean");
+    assert.strictEqual(draft?.status, "Synced");
 
-    markDraftStatus(10, "conflict");
-    assert.strictEqual(getTicketDraft(10)?.status, "conflict");
+    markDraftStatus(10, "Conflict");
+    assert.strictEqual(getTicketDraft(10)?.status, "Conflict");
 
     updateDraftAfterSave(
       10,
@@ -43,6 +43,6 @@ suite("Ticket draft store", () => {
     assert.strictEqual(updated?.baseSubject, "Next");
     assert.strictEqual(updated?.baseDescription, "Next Body");
     assert.strictEqual(updated?.lastKnownRemoteUpdatedAt, "2024-01-02T00:00:00Z");
-    assert.strictEqual(updated?.status, "clean");
+    assert.strictEqual(updated?.status, "Synced");
   });
 });

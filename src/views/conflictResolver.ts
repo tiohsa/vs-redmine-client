@@ -113,7 +113,7 @@ export async function forceSaveLocal(
         draft.baseMetadata,
         context.remoteUpdatedAt,
     );
-    markDraftStatus(context.ticketId, "dirty");
+    markDraftStatus(context.ticketId, "Dirty");
 
     // Now sync again with the updated timestamp.
     const result = await syncTicketDraft({

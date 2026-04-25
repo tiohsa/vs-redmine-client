@@ -59,6 +59,7 @@ suite("Ticket editor content", () => {
       },
       layout: "metadata-first",
       metadataBlock: "present",
+      controlFields: {},
     });
   });
 
@@ -89,6 +90,7 @@ suite("Ticket editor content", () => {
       },
       layout: "subject-first",
       metadataBlock: "present",
+      controlFields: {},
     });
   });
 

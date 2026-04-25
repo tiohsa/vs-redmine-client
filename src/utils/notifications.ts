@@ -1,6 +1,8 @@
 import * as vscode from "vscode";
+import { LogEntry, logOperation } from "./redmineLogger";
 
-export const showError = (message: string): void => {
+export const showError = (message: string, logEntry?: LogEntry): void => {
+  if (logEntry) { logOperation(logEntry); }
   void vscode.window.showErrorMessage(message);
 };
 
