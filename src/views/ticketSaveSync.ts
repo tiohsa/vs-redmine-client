@@ -1109,6 +1109,10 @@ export const saveTicketDraftLocally = (
   if (!ticketId) { return undefined; }
 
   if (ticketId === NEW_TICKET_DRAFT_ID) {
+    addOfflineNewTicket({
+      content: editor.document.getText(),
+      documentUri: editor.document.uri.toString(),
+    });
     return buildResult("queued", "新規チケットの下書きをローカルに保存しました。");
   }
 
@@ -1126,6 +1130,21 @@ export const saveTicketDraftLocally = (
     });
     setTicketDraftContent(ticketId, parsed);
     markDraftStatus(ticketId, "Dirty");
+    const draft = getTicketDraft(ticketId);
+    if (draft) {
+      addOfflineTicketUpdate(ticketId, {
+        ticketId,
+        baseSubject: draft.baseSubject,
+        baseDescription: draft.baseDescription,
+        baseMetadata: draft.baseMetadata,
+        lastKnownRemoteUpdatedAt: draft.lastKnownRemoteUpdatedAt,
+        subject: parsed.subject ?? draft.baseSubject,
+        description: parsed.description ?? draft.baseDescription,
+        metadata: parsed.metadata ?? draft.baseMetadata,
+        layout: parsed.layout,
+        metadataBlock: parsed.metadataBlock,
+      });
+    }
     return buildResult("queued", "ローカルに保存しました。Redmine への反映には同期コマンドを実行してください。");
   } catch {
     return buildResult("failed", "ドラフトの解析に失敗しました。");

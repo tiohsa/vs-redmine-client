@@ -22,7 +22,7 @@
     "onView:redmine-clientActivityTicketSettings",
     "onView:redmine-clientActivityProjects",
     "onView:redmine-clientActivityTickets",
-    "onView:redmine-clientActivityOpenTickets",
+    "onView:redmine-clientActivityUnsyncedFiles",
     "onView:redmine-clientActivityComments",
     "onCommand:redmine-client.refreshTickets",
     "onCommand:redmine-client.refreshProjects",
@@ -260,6 +260,16 @@
         "icon": "$(cloud-upload)"
       },
       {
+        "command": "redmine-client.syncOpenEditor",
+        "title": "Redmine: Upload Open Editor",
+        "icon": "$(cloud-upload)"
+      },
+      {
+        "command": "redmine-client.syncAllOpenEditors",
+        "title": "Redmine: Upload All Open Editors",
+        "icon": "$(cloud-upload)"
+      },
+      {
         "command": "redmine-client.toggleRelevantTickets",
         "title": "Redmine: 絞り込み表示切替",
         "icon": "$(filter)"
@@ -272,8 +282,8 @@
           "name": "Ticket Settings"
         },
         {
-          "id": "redmine-clientActivityOpenTickets",
-          "name": "Open Editors"
+          "id": "redmine-clientActivityUnsyncedFiles",
+          "name": "Unsynced Files"
         },
         {
           "id": "redmine-clientActivityProjects",
@@ -342,13 +352,11 @@
           "command": "redmine-client.refreshComments",
           "when": "view == redmine-clientActivityComments",
           "group": "navigation@1"
-        }
-      ],
-      "editor/title": [
+        },
         {
-          "command": "redmine-client.syncToRedmine",
-          "when": "resourceScheme == file && redmine-client.isTicketEditor",
-          "group": "navigation"
+          "command": "redmine-client.runOfflineSync",
+          "when": "view == redmine-clientActivityUnsyncedFiles",
+          "group": "navigation@1"
         }
       ],
       "view/item/context": [

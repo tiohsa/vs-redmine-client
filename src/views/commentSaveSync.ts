@@ -13,6 +13,7 @@ import {
 } from "../utils/markdownImageUpload";
 import { resolveEditorBaseDir } from "../utils/editorBaseDir";
 import {
+  getCommentIdForEditor,
   getEditorContentType,
   getTicketIdForEditor,
   isTicketEditor,
@@ -397,7 +398,15 @@ export const saveCommentDraftLocally = (
   if (contentType !== "comment" && contentType !== "commentDraft") { return undefined; }
   const ticketId = getTicketIdForEditor(editor);
   if (!ticketId) { return undefined; }
-  setCommentDraft(ticketId, editor.document.getText());
+  const body = editor.document.getText();
+  setCommentDraft(ticketId, body);
+  const commentId = getCommentIdForEditor(editor);
+  addOfflineCommentUpdate({
+    ticketId,
+    commentId,
+    body,
+    documentUri: editor.document.uri.toString(),
+  });
   return buildResult("queued", "ローカルに保存しました。Redmine への反映には同期コマンドを実行してください。");
 };
 

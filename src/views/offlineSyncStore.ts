@@ -1,3 +1,4 @@
+import type { Memento } from "vscode";
 import { IssueMetadata } from "./ticketMetadataTypes";
 import { TicketEditorLayout, TicketEditorMetadataBlock } from "./ticketEditorContent";
 
@@ -36,10 +37,62 @@ export type OfflineSyncQueue = {
   }>;
 };
 
+const STORAGE_KEY = "redmine.offlineSyncQueue";
+
+type SerializedQueue = {
+  tickets: [number, OfflineTicketUpdate][];
+  comments: OfflineCommentUpdate[];
+  newTickets: Array<{
+    content: string;
+    projectId?: number;
+    documentUri?: string;
+    baseDir?: string;
+  }>;
+};
+
 const queue: OfflineSyncQueue = {
   tickets: new Map<number, OfflineTicketUpdate>(),
   comments: [],
   newTickets: [],
+};
+
+let memento: Memento | undefined;
+
+const persist = (): void => {
+  if (!memento) {
+    return;
+  }
+  const serialized: SerializedQueue = {
+    tickets: Array.from(queue.tickets.entries()),
+    comments: queue.comments,
+    newTickets: queue.newTickets,
+  };
+  void memento.update(STORAGE_KEY, serialized);
+};
+
+export const initializeOfflineSyncStore = (storage: Memento): void => {
+  memento = storage;
+  const raw = storage.get<SerializedQueue>(STORAGE_KEY);
+  if (!raw) {
+    return;
+  }
+  queue.tickets = new Map(
+    Array.isArray(raw.tickets)
+      ? raw.tickets.filter(
+          (e): e is [number, OfflineTicketUpdate] =>
+            Array.isArray(e) &&
+            typeof e[0] === "number" &&
+            e[1] !== null &&
+            typeof e[1] === "object",
+        )
+      : [],
+  );
+  queue.comments = Array.isArray(raw.comments)
+    ? raw.comments.filter((c) => c !== null && typeof c === "object")
+    : [];
+  queue.newTickets = Array.isArray(raw.newTickets)
+    ? raw.newTickets.filter((t) => t !== null && typeof t === "object")
+    : [];
 };
 
 export const addOfflineTicketUpdate = (
@@ -56,6 +109,7 @@ export const addOfflineTicketUpdate = (
     lastKnownRemoteUpdatedAt:
       existing?.lastKnownRemoteUpdatedAt ?? update.lastKnownRemoteUpdatedAt,
   });
+  persist();
 };
 
 const replaceFirstMatch = (
@@ -74,6 +128,7 @@ const replaceFirstMatch = (
 export const addOfflineCommentUpdate = (update: OfflineCommentUpdate): void => {
   if (update.commentId !== undefined) {
     if (replaceFirstMatch(queue.comments, (item) => item.commentId === update.commentId, update)) {
+      persist();
       return;
     }
   }
@@ -85,10 +140,12 @@ export const addOfflineCommentUpdate = (update: OfflineCommentUpdate): void => {
         update,
       )
     ) {
+      persist();
       return;
     }
   }
   queue.comments.push(update);
+  persist();
 };
 
 export const addOfflineNewTicket = (update: {
@@ -103,10 +160,12 @@ export const addOfflineNewTicket = (update: {
     );
     if (index !== -1) {
       queue.newTickets[index] = { ...queue.newTickets[index], ...update };
+      persist();
       return;
     }
   }
   queue.newTickets.push(update);
+  persist();
 };
 
 export const getOfflineSyncQueue = (): OfflineSyncQueue => ({
@@ -119,10 +178,35 @@ export const clearOfflineSyncQueue = (): void => {
   queue.tickets.clear();
   queue.comments = [];
   queue.newTickets = [];
+  persist();
 };
 
 export const replaceOfflineSyncQueue = (next: OfflineSyncQueue): void => {
   queue.tickets = new Map(next.tickets);
   queue.comments = [...next.comments];
   queue.newTickets = [...next.newTickets];
+  persist();
+};
+
+export const removeOfflineTicketUpdate = (ticketId: number): void => {
+  queue.tickets.delete(ticketId);
+  persist();
+};
+
+export const removeOfflineNewTicket = (documentUri: string): void => {
+  queue.newTickets = queue.newTickets.filter((item) => item.documentUri !== documentUri);
+  persist();
+};
+
+export const removeOfflineCommentEntry = (params: { commentId?: number; documentUri?: string }): void => {
+  queue.comments = queue.comments.filter((item) => {
+    if (params.commentId !== undefined && item.commentId === params.commentId) {
+      return false;
+    }
+    if (params.documentUri && item.documentUri === params.documentUri) {
+      return false;
+    }
+    return true;
+  });
+  persist();
 };
