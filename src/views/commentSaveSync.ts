@@ -14,7 +14,6 @@ import {
 import { resolveEditorBaseDir } from "../utils/editorBaseDir";
 import {
   getEditorContentType,
-  getCommentIdForEditor,
   getTicketIdForEditor,
   isTicketEditor,
   registerCommentDocument,
@@ -29,6 +28,7 @@ import { applyEditorContent } from "./ticketPreview";
 import { UploadSummary } from "./saveUploadTypes";
 import { getOfflineSyncMode } from "../config/settings";
 import { addOfflineCommentUpdate, OfflineCommentUpdate } from "./offlineSyncStore";
+import { setCommentDraft } from "./commentDraftStore";
 
 export interface CommentSaveDependencies {
   addComment: typeof addComment;
@@ -389,52 +389,23 @@ export const syncNewCommentDraft = async (input: {
   }
 };
 
+export const saveCommentDraftLocally = (
+  editor: vscode.TextEditor,
+): CommentSaveResult | undefined => {
+  if (!isTicketEditor(editor)) { return undefined; }
+  const contentType = getEditorContentType(editor);
+  if (contentType !== "comment" && contentType !== "commentDraft") { return undefined; }
+  const ticketId = getTicketIdForEditor(editor);
+  if (!ticketId) { return undefined; }
+  setCommentDraft(ticketId, editor.document.getText());
+  return buildResult("queued", "ローカルに保存しました。Redmine への反映には同期コマンドを実行してください。");
+};
+
 export const handleCommentEditorSave = async (
   editor: vscode.TextEditor,
-  deps?: Partial<CommentSaveDependencies>,
+  _deps?: Partial<CommentSaveDependencies>,
 ): Promise<CommentSaveResult | undefined> => {
-  if (!isTicketEditor(editor)) {
-    return undefined;
-  }
-
-  const contentType = getEditorContentType(editor);
-  if (contentType !== "comment" && contentType !== "commentDraft") {
-    return undefined;
-  }
-
-  if (contentType === "commentDraft") {
-    const ticketId = getTicketIdForEditor(editor);
-    if (!ticketId) {
-      return undefined;
-    }
-
-    return syncNewCommentDraft({
-      ticketId,
-      content: editor.document.getText(),
-      editor,
-      deps,
-      onCreated: async ({ commentId, projectId }) => {
-        finalizeNewCommentDraftState({
-          editor,
-          ticketId,
-          projectId,
-          commentId,
-        });
-      },
-    });
-  }
-
-  const commentId = getCommentIdForEditor(editor);
-  if (!commentId) {
-    return undefined;
-  }
-
-  return syncCommentDraft({
-    commentId,
-    content: editor.document.getText(),
-    editor,
-    deps,
-  });
+  return saveCommentDraftLocally(editor);
 };
 
 export const applyQueuedCommentUpdate = async (input: {

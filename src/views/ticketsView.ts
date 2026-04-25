@@ -9,7 +9,9 @@ import {
 } from "../config/settings";
 import { getProjectSelection } from "../config/projectSelection";
 import { listIssues } from "../redmine/issues";
+import { getCurrentUserId } from "../redmine/users";
 import { Ticket } from "../redmine/types";
+import { getTicketDraft } from "./ticketDraftStore";
 import { showError } from "../utils/notifications";
 import { MAX_VIEW_ITEMS } from "./viewLimits";
 import { setViewContext } from "./viewContext";
@@ -264,6 +266,34 @@ export class TicketSettingsItem extends vscode.TreeItem {
   }
 }
 
+const getDraftStatusIcon = (ticketId: number): vscode.ThemeIcon | undefined => {
+  const draft = getTicketDraft(ticketId);
+  if (!draft) { return undefined; }
+  switch (draft.status) {
+    case "Draft": return new vscode.ThemeIcon("edit");
+    case "Dirty": return new vscode.ThemeIcon("circle-filled", new vscode.ThemeColor("list.warningForeground"));
+    case "Syncing": return new vscode.ThemeIcon("loading~spin");
+    case "Failed": return new vscode.ThemeIcon("error");
+    case "Conflict": return new vscode.ThemeIcon("warning");
+    default: return undefined;
+  }
+};
+
+const RELEVANT_DAYS_MS = 7 * 24 * 60 * 60 * 1000;
+
+export const isTicketRelevant = (
+  ticket: Ticket,
+  currentUserId?: number,
+): boolean => {
+  const draft = getTicketDraft(ticket.id);
+  if (draft && draft.status !== "Synced") { return true; }
+  if (ticket.updatedAt && Date.now() - new Date(ticket.updatedAt).getTime() <= RELEVANT_DAYS_MS) {
+    return true;
+  }
+  if (currentUserId && ticket.assigneeId === currentUserId) { return true; }
+  return false;
+};
+
 export const buildTicketsViewItems = (
   tickets: Ticket[],
   selectedProjectId?: number,
@@ -335,6 +365,8 @@ export class TicketsTreeProvider implements vscode.TreeDataProvider<vscode.TreeI
   private settings = getDefaultTicketListSettings();
   private rootNodes: Array<TreeNode<Ticket>> = [];
   private ticketItemsById = new Map<number, TicketTreeItem>();
+  private showRelevantOnly: boolean = true;
+  private currentUserId?: number;
 
   readonly onDidChangeTreeData = this.emitter.event;
 
@@ -366,6 +398,11 @@ export class TicketsTreeProvider implements vscode.TreeDataProvider<vscode.TreeI
 
       this.tickets = result.tickets;
       rememberTicketSummaries(this.tickets);
+      try {
+        this.currentUserId = await getCurrentUserId();
+      } catch {
+        // Ignore user ID lookup failure.
+      }
       this.emitter.fire();
     } catch (error) {
       const message = (error as Error).message;
@@ -438,15 +475,22 @@ export class TicketsTreeProvider implements vscode.TreeDataProvider<vscode.TreeI
     if (this.errorMessage || !this.selectedProjectId) {
       return;
     }
-    const { treeResult } = this.getVisibleTreeResult();
+    const preFiltered = this.showRelevantOnly
+      ? this.tickets.filter((t) => isTicketRelevant(t, this.currentUserId))
+      : this.tickets;
+    const { treeResult } = this.getVisibleTreeResult(preFiltered);
     const nodeIds = collectTreeNodeIds(treeResult.roots).map(String);
     setTreeExpandedBulk(TICKETS_VIEW_KEY, nodeIds, false);
     this.emitter.fire();
   }
 
   getViewItems(): vscode.TreeItem[] {
+    const visibleTickets = this.showRelevantOnly
+      ? this.tickets.filter((t) => isTicketRelevant(t, this.currentUserId))
+      : this.tickets;
+
     const items = buildTicketsViewItems(
-      this.tickets,
+      visibleTickets,
       this.selectedProjectId,
       this.errorMessage,
       this.settings,
@@ -460,9 +504,18 @@ export class TicketsTreeProvider implements vscode.TreeDataProvider<vscode.TreeI
       return items;
     }
 
-    const { treeResult } = this.getVisibleTreeResult();
+    const { treeResult } = this.getVisibleTreeResult(visibleTickets);
     this.rootNodes = treeResult.roots;
     return items;
+  }
+
+  toggleRelevantView(): void {
+    this.showRelevantOnly = !this.showRelevantOnly;
+    this.emitter.fire();
+  }
+
+  isRelevantOnlyMode(): boolean {
+    return this.showRelevantOnly;
   }
 
   getTicketItemById(ticketId: number): TicketTreeItem | undefined {
@@ -477,11 +530,12 @@ export class TicketsTreeProvider implements vscode.TreeDataProvider<vscode.TreeI
     return this.selectedProjectId;
   }
 
-  private getVisibleTreeResult(): {
+  private getVisibleTreeResult(preFiltered?: Ticket[]): {
     visibleTickets: Ticket[];
     treeResult: TreeBuildResult<Ticket>;
   } {
-    const filteredTickets = applyTicketFilters(this.tickets, this.settings.filters);
+    const base = preFiltered ?? this.tickets;
+    const filteredTickets = applyTicketFilters(base, this.settings.filters);
     const sortedTickets = applyTicketSort(filteredTickets, this.settings.sort);
     const visibleTickets = sortedTickets.slice(0, MAX_VIEW_ITEMS);
     const treeResult = buildTree(buildTicketTreeSources(visibleTickets));
@@ -886,7 +940,8 @@ export class TicketTreeItem extends vscode.TreeItem {
     } else {
       this.description = status || dueDateIndicator || "";
     }
-    this.iconPath = createSelectionIcon(
+    const draftStatusIcon = getDraftStatusIcon(node.data.id);
+    this.iconPath = draftStatusIcon ?? createSelectionIcon(
       node.children.length > 0 ? "folder" : "file-text",
       isSelected,
     );

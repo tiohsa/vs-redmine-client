@@ -1,56 +1,61 @@
-# redmine-client Development Guidelines
+# redmine-client AGENTS ガイド
 
-Auto-generated from all feature plans. Last updated: 2025-12-26
-日本語で回答する
+最終更新日: 2026-04-25
 
-## Active Technologies
-- N/A (Redmine is the system of record) (001-project-list-sidebar)
-- N/A (in-memory editor mapping and draft state) (001-ticket-editor-pinning)
-- In-memory ticket draft state (no persistent storage changes) (001-editor-save-sync)
-- N/A (filenames computed from identifiers; no new persistence) (001-stable-editor-filename)
-- N/A (in-memory state only) (001-activitybar-view)
-- N/A (no new persistence) (001-add-ticket-icon)
-- TypeScript 5.9 + VS Code Extension API, webpack, @vscode/test-cli, ESLint (001-add-settings-panel)
-- In-memory state only (no persistence changes) (001-add-settings-panel)
-- なし（下書き/表示はインメモリ） (001-show-saved-editor)
-- TypeScript 5.9 + VS Code Extension API, webpack 5, @vscode/test-cli, ESLint (001-ticket-metadata-editor)
-- N/A（インメモリのみ） (001-ticket-metadata-editor)
-- N/A（永続化変更なし、インメモリのみ） (001-iconize-view-buttons)
-- インメモリ（永続化なし） (001-editor-default-value)
-- N/A (インメモリのみ、永続化変更なし) (001-children-ticket-create)
-- VS Code workspace storage (ワークスペース内で永続保持) (001-tree-expand-collapse)
-- N/A (in-memory) (001-metadata-before-subject)
-- N/A (in-memory only) (001-add-child-ticket-icon)
-- N/A (local file system only) (001-fix-editor-path)
-- N/A (static asset update) (001-activitybar-icon)
-- File-based template content from an absolute path (settings-controlled) (001-editor-template)
-- N/A (in-memory state; editor file naming only) (001-comment-save-rename)
-- ファイル（既定値定義）, その他はN/A (001-remove-activitybar-default)
-- Local filesystem (`redmine-client.editorStorageDirectory/templates`) (001-project-template)
-- RedmineサーバーのアップロードAPI（/uploads.json）と既存のコメント更新APIを利用 (001-comment-image-upload)
+## 1. 基本方針
+- プロジェクト名: `redmine-client`（VS Code拡張）
+- 目的: Redmineチケット運用をVS Code内で完結させる開発を安全かつ一貫して進める。
+- 回答・ドキュメント・レビューコメントは日本語で記述する。
+- ガイドは網羅列挙より、運用判断に必要な最新情報を短く正確に保つ。
 
-- TypeScript 5.9 + VS Code Extension API, webpack, @vscode/test-cli (001-redmine-ticket-workflow)
+## 2. 技術ベースライン
+- 言語: TypeScript 5.9
+- 主要依存: VS Code Extension API, webpack 5, `@vscode/test-cli`, ESLint
+- ターゲット: VS Code 1.107+
+- 実装前提: 既存のstrict TypeScript構成・拡張機能実行モデルを維持する。
 
-## Project Structure
+## 3. リポジトリ構成
+- `src/`: 拡張機能本体コード
+- `src/test/`: テストコード（`@vscode/test-cli` + Mocha）
+- `specs/`: 機能仕様・計画・タスク
+- `spec-docs/`: 統合仕様書などの補足ドキュメント
+- `scripts/`: 補助スクリプト
+- `dist/`: ビルド成果物
+- `out/`: テストコンパイル出力
 
-```text
-src/
-tests/
-```
+## 4. 開発コマンド（pnpm基準）
+- `pnpm test`
+- `pnpm run lint`
+- `pnpm run compile`
+- `pnpm run test:unsafe`
 
-## Commands
+## 5. コーディング規約
+- TypeScript `strict`を必須とし、型安全性を下げる変更を行わない。
+- 既存のESLint設定（`eslint.config.mjs`）に準拠する。
+- 要件に直接関係しない大規模リファクタは行わない。
+- 自分が作業していない既存変更を勝手に巻き戻さない。
 
-npm test && npm run lint
+## 6. テスト方針
+- 変更箇所に対応する`src/test`のテストを追加または更新する。
+- 最低限、`pnpm test`または影響範囲の対象テストを実行して結果を確認する。
+- テスト未実行の場合は、理由と想定影響を作業報告に明記する。
 
-## Code Style
+## 7. スキル利用ルール
+- 利用可能スキル:
+  - `playwright`: ブラウザ操作・UIフロー検証が必要な場合に使用
+  - `skill-creator`: スキルの新規作成・更新時に使用
+  - `skill-installer`: スキル一覧取得・インストール時に使用
+- 発火条件:
+  - ユーザーがスキル名を明示した場合
+  - 依頼内容がスキル説明に明確に一致する場合
+- 適用順:
+  - 複数候補がある場合は最小セットを選び、必要なら順序を明示する。
+  - `SKILL.md`を先に確認し、必要最小限の関連リソースのみ読む。
+- フォールバック:
+  - スキルファイル欠落や手順不整合がある場合は理由を短く示し、通常手順で継続する。
 
-TypeScript 5.9: Follow standard conventions
-
-## Recent Changes
-- 001-comment-image-upload: Added TypeScript 5.9 + VS Code Extension API, webpack 5, @vscode/test-cli, ESLint
-- 001-upload-markdown-images: Added TypeScript 5.9 + VS Code Extension API, webpack 5, @vscode/test-cli, ESLint
-- 001-project-template: Added TypeScript 5.9 + VS Code Extension API, webpack 5, @vscode/test-cli, ESLint
-
-
-<!-- MANUAL ADDITIONS START -->
-<!-- MANUAL ADDITIONS END -->
+## 8. 更新ルール
+- 以下のいずれかが発生したPRでは、同PR内で`AGENTS.md`を更新する。
+  - `package.json`のscriptsや主要開発フローの変更
+  - 主要ディレクトリ構成の変更
+  - 主要機能specの追加（`specs/`配下）

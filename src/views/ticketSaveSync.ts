@@ -17,8 +17,14 @@ import { TicketUpdateFields } from "../redmine/types";
 import {
   getTicketDraft,
   markDraftStatus,
+  setTicketDraftContent,
   updateDraftAfterSave,
 } from "./ticketDraftStore";
+import {
+  markNewTicketDraftFailed,
+  markNewTicketDraftSynced,
+  markNewTicketDraftSyncing,
+} from "./newTicketDraftStore";
 import { buildTicketEditorContent, parseTicketEditorContent } from "./ticketEditorContent";
 import { IssueMetadata } from "./ticketMetadataTypes";
 import {
@@ -407,7 +413,7 @@ export const syncTicketDraft = async (input: {
     return buildResult("no_change", "No changes to save.", { uploadSummary });
   }
 
-  markDraftStatus(input.ticketId, "dirty");
+  markDraftStatus(input.ticketId, "Dirty");
 
   if (draft.lastKnownRemoteUpdatedAt) {
     try {
@@ -416,7 +422,7 @@ export const syncTicketDraft = async (input: {
       }
       const remoteUpdatedAt = remoteDetail.ticket.updatedAt;
       if (remoteUpdatedAt && remoteUpdatedAt !== draft.lastKnownRemoteUpdatedAt) {
-        markDraftStatus(input.ticketId, "conflict");
+        markDraftStatus(input.ticketId, "Conflict");
         return buildResult("conflict", "Remote changes detected. Refresh before saving.", {
           conflictContext: {
             ticketId: input.ticketId,
@@ -431,7 +437,7 @@ export const syncTicketDraft = async (input: {
     } catch (error) {
       const result = mapErrorToResult(error);
       if (result.status === "conflict") {
-        markDraftStatus(input.ticketId, "conflict");
+        markDraftStatus(input.ticketId, "Conflict");
       }
       return result;
     }
@@ -502,7 +508,7 @@ export const syncTicketDraft = async (input: {
     }
     const result = mapErrorToResult(error);
     if (result.status === "conflict") {
-      markDraftStatus(input.ticketId, "conflict");
+      markDraftStatus(input.ticketId, "Conflict");
     }
     return result;
   }
@@ -602,7 +608,7 @@ export const queueTicketDraft = async (input: {
     metadataBlock: parsed.metadataBlock,
     baseDir,
   });
-  markDraftStatus(input.ticketId, "dirty");
+  markDraftStatus(input.ticketId, "Dirty");
   if (input.editor) {
     const clearedMetadata: IssueMetadata = { ...parsed.metadata, children: [] };
     const nextContent = buildTicketEditorContent({
@@ -632,6 +638,19 @@ export const syncNewTicketDraft = async (input: {
   const deps = { ...defaultCreateDeps, ...input.deps };
   const baseDir = resolveEditorBaseDir({ editor: input.editor });
   const projectId = resolveProjectIdForEditor(input.editor);
+
+  let draftId: string | undefined;
+  try {
+    const parsedForDraftId = parseTicketEditorContent(input.editor.document.getText(), { allowMissingMetadata: true, fallbackMetadata: { tracker: "", priority: "", status: "", due_date: "", children: [] } });
+    draftId = parsedForDraftId.controlFields?.draft_id;
+  } catch {
+    // Ignore parse errors for draft_id lookup.
+  }
+
+  if (draftId) {
+    markNewTicketDraftSyncing(draftId);
+  }
+
   const { result, createdId, parsed } = await createTicketFromContent({
     content: input.editor.document.getText(),
     projectId,
@@ -640,7 +659,14 @@ export const syncNewTicketDraft = async (input: {
   });
 
   if (result.status !== "created" || !createdId || !parsed || !projectId) {
+    if (draftId) {
+      markNewTicketDraftFailed(draftId);
+    }
     return result;
+  }
+
+  if (draftId) {
+    markNewTicketDraftSynced(draftId, createdId);
   }
 
   removeTicketEditorByDocument(input.editor.document);
@@ -1069,39 +1095,52 @@ export const reloadTicketEditor = async (input: {
   }
 };
 
-export const handleTicketEditorSave = async (
+/**
+ * Ctrl+S 時のローカル保存処理。Redmine API は呼ばない。
+ * 明示的な同期は `syncEditorToRedmine` コマンドで行う。
+ */
+export const saveTicketDraftLocally = (
   editor: vscode.TextEditor,
-  options: { onSubjectUpdated?: (ticketId: number, subject: string) => void } = {},
-): Promise<TicketSaveResult | undefined> => {
-  if (!isTicketEditor(editor)) {
-    return undefined;
-  }
-
-  if (getEditorContentType(editor) !== "ticket") {
-    return undefined;
-  }
+): TicketSaveResult | undefined => {
+  if (!isTicketEditor(editor)) { return undefined; }
+  if (getEditorContentType(editor) !== "ticket") { return undefined; }
 
   const ticketId = getTicketIdForEditor(editor);
-  if (!ticketId) {
-    return undefined;
-  }
+  if (!ticketId) { return undefined; }
 
   if (ticketId === NEW_TICKET_DRAFT_ID) {
-    return syncNewTicketDraft({ editor });
+    return buildResult("queued", "新規チケットの下書きをローカルに保存しました。");
   }
 
-  if (getOfflineSyncMode() === "manual") {
-    return queueTicketDraft({
-      ticketId,
-      content: editor.document.getText(),
-      editor,
-      onSubjectUpdated: options.onSubjectUpdated,
+  const content = editor.document.getText();
+  try {
+    const parsed = parseTicketEditorContent(content, {
+      allowMissingMetadata: true,
+      fallbackMetadata: {
+        tracker: "",
+        priority: "",
+        status: "",
+        due_date: "",
+        children: [],
+      },
     });
+    setTicketDraftContent(ticketId, parsed);
+    markDraftStatus(ticketId, "Dirty");
+    return buildResult("queued", "ローカルに保存しました。Redmine への反映には同期コマンドを実行してください。");
+  } catch {
+    return buildResult("failed", "ドラフトの解析に失敗しました。");
+  }
+};
+
+export const handleTicketEditorSave = async (
+  editor: vscode.TextEditor,
+  _options: { onSubjectUpdated?: (ticketId: number, subject: string) => void } = {},
+): Promise<TicketSaveResult | undefined> => {
+  const result = saveTicketDraftLocally(editor);
+  if (result !== undefined) {
+    return result;
   }
 
-  return syncTicketDraft({
-    ticketId,
-    content: editor.document.getText(),
-    onSubjectUpdated: options.onSubjectUpdated,
-  });
+  // ticket エディタ以外（コメント等）は従来通り何もしない
+  return undefined;
 };

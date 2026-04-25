@@ -28,7 +28,17 @@ export interface TicketSaveResult {
   conflictContext?: ConflictContext;
 }
 
-export type TicketDraftStatus = "clean" | "dirty" | "conflict";
+export type TicketMode = "new-ticket" | "ticket-update" | "comment";
+
+export type LegacyTicketDraftStatus = "clean" | "dirty" | "conflict";
+export type TicketDraftStatus =
+  | LegacyTicketDraftStatus
+  | "Draft"
+  | "Dirty"
+  | "Syncing"
+  | "Synced"
+  | "Failed"
+  | "Conflict";
 
 export interface TicketDraftState {
   ticketId: number;
@@ -40,5 +50,6 @@ export interface TicketDraftState {
   draftMetadata?: IssueMetadata;
   lastKnownRemoteUpdatedAt?: string;
   lastSyncedAt?: number;
+  lockVersion?: number;
   status: TicketDraftStatus;
 }

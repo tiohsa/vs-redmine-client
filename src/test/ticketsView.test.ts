@@ -9,7 +9,8 @@ const resolveItems = async (provider: TicketsTreeProvider): Promise<unknown[]> =
 suite("Tickets view updates", () => {
   test("notifies listeners when a subject update is applied", () => {
     const provider = new TicketsTreeProvider();
-    provider.setTicketsState([{ id: 1, subject: "Old", projectId: 1 }], 1);
+    const recentDate = new Date().toISOString();
+    provider.setTicketsState([{ id: 1, subject: "Old", projectId: 1, updatedAt: recentDate }], 1);
 
     let fired = 0;
     const disposable = provider.onDidChangeTreeData(() => {
@@ -26,10 +27,11 @@ suite("Tickets view updates", () => {
 
   test("keeps item order when updating a subject", async () => {
     const provider = new TicketsTreeProvider();
+    const recentDate = new Date().toISOString();
     provider.setTicketsState(
       [
-        { id: 1, subject: "First", projectId: 1 },
-        { id: 2, subject: "Second", projectId: 1 },
+        { id: 1, subject: "First", projectId: 1, updatedAt: recentDate },
+        { id: 2, subject: "Second", projectId: 1, updatedAt: recentDate },
       ],
       1,
     );

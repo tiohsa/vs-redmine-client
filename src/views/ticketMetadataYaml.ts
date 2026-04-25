@@ -4,6 +4,91 @@ import {
   IssueMetadata,
   IssueMetadataKey,
 } from "./ticketMetadataTypes";
+import { FrontmatterControlFields } from "./ticketMetadataControlFields";
+import { TicketMode } from "./ticketSaveTypes";
+
+const VALID_TICKET_MODES: TicketMode[] = ["new-ticket", "ticket-update", "comment"];
+
+/**
+ * メタデータブロック全体テキストから `issue:` より前の制御フィールド部分と
+ * `issue:` ブロック部分を分離する。
+ */
+export const splitMetadataBlockText = (
+  text: string,
+): { controlText: string; issueText: string } => {
+  const lines = text.split(/\r?\n/);
+  const issueLineIndex = lines.findIndex((line) => line.trim() === "issue:");
+  if (issueLineIndex === -1) {
+    return { controlText: text, issueText: "" };
+  }
+  return {
+    controlText: lines.slice(0, issueLineIndex).join("\n"),
+    issueText: lines.slice(issueLineIndex).join("\n"),
+  };
+};
+
+/**
+ * 制御フィールドの flat YAML テキストをパースする。
+ * 未知のキーは warn-and-ignore。
+ */
+export const parseFrontmatterControlFields = (text: string): FrontmatterControlFields => {
+  const fields: FrontmatterControlFields = {};
+  const lines = text.split(/\r?\n/);
+
+  for (const line of lines) {
+    if (line.trim().length === 0) { continue; }
+    const match = line.match(/^([a-z_]+):\s*(.*)$/);
+    if (!match) { continue; }
+
+    const key = match[1];
+    const value = match[2].trim();
+
+    switch (key) {
+      case "mode":
+        if ((VALID_TICKET_MODES as string[]).includes(value)) {
+          fields.mode = value as TicketMode;
+        }
+        break;
+      case "project_id":
+        if (/^\d+$/.test(value)) { fields.project_id = Number(value); }
+        break;
+      case "issue_id":
+        if (/^\d+$/.test(value)) { fields.issue_id = Number(value); }
+        break;
+      case "parent_issue_id":
+        if (/^\d+$/.test(value)) { fields.parent_issue_id = Number(value); }
+        break;
+      case "draft_id":
+        if (value.length > 0) { fields.draft_id = value; }
+        break;
+      case "last_synced_at":
+        if (value.length > 0) { fields.last_synced_at = value; }
+        break;
+      case "lock_version":
+        if (/^\d+$/.test(value)) { fields.lock_version = Number(value); }
+        break;
+      default:
+        break;
+    }
+  }
+
+  return fields;
+};
+
+/**
+ * 制御フィールドを flat YAML テキストにシリアライズする。
+ */
+export const serializeFrontmatterControlFields = (fields: FrontmatterControlFields): string => {
+  const lines: string[] = [];
+  if (fields.mode !== undefined) { lines.push(`mode: ${fields.mode}`); }
+  if (fields.project_id !== undefined) { lines.push(`project_id: ${fields.project_id}`); }
+  if (fields.issue_id !== undefined) { lines.push(`issue_id: ${fields.issue_id}`); }
+  if (fields.parent_issue_id !== undefined) { lines.push(`parent_issue_id: ${fields.parent_issue_id}`); }
+  if (fields.draft_id !== undefined) { lines.push(`draft_id: ${fields.draft_id}`); }
+  if (fields.last_synced_at !== undefined) { lines.push(`last_synced_at: ${fields.last_synced_at}`); }
+  if (fields.lock_version !== undefined) { lines.push(`lock_version: ${fields.lock_version}`); }
+  return lines.join("\n");
+};
 
 const stripInlineComment = (value: string): string => {
   const index = value.indexOf(" #");
