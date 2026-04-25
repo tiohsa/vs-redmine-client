@@ -30,7 +30,7 @@ jobs:
         run: pnpm exec tsc --noEmit
 
       - name: Test
-        run: pnpm run compile-tests && pnpm run compile && pnpm exec vscode-test
+        run: pnpm run compile-tests && pnpm run compile && xvfb-run -a pnpm exec vscode-test
         env:
           ELECTRON_DISABLE_SANDBOX: '1'
           ELECTRON_NO_SANDBOX: '1'
