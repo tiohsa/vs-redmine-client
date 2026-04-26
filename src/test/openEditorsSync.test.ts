@@ -44,15 +44,14 @@ suite("Open Editors sync — package.json contributions", () => {
     assert.ok(!entry, "syncOpenEditor must not target the removed redmine-clientActivityOpenTickets view");
   });
 
-  test("runOfflineSync is contributed to view/title for Unsynced Files", () => {
+  test("runOfflineSync has no legacy view/title entry (UnsyncedFiles view removed)", () => {
     const menus = getMenus(loadPackageJson());
     const viewTitle: MenuEntry[] = (menus["view/title"] ?? []) as MenuEntry[];
     const entry = viewTitle.find(
       (e) => e.command === "redmine-client.runOfflineSync" &&
         e.when?.includes("redmine-clientActivityUnsyncedFiles"),
     );
-    assert.ok(entry, "redmine-client.runOfflineSync must be in view/title for redmine-clientActivityUnsyncedFiles");
-    assert.strictEqual(entry?.group, "navigation@1");
+    assert.ok(!entry, "legacy runOfflineSync view/title for UnsyncedFiles must be removed");
   });
 
   test("syncOpenEditor command has cloud-upload icon", () => {

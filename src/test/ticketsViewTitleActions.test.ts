@@ -14,29 +14,29 @@ const findViewTitleEntry = (commandId: string): MenuItem | undefined =>
   getViewTitleMenuItems().find((item) => item.command === commandId);
 
 suite("Tickets view title actions", () => {
-  test("declares add ticket command and view title action", () => {
+  test("createTicketFromList command still exists in Command Palette", () => {
     const addCommand = findCommand("redmine-client.createTicketFromList");
     assert.ok(addCommand, "redmine-client.createTicketFromList command must exist");
     assert.strictEqual(addCommand?.title, "Redmine: New Ticket");
-
-    const entry = findViewTitleEntry("redmine-client.createTicketFromList");
-    assert.ok(entry, "add ticket view/title entry must exist");
-    assert.strictEqual(entry?.when, "view == redmine-clientActivityTickets");
-    assert.strictEqual(entry?.enablement, "redmine-client.canCreateTickets");
   });
 
-  test("declares ticket view title icons and tooltip sources", () => {
+  test("createTicketFromList has no view/title entry (legacy view removed)", () => {
+    const entry = findViewTitleEntry("redmine-client.createTicketFromList");
+    assert.ok(!entry, "add ticket view/title entry must be removed");
+  });
+
+  test("refreshTickets has no view/title entry (legacy view removed)", () => {
+    const entry = findViewTitleEntry("redmine-client.refreshTickets");
+    assert.ok(!entry, "refresh tickets view/title entry must be removed");
+  });
+
+  test("declares ticket commands with icons", () => {
     const addCommand = findCommand("redmine-client.createTicketFromList");
     const refreshCommand = findCommand("redmine-client.refreshTickets");
     assert.ok(addCommand?.title, "add ticket command must include a title");
     assert.ok(refreshCommand?.title, "refresh tickets command must include a title");
     assert.ok(addCommand?.icon, "add ticket command must include an icon");
     assert.ok(refreshCommand?.icon, "refresh tickets command must include an icon");
-
-    const addEntry = findViewTitleEntry("redmine-client.createTicketFromList");
-    const refreshEntry = findViewTitleEntry("redmine-client.refreshTickets");
-    assert.ok(addEntry, "add ticket view/title entry must exist");
-    assert.ok(refreshEntry, "refresh tickets view/title entry must exist");
   });
 
   test("uses new-file icon for ticket add action", () => {
@@ -45,7 +45,7 @@ suite("Tickets view title actions", () => {
     assert.strictEqual(addCommand?.icon, "$(add)");
   });
 
-  test("declares child ticket action for ticket items", () => {
+  test("declares child ticket action for Explorer ticket items", () => {
     const childCommand = findCommand("redmine-client.createChildTicketFromList");
     assert.ok(childCommand, "child ticket command must exist");
     assert.strictEqual(childCommand?.title, "Redmine: Add Child Ticket");
@@ -61,14 +61,14 @@ suite("Tickets view title actions", () => {
     assert.ok(explorerEntry, "child ticket item action must exist in explorer view");
     assert.strictEqual(explorerEntry?.group, "inline@1");
 
+    // レガシー Activity View のコンテキストメニューは削除済み
     const activityEntry = contextItems.find(
       (item) =>
         item.command === "redmine-client.createChildTicketFromList" &&
         item.when ===
         "view == redmine-clientActivityTickets && viewItem == redmineTicket && redmine-client.canCreateTickets",
     );
-    assert.ok(activityEntry, "child ticket item action must exist in activity view");
-    assert.strictEqual(activityEntry?.group, "inline@1");
+    assert.ok(!activityEntry, "legacy activity view child ticket action must be removed");
   });
 
   test("uses refresh icon for ticket reload action", () => {
@@ -77,17 +77,16 @@ suite("Tickets view title actions", () => {
     assert.strictEqual(reloadCommand?.icon, "$(refresh)");
   });
 
-  test("declares collapse action for tickets view title", () => {
+  test("collapseAllTickets command still exists (no legacy view/title entry)", () => {
     const collapseCommand = findCommand("redmine-client.collapseAllTickets");
     assert.ok(collapseCommand, "redmine-client.collapseAllTickets command must exist");
     assert.strictEqual(collapseCommand?.icon, "$(collapse-all)");
 
     const collapseEntry = findViewTitleEntry("redmine-client.collapseAllTickets");
-    assert.ok(collapseEntry, "collapse tickets view/title entry must exist");
-    assert.strictEqual(collapseEntry?.when, "view == redmine-clientActivityTickets");
+    assert.ok(!collapseEntry, "collapse tickets view/title entry must be removed");
   });
 
-  test("keeps existing ticket context actions", () => {
+  test("keeps existing ticket context actions for Explorer view", () => {
     const contextItems = getMenuItems("view/item/context");
 
     const openPreview = contextItems.find(

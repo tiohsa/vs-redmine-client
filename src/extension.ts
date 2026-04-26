@@ -89,15 +89,7 @@ export async function activate(context: vscode.ExtensionContext) {
 
   // ── 初期ロード ───────────────────────────────────────────────────────────
   const initialSelection = getProjectSelection();
-  await views.projectsProvider.loadProjects();
   if (initialSelection.id) {
-    const projectItem = views.projectsProvider.getProjectItemById(initialSelection.id);
-    if (projectItem) {
-      await views.activityProjectsView.reveal(projectItem, {
-        select: true,
-        focus: false,
-      });
-    }
     views.ticketsProvider.setSelectedProjectId(initialSelection.id);
   }
 

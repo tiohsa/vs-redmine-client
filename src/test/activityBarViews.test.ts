@@ -27,30 +27,36 @@ suite("Activity Bar view container", () => {
     assert.ok(container?.icon, "redmine-clientActivity container icon must be defined");
   });
 
-  test("activates on Activity Bar views", () => {
+  test("activates on Dashboard view", () => {
     const packageJson = loadPackageJson();
     const activationEvents = packageJson.activationEvents as string[] | undefined;
     assert.ok(activationEvents, "activationEvents must be defined");
 
     assert.ok(
-      activationEvents.includes("onView:redmine-clientActivityTicketSettings"),
-      "onView:redmine-clientActivityTicketSettings activation missing",
+      activationEvents.includes("onView:redmine-clientActivityDashboard"),
+      "onView:redmine-clientActivityDashboard activation missing",
+    );
+
+    // レガシービューの activation events は削除済み
+    assert.ok(
+      !activationEvents.includes("onView:redmine-clientActivityTicketSettings"),
+      "legacy TicketSettings activation must be removed",
     );
     assert.ok(
-      activationEvents.includes("onView:redmine-clientActivityProjects"),
-      "onView:redmine-clientActivityProjects activation missing",
+      !activationEvents.includes("onView:redmine-clientActivityProjects"),
+      "legacy Projects activation must be removed",
     );
     assert.ok(
-      activationEvents.includes("onView:redmine-clientActivityTickets"),
-      "onView:redmine-clientActivityTickets activation missing",
+      !activationEvents.includes("onView:redmine-clientActivityTickets"),
+      "legacy Tickets activation must be removed",
     );
     assert.ok(
-      activationEvents.includes("onView:redmine-clientActivityUnsyncedFiles"),
-      "onView:redmine-clientActivityUnsyncedFiles activation missing",
+      !activationEvents.includes("onView:redmine-clientActivityUnsyncedFiles"),
+      "legacy UnsyncedFiles activation must be removed",
     );
     assert.ok(
-      activationEvents.includes("onView:redmine-clientActivityComments"),
-      "onView:redmine-clientActivityComments activation missing",
+      !activationEvents.includes("onView:redmine-clientActivityComments"),
+      "legacy Comments activation must be removed",
     );
   });
 

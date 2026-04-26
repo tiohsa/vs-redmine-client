@@ -16,11 +16,8 @@ import {
 import { reloadCommentFromEditor } from "../commands/reloadComment";
 import { reloadTicketFromEditor } from "../commands/reloadTicket";
 import { searchTickets } from "../commands/searchTickets";
-import { setProjectSelection } from "../config/projectSelection";
 import { setApiKey, clearApiKey, getApiKeyStatus } from "../config/apiKeyStore";
-import { getIssueDetail } from "../redmine/issues";
 import { showError, showSuccess } from "../utils/notifications";
-import { setCommentDraft } from "../views/commentDraftStore";
 import { CommentTreeItem, CommentsTreeProvider } from "../views/commentsView";
 import {
   configureEditorDefaultField,
@@ -34,13 +31,9 @@ import {
   TICKET_SETTINGS_COMMANDS,
 } from "../views/ticketsView";
 import { getAllEditorRecords, isTicketEditor, getTicketIdForEditor, NEW_TICKET_DRAFT_ID } from "../views/ticketEditorRegistry";
-import { showTicketComment, showTicketPreview } from "../views/ticketPreview";
+import { showTicketPreview } from "../views/ticketPreview";
 import { ProjectTreeItem, ProjectsTreeProvider } from "../views/projectsView";
 import { UnsyncedFileTreeItem, UnsyncedFilesTreeProvider } from "../views/unsyncedFilesView";
-import {
-  VIEW_ID_ACTIVITY_PROJECTS,
-  VIEW_ID_ACTIVITY_TICKETS,
-} from "../views/viewIds";
 import type { SyncController, SyncStatus } from "./syncController";
 
 export interface CommandDeps {
@@ -49,32 +42,8 @@ export interface CommandDeps {
   commentsProvider: CommentsTreeProvider;
   unsyncedFilesProvider: UnsyncedFilesTreeProvider;
   settingsProvider: TicketSettingsTreeProvider;
-  activityProjectsView: vscode.TreeView<vscode.TreeItem>;
-  activityTicketsView: vscode.TreeView<vscode.TreeItem>;
-  activityCommentsView: vscode.TreeView<vscode.TreeItem>;
   sync: Pick<SyncController, "syncEditorAndNotify">;
 }
-
-const runTreeCollapseCommand = async (viewId: string): Promise<boolean> => {
-  await vscode.commands.executeCommand(`${viewId}.focus`);
-  const commandId = "list.collapseAll";
-  const available = await vscode.commands.getCommands(true);
-  if (!available.includes(commandId)) {
-    return false;
-  }
-  await vscode.commands.executeCommand(commandId);
-  return true;
-};
-
-const restoreTreeScroll = async (
-  view: vscode.TreeView<vscode.TreeItem>,
-  item?: vscode.TreeItem,
-): Promise<void> => {
-  if (!item) {
-    return;
-  }
-  await view.reveal(item, { focus: false, select: false });
-};
 
 export const registerCommands = (
   context: vscode.ExtensionContext,
@@ -86,51 +55,8 @@ export const registerCommands = (
     commentsProvider,
     unsyncedFilesProvider,
     settingsProvider,
-    activityProjectsView,
-    activityTicketsView,
-    activityCommentsView,
     sync,
   } = deps;
-
-  let lastProjectSelection: ProjectTreeItem | undefined;
-  let lastTicketSelection: TicketTreeItem | undefined;
-  let selectedComment: CommentTreeItem | undefined;
-  let selectedCommentDocumentUri: string | undefined;
-
-  const getSelectedComment = (item?: CommentTreeItem): CommentTreeItem | undefined =>
-    item ??
-    (activityCommentsView.selection[0] as CommentTreeItem | undefined) ??
-    selectedComment;
-
-  const handleTicketSelection = (item?: TicketTreeItem): void => {
-    const selected = item ?? (activityTicketsView.selection[0] as TicketTreeItem | undefined);
-    if (!selected || !(selected instanceof TicketTreeItem)) {
-      return;
-    }
-    commentsProvider.setTicketId(selected.ticket.id);
-  };
-
-  const handleCommentSelection = async (item?: CommentTreeItem): Promise<void> => {
-    const selected = getSelectedComment(item);
-    if (!selected || !(selected instanceof CommentTreeItem)) {
-      return;
-    }
-    selectedComment = selected;
-    try {
-      const detail = await getIssueDetail(selected.comment.ticketId);
-      commentsProvider.setTicketId(detail.ticket.id, selected.comment.id);
-      setCommentDraft(detail.ticket.id, selected.comment.body);
-      const editor = await showTicketComment(
-        detail.ticket,
-        selected.comment.body,
-        selected.comment.id,
-        selected.comment.updatedAt,
-      );
-      selectedCommentDocumentUri = editor.document.uri.toString();
-    } catch (error) {
-      vscode.window.showErrorMessage((error as Error).message);
-    }
-  };
 
   // ── 基本コマンド ──────────────────────────────────────────────────────────
   context.subscriptions.push(
@@ -253,19 +179,8 @@ export const registerCommands = (
         showError("New ticket drafts are not listed in the ticket tree.");
         return;
       }
-      await ticketsProvider.loadTickets();
-      if (!ticketsProvider.getSelectedProjectId()) {
-        showError("Select a project to focus tickets.");
-        return;
-      }
-      ticketsProvider.getViewItems();
-      const item = ticketsProvider.getTicketItemById(ticketId);
-      if (!item) {
-        showError("Ticket is not visible in the current ticket list.");
-        return;
-      }
-      ticketsProvider.setSelectedTicketId(ticketId);
-      await activityTicketsView.reveal(item, { focus: true, select: true, expand: true });
+      // Dashboard 移行後: チケットIDを通知するのみ（TreeView reveal は不要）
+      showSuccess(`Ticket #${ticketId} is active in the editor.`);
     }),
     vscode.commands.registerCommand("redmine-client.reloadTicket", async () => {
       await reloadTicketFromEditor();
@@ -292,39 +207,16 @@ export const registerCommands = (
     vscode.commands.registerCommand(
       "redmine-client.reloadProject",
       async (item?: ProjectTreeItem) => {
-        const selected =
-          item ?? (activityProjectsView.selection[0] as ProjectTreeItem | undefined);
-        if (!selected || !(selected instanceof ProjectTreeItem)) {
-          return;
+        if (item instanceof ProjectTreeItem) {
+          projectsProvider.refresh();
         }
-        projectsProvider.refresh();
       },
     ),
-    vscode.commands.registerCommand("redmine-client.collapseAllProjects", async () => {
-      projectsProvider.collapseAllVisible();
-      const selected =
-        activityProjectsView.selection[0] ??
-        lastProjectSelection ??
-        projectsProvider
-          .getViewItems()
-          .find((i): i is ProjectTreeItem => i instanceof ProjectTreeItem);
-      const usedListCommand = await runTreeCollapseCommand(VIEW_ID_ACTIVITY_PROJECTS);
-      if (usedListCommand) {
-        await restoreTreeScroll(activityProjectsView, selected);
-      }
+    vscode.commands.registerCommand("redmine-client.collapseAllProjects", () => {
+      // Dashboard 移行後: TreeView は存在しないため no-op
     }),
-    vscode.commands.registerCommand("redmine-client.collapseAllTickets", async () => {
-      ticketsProvider.collapseAllVisible();
-      const usedListCommand = await runTreeCollapseCommand(VIEW_ID_ACTIVITY_TICKETS);
-      if (usedListCommand) {
-        const selected =
-          activityTicketsView.selection[0] ??
-          lastTicketSelection ??
-          ticketsProvider
-            .getViewItems()
-            .find((i): i is TicketTreeItem => i instanceof TicketTreeItem);
-        await restoreTreeScroll(activityTicketsView, selected);
-      }
+    vscode.commands.registerCommand("redmine-client.collapseAllTickets", () => {
+      // Dashboard 移行後: TreeView は存在しないため no-op
     }),
     vscode.commands.registerCommand("redmine-client.selectProject", async () => {
       const projectId = await vscode.window.showInputBox({
@@ -339,8 +231,6 @@ export const registerCommands = (
         vscode.window.showErrorMessage("Project ID must be a number.");
         return;
       }
-      await setProjectSelection(numericId, "");
-      projectsProvider.setSelectedProjectId(numericId);
       ticketsProvider.setSelectedProjectId(numericId);
       ticketsProvider.refresh();
     }),
@@ -360,29 +250,15 @@ export const registerCommands = (
     vscode.commands.registerCommand(
       "redmine-client.editComment",
       async (item?: CommentTreeItem) => {
-        const selected = getSelectedComment(item);
-        if (!selected || !(selected instanceof CommentTreeItem)) {
-          vscode.window.showErrorMessage("Select a comment to edit.");
+        if (!(item instanceof CommentTreeItem)) {
+          vscode.window.showErrorMessage("Dashboard からコメントを選択して編集してください。");
           return;
         }
-        if (
-          selectedCommentDocumentUri &&
-          vscode.window.activeTextEditor?.document?.uri.toString() !==
-            selectedCommentDocumentUri
-        ) {
-          vscode.window.showErrorMessage("Open the comment editor before updating.");
-          return;
-        }
-        await editComment(selected.comment);
+        await editComment(item.comment);
       },
     ),
     vscode.commands.registerCommand("redmine-client.addComment", async () => {
-      const selected = activityTicketsView.selection[0] as TicketTreeItem | undefined;
-      if (!selected) {
-        vscode.window.showErrorMessage("Select a ticket before adding a comment.");
-        return;
-      }
-      await addCommentFromList(selected.ticket.id);
+      vscode.window.showErrorMessage("Dashboard からチケットを選択してコメントを追加してください。");
     }),
     vscode.commands.registerCommand("redmine-client.addCommentFromComments", async () => {
       const ticketId = commentsProvider.getTicketId();
@@ -395,27 +271,23 @@ export const registerCommands = (
     vscode.commands.registerCommand(
       "redmine-client.openTicketPreview",
       async (item?: TicketTreeItem) => {
-        const selected =
-          item ?? (activityTicketsView.selection[0] as TicketTreeItem | undefined);
-        if (!selected || !(selected instanceof TicketTreeItem)) {
-          vscode.window.showErrorMessage("Select a ticket to preview.");
+        if (!(item instanceof TicketTreeItem)) {
+          vscode.window.showErrorMessage("Dashboard からチケットを選択してください。");
           return;
         }
-        commentsProvider.setTicketId(selected.ticket.id);
-        await showTicketPreview(selected.ticket);
+        commentsProvider.setTicketId(item.ticket.id);
+        await showTicketPreview(item.ticket);
       },
     ),
     vscode.commands.registerCommand(
       "redmine-client.openExtraTicketEditor",
       async (item?: TicketTreeItem) => {
-        const selected =
-          item ?? (activityTicketsView.selection[0] as TicketTreeItem | undefined);
-        if (!selected || !(selected instanceof TicketTreeItem)) {
-          vscode.window.showErrorMessage("Select a ticket to preview.");
+        if (!(item instanceof TicketTreeItem)) {
+          vscode.window.showErrorMessage("Dashboard からチケットを選択してください。");
           return;
         }
-        commentsProvider.setTicketId(selected.ticket.id);
-        await showTicketPreview(selected.ticket, { kind: "extra" });
+        commentsProvider.setTicketId(item.ticket.id);
+        await showTicketPreview(item.ticket, { kind: "extra" });
       },
     ),
   );
@@ -425,25 +297,19 @@ export const registerCommands = (
     vscode.commands.registerCommand(
       "redmine-client.openProjectInBrowser",
       async (item?: ProjectTreeItem) => {
-        const selected =
-          item ?? (activityProjectsView.selection[0] as ProjectTreeItem | undefined);
-        await openProjectInBrowser(selected);
+        await openProjectInBrowser(item instanceof ProjectTreeItem ? item : undefined);
       },
     ),
     vscode.commands.registerCommand(
       "redmine-client.openTicketInBrowser",
       async (item?: TicketTreeItem) => {
-        const selected =
-          item ?? (activityTicketsView.selection[0] as TicketTreeItem | undefined);
-        await openTicketInBrowser(selected);
+        await openTicketInBrowser(item instanceof TicketTreeItem ? item : undefined);
       },
     ),
     vscode.commands.registerCommand(
       "redmine-client.openCommentInBrowser",
       async (item?: CommentTreeItem) => {
-        const selected =
-          item ?? (activityCommentsView.selection[0] as CommentTreeItem | undefined);
-        await openCommentInBrowser(selected);
+        await openCommentInBrowser(item instanceof CommentTreeItem ? item : undefined);
       },
     ),
   );
@@ -547,34 +413,6 @@ export const registerCommands = (
         none: "APIキーが設定されていません。",
       };
       vscode.window.showInformationMessage(messages[status]);
-    }),
-  );
-
-  // ── View 選択イベント ─────────────────────────────────────────────────────
-  context.subscriptions.push(
-    activityTicketsView.onDidChangeSelection((event) => {
-      const selected = event.selection[0] as TicketTreeItem | undefined;
-      ticketsProvider.setSelectedTicketId(selected?.ticket.id);
-      handleTicketSelection(selected);
-      if (selected) {
-        lastTicketSelection = selected;
-      }
-    }),
-    activityProjectsView.onDidChangeSelection(async (event) => {
-      const selected = event.selection[0] as ProjectTreeItem | undefined;
-      if (!selected) {
-        return;
-      }
-      lastProjectSelection = selected;
-      await setProjectSelection(selected.project.id, selected.project.name);
-      projectsProvider.setSelectedProjectId(selected.project.id);
-      ticketsProvider.setSelectedProjectId(selected.project.id);
-      ticketsProvider.refresh();
-    }),
-    activityCommentsView.onDidChangeSelection((event) => {
-      const selected = event.selection[0] as CommentTreeItem | undefined;
-      commentsProvider.setSelectedCommentId(selected?.comment.id);
-      void handleCommentSelection(selected);
     }),
   );
 };

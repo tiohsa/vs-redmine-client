@@ -13,32 +13,24 @@ const findViewTitleEntry = (commandId: string): MenuItem | undefined =>
   getViewTitleMenuItems().find((item) => item.command === commandId);
 
 suite("Projects view title actions", () => {
-  test("declares collapse command and view title action", () => {
+  test("collapseAllProjects command still exists in Command Palette", () => {
     const collapseCommand = findCommand("redmine-client.collapseAllProjects");
     assert.ok(collapseCommand, "redmine-client.collapseAllProjects command must exist");
+  });
 
+  test("collapseAllProjects has no view/title entry (legacy view removed)", () => {
     const collapseEntry = findViewTitleEntry("redmine-client.collapseAllProjects");
-    assert.ok(collapseEntry, "collapse projects view/title entry must exist");
-    assert.strictEqual(collapseEntry?.when, "view == redmine-clientActivityProjects");
+    assert.ok(!collapseEntry, "collapse projects view/title entry must be removed");
   });
 
-  test("uses collapse icon for projects action", () => {
-    const collapseCommand = findCommand("redmine-client.collapseAllProjects");
-    assert.ok(collapseCommand, "collapse projects command must exist");
-    assert.ok(collapseCommand?.icon, "collapse projects command must include an icon");
-    assert.strictEqual(collapseCommand?.icon, "$(collapse-all)");
-  });
-
-  test("declares offline sync command and view title action", () => {
+  test("runOfflineSync command still exists in Command Palette", () => {
     const syncCommand = findCommand("redmine-client.runOfflineSync");
     assert.ok(syncCommand, "redmine-client.runOfflineSync command must exist");
+  });
 
-    const syncEntry = findViewTitleEntry("redmine-client.runOfflineSync");
-    assert.ok(syncEntry, "offline sync view/title entry must exist");
-    assert.strictEqual(
-      syncEntry?.when,
-      "view == redmine-clientActivityProjects && redmine-client.offlineSyncManual",
-    );
+  test("runOfflineSync has no legacy view/title entry (legacy view removed)", () => {
+    const legacyEntry = findViewTitleEntry("redmine-client.runOfflineSync");
+    assert.ok(!legacyEntry, "offline sync view/title entry for legacy Projects view must be removed");
   });
 
   test("uses cloud icon for offline sync action", () => {

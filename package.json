@@ -19,11 +19,7 @@
     "Other"
   ],
   "activationEvents": [
-    "onView:redmine-clientActivityTicketSettings",
-    "onView:redmine-clientActivityProjects",
-    "onView:redmine-clientActivityTickets",
-    "onView:redmine-clientActivityUnsyncedFiles",
-    "onView:redmine-clientActivityComments",
+    "onView:redmine-clientActivityDashboard",
     "onCommand:redmine-client.refreshTickets",
     "onCommand:redmine-client.refreshProjects",
     "onCommand:redmine-client.collapseAllProjects",
@@ -302,87 +298,13 @@
     "views": {
       "redmine-clientActivity": [
         {
-          "id": "redmine-clientActivityTicketSettings",
-          "name": "Ticket Settings"
-        },
-        {
-          "id": "redmine-clientActivityUnsyncedFiles",
-          "name": "Local Changes"
-        },
-        {
-          "id": "redmine-clientActivityProjects",
-          "name": "Projects"
-        },
-        {
-          "id": "redmine-clientActivityTickets",
-          "name": "Tickets"
-        },
-        {
-          "id": "redmine-clientActivityComments",
-          "name": "Comments"
+          "id": "redmine-clientActivityDashboard",
+          "name": "Dashboard",
+          "type": "webview"
         }
       ]
     },
     "menus": {
-      "view/title": [
-        {
-          "command": "redmine-client.refreshProjects",
-          "when": "view == redmine-clientActivityProjects",
-          "group": "navigation@1"
-        },
-        {
-          "command": "redmine-client.collapseAllProjects",
-          "when": "view == redmine-clientActivityProjects",
-          "group": "navigation@2"
-        },
-        {
-          "command": "redmine-client.runOfflineSync",
-          "when": "view == redmine-clientActivityProjects && redmine-client.offlineSyncManual",
-          "group": "navigation@3"
-        },
-        {
-          "command": "redmine-client.createTicketFromList",
-          "when": "view == redmine-clientActivityTickets",
-          "group": "navigation",
-          "enablement": "redmine-client.canCreateTickets"
-        },
-        {
-          "command": "redmine-client.searchTickets",
-          "when": "view == redmine-clientActivityTickets",
-          "group": "navigation@1"
-        },
-        {
-          "command": "redmine-client.refreshTickets",
-          "when": "view == redmine-clientActivityTickets",
-          "group": "navigation@2"
-        },
-        {
-          "command": "redmine-client.collapseAllTickets",
-          "when": "view == redmine-clientActivityTickets",
-          "group": "navigation@3"
-        },
-        {
-          "command": "redmine-client.toggleRelevantTickets",
-          "when": "view == redmine-clientActivityTickets",
-          "group": "navigation@4"
-        },
-        {
-          "command": "redmine-client.addCommentFromComments",
-          "when": "view == redmine-clientActivityComments",
-          "group": "navigation",
-          "enablement": "redmine-client.canAddComments"
-        },
-        {
-          "command": "redmine-client.refreshComments",
-          "when": "view == redmine-clientActivityComments",
-          "group": "navigation@1"
-        },
-        {
-          "command": "redmine-client.runOfflineSync",
-          "when": "view == redmine-clientActivityUnsyncedFiles",
-          "group": "navigation@1"
-        }
-      ],
       "view/item/context": [
         {
           "command": "redmine-client.openTicketPreview",
@@ -397,46 +319,6 @@
         {
           "command": "redmine-client.createChildTicketFromList",
           "when": "view == redmine-clientTickets && viewItem == redmineTicket && redmine-client.canCreateTickets",
-          "group": "inline@1"
-        },
-        {
-          "command": "redmine-client.createChildTicketFromList",
-          "when": "view == redmine-clientActivityTickets && viewItem == redmineTicket && redmine-client.canCreateTickets",
-          "group": "inline@1"
-        },
-        {
-          "command": "redmine-client.openProjectInBrowser",
-          "when": "view == redmine-clientActivityProjects && (viewItem == redmineProject || viewItem == redmineProjectSelected)",
-          "group": "inline@1"
-        },
-        {
-          "command": "redmine-client.reloadProject",
-          "when": "view == redmine-clientActivityProjects && (viewItem == redmineProject || viewItem == redmineProjectSelected)",
-          "group": "inline@2"
-        },
-        {
-          "command": "redmine-client.openTicketInBrowser",
-          "when": "view == redmine-clientActivityTickets && viewItem == redmineTicket",
-          "group": "inline@2"
-        },
-        {
-          "command": "redmine-client.reloadTicket",
-          "when": "view == redmine-clientActivityTickets && viewItem == redmineTicket",
-          "group": "inline@3"
-        },
-        {
-          "command": "redmine-client.openCommentInBrowser",
-          "when": "view == redmine-clientActivityComments && (viewItem == redmineComment || viewItem == redmineCommentEditable)",
-          "group": "inline@1"
-        },
-        {
-          "command": "redmine-client.reloadComment",
-          "when": "view == redmine-clientActivityComments && viewItem == redmineCommentEditable",
-          "group": "inline@2"
-        },
-        {
-          "command": "redmine-client.syncUnsyncedFile",
-          "when": "view == redmine-clientActivityUnsyncedFiles && viewItem == redmineUnsyncedFile",
           "group": "inline@1"
         }
       ]
