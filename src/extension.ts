@@ -7,6 +7,7 @@ import { createTicketFromList } from "./commands/createTicketFromList";
 import { editComment } from "./commands/editComment";
 import { focusTicketEditor } from "./commands/focusTicketEditor";
 import { runOfflineSync } from "./commands/offlineSync";
+import { syncUnsyncedFile } from "./commands/syncUnsyncedFile";
 import {
   configureOfflineSyncMode,
   refreshOfflineSyncContext,
@@ -36,12 +37,10 @@ import { initializeDraftStore, setTicketDraftContent } from "./views/ticketDraft
 import { createGlobalStateDraftStorage } from "./views/draftPersistence";
 import { initializeNewTicketDraftStore } from "./views/newTicketDraftStore";
 import { formatTicketLabel } from "./views/ticketLabel";
-import { UnsyncedFilesTreeProvider } from "./views/unsyncedFilesView";
+import { UnsyncedFileTreeItem, UnsyncedFilesTreeProvider } from "./views/unsyncedFilesView";
 import {
-  addOfflineNewTicket,
   addOfflineCommentUpdate,
   initializeOfflineSyncStore,
-  removeOfflineNewTicket,
   removeOfflineCommentEntry,
 } from "./views/offlineSyncStore";
 import {
@@ -89,8 +88,8 @@ import {
 import { getSaveNotification } from "./views/ticketSaveNotifications";
 import {
   handleTicketEditorSave,
-  syncNewTicketDraft,
-  syncNewTicketDraftContent,
+  queueNewTicketDraft,
+  queueNewTicketDraftContent,
   syncTicketDraft,
 } from "./views/ticketSaveSync";
 import { syncEditorToRedmine } from "./commands/syncToRedmine";
@@ -198,6 +197,7 @@ export async function activate(context: vscode.ExtensionContext) {
     activityTicketsView,
     activityUnsyncedFilesView,
     activityCommentsView,
+    unsyncedFilesProvider,
     registerFocusRefresh(activityProjectsView, () => projectsProvider.refresh()),
     registerFocusRefresh(activitySettingsView, () => settingsProvider.refresh()),
     registerFocusRefresh(activityTicketsView, () => ticketsProvider.refresh()),
@@ -537,21 +537,12 @@ export async function activate(context: vscode.ExtensionContext) {
         if (ticketIdForDocument === NEW_TICKET_DRAFT_ID) {
           const projectId =
             getProjectIdForDocument(document) ?? getProjectIdForUri(document.uri);
-          addOfflineNewTicket({ content: document.getText(), documentUri: document.uri.toString() });
-          const result = await syncNewTicketDraftContent({
+          const result = await queueNewTicketDraftContent({
             content: document.getText(),
             projectId,
             documentUri: document.uri,
-            onCreated: (createdId) => {
-              removeTicketEditorByDocument(document);
-              registerTicketDocument(createdId, document, "ticket", projectId);
-            },
           });
           notifyTicketSaveResult(result);
-          if (result.status === "created") {
-            ticketsProvider.refresh();
-            removeOfflineNewTicket(document.uri.toString());
-          }
           return;
         }
 
@@ -603,31 +594,17 @@ export async function activate(context: vscode.ExtensionContext) {
             return;
           }
 
-          addOfflineNewTicket({ content: document.getText(), documentUri: document.uri.toString() });
-
           if (editor) {
-            const result = await syncNewTicketDraft({ editor });
+            const result = await queueNewTicketDraft({ editor });
             notifyTicketSaveResult(result);
-            if (result.status === "created") {
-              ticketsProvider.refresh();
-              removeOfflineNewTicket(editor.document.uri.toString());
-            }
             return;
           }
 
-          const result = await syncNewTicketDraftContent({
+          const result = await queueNewTicketDraftContent({
             content: document.getText(),
             documentUri: document.uri,
-            onCreated: (createdId) => {
-              removeTicketEditorByDocument(document);
-              registerTicketDocument(createdId, document, "ticket");
-            },
           });
           notifyTicketSaveResult(result);
-          if (result.status === "created") {
-            ticketsProvider.refresh();
-            removeOfflineNewTicket(document.uri.toString());
-          }
           return;
         }
 
@@ -726,6 +703,17 @@ export async function activate(context: vscode.ExtensionContext) {
       ticketsProvider.refresh();
       commentsProvider.refresh();
       unsyncedFilesProvider.refresh();
+    }),
+  );
+
+  context.subscriptions.push(
+    vscode.commands.registerCommand("redmine-client.syncUnsyncedFile", async (item) => {
+      if (!(item instanceof UnsyncedFileTreeItem)) {
+        return;
+      }
+      await syncUnsyncedFile(item, {
+        onTicketCreated: () => ticketsProvider.refresh(),
+      });
     }),
   );
 

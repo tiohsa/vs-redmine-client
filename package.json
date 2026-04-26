@@ -243,6 +243,11 @@
         "icon": "$(cloud-upload)"
       },
       {
+        "command": "redmine-client.syncUnsyncedFile",
+        "title": "Redmine: Sync This File",
+        "icon": "$(cloud-upload)"
+      },
+      {
         "command": "redmine-client.configureOfflineSyncMode",
         "title": "Redmine: Configure Offline Sync Mode"
       },
@@ -409,6 +414,11 @@
           "command": "redmine-client.reloadComment",
           "when": "view == redmine-clientActivityComments && viewItem == redmineCommentEditable",
           "group": "inline@2"
+        },
+        {
+          "command": "redmine-client.syncUnsyncedFile",
+          "when": "view == redmine-clientActivityUnsyncedFiles && viewItem == redmineUnsyncedFile",
+          "group": "inline@1"
         }
       ]
     },

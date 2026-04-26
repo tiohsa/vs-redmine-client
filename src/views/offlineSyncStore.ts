@@ -39,6 +39,25 @@ export type OfflineSyncQueue = {
 
 const STORAGE_KEY = "redmine.offlineSyncQueue";
 
+type QueueChangeListener = () => void;
+
+const queueChangeListeners = new Set<QueueChangeListener>();
+
+const notifyQueueChanged = (): void => {
+  for (const listener of Array.from(queueChangeListeners)) {
+    listener();
+  }
+};
+
+export const onOfflineSyncQueueChanged = (
+  listener: QueueChangeListener,
+): (() => void) => {
+  queueChangeListeners.add(listener);
+  return () => {
+    queueChangeListeners.delete(listener);
+  };
+};
+
 type SerializedQueue = {
   tickets: [number, OfflineTicketUpdate][];
   comments: OfflineCommentUpdate[];
@@ -59,25 +78,22 @@ const queue: OfflineSyncQueue = {
 let memento: Memento | undefined;
 
 const persist = (): void => {
-  if (!memento) {
-    return;
+  if (memento) {
+    const serialized: SerializedQueue = {
+      tickets: Array.from(queue.tickets.entries()),
+      comments: queue.comments,
+      newTickets: queue.newTickets,
+    };
+    void memento.update(STORAGE_KEY, serialized);
   }
-  const serialized: SerializedQueue = {
-    tickets: Array.from(queue.tickets.entries()),
-    comments: queue.comments,
-    newTickets: queue.newTickets,
-  };
-  void memento.update(STORAGE_KEY, serialized);
+  notifyQueueChanged();
 };
 
 export const initializeOfflineSyncStore = (storage: Memento): void => {
   memento = storage;
   const raw = storage.get<SerializedQueue>(STORAGE_KEY);
-  if (!raw) {
-    return;
-  }
   queue.tickets = new Map(
-    Array.isArray(raw.tickets)
+    raw && Array.isArray(raw.tickets)
       ? raw.tickets.filter(
           (e): e is [number, OfflineTicketUpdate] =>
             Array.isArray(e) &&
@@ -87,12 +103,14 @@ export const initializeOfflineSyncStore = (storage: Memento): void => {
         )
       : [],
   );
-  queue.comments = Array.isArray(raw.comments)
-    ? raw.comments.filter((c) => c !== null && typeof c === "object")
-    : [];
-  queue.newTickets = Array.isArray(raw.newTickets)
-    ? raw.newTickets.filter((t) => t !== null && typeof t === "object")
-    : [];
+  queue.comments =
+    raw && Array.isArray(raw.comments)
+      ? raw.comments.filter((c) => c !== null && typeof c === "object")
+      : [];
+  queue.newTickets =
+    raw && Array.isArray(raw.newTickets)
+      ? raw.newTickets.filter((t) => t !== null && typeof t === "object")
+      : [];
 };
 
 export const addOfflineTicketUpdate = (

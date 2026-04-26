@@ -27,6 +27,7 @@ suite("UnsyncedFilesTreeProvider", () => {
   });
 
   teardown(() => {
+    provider.dispose();
     clearOfflineSyncQueue();
   });
 
@@ -148,6 +149,99 @@ suite("UnsyncedFilesTreeProvider", () => {
     const after = await getItems(provider);
     assert.strictEqual(after.length, 1);
     assert.strictEqual(after[0].label, "No unsynced local files.");
+  });
+
+  test("オフライン同期キュー変更時に自動 refresh イベントを発火する", () => {
+    let refreshCount = 0;
+    const disposable = provider.onDidChangeTreeData(() => {
+      refreshCount += 1;
+    });
+
+    addOfflineNewTicket({
+      content: "# New ticket\n\nBody",
+      documentUri: "file:///tmp/redmine-client-new-ticket.md",
+    });
+
+    assert.strictEqual(refreshCount, 1);
+    disposable.dispose();
+  });
+
+  test("新規コメントのキュー追加時に自動 refresh イベントを発火する", () => {
+    let refreshCount = 0;
+    const disposable = provider.onDidChangeTreeData(() => {
+      refreshCount += 1;
+    });
+
+    addOfflineCommentUpdate({
+      ticketId: 123,
+      body: "New comment",
+      documentUri: "file:///tmp/redmine-client-new-comment-123.md",
+    });
+
+    assert.strictEqual(refreshCount, 1);
+    disposable.dispose();
+  });
+
+  test("チケット更新エントリの syncKey が正しく設定される", async () => {
+    const metadata = buildIssueMetadataFixture();
+    addOfflineTicketUpdate(77, {
+      ticketId: 77,
+      baseSubject: "Base",
+      baseDescription: "",
+      baseMetadata: metadata,
+      subject: "Updated",
+      description: "",
+      metadata,
+    });
+
+    const items = await getItems(provider);
+    const item = items[0] as UnsyncedFileTreeItem;
+    assert.deepStrictEqual(item.syncKey, { kind: "ticket", ticketId: 77 });
+  });
+
+  test("新規チケットエントリの syncKey が正しく設定される", async () => {
+    addOfflineNewTicket({
+      content: "# ticket",
+      documentUri: "file:///tmp/new.md",
+    });
+
+    const items = await getItems(provider);
+    const item = items[0] as UnsyncedFileTreeItem;
+    assert.deepStrictEqual(item.syncKey, { kind: "newTicket", documentUri: "file:///tmp/new.md" });
+  });
+
+  test("コメント更新エントリの syncKey が正しく設定される", async () => {
+    addOfflineCommentUpdate({
+      ticketId: 55,
+      commentId: 99,
+      body: "body",
+      documentUri: "file:///tmp/c.md",
+    });
+
+    const items = await getItems(provider);
+    const item = items[0] as UnsyncedFileTreeItem;
+    assert.deepStrictEqual(item.syncKey, {
+      kind: "comment",
+      ticketId: 55,
+      commentId: 99,
+      documentUri: "file:///tmp/c.md",
+    });
+  });
+
+  test("新規コメントエントリの syncKey が正しく設定される", async () => {
+    addOfflineCommentUpdate({
+      ticketId: 44,
+      body: "new comment",
+      documentUri: "file:///tmp/nc.md",
+    });
+
+    const items = await getItems(provider);
+    const item = items[0] as UnsyncedFileTreeItem;
+    assert.deepStrictEqual(item.syncKey, {
+      kind: "comment",
+      ticketId: 44,
+      documentUri: "file:///tmp/nc.md",
+    });
   });
 
   test("オフラインSync失敗後にキューを置換すると失敗エントリが残る", async () => {
