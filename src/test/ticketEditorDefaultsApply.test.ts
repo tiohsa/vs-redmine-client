@@ -29,6 +29,10 @@ suite("Ticket editor defaults application", () => {
         due_date: "2025-01-01",
         children: [],
       },
+      controlFields: {
+        mode: "new-ticket",
+        issue_id: null,
+      },
     });
   });
 
@@ -45,6 +49,10 @@ suite("Ticket editor defaults application", () => {
         status: "",
         due_date: "",
         children: [],
+      },
+      controlFields: {
+        mode: "new-ticket",
+        issue_id: null,
       },
     });
   });

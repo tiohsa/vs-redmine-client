@@ -27,15 +27,13 @@ export const buildNewTicketDraftContent = (options?: {
   projectId?: number;
 }): TicketEditorContent => {
   const base = applyTicketEditorDefaults(getTicketEditorDefaults());
-  if (!options || (!options.draftId && !options.projectId)) {
-    return base;
-  }
   return {
     ...base,
     controlFields: {
       mode: "new-ticket",
-      ...(options.draftId ? { draft_id: options.draftId } : {}),
-      ...(options.projectId ? { project_id: options.projectId } : {}),
+      ...(options?.projectId !== undefined ? { project_id: options.projectId } : {}),
+      issue_id: null,
+      ...(options?.draftId ? { draft_id: options.draftId } : {}),
     },
   };
 };

@@ -10,10 +10,13 @@ import { applyQueuedCommentUpdate, finalizeNewCommentDraftDocument } from "../vi
 import { registerTicketDocument } from "../views/ticketEditorRegistry";
 import { UnsyncedFileTreeItem } from "../views/unsyncedFilesView";
 import { showInfo, showWarning } from "../utils/notifications";
+import { rewriteDocumentWithRegisteredFields, RewriteDocumentDeps } from "../views/editorDocumentRewrite";
+import { removeTicketEditorByUri } from "../views/ticketEditorRegistry";
 
 export const syncUnsyncedFile = async (
   item: UnsyncedFileTreeItem,
   options: { onTicketCreated?: () => void; onSubjectUpdated?: (ticketId: number, subject: string) => void } = {},
+  rewriteDeps: RewriteDocumentDeps = {},
 ): Promise<void> => {
   const { syncKey } = item;
   const queue = getOfflineSyncQueue();
@@ -52,22 +55,32 @@ export const syncUnsyncedFile = async (
       projectId: entry.projectId,
       baseDir: entry.baseDir,
     });
-    if (result.status === "created" && createdId && entry.documentUri) {
-      const document = vscode.workspace.textDocuments.find(
-        (doc) => doc.uri.toString() === entry.documentUri,
-      );
-      if (document) {
-        registerTicketDocument(createdId, document, "ticket", entry.projectId);
-      }
-      removeOfflineNewTicket(entry.documentUri);
-      options.onTicketCreated?.();
-      showInfo("新規チケットを作成しました。");
-    } else if (result.status === "created" && createdId) {
+    if (result.status === "created" && createdId) {
       if (entry.documentUri) {
-        removeOfflineNewTicket(entry.documentUri);
+        const docUri = vscode.Uri.parse(entry.documentUri);
+        removeTicketEditorByUri(docUri);
+        const rewriteSuccess = await rewriteDocumentWithRegisteredFields(
+          entry.documentUri,
+          createdId,
+          rewriteDeps,
+        );
+        const document = vscode.workspace.textDocuments.find(
+          (doc) => doc.uri.toString() === entry.documentUri,
+        );
+        if (document) {
+          registerTicketDocument(createdId, document, "ticket", entry.projectId);
+        }
+        if (rewriteSuccess) {
+          removeOfflineNewTicket(entry.documentUri);
+          options.onTicketCreated?.();
+          showInfo("新規チケットを作成しました。");
+        } else {
+          showWarning("チケットは作成されましたが、ファイルの書き換えに失敗しました。再度同期してください。");
+        }
+      } else {
+        options.onTicketCreated?.();
+        showInfo("新規チケットを作成しました。");
       }
-      options.onTicketCreated?.();
-      showInfo("新規チケットを作成しました。");
     } else {
       showWarning(`同期に失敗しました: ${result.message ?? "不明なエラー"}`);
     }
