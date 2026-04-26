@@ -8,6 +8,8 @@ const LEGACY_STATUS_MAP: Record<string, TicketDraftState["status"]> = {
   clean: "Synced",
   dirty: "Dirty",
   conflict: "Conflict",
+  // "Syncing" は同期中の一時ステータス。永続化されていた場合は同期が中断されたことを意味するため "Dirty" にリセット
+  Syncing: "Dirty",
 };
 
 const migrateLegacyStatus = (status: string): TicketDraftState["status"] =>

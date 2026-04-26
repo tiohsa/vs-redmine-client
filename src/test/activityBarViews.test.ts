@@ -45,8 +45,8 @@ suite("Activity Bar view container", () => {
       "onView:redmine-clientActivityTickets activation missing",
     );
     assert.ok(
-      activationEvents.includes("onView:redmine-clientActivityOpenTickets"),
-      "onView:redmine-clientActivityOpenTickets activation missing",
+      activationEvents.includes("onView:redmine-clientActivityUnsyncedFiles"),
+      "onView:redmine-clientActivityUnsyncedFiles activation missing",
     );
     assert.ok(
       activationEvents.includes("onView:redmine-clientActivityComments"),

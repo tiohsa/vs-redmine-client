@@ -16,7 +16,7 @@ import {
 } from "../views/ticketPreview";
 import { buildUniqueUntitledName, buildUniqueUntitledPath } from "../views/untitledPath";
 import { buildEmptyTicketDraftContent } from "../views/ticketDraftStore";
-import { TicketEditorContent } from "../views/ticketEditorContent";
+import { TicketEditorContent, parseTicketEditorContent } from "../views/ticketEditorContent";
 import { showError } from "../utils/notifications";
 
 const DRAFT_FILENAME = "redmine-client-new-ticket.md";
@@ -81,14 +81,33 @@ export const buildNewTicketDraftUri = (
   return vscode.Uri.file(targetPath).with({ scheme: "untitled" });
 };
 
+const isAlreadySyncedDocument = (document: vscode.TextDocument): boolean => {
+  const text = document.getText().trim();
+  if (!text) { return false; }
+  try {
+    const parsed = parseTicketEditorContent(text, {
+      allowMissingMetadata: true,
+      fallbackMetadata: { tracker: "", priority: "", status: "", due_date: "", children: [] },
+      allowMissingSubject: true,
+    });
+    return parsed.controlFields?.mode === "ticket-update";
+  } catch {
+    return false;
+  }
+};
+
 export const openNewTicketDraft = async (input: {
   content: TicketEditorContent;
   projectId?: number;
 }): Promise<void> => {
   const knownUri =
     getNewTicketDraftUri() ?? buildNewTicketDraftUri(getEditorBasePath());
-  const existing = findOpenDocument(knownUri);
-  const document = existing ?? (await vscode.workspace.openTextDocument(knownUri));
+  let existing = findOpenDocument(knownUri);
+  if (existing && isAlreadySyncedDocument(existing)) {
+    existing = undefined;
+  }
+  const targetUri = existing ? knownUri : buildNewTicketDraftUri(getEditorBasePath());
+  const document = existing ?? (await vscode.workspace.openTextDocument(targetUri));
   const editor = await vscode.window.showTextDocument(document, { preview: false });
 
   registerNewTicketDraft(editor);

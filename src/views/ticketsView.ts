@@ -374,6 +374,10 @@ export class TicketsTreeProvider implements vscode.TreeDataProvider<vscode.TreeI
     void this.loadTickets();
   }
 
+  notifyChange(): void {
+    this.emitter.fire();
+  }
+
   async loadTickets(): Promise<void> {
     try {
       this.errorMessage = undefined;

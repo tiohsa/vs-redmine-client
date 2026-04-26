@@ -54,6 +54,8 @@ import {
   addOfflineNewTicket,
   OfflineTicketUpdate,
 } from "./offlineSyncStore";
+import { withRegisteredTicketControlFields } from "./ticketControlFields";
+import { suppressSaveSync, releaseSaveSync, isSaveSyncSuppressed } from "./saveSyncSuppression";
 
 export interface TicketSaveDependencies {
   getIssueDetail: typeof getIssueDetail;
@@ -631,6 +633,7 @@ export const queueTicketDraft = async (input: {
 export const syncNewTicketDraft = async (input: {
   editor: vscode.TextEditor;
   deps?: Partial<TicketCreateDependencies>;
+  applyContent?: (editor: vscode.TextEditor, content: string) => Promise<void>;
 }): Promise<TicketSaveResult> => {
   if (getOfflineSyncMode() === "manual") {
     return queueNewTicketDraft({ editor: input.editor });
@@ -640,9 +643,11 @@ export const syncNewTicketDraft = async (input: {
   const projectId = resolveProjectIdForEditor(input.editor);
 
   let draftId: string | undefined;
+  let originalControlFields;
   try {
     const parsedForDraftId = parseTicketEditorContent(input.editor.document.getText(), { allowMissingMetadata: true, fallbackMetadata: { tracker: "", priority: "", status: "", due_date: "", children: [] } });
     draftId = parsedForDraftId.controlFields?.draft_id;
+    originalControlFields = parsedForDraftId.controlFields;
   } catch {
     // Ignore parse errors for draft_id lookup.
   }
@@ -673,6 +678,27 @@ export const syncNewTicketDraft = async (input: {
   registerTicketEditor(createdId, input.editor, "primary", "ticket", projectId);
   setEditorDisplaySource(input.editor, "saved");
   updateDraftAfterSave(createdId, parsed.subject, parsed.description, parsed.metadata);
+
+  const newControlFields = withRegisteredTicketControlFields(
+    originalControlFields ?? {},
+    createdId,
+  );
+  const newContent = buildTicketEditorContent({
+    subject: parsed.subject,
+    description: parsed.description,
+    metadata: parsed.metadata,
+    layout: parsed.layout,
+    metadataBlock: parsed.metadataBlock,
+    controlFields: newControlFields,
+  });
+  const uriString = input.editor.document.uri.toString();
+  suppressSaveSync(uriString);
+  try {
+    const doApply = input.applyContent ?? applyEditorContent;
+    await doApply(input.editor, newContent);
+  } finally {
+    releaseSaveSync(uriString);
+  }
 
   return result;
 };
@@ -1109,6 +1135,10 @@ export const saveTicketDraftLocally = (
   if (!ticketId) { return undefined; }
 
   if (ticketId === NEW_TICKET_DRAFT_ID) {
+    addOfflineNewTicket({
+      content: editor.document.getText(),
+      documentUri: editor.document.uri.toString(),
+    });
     return buildResult("queued", "新規チケットの下書きをローカルに保存しました。");
   }
 
@@ -1126,6 +1156,21 @@ export const saveTicketDraftLocally = (
     });
     setTicketDraftContent(ticketId, parsed);
     markDraftStatus(ticketId, "Dirty");
+    const draft = getTicketDraft(ticketId);
+    if (draft) {
+      addOfflineTicketUpdate(ticketId, {
+        ticketId,
+        baseSubject: draft.baseSubject,
+        baseDescription: draft.baseDescription,
+        baseMetadata: draft.baseMetadata,
+        lastKnownRemoteUpdatedAt: draft.lastKnownRemoteUpdatedAt,
+        subject: parsed.subject ?? draft.baseSubject,
+        description: parsed.description ?? draft.baseDescription,
+        metadata: parsed.metadata ?? draft.baseMetadata,
+        layout: parsed.layout,
+        metadataBlock: parsed.metadataBlock,
+      });
+    }
     return buildResult("queued", "ローカルに保存しました。Redmine への反映には同期コマンドを実行してください。");
   } catch {
     return buildResult("failed", "ドラフトの解析に失敗しました。");
@@ -1136,6 +1181,10 @@ export const handleTicketEditorSave = async (
   editor: vscode.TextEditor,
   _options: { onSubjectUpdated?: (ticketId: number, subject: string) => void } = {},
 ): Promise<TicketSaveResult | undefined> => {
+  if (isSaveSyncSuppressed(editor.document.uri.toString())) {
+    return undefined;
+  }
+
   const result = saveTicketDraftLocally(editor);
   if (result !== undefined) {
     return result;

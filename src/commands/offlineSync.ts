@@ -11,7 +11,8 @@ import {
   createTicketFromQueuedContent,
 } from "../views/ticketSaveSync";
 import { applyQueuedCommentUpdate } from "../views/commentSaveSync";
-import { registerTicketDocument } from "../views/ticketEditorRegistry";
+import { registerTicketDocument, removeTicketEditorByUri } from "../views/ticketEditorRegistry";
+import { rewriteDocumentWithRegisteredFields } from "../views/editorDocumentRewrite";
 import { finalizeNewCommentDraftDocument } from "../views/commentSaveSync";
 import { showInfo, showWarning } from "../utils/notifications";
 import { TicketSaveResult } from "../views/ticketSaveTypes";
@@ -70,6 +71,9 @@ export const runOfflineSync = async (): Promise<void> => {
       baseDir: entry.baseDir,
     });
     if (result.status === "created" && createdId && entry.documentUri) {
+      const docUri = vscode.Uri.parse(entry.documentUri);
+      removeTicketEditorByUri(docUri);
+      await rewriteDocumentWithRegisteredFields(entry.documentUri, createdId);
       const document = vscode.workspace.textDocuments.find(
         (doc) => doc.uri.toString() === entry.documentUri,
       );

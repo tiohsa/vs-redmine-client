@@ -6,6 +6,11 @@ import {
   isTicketEditor,
   NEW_TICKET_DRAFT_ID,
 } from "../views/ticketEditorRegistry";
+import {
+  removeOfflineTicketUpdate,
+  removeOfflineNewTicket,
+  removeOfflineCommentEntry,
+} from "../views/offlineSyncStore";
 import { markDraftStatus } from "../views/ticketDraftStore";
 import {
   syncNewTicketDraft,
@@ -51,20 +56,30 @@ export const syncEditorToRedmine = async (
     const result = await syncNewTicketDraft({ editor, deps: options.deps });
     if (result.status === "created") {
       options.onTicketCreated?.();
+      removeOfflineNewTicket(editor.document.uri.toString());
     }
     return { kind: "ticket", result };
   }
 
   if (contentType === "ticket") {
     markDraftStatus(ticketId, "Syncing");
-    const result = await syncTicketDraft({
-      ticketId,
-      content: editor.document.getText(),
-      editor,
-      deps: options.deps,
-      onSubjectUpdated: options.onSubjectUpdated,
-    });
-    if (result.status !== "success" && result.status !== "no_change" && result.status !== "conflict") {
+    let result: TicketSaveResult;
+    try {
+      result = await syncTicketDraft({
+        ticketId,
+        content: editor.document.getText(),
+        editor,
+        deps: options.deps,
+        onSubjectUpdated: options.onSubjectUpdated,
+      });
+    } catch (error) {
+      markDraftStatus(ticketId, "Failed");
+      throw error;
+    }
+    if (result.status === "no_change" || result.status === "success") {
+      markDraftStatus(ticketId, "Synced");
+      removeOfflineTicketUpdate(ticketId);
+    } else if (result.status !== "conflict" && result.status !== "queued") {
       markDraftStatus(ticketId, "Failed");
     }
     return { kind: "ticket", result };
@@ -88,6 +103,9 @@ export const syncEditorToRedmine = async (
     if (shouldRefreshComments(result.status)) {
       options.onCommentsRefresh?.(ticketId);
     }
+    if (result.status === "created" || result.status === "no_change") {
+      removeOfflineCommentEntry({ documentUri: editor.document.uri.toString() });
+    }
     return { kind: "comment", result, ticketId };
   }
 
@@ -104,6 +122,9 @@ export const syncEditorToRedmine = async (
     });
     if (shouldRefreshComments(result.status)) {
       options.onCommentsRefresh?.(ticketId);
+    }
+    if (result.status === "success" || result.status === "no_change") {
+      removeOfflineCommentEntry({ commentId, documentUri: editor.document.uri.toString() });
     }
     return { kind: "comment", result, ticketId };
   }

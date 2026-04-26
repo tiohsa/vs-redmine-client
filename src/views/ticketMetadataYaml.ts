@@ -53,7 +53,11 @@ export const parseFrontmatterControlFields = (text: string): FrontmatterControlF
         if (/^\d+$/.test(value)) { fields.project_id = Number(value); }
         break;
       case "issue_id":
-        if (/^\d+$/.test(value)) { fields.issue_id = Number(value); }
+        if (value.length === 0) {
+          fields.issue_id = null;
+        } else if (/^\d+$/.test(value)) {
+          fields.issue_id = Number(value);
+        }
         break;
       case "parent_issue_id":
         if (/^\d+$/.test(value)) { fields.parent_issue_id = Number(value); }
@@ -82,7 +86,11 @@ export const serializeFrontmatterControlFields = (fields: FrontmatterControlFiel
   const lines: string[] = [];
   if (fields.mode !== undefined) { lines.push(`mode: ${fields.mode}`); }
   if (fields.project_id !== undefined) { lines.push(`project_id: ${fields.project_id}`); }
-  if (fields.issue_id !== undefined) { lines.push(`issue_id: ${fields.issue_id}`); }
+  if (fields.issue_id === null) {
+    lines.push("issue_id:");
+  } else if (fields.issue_id !== undefined) {
+    lines.push(`issue_id: ${fields.issue_id}`);
+  }
   if (fields.parent_issue_id !== undefined) { lines.push(`parent_issue_id: ${fields.parent_issue_id}`); }
   if (fields.draft_id !== undefined) { lines.push(`draft_id: ${fields.draft_id}`); }
   if (fields.last_synced_at !== undefined) { lines.push(`last_synced_at: ${fields.last_synced_at}`); }
