@@ -59,7 +59,10 @@
     "onCommand:redmine-client.configureOfflineSyncMode",
     "onCommand:redmine-client.searchTickets",
     "onCommand:redmine-client.revealActiveTicket",
-    "onCommand:redmine-client.focusTicketEditor"
+    "onCommand:redmine-client.focusTicketEditor",
+    "onCommand:redmine-client.setApiKey",
+    "onCommand:redmine-client.clearApiKey",
+    "onCommand:redmine-client.showApiKeyStatus"
   ],
   "main": "./dist/extension.js",
   "l10n": "./l10n",
@@ -74,6 +77,22 @@
       ]
     },
     "commands": [
+      {
+        "command": "redmine-client.setApiKey",
+        "title": "Redmine: Set API Key"
+      },
+      {
+        "command": "redmine-client.clearApiKey",
+        "title": "Redmine: Clear API Key"
+      },
+      {
+        "command": "redmine-client.showApiKeyStatus",
+        "title": "Redmine: Show API Key Status"
+      },
+      {
+        "command": "redmine-client.loadMoreTickets",
+        "title": "Redmine: Load More Tickets"
+      },
       {
         "command": "redmine-client.refreshProjects",
         "title": "Redmine: Refresh Projects",
@@ -288,7 +307,7 @@
         },
         {
           "id": "redmine-clientActivityUnsyncedFiles",
-          "name": "Unsynced Files"
+          "name": "Local Changes"
         },
         {
           "id": "redmine-clientActivityProjects",
@@ -433,12 +452,12 @@
         "redmine-client.apiKey": {
           "type": "string",
           "default": "",
-          "description": "Redmine API key for authentication."
+          "markdownDescription": "Redmine API key for authentication. **Deprecated**: Use the `Redmine: Set API Key` command to store the key securely in VS Code SecretStorage instead."
         },
         "redmine-client.ignoreSSLErrors": {
           "type": "boolean",
           "default": false,
-          "description": "Ignore SSL certificate errors (e.g. for self-signed certificates)."
+          "markdownDescription": "Ignore SSL certificate errors (e.g. for self-signed certificates). **For development/testing only. Do NOT enable in production.**"
         },
         "redmine-client.defaultProjectId": {
           "type": "string",
@@ -481,7 +500,12 @@
           "type": "string",
           "default": "auto",
           "enum": ["auto", "manual"],
-          "description": "Sync mode for ticket/comment saves. Auto sends to Redmine, manual queues for offline sync."
+          "description": "Sync mode for explicit sync commands. Auto sends to Redmine immediately, manual queues for batch sync. Ctrl+S always saves locally regardless of this setting."
+        },
+        "redmine-client.requestTimeoutMs": {
+          "type": "number",
+          "default": 30000,
+          "description": "HTTP request timeout in milliseconds (default: 30000ms = 30 seconds)."
         }
       }
     }

@@ -133,13 +133,17 @@ const formatDueDateSummary = (rule: DueDateDisplayRule): string => {
   return enabled.join(", ");
 };
 
-const buildTicketTreeSources = (tickets: Ticket[]): Array<TreeSource<Ticket>> =>
-  tickets.map((ticket) => ({
+const buildTicketTreeSources = (tickets: Ticket[]): Array<TreeSource<Ticket>> => {
+  const idSet = new Set(tickets.map((t) => t.id));
+  return tickets.map((ticket) => ({
     id: ticket.id,
     parentId: ticket.parentId,
     label: `#${ticket.id} ${ticket.subject}`,
     data: ticket,
+    parentNotLoaded:
+      ticket.parentId !== undefined && !idSet.has(ticket.parentId),
   }));
+};
 
 const collectTicketNodes = (
   nodes: Array<TreeNode<Ticket>>,
@@ -353,11 +357,28 @@ export const buildTicketsViewItems = (
   return [...warningItems, ...ticketItems];
 };
 
+export class LoadMoreTicketsItem extends vscode.TreeItem {
+  constructor(loaded: number, total: number) {
+    super(
+      `Load more… (${loaded} / ${total})`,
+      vscode.TreeItemCollapsibleState.None,
+    );
+    this.iconPath = new vscode.ThemeIcon("ellipsis");
+    this.command = {
+      command: "redmine-client.loadMoreTickets",
+      title: "Load More Tickets",
+      arguments: [],
+    };
+    this.tooltip = `${loaded} 件表示中 / 全 ${total} 件`;
+  }
+}
+
 export class TicketsTreeProvider implements vscode.TreeDataProvider<vscode.TreeItem> {
   private readonly emitter = new vscode.EventEmitter<
     vscode.TreeItem | undefined | void
   >();
   private tickets: Ticket[] = [];
+  private totalCount = 0;
   private offset = 0;
   private errorMessage?: string;
   private selectedProjectId?: number;
@@ -381,6 +402,7 @@ export class TicketsTreeProvider implements vscode.TreeDataProvider<vscode.TreeI
   async loadTickets(): Promise<void> {
     try {
       this.errorMessage = undefined;
+      this.offset = 0;
       refreshCreateTicketContext();
       const selection = getProjectSelection();
       const fallbackId = Number(getDefaultProjectId());
@@ -389,6 +411,7 @@ export class TicketsTreeProvider implements vscode.TreeDataProvider<vscode.TreeI
       this.selectedProjectId = projectId;
       if (!projectId) {
         this.tickets = [];
+        this.totalCount = 0;
         this.emitter.fire();
         return;
       }
@@ -397,10 +420,11 @@ export class TicketsTreeProvider implements vscode.TreeDataProvider<vscode.TreeI
         projectId,
         includeChildProjects: getIncludeChildProjects(),
         limit: getTicketListLimit(),
-        offset: this.offset,
+        offset: 0,
       });
 
       this.tickets = result.tickets;
+      this.totalCount = result.totalCount;
       rememberTicketSummaries(this.tickets);
       try {
         this.currentUserId = await getCurrentUserId();
@@ -414,6 +438,34 @@ export class TicketsTreeProvider implements vscode.TreeDataProvider<vscode.TreeI
       showError(this.errorMessage);
       this.emitter.fire();
     }
+  }
+
+  async loadMoreTickets(): Promise<void> {
+    if (!this.selectedProjectId || this.tickets.length >= this.totalCount) {
+      return;
+    }
+    try {
+      const limit = getTicketListLimit();
+      const nextOffset = this.tickets.length;
+      const result = await listIssues({
+        projectId: this.selectedProjectId,
+        includeChildProjects: getIncludeChildProjects(),
+        limit,
+        offset: nextOffset,
+      });
+      this.tickets = [...this.tickets, ...result.tickets];
+      this.totalCount = result.totalCount;
+      this.offset = nextOffset;
+      rememberTicketSummaries(result.tickets);
+      this.emitter.fire();
+    } catch (error) {
+      const message = (error as Error).message;
+      showError(`Failed to load more tickets: ${message}`);
+    }
+  }
+
+  getTotalCount(): number {
+    return this.totalCount;
   }
 
   setOffset(offset: number): void {
@@ -510,6 +562,12 @@ export class TicketsTreeProvider implements vscode.TreeDataProvider<vscode.TreeI
 
     const { treeResult } = this.getVisibleTreeResult(visibleTickets);
     this.rootNodes = treeResult.roots;
+
+    // サーバー側にまだ未取得のチケットがある場合は「Load more」を表示する
+    if (this.tickets.length < this.totalCount) {
+      items.push(new LoadMoreTicketsItem(this.tickets.length, this.totalCount));
+    }
+
     return items;
   }
 
@@ -949,6 +1007,9 @@ export class TicketTreeItem extends vscode.TreeItem {
       node.children.length > 0 ? "folder" : "file-text",
       isSelected,
     );
+    if (node.parentNotLoaded && node.data.parentId !== undefined) {
+      this.tooltip = `Parent ticket #${node.data.parentId} is not loaded in the current view.`;
+    }
   }
 
   get ticket(): Ticket {

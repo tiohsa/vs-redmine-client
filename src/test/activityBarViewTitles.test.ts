@@ -25,7 +25,7 @@ suite("Activity Bar view titles", () => {
 
     assert.strictEqual(
       viewById("redmine-clientActivityUnsyncedFiles")?.name,
-      "Unsynced Files",
+      "Local Changes",
     );
     assert.strictEqual(viewById("redmine-clientActivityProjects")?.name, "Projects");
     assert.strictEqual(viewById("redmine-clientActivityTickets")?.name, "Tickets");

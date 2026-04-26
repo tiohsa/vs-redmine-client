@@ -84,7 +84,9 @@ const persist = (): void => {
       comments: queue.comments,
       newTickets: queue.newTickets,
     };
-    void memento.update(STORAGE_KEY, serialized);
+    Promise.resolve(memento.update(STORAGE_KEY, serialized)).catch((err: unknown) => {
+      console.error("[vs-redmine-client] offlineSyncStore: persist failed", err);
+    });
   }
   notifyQueueChanged();
 };
