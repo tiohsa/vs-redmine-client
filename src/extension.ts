@@ -38,11 +38,7 @@ import { createGlobalStateDraftStorage } from "./views/draftPersistence";
 import { initializeNewTicketDraftStore } from "./views/newTicketDraftStore";
 import { formatTicketLabel } from "./views/ticketLabel";
 import { UnsyncedFileTreeItem, UnsyncedFilesTreeProvider } from "./views/unsyncedFilesView";
-import {
-  addOfflineCommentUpdate,
-  initializeOfflineSyncStore,
-  removeOfflineCommentEntry,
-} from "./views/offlineSyncStore";
+import { initializeOfflineSyncStore } from "./views/offlineSyncStore";
 import {
   configureEditorDefaultField,
   EDITOR_DEFAULT_COMMANDS,
@@ -80,10 +76,8 @@ import { showTicketComment, showTicketPreview } from "./views/ticketPreview";
 import { getCommentSaveNotification } from "./views/commentSaveNotifications";
 import {
   handleCommentEditorSave,
-  finalizeNewCommentDraftDocument,
+  saveCommentDocumentLocally,
   shouldRefreshComments,
-  syncCommentDraft,
-  syncNewCommentDraft,
 } from "./views/commentSaveSync";
 import { getSaveNotification } from "./views/ticketSaveNotifications";
 import {
@@ -516,15 +510,13 @@ export async function activate(context: vscode.ExtensionContext) {
         if (!ticketIdForDocument) {
           return;
         }
-        const commentResult = await syncCommentDraft({
+        const commentResult = saveCommentDocumentLocally({
+          ticketId: ticketIdForDocument,
           commentId: commentIdForDocument,
           content: document.getText(),
           documentUri: document.uri,
         });
         notifyCommentSaveResult(commentResult);
-        if (shouldRefreshComments(commentResult.status)) {
-          commentsProvider.refreshForTicket(ticketIdForDocument);
-        }
         return;
       }
 
@@ -615,41 +607,22 @@ export async function activate(context: vscode.ExtensionContext) {
           getCommentIdForUri(document.uri) ??
           getCommentIdForDraftUri(draftTicketId, document.uri.toString());
         if (existingCommentId) {
-          // Already added comment - sync as update
-          const commentResult = await syncCommentDraft({
+          const commentResult = saveCommentDocumentLocally({
+            ticketId: draftTicketId,
             commentId: existingCommentId,
             content: document.getText(),
             documentUri: document.uri,
           });
           notifyCommentSaveResult(commentResult);
-          if (shouldRefreshComments(commentResult.status)) {
-            commentsProvider.refreshForTicket(draftTicketId);
-          }
           return;
         }
 
-        addOfflineCommentUpdate({ ticketId: draftTicketId, body: document.getText(), documentUri: document.uri.toString() });
-
-        const result = await syncNewCommentDraft({
+        const result = saveCommentDocumentLocally({
           ticketId: draftTicketId,
           content: document.getText(),
           documentUri: document.uri,
-          onCreated: async ({ commentId, projectId }) => {
-            finalizeNewCommentDraftDocument({
-              document,
-              ticketId: draftTicketId,
-              projectId,
-              commentId,
-            });
-          },
         });
         notifyCommentSaveResult(result);
-        if (shouldRefreshComments(result.status)) {
-          commentsProvider.refreshForTicket(draftTicketId);
-        }
-        if (result.status === "created" || result.status === "created_unresolved") {
-          removeOfflineCommentEntry({ documentUri: document.uri.toString() });
-        }
         return;
       }
 
@@ -673,15 +646,13 @@ export async function activate(context: vscode.ExtensionContext) {
         return;
       }
 
-      const commentResult = await syncCommentDraft({
+      const commentResult = saveCommentDocumentLocally({
+        ticketId: parsed.ticketId,
         commentId: parsed.commentId,
         content: document.getText(),
         documentUri: document.uri,
       });
       notifyCommentSaveResult(commentResult);
-      if (shouldRefreshComments(commentResult.status)) {
-        commentsProvider.refreshForTicket(parsed.ticketId);
-      }
     })();
   };
 

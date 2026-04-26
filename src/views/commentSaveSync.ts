@@ -410,6 +410,21 @@ export const saveCommentDraftLocally = (
   return buildResult("queued", "ローカルに保存しました。Redmine への反映には同期コマンドを実行してください。");
 };
 
+export const saveCommentDocumentLocally = (input: {
+  ticketId: number;
+  commentId?: number;
+  content: string;
+  documentUri: vscode.Uri;
+}): CommentSaveResult => {
+  addOfflineCommentUpdate({
+    ticketId: input.ticketId,
+    commentId: input.commentId,
+    body: input.content,
+    documentUri: input.documentUri.toString(),
+  });
+  return buildResult("queued", "ローカルに保存しました。Redmine への反映には同期コマンドを実行してください。");
+};
+
 export const handleCommentEditorSave = async (
   editor: vscode.TextEditor,
   _deps?: Partial<CommentSaveDependencies>,
