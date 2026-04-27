@@ -1,0 +1,553 @@
+/** Dashboard Webview CSS — light / dark / high-contrast theme対応 */
+export const dashboardStyles = String.raw`
+/* ── Design tokens (mm-*) ────────────────────────────────────── */
+:root {
+  --mm-brand-blue: #1456f0;
+  --mm-sky-blue: #3daeff;
+  --mm-primary-200: #bfdbfe;
+  --mm-primary-500: #3b82f6;
+  --mm-primary-600: #2563eb;
+  --mm-primary-700: #1d4ed8;
+  --mm-brand-pink: #ea5ec1;
+
+  --mm-text: #222222;
+  --mm-text-strong: #18181b;
+  --mm-text-secondary: #45515e;
+  --mm-text-muted: #8e8e93;
+
+  --mm-bg: #ffffff;
+  --mm-surface: #ffffff;
+  --mm-surface-subtle: #f8f9fb;
+  --mm-border: #e5e7eb;
+  --mm-border-subtle: #f2f3f5;
+
+  --mm-radius-button: 8px;
+  --mm-radius-control: 13px;
+  --mm-radius-card: 18px;
+  --mm-radius-hero-card: 22px;
+  --mm-radius-pill: 9999px;
+
+  --mm-shadow-subtle: rgba(0,0,0,0.08) 0px 4px 6px;
+  --mm-shadow-brand: rgba(44,30,116,0.16) 0px 0px 15px;
+
+  --font-ui: "DM Sans","Noto Sans JP",var(--vscode-font-family),system-ui,-apple-system,sans-serif;
+  --font-display: "Outfit","DM Sans","Noto Sans JP",var(--vscode-font-family),system-ui,sans-serif;
+}
+
+/* ── App semantic tokens (base / light fallback) ─────────────── */
+body {
+  --app-bg: var(--vscode-sideBar-background, var(--mm-bg));
+  --app-surface: var(--vscode-editor-background, var(--mm-surface));
+  --app-surface-subtle: var(--vscode-sideBarSectionHeader-background, var(--mm-surface-subtle));
+  --app-text: var(--vscode-foreground, var(--mm-text));
+  --app-text-secondary: var(--vscode-descriptionForeground, var(--mm-text-secondary));
+  --app-text-muted: var(--vscode-disabledForeground, var(--mm-text-muted));
+  --app-border: var(--vscode-panel-border, var(--mm-border));
+  --app-card-border: var(--vscode-panel-border, var(--mm-border));
+  --app-focus: var(--vscode-focusBorder, var(--mm-brand-blue));
+  --app-accent: var(--mm-brand-blue);
+  --app-accent-hover: var(--mm-primary-600);
+  --app-hover: rgba(20,86,240,0.07);
+  --app-selected: rgba(20,86,240,0.12);
+  --app-shadow: var(--mm-shadow-subtle);
+}
+
+/* ── Light theme ─────────────────────────────────────────────── */
+body.vscode-light {
+  --app-bg: var(--vscode-sideBar-background, #ffffff);
+  --app-surface: var(--vscode-editor-background, #ffffff);
+  --app-surface-subtle: #f8f9fb;
+  --app-hover: rgba(20,86,240,0.07);
+  --app-selected: rgba(20,86,240,0.12);
+  --app-card-border: #e5e7eb;
+  --app-shadow: rgba(44,30,116,0.12) 0 0 15px;
+}
+
+/* ── Dark theme ──────────────────────────────────────────────── */
+body.vscode-dark {
+  --app-bg: var(--vscode-sideBar-background, #181e25);
+  --app-surface: var(--vscode-editor-background, #22262e);
+  --app-surface-subtle: rgba(255,255,255,0.04);
+  --app-hover: rgba(96,165,250,0.12);
+  --app-selected: rgba(96,165,250,0.18);
+  --app-card-border: var(--vscode-panel-border, #2e3340);
+  --app-shadow: none;
+}
+
+/* ── High contrast theme ─────────────────────────────────────── */
+body.vscode-high-contrast {
+  --app-bg: var(--vscode-editor-background);
+  --app-surface: var(--vscode-editor-background);
+  --app-surface-subtle: var(--vscode-editor-background);
+  --app-text: var(--vscode-foreground);
+  --app-text-secondary: var(--vscode-foreground);
+  --app-text-muted: var(--vscode-foreground);
+  --app-border: var(--vscode-contrastBorder);
+  --app-card-border: var(--vscode-contrastBorder);
+  --app-focus: var(--vscode-focusBorder);
+  --app-hover: transparent;
+  --app-selected: transparent;
+  --app-shadow: none;
+}
+
+/* ── Reset ───────────────────────────────────────────────────── */
+*{box-sizing:border-box;margin:0;padding:0}
+body{
+  font-family:var(--font-ui);
+  font-size:13px;
+  color:var(--app-text);
+  background:var(--app-bg);
+  height:100vh;
+  display:flex;
+  flex-direction:column;
+  overflow:hidden;
+  line-height:1.5;
+}
+
+/* ── Header ──────────────────────────────────────────────────── */
+#header{
+  padding:10px 12px 8px;
+  border-bottom:1px solid var(--app-border);
+  background:var(--app-bg);
+  flex-shrink:0;
+}
+#header h1{
+  font-family:var(--font-display);
+  font-size:14px;
+  font-weight:600;
+  color:var(--app-text);
+  letter-spacing:-.01em;
+  margin-bottom:8px;
+  line-height:1.5;
+}
+#header-row{
+  display:flex;
+  align-items:center;
+  gap:6px;
+  flex-wrap:wrap;
+}
+.project-select{
+  flex:1;
+  min-width:0;
+  padding:4px 8px;
+  background:var(--vscode-dropdown-background, var(--app-surface));
+  color:var(--vscode-dropdown-foreground, var(--app-text));
+  border:1px solid var(--vscode-input-border, var(--app-border));
+  border-radius:var(--mm-radius-button);
+  font:inherit;
+  font-size:12px;
+  cursor:pointer;
+  max-width:180px;
+}
+.project-select:focus{
+  outline:1px solid var(--app-focus);
+  outline-offset:1px;
+}
+.toggle-children{
+  display:flex;
+  align-items:center;
+  gap:4px;
+  font-size:11.5px;
+  color:var(--app-text-secondary);
+  cursor:pointer;
+  user-select:none;
+  white-space:nowrap;
+}
+.toggle-children input{accent-color:var(--app-accent)}
+.btn-icon{
+  width:26px;
+  height:26px;
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  border:none;
+  background:transparent;
+  color:var(--app-text-secondary);
+  border-radius:var(--mm-radius-button);
+  cursor:pointer;
+  font-size:15px;
+  flex-shrink:0;
+  transition:background .15s;
+}
+.btn-icon:hover{background:var(--app-hover);color:var(--app-accent)}
+.btn-icon:focus-visible{outline:1px solid var(--app-focus);outline-offset:1px}
+
+/* ── Tab bar (pill navigation) ───────────────────────────────── */
+#tabs{
+  display:flex;
+  gap:6px;
+  padding:8px 12px;
+  border-bottom:1px solid var(--app-border);
+  flex-shrink:0;
+  overflow-x:auto;
+  scrollbar-width:none;
+}
+#tabs::-webkit-scrollbar{display:none}
+.tab{
+  padding:6px 12px;
+  border-radius:var(--mm-radius-pill);
+  font-size:12px;
+  font-weight:500;
+  color:var(--app-text-secondary);
+  cursor:pointer;
+  border:1px solid transparent;
+  white-space:nowrap;
+  user-select:none;
+  transition:background .15s,color .15s;
+  display:flex;
+  align-items:center;
+  gap:5px;
+}
+.tab:hover{background:var(--app-hover);color:var(--app-accent)}
+.tab:focus-visible{outline:1px solid var(--app-focus);outline-offset:1px}
+.tab.active{
+  background:var(--app-selected);
+  color:var(--app-accent);
+  border-color:color-mix(in srgb,var(--app-accent) 30%,transparent);
+}
+body.vscode-high-contrast .tab.active{
+  border-color:var(--app-border);
+  background:transparent;
+  text-decoration:underline;
+}
+.tab-badge{
+  min-width:16px;
+  height:16px;
+  padding:0 4px;
+  border-radius:var(--mm-radius-pill);
+  background:var(--app-accent);
+  color:#fff;
+  font-size:10px;
+  font-weight:600;
+  display:flex;
+  align-items:center;
+  justify-content:center;
+}
+
+/* ── Content ─────────────────────────────────────────────────── */
+#content{flex:1;overflow:hidden;display:flex;flex-direction:column;min-height:0}
+.tab-panel{display:none;flex:1;flex-direction:column;overflow:hidden;min-height:0}
+.tab-panel.active{display:flex}
+
+/* ── Search / filter bar ─────────────────────────────────────── */
+#filter-bar{
+  padding:8px 12px;
+  border-bottom:1px solid var(--app-border);
+  flex-shrink:0;
+}
+#search-row{display:flex;gap:6px;align-items:center}
+#search-input{
+  flex:1;
+  padding:5px 10px;
+  background:var(--vscode-input-background, var(--app-surface));
+  color:var(--vscode-input-foreground, var(--app-text));
+  border:1px solid var(--vscode-input-border, var(--app-border));
+  border-radius:var(--mm-radius-pill);
+  font:inherit;
+  font-size:12px;
+  outline:none;
+  transition:border .15s;
+}
+#search-input:focus{outline:1px solid var(--app-focus);outline-offset:1px}
+#search-input::placeholder{color:var(--app-text-muted)}
+#filter-chips{
+  display:flex;
+  flex-wrap:wrap;
+  gap:4px;
+  margin-top:6px;
+}
+.filter-chip{
+  display:flex;
+  align-items:center;
+  gap:4px;
+  padding:2px 8px 2px 10px;
+  background:var(--app-selected);
+  color:var(--app-accent);
+  border-radius:var(--mm-radius-pill);
+  font-size:11px;
+  font-weight:500;
+  cursor:pointer;
+  border:1px solid transparent;
+}
+.filter-chip:hover{border-color:var(--app-accent)}
+.filter-chip-x{
+  font-size:12px;
+  line-height:1;
+  opacity:.7;
+  margin-left:2px;
+}
+
+/* ── Ticket list ─────────────────────────────────────────────── */
+#ticket-scroll{flex:1;overflow-y:auto;min-height:0}
+.ticket-row{
+  position:relative;
+  display:flex;
+  align-items:center;
+  gap:6px;
+  padding:6px 12px;
+  cursor:pointer;
+  border-bottom:1px solid var(--app-border);
+  transition:background .1s;
+}
+.ticket-row:hover{background:var(--app-hover)}
+.ticket-row.selected{background:var(--app-selected)}
+.ticket-row.selected::before{
+  content:"";
+  position:absolute;
+  left:0;
+  top:6px;
+  bottom:6px;
+  width:3px;
+  border-radius:var(--mm-radius-pill);
+  background:var(--app-accent);
+}
+.ticket-row:focus-visible{
+  outline:1px solid var(--app-focus);
+  outline-offset:-1px;
+}
+body.vscode-high-contrast .ticket-row.selected{
+  border-left:3px solid var(--app-border);
+}
+.ticket-indent{width:0;flex-shrink:0}
+.ticket-id{
+  font-size:11px;
+  color:var(--app-text-muted);
+  white-space:nowrap;
+  flex-shrink:0;
+  min-width:38px;
+}
+.ticket-subject{
+  flex:1;
+  overflow:hidden;
+  text-overflow:ellipsis;
+  white-space:nowrap;
+  font-size:12.5px;
+}
+.badges{display:flex;gap:3px;flex-shrink:0;flex-wrap:wrap;justify-content:flex-end}
+.badge{
+  padding:2px 7px;
+  border-radius:var(--mm-radius-pill);
+  font-size:10.5px;
+  font-weight:500;
+  white-space:nowrap;
+  background:var(--app-surface-subtle);
+  color:var(--app-text-secondary);
+  border:1px solid var(--app-card-border);
+}
+.badge.priority-high{background:#fff0f0;color:#c0392b;border-color:#fca5a5}
+.badge.priority-low{background:#f0fff4;color:#15803d;border-color:#86efac}
+.badge.sync-dirty{background:#fff7ed;color:#b45309;border-color:#fcd34d}
+.badge.sync-queued{background:#eff6ff;color:var(--app-accent);border-color:var(--mm-primary-200)}
+.badge.sync-conflict{background:#fef2f2;color:#b91c1c;border-color:#fca5a5}
+.badge.sync-failed{background:#fef2f2;color:#b91c1c;border-color:#fca5a5}
+.badge.sync-syncing{background:#f0fdf4;color:#15803d;border-color:#bbf7d0}
+body.vscode-high-contrast .badge{background:transparent;border-color:var(--app-border)}
+body.vscode-high-contrast .badge.priority-high,
+body.vscode-high-contrast .badge.priority-low,
+body.vscode-high-contrast .badge.sync-dirty,
+body.vscode-high-contrast .badge.sync-queued,
+body.vscode-high-contrast .badge.sync-conflict,
+body.vscode-high-contrast .badge.sync-failed,
+body.vscode-high-contrast .badge.sync-syncing{
+  background:transparent;
+  color:var(--app-text);
+  border-color:var(--app-border);
+}
+.load-more-row{
+  padding:10px 12px;
+  text-align:center;
+  color:var(--app-accent);
+  font-size:12px;
+  cursor:pointer;
+  font-weight:500;
+}
+.load-more-row:hover{text-decoration:underline}
+
+/* ── Detail card ─────────────────────────────────────────────── */
+#detail-card{
+  margin:8px 10px 10px;
+  border:1px solid var(--app-card-border);
+  border-radius:var(--mm-radius-card);
+  padding:10px 12px;
+  flex-shrink:0;
+  max-height:200px;
+  overflow-y:auto;
+  background:var(--app-surface);
+  box-shadow:var(--app-shadow);
+}
+.detail-title{
+  font-size:13px;
+  font-weight:600;
+  color:var(--app-text);
+  margin-bottom:6px;
+  overflow:hidden;
+  text-overflow:ellipsis;
+  white-space:nowrap;
+}
+.detail-meta{
+  display:flex;
+  flex-wrap:wrap;
+  gap:4px;
+  margin-bottom:8px;
+}
+.detail-actions{display:flex;gap:6px;flex-wrap:wrap}
+
+/* ── Buttons ─────────────────────────────────────────────────── */
+.btn{
+  padding:4px 12px;
+  border-radius:var(--mm-radius-button);
+  font-size:11.5px;
+  font-weight:600;
+  cursor:pointer;
+  border:none;
+  transition:background .15s;
+  line-height:1.5;
+}
+.btn:focus-visible{outline:1px solid var(--app-focus);outline-offset:1px}
+.btn-primary{background:var(--app-accent);color:#fff}
+.btn-primary:hover{background:var(--app-accent-hover)}
+.btn-secondary{
+  background:transparent;
+  color:var(--app-text-secondary);
+  border:1px solid var(--app-card-border);
+}
+.btn-secondary:hover{background:var(--app-hover);color:var(--app-accent)}
+body.vscode-high-contrast .btn-primary{
+  border:1px solid var(--app-border);
+}
+
+/* ── Unsynced tab ────────────────────────────────────────────── */
+#unsynced-panel{padding:8px 12px;display:flex;flex-direction:column;gap:4px;overflow-y:auto}
+.unsynced-card{
+  display:flex;
+  align-items:center;
+  gap:8px;
+  padding:8px 10px;
+  background:var(--app-surface);
+  border:1px solid var(--app-card-border);
+  border-radius:var(--mm-radius-card);
+  box-shadow:var(--app-shadow);
+}
+.unsynced-icon{font-size:16px;flex-shrink:0}
+.unsynced-body{flex:1;min-width:0}
+.unsynced-label{
+  font-size:12.5px;
+  font-weight:500;
+  color:var(--app-text);
+  overflow:hidden;
+  text-overflow:ellipsis;
+  white-space:nowrap;
+}
+.unsynced-detail{font-size:11px;color:var(--app-text-muted);margin-top:1px}
+.unsynced-actions{display:flex;gap:4px;flex-shrink:0}
+#sync-all-btn{
+  width:100%;
+  padding:8px;
+  margin-bottom:8px;
+  background:var(--app-accent);
+  color:#fff;
+  border:none;
+  border-radius:var(--mm-radius-button);
+  font:inherit;
+  font-size:12.5px;
+  font-weight:600;
+  cursor:pointer;
+  transition:background .15s;
+}
+#sync-all-btn:hover{background:var(--app-accent-hover)}
+#sync-all-btn:focus-visible{outline:1px solid var(--app-focus);outline-offset:1px}
+
+/* ── Comments tab ────────────────────────────────────────────── */
+#comments-panel{padding:8px 12px;overflow-y:auto;display:flex;flex-direction:column;gap:8px}
+.comment-card{
+  padding:10px 12px;
+  background:var(--app-surface);
+  border:1px solid var(--app-card-border);
+  border-radius:var(--mm-radius-card);
+  box-shadow:var(--app-shadow);
+}
+.comment-header{
+  display:flex;
+  justify-content:space-between;
+  margin-bottom:6px;
+}
+.comment-author{font-size:12px;font-weight:600;color:var(--app-text)}
+.comment-date{font-size:11px;color:var(--app-text-muted)}
+.comment-body{font-size:12px;color:var(--app-text-secondary);white-space:pre-wrap;word-break:break-word}
+.comment-actions{margin-top:6px;display:flex;gap:4px}
+
+/* ── Settings tab ────────────────────────────────────────────── */
+#settings-panel{padding:12px;overflow-y:auto}
+.settings-section{margin-bottom:16px}
+.settings-section h3{
+  font-size:11.5px;
+  font-weight:600;
+  color:var(--app-text-muted);
+  text-transform:uppercase;
+  letter-spacing:.06em;
+  margin-bottom:8px;
+}
+.setting-row{
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  padding:6px 0;
+  border-bottom:1px solid var(--app-border);
+  font-size:12.5px;
+  gap:8px;
+}
+.setting-label{color:var(--app-text);font-weight:500}
+.setting-value{color:var(--app-text-secondary);font-size:11.5px}
+.setting-input,
+.setting-select{
+  background:var(--vscode-input-background, var(--app-surface));
+  color:var(--vscode-input-foreground, var(--app-text));
+  border:1px solid var(--vscode-input-border, var(--app-border));
+  border-radius:var(--mm-radius-button);
+  font:inherit;
+  font-size:12px;
+  padding:3px 7px;
+}
+.setting-input:focus,
+.setting-select:focus{
+  outline:1px solid var(--app-focus);
+  outline-offset:1px;
+}
+.settings-reset-btn{
+  width:100%;
+  margin-top:12px;
+  padding:7px;
+  border:1px solid var(--app-card-border);
+  border-radius:var(--mm-radius-button);
+  background:transparent;
+  color:var(--app-text-secondary);
+  font:inherit;
+  font-size:12px;
+  cursor:pointer;
+  transition:background .15s;
+}
+.settings-reset-btn:hover{background:var(--app-hover);color:#ef4444}
+.settings-reset-btn:focus-visible{outline:1px solid var(--app-focus);outline-offset:1px}
+
+/* ── Empty / loading / error states ─────────────────────────── */
+.state-msg{
+  padding:24px 16px;
+  text-align:center;
+  color:var(--app-text-muted);
+  font-size:12.5px;
+  line-height:1.6;
+}
+.state-msg strong{
+  display:block;
+  font-size:14px;
+  font-weight:600;
+  color:var(--app-text-secondary);
+  margin-bottom:4px;
+}
+.error-msg{color:#ef4444}
+
+/* ── Scrollbar ───────────────────────────────────────────────── */
+::-webkit-scrollbar{width:4px}
+::-webkit-scrollbar-track{background:transparent}
+::-webkit-scrollbar-thumb{background:var(--app-border);border-radius:var(--mm-radius-pill)}
+`;
