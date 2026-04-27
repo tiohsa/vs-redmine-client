@@ -305,23 +305,7 @@
       ]
     },
     "menus": {
-      "view/item/context": [
-        {
-          "command": "redmine-client.openTicketPreview",
-          "when": "view == redmine-clientTickets && viewItem == redmineTicket",
-          "group": "navigation"
-        },
-        {
-          "command": "redmine-client.openExtraTicketEditor",
-          "when": "view == redmine-clientTickets && viewItem == redmineTicket",
-          "group": "navigation@1"
-        },
-        {
-          "command": "redmine-client.createChildTicketFromList",
-          "when": "view == redmine-clientTickets && viewItem == redmineTicket && redmine-client.canCreateTickets",
-          "group": "inline@1"
-        }
-      ]
+      "view/item/context": []
     },
     "configuration": {
       "title": "Redmine Client",
@@ -381,7 +365,10 @@
         "redmine-client.offlineSyncMode": {
           "type": "string",
           "default": "auto",
-          "enum": ["auto", "manual"],
+          "enum": [
+            "auto",
+            "manual"
+          ],
           "description": "Sync mode for explicit sync commands. Auto sends to Redmine immediately, manual queues for batch sync. Ctrl+S always saves locally regardless of this setting."
         },
         "redmine-client.requestTimeoutMs": {

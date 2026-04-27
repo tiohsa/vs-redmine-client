@@ -135,6 +135,12 @@ export interface DashboardState {
 
 export type DashboardSettingsPatch = Partial<TicketListSettings>;
 
+export interface DashboardGeneralSettingsPatch {
+  offlineSyncMode?: "auto" | "manual";
+  includeChildProjects?: boolean;
+  ticketListLimit?: number;
+}
+
 export type DashboardRequest =
   | { type: "dashboard.ready"; requestId: string }
   | { type: "dashboard.refresh"; requestId: string }
@@ -154,7 +160,10 @@ export type DashboardRequest =
   | { type: "unsynced.syncOne"; requestId: string; key: DashboardUnsyncedKey }
   | { type: "unsynced.syncAll"; requestId: string }
   | { type: "settings.update"; requestId: string; patch: DashboardSettingsPatch }
-  | { type: "settings.reset"; requestId: string };
+  | { type: "settings.reset"; requestId: string }
+  | { type: "settings.updateEditorDefault"; requestId: string; field: string; value: string }
+  | { type: "settings.resetEditorDefaults"; requestId: string; fields: string[] }
+  | { type: "settings.updateGeneral"; requestId: string; patch: DashboardGeneralSettingsPatch };
 
 export type DashboardEvent =
   | { type: "dashboard.state"; state: DashboardState }

@@ -45,30 +45,20 @@ suite("Tickets view title actions", () => {
     assert.strictEqual(addCommand?.icon, "$(add)");
   });
 
-  test("declares child ticket action for Explorer ticket items", () => {
+  test("child ticket command still exists in Command Palette (no context menu after Dashboard migration)", () => {
     const childCommand = findCommand("redmine-client.createChildTicketFromList");
     assert.ok(childCommand, "child ticket command must exist");
     assert.strictEqual(childCommand?.title, "Redmine: Add Child Ticket");
     assert.strictEqual(childCommand?.icon, "$(add)");
 
+    // Dashboard 移行により Explorer ビューのコンテキストメニューは削除済み
     const contextItems = getMenuItems("view/item/context");
     const explorerEntry = contextItems.find(
       (item) =>
         item.command === "redmine-client.createChildTicketFromList" &&
-        item.when ===
-        "view == redmine-clientTickets && viewItem == redmineTicket && redmine-client.canCreateTickets",
+        item.when?.includes("redmine-clientTickets"),
     );
-    assert.ok(explorerEntry, "child ticket item action must exist in explorer view");
-    assert.strictEqual(explorerEntry?.group, "inline@1");
-
-    // レガシー Activity View のコンテキストメニューは削除済み
-    const activityEntry = contextItems.find(
-      (item) =>
-        item.command === "redmine-client.createChildTicketFromList" &&
-        item.when ===
-        "view == redmine-clientActivityTickets && viewItem == redmineTicket && redmine-client.canCreateTickets",
-    );
-    assert.ok(!activityEntry, "legacy activity view child ticket action must be removed");
+    assert.ok(!explorerEntry, "stale explorer view child ticket context menu must be removed after Dashboard migration");
   });
 
   test("uses refresh icon for ticket reload action", () => {
@@ -86,19 +76,13 @@ suite("Tickets view title actions", () => {
     assert.ok(!collapseEntry, "collapse tickets view/title entry must be removed");
   });
 
-  test("keeps existing ticket context actions for Explorer view", () => {
+  test("stale Explorer view context menu entries are removed after Dashboard migration", () => {
     const contextItems = getMenuItems("view/item/context");
 
-    const openPreview = contextItems.find(
-      (item) => item.command === "redmine-client.openTicketPreview",
+    // Dashboard 移行後、redmine-clientTickets を参照する stale エントリは削除済み
+    const staleEntries = contextItems.filter(
+      (item) => item.when?.includes("redmine-clientTickets"),
     );
-    assert.ok(openPreview, "open ticket preview menu item must exist");
-    assert.strictEqual(openPreview?.when, "view == redmine-clientTickets && viewItem == redmineTicket");
-
-    const openExtra = contextItems.find(
-      (item) => item.command === "redmine-client.openExtraTicketEditor",
-    );
-    assert.ok(openExtra, "open extra ticket editor menu item must exist");
-    assert.strictEqual(openExtra?.when, "view == redmine-clientTickets && viewItem == redmineTicket");
+    assert.strictEqual(staleEntries.length, 0, "no stale explorer view context menu entries should remain");
   });
 });

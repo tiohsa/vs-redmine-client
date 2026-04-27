@@ -1,4 +1,5 @@
 import type { DashboardRequest, DashboardUnsyncedKey } from "./dashboardProtocol";
+import { EDITOR_DEFAULT_FIELDS } from "../config/settings";
 
 type ValidationResult =
   | { ok: true; request: DashboardRequest }
@@ -6,23 +7,68 @@ type ValidationResult =
 
 const isString = (v: unknown): v is string => typeof v === "string";
 const isNumber = (v: unknown): v is number => typeof v === "number" && Number.isFinite(v);
+const isPositiveInt = (v: unknown): v is number => isNumber(v) && Number.isInteger(v) && (v as number) > 0;
 const isBoolean = (v: unknown): v is boolean => typeof v === "boolean";
 const isObject = (v: unknown): v is Record<string, unknown> =>
   v !== null && typeof v === "object" && !Array.isArray(v);
+const isStringArray = (v: unknown): v is string[] =>
+  Array.isArray(v) && v.every((item) => typeof item === "string");
 
 const UNSYNCED_KINDS = new Set(["ticket", "newTicket", "comment"]);
+const OFFLINE_SYNC_MODES = new Set(["auto", "manual"]);
+const SORT_DIRECTIONS = new Set(["asc", "desc"]);
+const SORT_FIELDS = new Set(["priority", "status", "tracker", "assignee"]);
 
 const validateUnsyncedKey = (v: unknown): v is DashboardUnsyncedKey => {
   if (!isObject(v)) { return false; }
   const kind = v["kind"];
   if (!isString(kind) || !UNSYNCED_KINDS.has(kind)) { return false; }
-  if (kind === "ticket" && !isNumber(v["ticketId"])) { return false; }
+  if (kind === "ticket" && !isPositiveInt(v["ticketId"])) { return false; }
   if (kind === "newTicket" && !isString(v["documentUri"])) { return false; }
-  if (kind === "comment" && !isNumber(v["ticketId"])) { return false; }
+  if (kind === "comment" && !isPositiveInt(v["ticketId"])) { return false; }
   return true;
 };
 
-const validatePatch = (v: unknown): boolean => isObject(v);
+const validateSettingsPatch = (v: unknown): boolean => {
+  if (!isObject(v)) { return false; }
+  if ("filters" in v) {
+    const f = v["filters"];
+    if (!isObject(f)) { return false; }
+    if ("subjectQuery" in f && !isString(f["subjectQuery"])) { return false; }
+    if ("priorityIds" in f && !Array.isArray(f["priorityIds"])) { return false; }
+    if ("statusIds" in f && !Array.isArray(f["statusIds"])) { return false; }
+    if ("trackerIds" in f && !Array.isArray(f["trackerIds"])) { return false; }
+    if ("assigneeIds" in f && !Array.isArray(f["assigneeIds"])) { return false; }
+    if ("includeUnassigned" in f && !isBoolean(f["includeUnassigned"])) { return false; }
+  }
+  if ("sort" in v) {
+    const s = v["sort"];
+    if (!isObject(s)) { return false; }
+    if ("direction" in s && !SORT_DIRECTIONS.has(s["direction"] as string)) { return false; }
+    if ("field" in s && s["field"] !== undefined && !SORT_FIELDS.has(s["field"] as string)) { return false; }
+  }
+  if ("dueDate" in v) {
+    const d = v["dueDate"];
+    if (!isObject(d)) { return false; }
+    for (const key of ["showWithin7Days", "showWithin3Days", "showWithin1Day", "showOverdue"]) {
+      if (key in d && !isBoolean(d[key])) { return false; }
+    }
+  }
+  return true;
+};
+
+const validateGeneralPatch = (v: unknown): boolean => {
+  if (!isObject(v)) { return false; }
+  if ("offlineSyncMode" in v && !OFFLINE_SYNC_MODES.has(v["offlineSyncMode"] as string)) { return false; }
+  if ("includeChildProjects" in v && !isBoolean(v["includeChildProjects"])) { return false; }
+  if ("ticketListLimit" in v) {
+    const limit = v["ticketListLimit"];
+    if (!isNumber(limit) || !Number.isInteger(limit) || (limit as number) < 1 || (limit as number) > 500) {
+      return false;
+    }
+  }
+  return true;
+};
 
 export const validateDashboardMessage = (raw: unknown): ValidationResult => {
   if (!isObject(raw)) {
@@ -46,8 +92,8 @@ export const validateDashboardMessage = (raw: unknown): ValidationResult => {
 
     case "project.select": {
       const projectId = raw["projectId"];
-      if (!isNumber(projectId)) {
-        return { ok: false, reason: "project.select: projectId must be a number" };
+      if (!isPositiveInt(projectId)) {
+        return { ok: false, reason: "project.select: projectId must be a positive integer" };
       }
       return { ok: true, request: { type, requestId, projectId } };
     }
@@ -66,24 +112,24 @@ export const validateDashboardMessage = (raw: unknown): ValidationResult => {
 
     case "ticket.select": {
       const ticketId = raw["ticketId"];
-      if (!isNumber(ticketId)) {
-        return { ok: false, reason: "ticket.select: ticketId must be a number" };
+      if (!isPositiveInt(ticketId)) {
+        return { ok: false, reason: "ticket.select: ticketId must be a positive integer" };
       }
       return { ok: true, request: { type, requestId, ticketId } };
     }
 
     case "ticket.openEditor": {
       const ticketId = raw["ticketId"];
-      if (!isNumber(ticketId)) {
-        return { ok: false, reason: "ticket.openEditor: ticketId must be a number" };
+      if (!isPositiveInt(ticketId)) {
+        return { ok: false, reason: "ticket.openEditor: ticketId must be a positive integer" };
       }
       return { ok: true, request: { type, requestId, ticketId } };
     }
 
     case "ticket.openBrowser": {
       const ticketId = raw["ticketId"];
-      if (!isNumber(ticketId)) {
-        return { ok: false, reason: "ticket.openBrowser: ticketId must be a number" };
+      if (!isPositiveInt(ticketId)) {
+        return { ok: false, reason: "ticket.openBrowser: ticketId must be a positive integer" };
       }
       return { ok: true, request: { type, requestId, ticketId } };
     }
@@ -93,16 +139,16 @@ export const validateDashboardMessage = (raw: unknown): ValidationResult => {
 
     case "ticket.createChild": {
       const parentTicketId = raw["parentTicketId"];
-      if (!isNumber(parentTicketId)) {
-        return { ok: false, reason: "ticket.createChild: parentTicketId must be a number" };
+      if (!isPositiveInt(parentTicketId)) {
+        return { ok: false, reason: "ticket.createChild: parentTicketId must be a positive integer" };
       }
       return { ok: true, request: { type, requestId, parentTicketId } };
     }
 
     case "comment.add": {
       const ticketId = raw["ticketId"];
-      if (!isNumber(ticketId)) {
-        return { ok: false, reason: "comment.add: ticketId must be a number" };
+      if (!isPositiveInt(ticketId)) {
+        return { ok: false, reason: "comment.add: ticketId must be a positive integer" };
       }
       return { ok: true, request: { type, requestId, ticketId } };
     }
@@ -110,27 +156,27 @@ export const validateDashboardMessage = (raw: unknown): ValidationResult => {
     case "comment.edit": {
       const ticketId = raw["ticketId"];
       const commentId = raw["commentId"];
-      if (!isNumber(ticketId)) {
-        return { ok: false, reason: "comment.edit: ticketId must be a number" };
+      if (!isPositiveInt(ticketId)) {
+        return { ok: false, reason: "comment.edit: ticketId must be a positive integer" };
       }
-      if (!isNumber(commentId)) {
-        return { ok: false, reason: "comment.edit: commentId must be a number" };
+      if (!isPositiveInt(commentId)) {
+        return { ok: false, reason: "comment.edit: commentId must be a positive integer" };
       }
       return { ok: true, request: { type, requestId, ticketId, commentId } };
     }
 
     case "comment.reload": {
       const ticketId = raw["ticketId"];
-      if (!isNumber(ticketId)) {
-        return { ok: false, reason: "comment.reload: ticketId must be a number" };
+      if (!isPositiveInt(ticketId)) {
+        return { ok: false, reason: "comment.reload: ticketId must be a positive integer" };
       }
       return { ok: true, request: { type, requestId, ticketId } };
     }
 
     case "unsynced.openLocalFile": {
       const documentUri = raw["documentUri"];
-      if (!isString(documentUri)) {
-        return { ok: false, reason: "unsynced.openLocalFile: documentUri must be a string" };
+      if (!isString(documentUri) || documentUri.length === 0) {
+        return { ok: false, reason: "unsynced.openLocalFile: documentUri must be a non-empty string" };
       }
       return { ok: true, request: { type, requestId, documentUri } };
     }
@@ -148,14 +194,47 @@ export const validateDashboardMessage = (raw: unknown): ValidationResult => {
 
     case "settings.update": {
       const patch = raw["patch"];
-      if (!validatePatch(patch)) {
-        return { ok: false, reason: "settings.update: patch must be an object" };
+      if (!validateSettingsPatch(patch)) {
+        return { ok: false, reason: "settings.update: patch is invalid" };
       }
       return { ok: true, request: { type, requestId, patch: patch as import("./dashboardProtocol").DashboardSettingsPatch } };
     }
 
     case "settings.reset":
       return { ok: true, request: { type, requestId } };
+
+    case "settings.updateEditorDefault": {
+      const field = raw["field"];
+      const value = raw["value"];
+      if (!isString(field) || !(EDITOR_DEFAULT_FIELDS as readonly string[]).includes(field)) {
+        return { ok: false, reason: `settings.updateEditorDefault: field must be one of ${EDITOR_DEFAULT_FIELDS.join(", ")}` };
+      }
+      if (!isString(value)) {
+        return { ok: false, reason: "settings.updateEditorDefault: value must be a string" };
+      }
+      return { ok: true, request: { type, requestId, field, value } };
+    }
+
+    case "settings.resetEditorDefaults": {
+      const fields = raw["fields"];
+      if (!isStringArray(fields)) {
+        return { ok: false, reason: "settings.resetEditorDefaults: fields must be an array of strings" };
+      }
+      const validFields = (EDITOR_DEFAULT_FIELDS as readonly string[]);
+      const invalid = fields.find((f) => !validFields.includes(f));
+      if (invalid !== undefined) {
+        return { ok: false, reason: `settings.resetEditorDefaults: unknown field "${invalid}"` };
+      }
+      return { ok: true, request: { type, requestId, fields } };
+    }
+
+    case "settings.updateGeneral": {
+      const patch = raw["patch"];
+      if (!validateGeneralPatch(patch)) {
+        return { ok: false, reason: "settings.updateGeneral: patch is invalid" };
+      }
+      return { ok: true, request: { type, requestId, patch: patch as import("./dashboardProtocol").DashboardGeneralSettingsPatch } };
+    }
 
     default:
       return { ok: false, reason: `unknown message type: ${String(type)}` };

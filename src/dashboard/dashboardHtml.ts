@@ -433,6 +433,7 @@ body{
       <input type="checkbox" id="include-children"> Children
     </label>
     <button class="btn-icon" id="refresh-btn" title="Refresh">↻</button>
+    <button class="btn btn-primary" id="new-ticket-btn" title="New Ticket">+ New</button>
   </div>
 </div>
 
@@ -511,6 +512,7 @@ tabs.forEach(t=>{ t.addEventListener('click',()=>activateTab(t.dataset.tab)); })
 
 // ── Header ─────────────────────────────────────────────────────────────────
 document.getElementById('refresh-btn').addEventListener('click',()=>req('dashboard.refresh'));
+document.getElementById('new-ticket-btn').addEventListener('click',()=>req('ticket.create'));
 document.getElementById('include-children').addEventListener('change',function(){
   req('project.toggleChildren',{includeChildProjects:this.checked});
 });
@@ -713,19 +715,64 @@ function renderComments(){
 function renderSettings(){
   if(!state) return;
   const s=state.settings;
-  const rows=[
-    ['Search filter', s.filters.subjectQuery||'None'],
-    ['Sort field', s.sort.field||(s.sort.direction==='asc'?'Default (asc)':'Default (desc)')],
-    ['Offline sync mode', s.offlineSyncMode==='manual'?'Manual (queue only)':'Auto'],
-    ['Due within 7 days', s.dueDate.showWithin7Days?'✓':'—'],
-    ['Due within 3 days', s.dueDate.showWithin3Days?'✓':'—'],
-    ['Due within 1 day', s.dueDate.showWithin1Day?'✓':'—'],
-    ['Overdue', s.dueDate.showOverdue?'✓':'—'],
-  ];
   const el=document.getElementById('settings-content');
-  el.innerHTML='<div class="settings-section"><h3>Current Settings</h3>'
-    +rows.map(([l,v])=>'<div class="setting-row"><span class="setting-label">'+esc(l)+'</span><span class="setting-value">'+esc(String(v))+'</span></div>').join('')
+  el.innerHTML=
+    '<div class="settings-section"><h3>Ticket Filters</h3>'
+    +'<div class="setting-row"><span class="setting-label">Subject search</span>'
+    +'<input class="setting-input" id="set-subject" type="text" value="'+esc(s.filters.subjectQuery||'')+'" placeholder="Keyword…"></div>'
+    +'</div>'
+    +'<div class="settings-section"><h3>Sort</h3>'
+    +'<div class="setting-row"><span class="setting-label">Sort field</span>'
+    +'<select class="setting-select" id="set-sort-field">'
+    +'<option value=""'+(s.sort.field?'':' selected')+'>Default</option>'
+    +'<option value="priority"'+(s.sort.field==="priority"?' selected':'')+'>Priority</option>'
+    +'<option value="status"'+(s.sort.field==="status"?' selected':'')+'>Status</option>'
+    +'<option value="tracker"'+(s.sort.field==="tracker"?' selected':'')+'>Tracker</option>'
+    +'<option value="assignee"'+(s.sort.field==="assignee"?' selected':'')+'>Assignee</option>'
+    +'</select></div>'
+    +'<div class="setting-row"><span class="setting-label">Direction</span>'
+    +'<select class="setting-select" id="set-sort-dir">'
+    +'<option value="asc"'+(s.sort.direction==="asc"?' selected':'')+'>Ascending</option>'
+    +'<option value="desc"'+(s.sort.direction==="desc"?' selected':'')+'>Descending</option>'
+    +'</select></div>'
+    +'</div>'
+    +'<div class="settings-section"><h3>Due Date Indicators</h3>'
+    +'<div class="setting-row"><span class="setting-label">Overdue</span><input type="checkbox" id="set-dd-overdue"'+(s.dueDate.showOverdue?' checked':'')+' class="setting-check"></div>'
+    +'<div class="setting-row"><span class="setting-label">Within 1 day</span><input type="checkbox" id="set-dd-1d"'+(s.dueDate.showWithin1Day?' checked':'')+' class="setting-check"></div>'
+    +'<div class="setting-row"><span class="setting-label">Within 3 days</span><input type="checkbox" id="set-dd-3d"'+(s.dueDate.showWithin3Days?' checked':'')+' class="setting-check"></div>'
+    +'<div class="setting-row"><span class="setting-label">Within 7 days</span><input type="checkbox" id="set-dd-7d"'+(s.dueDate.showWithin7Days?' checked':'')+' class="setting-check"></div>'
+    +'</div>'
+    +'<div class="settings-section"><h3>General</h3>'
+    +'<div class="setting-row"><span class="setting-label">Offline sync mode</span>'
+    +'<select class="setting-select" id="set-sync-mode">'
+    +'<option value="auto"'+(s.offlineSyncMode==="auto"?' selected':'')+'>Auto</option>'
+    +'<option value="manual"'+(s.offlineSyncMode==="manual"?' selected':'')+'>Manual</option>'
+    +'</select></div>'
     +'</div>';
+
+  const applyTicketListPatch=(patch)=>req('settings.update',{patch});
+
+  const subjectEl=document.getElementById('set-subject');
+  subjectEl.addEventListener('change',()=>applyTicketListPatch({filters:{...s.filters,subjectQuery:subjectEl.value}}));
+
+  const sortFieldEl=document.getElementById('set-sort-field');
+  sortFieldEl.addEventListener('change',()=>applyTicketListPatch({sort:{field:sortFieldEl.value||undefined,direction:s.sort.direction}}));
+
+  const sortDirEl=document.getElementById('set-sort-dir');
+  sortDirEl.addEventListener('change',()=>applyTicketListPatch({sort:{field:s.sort.field,direction:sortDirEl.value}}));
+
+  const ddOverdue=document.getElementById('set-dd-overdue');
+  ddOverdue.addEventListener('change',()=>applyTicketListPatch({dueDate:{...s.dueDate,showOverdue:ddOverdue.checked}}));
+  const dd1d=document.getElementById('set-dd-1d');
+  dd1d.addEventListener('change',()=>applyTicketListPatch({dueDate:{...s.dueDate,showWithin1Day:dd1d.checked}}));
+  const dd3d=document.getElementById('set-dd-3d');
+  dd3d.addEventListener('change',()=>applyTicketListPatch({dueDate:{...s.dueDate,showWithin3Days:dd3d.checked}}));
+  const dd7d=document.getElementById('set-dd-7d');
+  dd7d.addEventListener('change',()=>applyTicketListPatch({dueDate:{...s.dueDate,showWithin7Days:dd7d.checked}}));
+
+  const syncModeEl=document.getElementById('set-sync-mode');
+  syncModeEl.addEventListener('change',()=>req('settings.updateGeneral',{patch:{offlineSyncMode:syncModeEl.value}}));
+
   document.getElementById('settings-reset-btn').onclick=()=>req('settings.reset');
 }
 

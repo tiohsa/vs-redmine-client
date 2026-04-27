@@ -3,25 +3,27 @@ import { getProjectSelection, setProjectSelection } from "../config/projectSelec
 import { getDefaultProjectId, getIncludeChildProjects } from "../config/settings";
 import { listProjects } from "../redmine/projects";
 import { getIssueDetail, listIssues } from "../redmine/issues";
-import { applyTicketFilters, applyTicketSort, DEFAULT_TICKET_LIST_SETTINGS, TicketListSettings } from "../views/projectListSettings";
-import { getOfflineSyncQueue, onOfflineSyncQueueChanged } from "../views/offlineSyncStore";
+import { applyTicketFilters, applyTicketSort } from "../views/projectListSettings";
+import { onOfflineSyncQueueChanged } from "../views/offlineSyncStore";
 import { runOfflineSync } from "../commands/offlineSync";
 import { syncUnsyncedFile } from "../commands/syncUnsyncedFile";
-import { UnsyncedFileTreeItem } from "../views/unsyncedFilesView";
 import { openTicketInBrowser } from "../commands/openInBrowser";
 import { addCommentFromList } from "../commands/addCommentFromList";
 import { editComment } from "../commands/editComment";
 import { rememberTicketSummaries } from "../views/ticketSummaryStore";
 import { showTicketPreview } from "../views/ticketPreview";
-import { createTicketFromList } from "../commands/createTicketFromList";
-import { createChildTicketFromList } from "../commands/createChildTicketFromList";
+import { resolveNewTicketDraftContent } from "../views/ticketPreview";
+import { buildNewChildTicketDraftContent, buildNewTicketDraftContent } from "../views/ticketDraftStore";
+import { openNewTicketDraft } from "../commands/createTicketFromList";
+import { showError } from "../utils/notifications";
 import { Ticket } from "../redmine/types";
+import type { UnsyncedFileSyncKey } from "../views/unsyncedFilesView";
 import { buildTicketDashboardNodes, buildTicketDetail } from "./viewModels/ticketDashboardViewModel";
 import { buildUnsyncedDashboardItems } from "./viewModels/unsyncedDashboardViewModel";
 import { buildCommentDashboardItems } from "./viewModels/commentsDashboardViewModel";
-import { buildSettingsDashboardViewModel } from "./viewModels/settingsDashboardViewModel";
 import { DashboardStateStore } from "./DashboardStateStore";
-import type { DashboardProjectNode, DashboardRequest, DashboardSettingsPatch, DashboardUnsyncedKey } from "./dashboardProtocol";
+import { SettingsController } from "./SettingsController";
+import type { DashboardProjectNode, DashboardRequest, DashboardUnsyncedKey } from "./dashboardProtocol";
 
 export interface DashboardControllerOptions {
   store: DashboardStateStore;
@@ -35,10 +37,11 @@ export class DashboardController {
   private tickets: Ticket[] = [];
   private projects: DashboardProjectNode[] = [];
   private totalCount = 0;
-  private settings: TicketListSettings = { ...DEFAULT_TICKET_LIST_SETTINGS };
+  private readonly settingsCtrl: SettingsController;
   private readonly disposables: vscode.Disposable[] = [];
 
   constructor(private readonly opts: DashboardControllerOptions) {
+    this.settingsCtrl = new SettingsController(opts.store);
     this.disposables.push(
       { dispose: onOfflineSyncQueueChanged(() => this.refreshUnsynced()) },
     );
@@ -78,13 +81,11 @@ export class DashboardController {
         await this.openInBrowser(req.ticketId);
         break;
       case "ticket.create":
-        await createTicketFromList();
+        await this.createTicketFromDashboard();
         break;
-      case "ticket.createChild": {
-        const item = this.getTicketItem(req.parentTicketId);
-        await createChildTicketFromList(item);
+      case "ticket.createChild":
+        await this.createChildTicketFromDashboard(req.parentTicketId);
         break;
-      }
       case "comment.add":
         await addCommentFromList(req.ticketId);
         break;
@@ -107,12 +108,22 @@ export class DashboardController {
         this.opts.onTicketsRefreshed();
         break;
       case "settings.update":
-        this.updateSettings(req.patch);
+        this.settingsCtrl.updateTicketList(req.patch);
+        this.pushTickets();
         break;
       case "settings.reset":
-        this.settings = { ...DEFAULT_TICKET_LIST_SETTINGS };
+        this.settingsCtrl.resetTicketList();
         this.pushTickets();
-        this.pushSettings();
+        break;
+      case "settings.updateEditorDefault":
+        this.settingsCtrl.updateEditorDefault(req.field, req.value);
+        break;
+      case "settings.resetEditorDefaults":
+        this.settingsCtrl.resetEditorDefaults(req.fields);
+        break;
+      case "settings.updateGeneral":
+        await this.settingsCtrl.updateGeneral(req.patch);
+        await this.loadTickets();
         break;
     }
   }
@@ -282,8 +293,7 @@ export class DashboardController {
     if (!ticket) {
       return;
     }
-    // TicketTreeItem 相当のオブジェクトとして渡す
-    await openTicketInBrowser({ ticket } as Parameters<typeof openTicketInBrowser>[0]);
+    await openTicketInBrowser({ ticket });
   }
 
   private async editTicketComment(ticketId: number, commentId: number): Promise<void> {
@@ -299,8 +309,7 @@ export class DashboardController {
   }
 
   private async syncOne(key: DashboardUnsyncedKey): Promise<void> {
-    const queue = getOfflineSyncQueue();
-    let syncKey: UnsyncedFileTreeItem["syncKey"] | undefined;
+    let syncKey: UnsyncedFileSyncKey | undefined;
 
     if (key.kind === "ticket" && key.ticketId !== undefined) {
       syncKey = { kind: "ticket", ticketId: key.ticketId };
@@ -319,26 +328,55 @@ export class DashboardController {
       return;
     }
 
-    void queue;
     await syncUnsyncedFile(
-      { syncKey } as UnsyncedFileTreeItem,
+      { syncKey },
       { onTicketCreated: () => this.opts.onTicketsRefreshed() },
     );
     this.refreshUnsynced();
   }
 
-  private updateSettings(patch: DashboardSettingsPatch): void {
-    if (patch.filters) {
-      this.settings = { ...this.settings, filters: { ...this.settings.filters, ...patch.filters } };
+  private async createTicketFromDashboard(): Promise<void> {
+    const selection = getProjectSelection();
+    if (!selection.id) {
+      showError("プロジェクトを選択してからチケットを作成してください。");
+      return;
     }
-    if (patch.sort) {
-      this.settings = { ...this.settings, sort: { ...this.settings.sort, ...patch.sort } };
+    const templateResolution = resolveNewTicketDraftContent({
+      projectName: selection.name,
+    });
+    if (templateResolution.isTemplateConfigured && templateResolution.errorMessage) {
+      showError(templateResolution.errorMessage);
     }
-    if (patch.dueDate) {
-      this.settings = { ...this.settings, dueDate: { ...this.settings.dueDate, ...patch.dueDate } };
+    await openNewTicketDraft({
+      content: templateResolution.content ?? buildNewTicketDraftContent({ projectId: selection.id }),
+      projectId: selection.id,
+    });
+  }
+
+  private async createChildTicketFromDashboard(parentTicketId: number): Promise<void> {
+    const parent = this.tickets.find((t) => t.id === parentTicketId);
+    if (!parent) {
+      showError("親チケットが見つかりません。");
+      return;
     }
-    this.pushTickets();
-    this.pushSettings();
+    if (!parent.projectId) {
+      showError("親チケットのプロジェクト情報が不足しています。");
+      return;
+    }
+
+    const selection = getProjectSelection();
+    const templateResolution = resolveNewTicketDraftContent({
+      projectName: selection.name,
+    });
+    if (templateResolution.isTemplateConfigured && templateResolution.errorMessage) {
+      showError(templateResolution.errorMessage);
+    }
+
+    const baseContent = templateResolution.content ?? buildNewTicketDraftContent({ projectId: parent.projectId });
+    await openNewTicketDraft({
+      content: buildNewChildTicketDraftContent(parent, baseContent),
+      projectId: parent.projectId,
+    });
   }
 
   private refreshUnsynced(): void {
@@ -350,23 +388,14 @@ export class DashboardController {
   }
 
   private pushTickets(): void {
-    const filtered = applyTicketFilters(this.tickets, this.settings.filters);
-    const sorted = applyTicketSort(filtered, this.settings.sort);
+    const settings = this.settingsCtrl.getSettings();
+    const filtered = applyTicketFilters(this.tickets, settings.filters);
+    const sorted = applyTicketSort(filtered, settings.sort);
     const nodes = buildTicketDashboardNodes(sorted);
     this.opts.store.update({
       tickets: nodes,
       totalTicketCount: this.totalCount,
       loadedTicketCount: this.tickets.length,
     });
-  }
-
-  private pushSettings(): void {
-    this.opts.store.update({
-      settings: buildSettingsDashboardViewModel(this.settings),
-    });
-  }
-
-  private getTicketItem(_ticketId: number): undefined {
-    return undefined;
   }
 }
