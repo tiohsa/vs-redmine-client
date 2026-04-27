@@ -8,13 +8,13 @@ import {
 import { applyQueuedTicketUpdate, createTicketFromQueuedContent } from "../views/ticketSaveSync";
 import { applyQueuedCommentUpdate, finalizeNewCommentDraftDocument } from "../views/commentSaveSync";
 import { registerTicketDocument } from "../views/ticketEditorRegistry";
-import { UnsyncedFileTreeItem } from "../views/unsyncedFilesView";
+import { UnsyncedFileSyncKey } from "../views/unsyncedFilesView";
 import { showInfo, showWarning } from "../utils/notifications";
 import { rewriteDocumentWithRegisteredFields, RewriteDocumentDeps } from "../views/editorDocumentRewrite";
 import { removeTicketEditorByUri } from "../views/ticketEditorRegistry";
 
 export const syncUnsyncedFile = async (
-  item: UnsyncedFileTreeItem,
+  item: { syncKey: UnsyncedFileSyncKey },
   options: { onTicketCreated?: () => void; onSubjectUpdated?: (ticketId: number, subject: string) => void } = {},
   rewriteDeps: RewriteDocumentDeps = {},
 ): Promise<void> => {

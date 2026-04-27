@@ -89,6 +89,9 @@ export interface RedmineUserRef {
 
 export interface RedmineProjectResponse {
   projects: Array<{ id: number; name: string; identifier: string; parent?: { id: number } }>;
+  total_count?: number;
+  limit?: number;
+  offset?: number;
 }
 
 export interface RedmineIssueListResponse {

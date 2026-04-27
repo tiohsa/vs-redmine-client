@@ -104,6 +104,7 @@ const buildNode = <T>(
     data: source.data,
     level,
     children,
+    parentNotLoaded: source.parentNotLoaded,
   };
 };
 

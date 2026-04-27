@@ -11,7 +11,7 @@ const loadPackageJson = (): Record<string, unknown> => {
 type ViewContribution = { id: string; name: string };
 
 suite("Activity Bar views", () => {
-  test("declares unsynced files/settings/projects/tickets/comments views under the Activity Bar container", () => {
+  test("declares only Dashboard view under the Activity Bar container", () => {
     const packageJson = loadPackageJson();
     const contributes = packageJson.contributes as Record<string, unknown> | undefined;
     assert.ok(contributes, "contributes must be defined");
@@ -23,10 +23,26 @@ suite("Activity Bar views", () => {
     );
 
     const viewIds = views["redmine-clientActivity"].map((view) => view.id);
-    assert.strictEqual(viewIds[0], "redmine-clientActivityTicketSettings");
-    assert.ok(viewIds.includes("redmine-clientActivityProjects"));
-    assert.ok(viewIds.includes("redmine-clientActivityTickets"));
-    assert.ok(viewIds.includes("redmine-clientActivityUnsyncedFiles"));
-    assert.ok(viewIds.includes("redmine-clientActivityComments"));
+    assert.ok(viewIds.includes("redmine-clientActivityDashboard"), "Dashboard view must exist");
+
+    // レガシー TreeView は削除済み
+    assert.ok(!viewIds.includes("redmine-clientActivityTicketSettings"), "TicketSettings must be removed");
+    assert.ok(!viewIds.includes("redmine-clientActivityProjects"), "Projects must be removed");
+    assert.ok(!viewIds.includes("redmine-clientActivityTickets"), "Tickets must be removed");
+    assert.ok(!viewIds.includes("redmine-clientActivityUnsyncedFiles"), "UnsyncedFiles must be removed");
+    assert.ok(!viewIds.includes("redmine-clientActivityComments"), "Comments must be removed");
+
+    assert.strictEqual(viewIds.length, 1, "Only Dashboard view should be registered");
+  });
+
+  test("does not contribute showLegacyViews configuration", () => {
+    const packageJson = loadPackageJson();
+    const contributes = packageJson.contributes as Record<string, unknown> | undefined;
+    const config = contributes?.configuration as Record<string, unknown> | undefined;
+    const properties = config?.properties as Record<string, unknown> | undefined;
+    assert.ok(
+      !properties?.["redmine-client.showLegacyViews"],
+      "showLegacyViews config must be removed",
+    );
   });
 });
