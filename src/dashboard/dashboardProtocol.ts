@@ -156,6 +156,7 @@ export type DashboardRequest =
   | { type: "comment.reload"; requestId: string; ticketId: number }
   | { type: "unsynced.openLocalFile"; requestId: string; documentUri: string }
   | { type: "unsynced.syncOne"; requestId: string; key: DashboardUnsyncedKey }
+  | { type: "unsynced.discardOne"; requestId: string; key: DashboardUnsyncedKey }
   | { type: "unsynced.syncAll"; requestId: string }
   | { type: "settings.update"; requestId: string; patch: DashboardSettingsPatch }
   | { type: "settings.reset"; requestId: string }
