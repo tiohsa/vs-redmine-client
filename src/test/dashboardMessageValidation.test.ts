@@ -23,7 +23,7 @@ suite("Dashboard メッセージバリデーション", () => {
   });
 
   test("未知のメッセージタイプは拒否される", () => {
-    const r = validateDashboardMessage({ type: "evil.hack", requestId: "x" });
+    const r = validateDashboardMessage({ type: "unknown.message", requestId: "x" });
     assert.strictEqual(r.ok, false);
   });
 
@@ -105,6 +105,11 @@ suite("Dashboard メッセージバリデーション", () => {
     assert.strictEqual(r.ok, true);
   });
 
+  test("unsynced.syncOne: newTicket key の documentUri が空なら拒否される", () => {
+    const r = validateDashboardMessage({ type: "unsynced.syncOne", requestId: "r", key: { kind: "newTicket", documentUri: "" } });
+    assert.strictEqual(r.ok, false);
+  });
+
   test("unsynced.syncOne: comment key に ticketId がないと拒否される", () => {
     const r = validateDashboardMessage({ type: "unsynced.syncOne", requestId: "r", key: { kind: "comment", commentId: 1, documentUri: "file:///a.md" } });
     assert.strictEqual(r.ok, false);
@@ -112,6 +117,16 @@ suite("Dashboard メッセージバリデーション", () => {
 
   test("unsynced.syncOne: comment key に ticketId が 0 だと拒否される", () => {
     const r = validateDashboardMessage({ type: "unsynced.syncOne", requestId: "r", key: { kind: "comment", ticketId: 0, commentId: 1, documentUri: "file:///a.md" } });
+    assert.strictEqual(r.ok, false);
+  });
+
+  test("unsynced.syncOne: comment key に commentId と documentUri が両方ないと拒否される", () => {
+    const r = validateDashboardMessage({ type: "unsynced.syncOne", requestId: "r", key: { kind: "comment", ticketId: 42 } });
+    assert.strictEqual(r.ok, false);
+  });
+
+  test("unsynced.syncOne: comment key の documentUri が空なら拒否される", () => {
+    const r = validateDashboardMessage({ type: "unsynced.syncOne", requestId: "r", key: { kind: "comment", ticketId: 42, documentUri: "" } });
     assert.strictEqual(r.ok, false);
   });
 
@@ -125,9 +140,41 @@ suite("Dashboard メッセージバリデーション", () => {
     assert.strictEqual(r.ok, false);
   });
 
+  test("unsynced.openLocalFile: documentUri が空なら拒否される", () => {
+    const r = validateDashboardMessage({ type: "unsynced.openLocalFile", requestId: "r", documentUri: "" });
+    assert.strictEqual(r.ok, false);
+  });
+
   test("settings.update: patch がオブジェクトでないと拒否される", () => {
     const r = validateDashboardMessage({ type: "settings.update", requestId: "r", patch: "bad" });
     assert.strictEqual(r.ok, false);
+  });
+
+  test("settings.update: ID配列に文字列が含まれると拒否される", () => {
+    const r = validateDashboardMessage({
+      type: "settings.update",
+      requestId: "r",
+      patch: { filters: { priorityIds: [1, "2"] } },
+    });
+    assert.strictEqual(r.ok, false);
+  });
+
+  test("settings.update: ID配列に0が含まれると拒否される", () => {
+    const r = validateDashboardMessage({
+      type: "settings.update",
+      requestId: "r",
+      patch: { filters: { trackerIds: [0] } },
+    });
+    assert.strictEqual(r.ok, false);
+  });
+
+  test("settings.update: ID配列が正の整数なら受け入れられる", () => {
+    const r = validateDashboardMessage({
+      type: "settings.update",
+      requestId: "r",
+      patch: { filters: { priorityIds: [1, 2], statusIds: [3], trackerIds: [4], assigneeIds: [5] } },
+    });
+    assert.strictEqual(r.ok, true);
   });
 
   test("settings.update: 正常", () => {
