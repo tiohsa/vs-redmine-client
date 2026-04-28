@@ -47,7 +47,14 @@ const summarizeFailures = (
   return parts.join(", ");
 };
 
-export const runOfflineSync = async (): Promise<void> => {
+export type OfflineSyncRunResult =
+  | { status: "nothing_to_sync"; total: 0; synced: 0; failed: 0; conflicts: 0 }
+  | { status: "success"; total: number; synced: number; failed: 0; conflicts: 0 }
+  | { status: "partial_failure"; total: number; synced: number; failed: number; conflicts: number }
+  | { status: "cancelled"; total: number; synced: number; failed: number; conflicts: number }
+  | { status: "failed"; total: number; synced: number; failed: number; conflicts: number };
+
+export const runOfflineSync = async (): Promise<OfflineSyncRunResult> => {
   const queue = getOfflineSyncQueue();
   const ticketUpdates = Array.from(queue.tickets.values());
   const totalItems =
@@ -55,7 +62,7 @@ export const runOfflineSync = async (): Promise<void> => {
 
   if (totalItems === 0) {
     showInfo("No local changes to sync.");
-    return;
+    return { status: "nothing_to_sync", total: 0, synced: 0, failed: 0, conflicts: 0 };
   }
 
   const failedTickets: OfflineTicketUpdate[] = [];
@@ -64,6 +71,7 @@ export const runOfflineSync = async (): Promise<void> => {
 
   let synced = 0;
   let conflicts = 0;
+  let wasCancelled = false;
 
   await vscode.window.withProgress(
     {
@@ -85,6 +93,7 @@ export const runOfflineSync = async (): Promise<void> => {
       // ── 新規チケット ────────────────────────────────────────────────────
       for (const entry of queue.newTickets) {
         if (token.isCancellationRequested) {
+          wasCancelled = true;
           failedNewTickets.push(...queue.newTickets.slice(processed));
           break;
         }
@@ -115,6 +124,7 @@ export const runOfflineSync = async (): Promise<void> => {
       // ── チケット更新 ────────────────────────────────────────────────────
       for (const update of ticketUpdates) {
         if (token.isCancellationRequested) {
+          wasCancelled = true;
           failedTickets.push(update);
           continue;
         }
@@ -133,6 +143,7 @@ export const runOfflineSync = async (): Promise<void> => {
       // ── コメント更新 ────────────────────────────────────────────────────
       for (const update of queue.comments) {
         if (token.isCancellationRequested) {
+          wasCancelled = true;
           failedComments.push(update);
           continue;
         }
@@ -171,7 +182,7 @@ export const runOfflineSync = async (): Promise<void> => {
   const failed =
     failedTickets.length + failedComments.length + failedNewTickets.length;
 
-  if (failed > 0 || conflicts > 0) {
+  if (wasCancelled || failed > 0 || conflicts > 0) {
     replaceOfflineSyncQueue({
       tickets: new Map(failedTickets.map((item) => [item.ticketId, item])),
       comments: failedComments,
@@ -188,9 +199,16 @@ export const runOfflineSync = async (): Promise<void> => {
         failedNewTickets.length,
       )}`,
     );
-    return;
+    if (wasCancelled) {
+      return { status: "cancelled", total: totalItems, synced, failed, conflicts };
+    }
+    if (synced === 0) {
+      return { status: "failed", total: totalItems, synced, failed, conflicts };
+    }
+    return { status: "partial_failure", total: totalItems, synced, failed, conflicts };
   }
 
   clearOfflineSyncQueue();
   showInfo(`Sync completed. Synced: ${synced}.`);
+  return { status: "success", total: totalItems, synced, failed: 0, conflicts: 0 };
 };

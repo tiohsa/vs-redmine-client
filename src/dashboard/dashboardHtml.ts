@@ -5,9 +5,9 @@ export const buildDashboardHtml = (nonce: string): string => `<!DOCTYPE html>
 <html lang="ja">
 <head>
 <meta charset="UTF-8">
-<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'nonce-${nonce}';">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'nonce-${nonce}'; script-src 'nonce-${nonce}';">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<style>
+<style nonce="${nonce}">
 ${dashboardStyles}
 </style>
 </head>
@@ -27,17 +27,17 @@ ${dashboardStyles}
   </div>
 </div>
 
-<div id="tabs">
-  <div class="tab active" data-tab="tickets">チケット</div>
-  <div class="tab" data-tab="unsynced">未同期 <span class="tab-badge" id="unsynced-badge" style="display:none">0</span></div>
-  <div class="tab" data-tab="comments">コメント</div>
-  <div class="tab" data-tab="settings">設定</div>
+<div id="tabs" role="tablist">
+  <button class="tab active" role="tab" aria-selected="true" aria-controls="panel-tickets" data-tab="tickets" type="button">チケット</button>
+  <button class="tab" role="tab" aria-selected="false" aria-controls="panel-unsynced" data-tab="unsynced" type="button">未同期 <span class="tab-badge" id="unsynced-badge" style="display:none">0</span></button>
+  <button class="tab" role="tab" aria-selected="false" aria-controls="panel-comments" data-tab="comments" type="button">コメント</button>
+  <button class="tab" role="tab" aria-selected="false" aria-controls="panel-settings" data-tab="settings" type="button">設定</button>
 </div>
 
 <div id="content">
 
   <!-- TICKETS TAB -->
-  <div class="tab-panel active" id="panel-tickets">
+  <div class="tab-panel active" id="panel-tickets" role="tabpanel">
     <div id="filter-bar">
       <div id="search-row">
         <input id="search-input" type="text" placeholder="チケットを検索…" autocomplete="off">
@@ -52,7 +52,7 @@ ${dashboardStyles}
   </div>
 
   <!-- UNSYNCED TAB -->
-  <div class="tab-panel" id="panel-unsynced">
+  <div class="tab-panel" id="panel-unsynced" role="tabpanel">
     <div id="unsynced-panel">
       <button id="sync-all-btn" style="display:none">⬆ すべて同期</button>
       <div id="unsynced-list"></div>
@@ -60,14 +60,14 @@ ${dashboardStyles}
   </div>
 
   <!-- COMMENTS TAB -->
-  <div class="tab-panel" id="panel-comments">
+  <div class="tab-panel" id="panel-comments" role="tabpanel">
     <div id="comments-panel">
       <div id="comments-list"></div>
     </div>
   </div>
 
   <!-- SETTINGS TAB -->
-  <div class="tab-panel" id="panel-settings">
+  <div class="tab-panel" id="panel-settings" role="tabpanel">
     <div id="settings-panel">
       <div id="settings-content"></div>
       <button class="settings-reset-btn" id="settings-reset-btn">設定をリセット</button>
@@ -125,13 +125,30 @@ function updateSyncButtonStates(){
 }
 
 // ── Tabs ───────────────────────────────────────────────────────────────────
-const tabs = document.querySelectorAll('.tab');
-const panels = document.querySelectorAll('.tab-panel');
+const tabs = document.querySelectorAll('[role="tab"]');
+const panels = document.querySelectorAll('[role="tabpanel"]');
 function activateTab(name){
-  tabs.forEach(t=>{ t.classList.toggle('active', t.dataset.tab===name); });
+  tabs.forEach(t=>{
+    const active = t.dataset.tab===name;
+    t.classList.toggle('active', active);
+    t.setAttribute('aria-selected', String(active));
+  });
   panels.forEach(p=>{ p.classList.toggle('active', p.id==='panel-'+name); });
 }
 tabs.forEach(t=>{ t.addEventListener('click',()=>activateTab(t.dataset.tab)); });
+document.getElementById('tabs').addEventListener('keydown',function(e){
+  const tabEls = Array.from(this.querySelectorAll('[role="tab"]'));
+  const activeIdx = tabEls.findIndex(t=>t.getAttribute('aria-selected')==='true');
+  if(e.key==='ArrowRight'){
+    const next = tabEls[(activeIdx+1)%tabEls.length];
+    activateTab(next.dataset.tab); next.focus();
+    e.preventDefault();
+  } else if(e.key==='ArrowLeft'){
+    const prev = tabEls[(activeIdx-1+tabEls.length)%tabEls.length];
+    activateTab(prev.dataset.tab); prev.focus();
+    e.preventDefault();
+  }
+});
 
 // ── Header ─────────────────────────────────────────────────────────────────
 document.getElementById('refresh-btn').addEventListener('click',()=>req('dashboard.refresh'));
@@ -159,11 +176,27 @@ const SYNC_LABEL = {
   Syncing: '同期中',
 };
 
-// ── Ticket rendering ────────────────────────────────────────────────────────
-function flattenNodes(nodes, result=[]){
-  for(const n of nodes){ result.push(n); if(n.children?.length) flattenNodes(n.children,result); }
+// ── Ticket expand/collapse state ───────────────────────────────────────────
+const expandedIds = new Set();
+function syncExpandState(nodes){
+  for(const n of nodes){
+    if(n.children?.length && !expandedIds.has(n.id)) expandedIds.add(n.id);
+    if(n.children?.length) syncExpandState(n.children);
+  }
+}
+function toggleExpand(ticketId){
+  if(expandedIds.has(ticketId)) expandedIds.delete(ticketId); else expandedIds.add(ticketId);
+  renderTickets();
+}
+function flattenVisible(nodes, result=[]){
+  for(const n of nodes){
+    result.push(n);
+    if(n.children?.length && expandedIds.has(n.id)) flattenVisible(n.children, result);
+  }
   return result;
 }
+
+// ── Ticket rendering ────────────────────────────────────────────────────────
 function matchesSearch(t){
   if(!searchQuery) return true;
   return t.subject.toLowerCase().includes(searchQuery) || String(t.id).includes(searchQuery);
@@ -190,7 +223,7 @@ function renderTickets(){
     updateSyncButtonStates();
     return;
   }
-  const flat = flattenNodes(state.tickets).filter(matchesSearch);
+  const flat = flattenVisible(state.tickets).filter(matchesSearch);
   if(!flat.length){
     list.innerHTML='<div class="state-msg">フィルター条件に一致するチケットがありません。</div>';
   } else {
@@ -204,18 +237,37 @@ function renderTickets(){
       const priCls = t.priorityName?.toLowerCase().includes('high')?'priority-high':t.priorityName?.toLowerCase().includes('low')?'priority-low':'';
       const priBadge = t.priorityName?'<span class="badge '+priCls+'">'+esc(t.priorityName)+'</span>':'';
       const stBadge = t.statusName?'<span class="badge">'+esc(t.statusName)+'</span>':'';
+      const hasChildren = t.children?.length > 0;
+      const isExpanded = expandedIds.has(t.id);
+      const expandBtn = hasChildren
+        ?'<button class="expand-btn" type="button" data-expand="'+t.id+'" aria-expanded="'+isExpanded+'" title="'+(isExpanded?'折りたたむ':'展開する')+'">'+(isExpanded?'⌄':'›')+'</button>'
+        :'<span class="expand-placeholder"></span>';
       return '<div class="ticket-row'+sel+'" data-id="'+t.id+'" style="padding-left:'+(12+indent)+'px" tabindex="0">'
+        +expandBtn
         +'<span class="ticket-id">#'+t.id+'</span>'
         +'<span class="ticket-subject" title="'+esc(t.subject)+'">'+esc(t.subject)+'</span>'
         +'<span class="badges">'+priBadge+stBadge+syncBadge+'</span>'
         +'</div>';
     }).join('');
     list.querySelectorAll('.ticket-row').forEach(row=>{
-      row.addEventListener('click',()=>{
+      row.addEventListener('click',e=>{
+        if(e.target.closest('.expand-btn')) return;
         const id=Number(row.dataset.id);
         req('ticket.select',{ticketId:id});
       });
-      row.addEventListener('keydown',e=>{ if(e.key==='Enter') row.click(); });
+      row.addEventListener('keydown',e=>{
+        if(e.key==='Enter'||e.key===' '){
+          const expandBtn=row.querySelector('.expand-btn');
+          if(e.target===expandBtn){ toggleExpand(Number(expandBtn.dataset.expand)); e.preventDefault(); return; }
+          if(e.key==='Enter') row.click();
+        }
+      });
+    });
+    list.querySelectorAll('.expand-btn').forEach(btn=>{
+      btn.addEventListener('click',e=>{
+        e.stopPropagation();
+        toggleExpand(Number(btn.dataset.expand));
+      });
     });
   }
   const lm = document.getElementById('load-more-row');
@@ -419,6 +471,8 @@ function renderSettings(){
 // ── Full render ──────────────────────────────────────────────────────────────
 function render(){
   if(!state) return;
+  // 新しい親チケットをデフォルト展開状態に追加
+  if(state.tickets) syncExpandState(state.tickets);
   // プロジェクトセレクタ更新
   const sel=document.getElementById('project-select');
   const currentVal=sel.value;

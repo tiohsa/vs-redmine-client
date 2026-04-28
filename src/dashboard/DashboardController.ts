@@ -1,12 +1,14 @@
 import * as vscode from "vscode";
 import { getProjectSelection, setProjectSelection } from "../config/projectSelection";
-import { getDefaultProjectId, getIncludeChildProjects } from "../config/settings";
+import { getDefaultProjectId, getIncludeChildProjects, getTicketListLimit } from "../config/settings";
 import { listProjects } from "../redmine/projects";
 import { getIssueDetail, listIssues } from "../redmine/issues";
 import { applyTicketFilters, applyTicketSort } from "../views/projectListSettings";
 import { onOfflineSyncQueueChanged } from "../views/offlineSyncStore";
 import { runOfflineSync } from "../commands/offlineSync";
+import type { OfflineSyncRunResult } from "../commands/offlineSync";
 import { syncUnsyncedFile } from "../commands/syncUnsyncedFile";
+import type { SyncUnsyncedFileResult } from "../commands/syncUnsyncedFile";
 import { openTicketInBrowser } from "../commands/openInBrowser";
 import { addCommentFromList } from "../commands/addCommentFromList";
 import { editComment } from "../commands/editComment";
@@ -52,6 +54,7 @@ export class DashboardController {
   // ── Public API ─────────────────────────────────────────────────────────
 
   async initialize(): Promise<void> {
+    this.settingsCtrl.pushSettings();
     await Promise.all([this.loadProjects(), this.loadTickets()]);
   }
 
@@ -112,9 +115,15 @@ export class DashboardController {
       case "comment.reload":
         await this.loadComments(req.ticketId);
         break;
-      case "unsynced.openLocalFile":
-        await vscode.commands.executeCommand("vscode.open", vscode.Uri.parse(req.documentUri));
+      case "unsynced.openLocalFile": {
+        const uri = vscode.Uri.parse(req.documentUri);
+        if (uri.scheme !== "file" && uri.scheme !== "vscode-userdata") {
+          this.opts.notifyError(req.requestId, "この URI は開けません。");
+          return;
+        }
+        await vscode.commands.executeCommand("vscode.open", uri);
         break;
+      }
       case "unsynced.syncOne":
         await this.handleSyncOne(req.requestId, req.key);
         break;
@@ -181,7 +190,7 @@ export class DashboardController {
       const result = await listIssues({
         projectId: project.id,
         includeChildProjects: getIncludeChildProjects(),
-        limit: 50,
+        limit: getTicketListLimit(),
         offset: 0,
       });
       this.tickets = result.tickets;
@@ -212,7 +221,7 @@ export class DashboardController {
       const result = await listIssues({
         projectId: project.id,
         includeChildProjects: getIncludeChildProjects(),
-        limit: 50,
+        limit: getTicketListLimit(),
         offset: this.tickets.length,
       });
       this.tickets = [...this.tickets, ...result.tickets];
@@ -329,34 +338,67 @@ export class DashboardController {
   }
 
   private async handleSyncOne(requestId: string, key: DashboardUnsyncedKey): Promise<void> {
-    const beforeCount = this.opts.store.getState().unsynced.totalCount;
     this.opts.notifyOperationStarted(requestId, "同期中...");
-    await this.syncOne(key);
-    const afterCount = this.opts.store.getState().unsynced.totalCount;
-    if (afterCount < beforeCount) {
-      this.opts.notifySuccess(requestId, "同期が完了しました。");
-    } else {
-      this.opts.notifyError(requestId, "同期に失敗しました。VS Codeの通知をご確認ください。");
+    const result = await this.syncOne(key);
+    this.notifySyncOneResult(requestId, result);
+  }
+
+  private notifySyncOneResult(requestId: string, result: SyncUnsyncedFileResult | undefined): void {
+    if (!result) {
+      this.opts.notifyError(requestId, "同期に失敗しました。VS Code の通知をご確認ください。");
+      return;
+    }
+    switch (result.status) {
+      case "success":
+        this.opts.notifySuccess(requestId, "同期が完了しました。");
+        break;
+      case "no_change":
+        this.opts.notifySuccess(requestId, "変更はありませんでした。");
+        break;
+      case "conflict":
+        this.opts.notifyError(requestId, "リモートの変更と競合しています。ファイルを開いて確認してください。");
+        break;
+      case "failed":
+        this.opts.notifyError(requestId, "同期に失敗しました。VS Code の通知をご確認ください。");
+        break;
     }
   }
 
   private async handleSyncAll(requestId: string): Promise<void> {
-    const beforeCount = this.opts.store.getState().unsynced.totalCount;
     this.opts.notifyOperationStarted(requestId, "全件同期中...");
-    await runOfflineSync();
+    const result = await runOfflineSync();
     this.opts.onTicketsRefreshed();
     this.refreshUnsynced();
-    const afterCount = this.opts.store.getState().unsynced.totalCount;
-    if (beforeCount === 0) {
-      this.opts.notifySuccess(requestId, "同期するものはありません。");
-    } else if (afterCount < beforeCount) {
-      this.opts.notifySuccess(requestId, "全件同期が完了しました。");
-    } else {
-      this.opts.notifyError(requestId, "一部の同期に失敗しました。VS Codeの通知をご確認ください。");
+    this.notifySyncAllResult(requestId, result);
+  }
+
+  private notifySyncAllResult(requestId: string, result: OfflineSyncRunResult): void {
+    switch (result.status) {
+      case "nothing_to_sync":
+        this.opts.notifySuccess(requestId, "同期するものはありません。");
+        break;
+      case "success":
+        this.opts.notifySuccess(requestId, `全件同期が完了しました。同期: ${result.synced}件`);
+        break;
+      case "partial_failure":
+        this.opts.notifyError(
+          requestId,
+          `一部の同期に失敗しました。成功: ${result.synced}件 / 失敗: ${result.failed}件 / 競合: ${result.conflicts}件`,
+        );
+        break;
+      case "cancelled":
+        this.opts.notifyError(
+          requestId,
+          `同期をキャンセルしました。成功: ${result.synced}件 / 未完了: ${result.failed}件`,
+        );
+        break;
+      case "failed":
+        this.opts.notifyError(requestId, "同期に失敗しました。VS Code の通知をご確認ください。");
+        break;
     }
   }
 
-  private async syncOne(key: DashboardUnsyncedKey): Promise<void> {
+  private async syncOne(key: DashboardUnsyncedKey): Promise<SyncUnsyncedFileResult | undefined> {
     let syncKey: UnsyncedFileSyncKey | undefined;
 
     if (key.kind === "ticket" && key.ticketId !== undefined) {
@@ -373,14 +415,15 @@ export class DashboardController {
     }
 
     if (!syncKey) {
-      return;
+      return undefined;
     }
 
-    await syncUnsyncedFile(
+    const result = await syncUnsyncedFile(
       { syncKey },
       { onTicketCreated: () => this.opts.onTicketsRefreshed() },
     );
     this.refreshUnsynced();
+    return result;
   }
 
   private async createTicketFromDashboard(): Promise<void> {

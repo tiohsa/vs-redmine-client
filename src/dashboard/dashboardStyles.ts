@@ -309,6 +309,26 @@ body.vscode-high-contrast .ticket-row.selected{
   border-left:3px solid var(--app-border);
 }
 .ticket-indent{width:0;flex-shrink:0}
+.expand-btn{
+  background:none;
+  border:none;
+  cursor:pointer;
+  padding:1px 3px;
+  border-radius:4px;
+  color:var(--app-text-muted);
+  font-size:11px;
+  width:18px;
+  min-width:18px;
+  display:inline-flex;
+  align-items:center;
+  justify-content:center;
+  flex-shrink:0;
+  line-height:1;
+}
+.expand-btn:hover{background:var(--app-hover);color:var(--app-accent)}
+.expand-btn:focus-visible{outline:1px solid var(--app-focus);outline-offset:1px;background:var(--app-hover)}
+body.vscode-high-contrast .expand-btn:focus-visible{outline:2px solid var(--app-focus)}
+.expand-placeholder{display:inline-block;width:18px;min-width:18px;flex-shrink:0}
 .ticket-id{
   font-size:11px;
   color:var(--app-text-muted);
