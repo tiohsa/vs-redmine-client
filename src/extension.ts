@@ -1,8 +1,9 @@
 import * as path from "path";
 import * as vscode from "vscode";
+import { DashboardWebviewProvider } from "./dashboard/DashboardWebviewProvider";
 import { addCommentFromList } from "./commands/addCommentFromList";
 import { createTicketFromEditor } from "./commands/createTicket";
-import { createChildTicketFromList } from "./commands/createChildTicketFromList";
+import { createChildTicketFromList, createChildTicketWithTicket } from "./commands/createChildTicketFromList";
 import { createTicketFromList } from "./commands/createTicketFromList";
 import { editComment } from "./commands/editComment";
 import { focusTicketEditor } from "./commands/focusTicketEditor";
@@ -21,6 +22,8 @@ import { reloadCommentFromEditor } from "./commands/reloadComment";
 import { reloadTicketFromEditor } from "./commands/reloadTicket";
 import { searchTickets } from "./commands/searchTickets";
 import { setProjectSelection, getProjectSelection } from "./config/projectSelection";
+import { getBaseUrl } from "./config/settings";
+import { buildTicketUrl, buildProjectUrl } from "./utils/redmineUrls";
 import { getIssueDetail } from "./redmine/issues";
 import { showError, showSuccess, showWarning } from "./utils/notifications";
 import { setCommentDraft } from "./views/commentDraftStore";
@@ -1206,6 +1209,51 @@ export async function activate(context: vscode.ExtensionContext) {
       commentsProvider.setSelectedCommentId(selected?.comment.id);
       void handleCommentSelection(selected);
     }),
+  );
+
+  // Dashboard Webview provider
+  const dashboardProvider = new DashboardWebviewProvider({
+    openTicketInEditor: async (ticketId) => {
+      try {
+        const detail = await getIssueDetail(ticketId);
+        await showTicketPreview(detail.ticket);
+      } catch (e) {
+        showError(String(e));
+      }
+    },
+    openTicketInBrowser: async (ticketId) => {
+      const { url } = buildTicketUrl(getBaseUrl(), ticketId);
+      if (url) {await vscode.env.openExternal(vscode.Uri.parse(url));}
+    },
+    createTicket: async () => {
+      await createTicketFromList();
+    },
+    createChildTicket: async (parentTicketId) => {
+      try {
+        const detail = await getIssueDetail(parentTicketId);
+        await createChildTicketWithTicket(detail.ticket);
+      } catch (e) {
+        showError(String(e));
+      }
+    },
+    addComment: async (ticketId) => {
+      await addCommentFromList(ticketId);
+    },
+    editComment: async (_ticketId, commentId) => {
+      showWarning(`コメント#${commentId}の編集はエディタで行ってください。`);
+    },
+    openProjectInBrowser: async (_projectId, identifier) => {
+      const { url } = buildProjectUrl(getBaseUrl(), identifier);
+      if (url) {await vscode.env.openExternal(vscode.Uri.parse(url));}
+    },
+  });
+  context.subscriptions.push(
+    vscode.window.registerWebviewViewProvider(
+      DashboardWebviewProvider.viewId,
+      dashboardProvider,
+      { webviewOptions: { retainContextWhenHidden: true } },
+    ),
+    dashboardProvider,
   );
 
   const initialSelection = getProjectSelection();

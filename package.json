@@ -19,6 +19,7 @@
     "Other"
   ],
   "activationEvents": [
+    "onView:redmine-clientActivityDashboard",
     "onView:redmine-clientActivityTicketSettings",
     "onView:redmine-clientActivityProjects",
     "onView:redmine-clientActivityTickets",
@@ -282,6 +283,11 @@
     ],
     "views": {
       "redmine-clientActivity": [
+        {
+          "id": "redmine-clientActivityDashboard",
+          "name": "Dashboard",
+          "type": "webview"
+        },
         {
           "id": "redmine-clientActivityTicketSettings",
           "name": "Ticket Settings"

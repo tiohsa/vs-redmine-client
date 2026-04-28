@@ -18,6 +18,13 @@ import { showInfo, showWarning } from "../utils/notifications";
 import { TicketSaveResult } from "../views/ticketSaveTypes";
 import { CommentSaveResult } from "../views/commentSaveTypes";
 
+export type OfflineSyncRunResult =
+  | { status: "nothing_to_sync"; total: 0; synced: 0; failed: 0; conflicts: 0 }
+  | { status: "success"; total: number; synced: number; failed: 0; conflicts: 0 }
+  | { status: "partial_failure"; total: number; synced: number; failed: number; conflicts: number }
+  | { status: "cancelled"; total: number; synced: number; failed: number; conflicts: number }
+  | { status: "failed"; total: number; synced: number; failed: number; conflicts: number };
+
 const isTicketResultSuccess = (result: TicketSaveResult): boolean =>
   result.status === "success" ||
   result.status === "created" ||
@@ -47,7 +54,7 @@ const summarizeFailures = (
   return parts.join(", ");
 };
 
-export const runOfflineSync = async (): Promise<void> => {
+export const runOfflineSync = async (): Promise<OfflineSyncRunResult> => {
   const queue = getOfflineSyncQueue();
   const ticketUpdates = Array.from(queue.tickets.values());
 
@@ -57,12 +64,14 @@ export const runOfflineSync = async (): Promise<void> => {
     queue.comments.length === 0
   ) {
     showInfo("No offline changes to sync.");
-    return;
+    return { status: "nothing_to_sync", total: 0, synced: 0, failed: 0, conflicts: 0 };
   }
 
+  const total = queue.newTickets.length + ticketUpdates.length + queue.comments.length;
   const failedTickets: OfflineTicketUpdate[] = [];
   const failedComments: OfflineCommentUpdate[] = [];
   const failedNewTickets: typeof queue.newTickets = [];
+  let conflictCount = 0;
 
   for (const entry of queue.newTickets) {
     const { result, createdId } = await createTicketFromQueuedContent({
@@ -89,7 +98,10 @@ export const runOfflineSync = async (): Promise<void> => {
 
   for (const update of ticketUpdates) {
     const result = await applyQueuedTicketUpdate({ update });
-    if (!isTicketResultSuccess(result)) {
+    if (result.status === "conflict") {
+      conflictCount++;
+      failedTickets.push(update);
+    } else if (!isTicketResultSuccess(result)) {
       failedTickets.push(update);
     }
   }
@@ -114,12 +126,18 @@ export const runOfflineSync = async (): Promise<void> => {
         });
       }
     }
-    if (!isCommentResultSuccess(result)) {
+    if (result.status === "conflict") {
+      conflictCount++;
+      failedComments.push(update);
+    } else if (!isCommentResultSuccess(result)) {
       failedComments.push(update);
     }
   }
 
-  if (failedTickets.length > 0 || failedComments.length > 0 || failedNewTickets.length > 0) {
+  const failedCount = failedTickets.length + failedComments.length + failedNewTickets.length;
+  const syncedCount = total - failedCount;
+
+  if (failedCount > 0) {
     replaceOfflineSyncQueue({
       tickets: new Map(failedTickets.map((item) => [item.ticketId, item])),
       comments: failedComments,
@@ -132,9 +150,10 @@ export const runOfflineSync = async (): Promise<void> => {
         failedNewTickets.length,
       )}`,
     );
-    return;
+    return { status: "partial_failure", total, synced: syncedCount, failed: failedCount, conflicts: conflictCount };
   }
 
   clearOfflineSyncQueue();
   showInfo("Offline sync completed.");
+  return { status: "success", total, synced: total, failed: 0, conflicts: 0 };
 };

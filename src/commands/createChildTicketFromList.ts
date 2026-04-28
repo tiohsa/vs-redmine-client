@@ -4,18 +4,12 @@ import { TicketTreeItem } from "../views/ticketsView";
 import { showError } from "../utils/notifications";
 import { resolveNewTicketDraftContent } from "../views/ticketPreview";
 import { openNewTicketDraft } from "./createTicketFromList";
+import { Ticket } from "../redmine/types";
 
-export const createChildTicketFromList = async (
-  item?: TicketTreeItem,
+export const createChildTicketWithTicket = async (
+  ticket: Ticket,
 ): Promise<void> => {
-  if (!item || !(item instanceof TicketTreeItem)) {
-    showError("Parent ticket is not available.");
-    return;
-  }
-
-  const parentId = item.ticket.id;
-  const projectId = item.ticket.projectId;
-  if (!parentId || !projectId) {
+  if (!ticket.id || !ticket.projectId) {
     showError("Parent ticket is missing required information.");
     return;
   }
@@ -29,7 +23,18 @@ export const createChildTicketFromList = async (
   }
 
   await openNewTicketDraft({
-    content: buildNewChildTicketDraftContent(item.ticket, templateResolution.content),
-    projectId,
+    content: buildNewChildTicketDraftContent(ticket, templateResolution.content),
+    projectId: ticket.projectId,
   });
+};
+
+export const createChildTicketFromList = async (
+  item?: TicketTreeItem,
+): Promise<void> => {
+  if (!item || !(item instanceof TicketTreeItem)) {
+    showError("Parent ticket is not available.");
+    return;
+  }
+
+  await createChildTicketWithTicket(item.ticket);
 };
