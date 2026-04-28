@@ -6,12 +6,14 @@ const vscode = acquireVsCodeApi();
 // ── State ──────────────────────────────────────────────────────────────────
 let state = null;
 let reqCounter = 0;
+let activeTicketActionMenuId = null;
 const nextReqId = () => 'req-' + (++reqCounter);
 
 // ── Utils ──────────────────────────────────────────────────────────────────
 function esc(s){ return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
 function send(msg){ vscode.postMessage(msg); }
 function req(type, extra){ send({type, requestId:nextReqId(), ...extra}); }
+function isTicketActionTarget(target){ return !!target.closest('.ticket-action-btn,.ticket-action-menu,.expand-btn'); }
 
 // ── Toast / operation feedback ─────────────────────────────────────────────
 const activeSyncRequests = new Set();
@@ -115,6 +117,37 @@ function flattenVisible(nodes, result=[]){
   return result;
 }
 
+// ── Ticket row actions ──────────────────────────────────────────────────────
+function closeTicketActionMenus(){
+  document.querySelectorAll('.ticket-action-menu').forEach(menu=>menu.classList.add('hidden'));
+  document.querySelectorAll('.ticket-action-btn[aria-expanded="true"]').forEach(btn=>btn.setAttribute('aria-expanded','false'));
+  activeTicketActionMenuId = null;
+}
+function toggleTicketActionMenu(ticketId){
+  const menuId = 'ticket-action-menu-' + ticketId;
+  const shouldOpen = activeTicketActionMenuId !== menuId;
+  closeTicketActionMenus();
+  if(!shouldOpen) return;
+  const menu = document.getElementById(menuId);
+  const btn = document.querySelector('[data-ticket-action-menu="'+ticketId+'"]');
+  if(menu){ menu.classList.remove('hidden'); }
+  if(btn){ btn.setAttribute('aria-expanded','true'); }
+  activeTicketActionMenuId = menuId;
+}
+function runTicketAction(action, ticketId){
+  closeTicketActionMenus();
+  if(action === 'open') req('ticket.openEditor',{ticketId});
+  else if(action === 'comment') req('comment.add',{ticketId});
+  else if(action === 'browser') req('ticket.openBrowser',{ticketId});
+  else if(action === 'child') req('ticket.createChild',{parentTicketId:ticketId});
+}
+document.addEventListener('click',e=>{
+  if(!e.target.closest('.ticket-action-menu,.ticket-action-btn')) closeTicketActionMenus();
+});
+document.addEventListener('keydown',e=>{
+  if(e.key === 'Escape') closeTicketActionMenus();
+});
+
 // ── Ticket rendering ────────────────────────────────────────────────────────
 function matchesSearch(t){
   if(!searchQuery) return true;
@@ -161,18 +194,32 @@ function renderTickets(){
       const expandBtn = hasChildren
         ?'<button class="expand-btn" type="button" data-expand="'+t.id+'" aria-expanded="'+isExpanded+'" title="'+(isExpanded?'折りたたむ':'展開する')+'"><span class="expand-icon '+(isExpanded?'expanded':'collapsed')+'"></span></button>'
         :'<span class="expand-placeholder"></span>';
+      const actionMenu = '<span class="ticket-actions">'
+        +'<button class="ticket-action-btn" type="button" data-ticket-action-menu="'+t.id+'" aria-haspopup="menu" aria-expanded="false" aria-controls="ticket-action-menu-'+t.id+'" title="チケット操作">操作</button>'
+        +'<span class="ticket-action-menu hidden" id="ticket-action-menu-'+t.id+'" role="menu">'
+        +'<button type="button" role="menuitem" data-ticket-action="open" data-ticket="'+t.id+'">エディタで開く</button>'
+        +'<button type="button" role="menuitem" data-ticket-action="comment" data-ticket="'+t.id+'">コメント追加</button>'
+        +'<button type="button" role="menuitem" data-ticket-action="browser" data-ticket="'+t.id+'">ブラウザで開く</button>'
+        +'<button type="button" role="menuitem" data-ticket-action="child" data-ticket="'+t.id+'">子チケット作成</button>'
+        +'</span></span>';
       return '<div class="ticket-row'+sel+'" data-id="'+t.id+'" style="padding-left:'+(12+indent)+'px" tabindex="0">'
         +expandBtn
         +'<span class="ticket-id">#'+t.id+'</span>'
         +'<span class="ticket-subject" title="'+esc(t.subject)+'">'+esc(t.subject)+'</span>'
         +'<span class="badges">'+priBadge+stBadge+syncBadge+'</span>'
+        +actionMenu
         +'</div>';
     }).join('');
     list.querySelectorAll('.ticket-row').forEach(row=>{
       row.addEventListener('click',e=>{
-        if(e.target.closest('.expand-btn')) return;
+        if(isTicketActionTarget(e.target)) return;
         const id=Number(row.dataset.id);
         req('ticket.select',{ticketId:id});
+      });
+      row.addEventListener('dblclick',e=>{
+        if(isTicketActionTarget(e.target)) return;
+        const id=Number(row.dataset.id);
+        req('ticket.openEditor',{ticketId:id});
       });
       row.addEventListener('keydown',e=>{
         if(e.key==='Enter'||e.key===' '){
@@ -186,6 +233,18 @@ function renderTickets(){
       btn.addEventListener('click',e=>{
         e.stopPropagation();
         toggleExpand(Number(btn.dataset.expand));
+      });
+    });
+    list.querySelectorAll('[data-ticket-action-menu]').forEach(btn=>{
+      btn.addEventListener('click',e=>{
+        e.stopPropagation();
+        toggleTicketActionMenu(Number(btn.dataset.ticketActionMenu));
+      });
+    });
+    list.querySelectorAll('[data-ticket-action]').forEach(btn=>{
+      btn.addEventListener('click',e=>{
+        e.stopPropagation();
+        runTicketAction(btn.dataset.ticketAction, Number(btn.dataset.ticket));
       });
     });
   }
@@ -390,6 +449,7 @@ function renderSettings(){
 // ── Full render ──────────────────────────────────────────────────────────────
 function render(){
   if(!state) return;
+  closeTicketActionMenus();
   if(state.tickets) syncExpandState(state.tickets);
   const sel=document.getElementById('project-select');
   const currentVal=sel.value;
