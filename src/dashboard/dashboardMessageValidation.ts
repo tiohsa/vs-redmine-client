@@ -189,10 +189,11 @@ export const validateDashboardMessage = (raw: unknown): ValidationResult => {
       return { ok: true, request: { type, requestId, documentUri } };
     }
 
-    case "unsynced.syncOne": {
+    case "unsynced.syncOne":
+    case "unsynced.discardOne": {
       const key = raw["key"];
       if (!validateUnsyncedKey(key)) {
-        return { ok: false, reason: "unsynced.syncOne: key is invalid" };
+        return { ok: false, reason: `${type}: key is invalid` };
       }
       return { ok: true, request: { type, requestId, key } };
     }
