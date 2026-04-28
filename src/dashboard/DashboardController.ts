@@ -24,9 +24,11 @@ import { buildCommentDashboardItems } from "./viewModels/commentsDashboardViewMo
 import { DashboardStateStore } from "./DashboardStateStore";
 import { SettingsController } from "./SettingsController";
 import type { DashboardProjectNode, DashboardRequest, DashboardUnsyncedKey } from "./dashboardProtocol";
+import { resolveCurrentProject, type ResolvedProject } from "./resolveProject";
 
 export interface DashboardControllerOptions {
   store: DashboardStateStore;
+  notifyOperationStarted: (requestId: string, label?: string) => void;
   notifySuccess: (requestId: string, msg: string) => void;
   notifyError: (requestId: string, msg: string) => void;
   notifyToast: (level: "info" | "warning" | "error" | "success", msg: string) => void;
@@ -54,6 +56,21 @@ export class DashboardController {
   }
 
   async handle(req: DashboardRequest): Promise<void> {
+    try {
+      await this.handleRequest(req);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      this.opts.notifyError(req.requestId, `操作に失敗しました: ${msg}`);
+    }
+  }
+
+  dispose(): void {
+    this.disposables.forEach((d) => d.dispose());
+  }
+
+  // ── Private request handler ────────────────────────────────────────────
+
+  private async handleRequest(req: DashboardRequest): Promise<void> {
     switch (req.type) {
       case "dashboard.ready":
       case "dashboard.refresh":
@@ -99,21 +116,20 @@ export class DashboardController {
         await vscode.commands.executeCommand("vscode.open", vscode.Uri.parse(req.documentUri));
         break;
       case "unsynced.syncOne":
-        await this.syncOne(req.key);
-        this.opts.notifySuccess(req.requestId, "Sync complete.");
+        await this.handleSyncOne(req.requestId, req.key);
         break;
       case "unsynced.syncAll":
-        await runOfflineSync();
-        this.opts.notifySuccess(req.requestId, "Sync all complete.");
-        this.opts.onTicketsRefreshed();
+        await this.handleSyncAll(req.requestId);
         break;
       case "settings.update":
         this.settingsCtrl.updateTicketList(req.patch);
         this.pushTickets();
+        this.opts.notifySuccess(req.requestId, "設定を更新しました。");
         break;
       case "settings.reset":
         this.settingsCtrl.resetTicketList();
         this.pushTickets();
+        this.opts.notifySuccess(req.requestId, "設定をリセットしました。");
         break;
       case "settings.updateEditorDefault":
         this.settingsCtrl.updateEditorDefault(req.field, req.value);
@@ -128,28 +144,32 @@ export class DashboardController {
     }
   }
 
-  dispose(): void {
-    this.disposables.forEach((d) => d.dispose());
+  // ── Project resolution ─────────────────────────────────────────────────
+
+  private getResolvedProject(): ResolvedProject | undefined {
+    const selection = getProjectSelection();
+    return resolveCurrentProject({
+      selectionId: selection.id,
+      selectionName: selection.name,
+      defaultProjectId: getDefaultProjectId(),
+      projects: this.projects,
+    });
   }
 
   // ── Private ────────────────────────────────────────────────────────────
 
   private async loadTickets(): Promise<void> {
     const { store } = this.opts;
-    const selection = getProjectSelection();
-    const fallback = Number(getDefaultProjectId());
-    const projectId = selection.id ?? (Number.isNaN(fallback) ? undefined : fallback);
+    const project = this.getResolvedProject();
 
     store.update({
-      selectedProject: selection.id
-        ? { id: selection.id, name: selection.name }
-        : undefined,
+      selectedProject: project ? { id: project.id, name: project.name } : undefined,
       includeChildProjects: getIncludeChildProjects(),
       loading: { ...store.getState().loading, tickets: true },
       errors: { ...store.getState().errors, tickets: undefined },
     });
 
-    if (!projectId) {
+    if (!project) {
       this.tickets = [];
       this.totalCount = 0;
       this.pushTickets();
@@ -159,7 +179,7 @@ export class DashboardController {
 
     try {
       const result = await listIssues({
-        projectId,
+        projectId: project.id,
         includeChildProjects: getIncludeChildProjects(),
         limit: 50,
         offset: 0,
@@ -184,13 +204,13 @@ export class DashboardController {
       return;
     }
     const { store } = this.opts;
-    const selection = getProjectSelection();
-    if (!selection.id) {
+    const project = this.getResolvedProject();
+    if (!project) {
       return;
     }
     try {
       const result = await listIssues({
-        projectId: selection.id,
+        projectId: project.id,
         includeChildProjects: getIncludeChildProjects(),
         limit: 50,
         offset: this.tickets.length,
@@ -304,7 +324,35 @@ export class DashboardController {
         await editComment(comment);
       }
     } catch {
-      // ignore
+      // コメント編集準備に失敗した場合は無視する
+    }
+  }
+
+  private async handleSyncOne(requestId: string, key: DashboardUnsyncedKey): Promise<void> {
+    const beforeCount = this.opts.store.getState().unsynced.totalCount;
+    this.opts.notifyOperationStarted(requestId, "同期中...");
+    await this.syncOne(key);
+    const afterCount = this.opts.store.getState().unsynced.totalCount;
+    if (afterCount < beforeCount) {
+      this.opts.notifySuccess(requestId, "同期が完了しました。");
+    } else {
+      this.opts.notifyError(requestId, "同期に失敗しました。VS Codeの通知をご確認ください。");
+    }
+  }
+
+  private async handleSyncAll(requestId: string): Promise<void> {
+    const beforeCount = this.opts.store.getState().unsynced.totalCount;
+    this.opts.notifyOperationStarted(requestId, "全件同期中...");
+    await runOfflineSync();
+    this.opts.onTicketsRefreshed();
+    this.refreshUnsynced();
+    const afterCount = this.opts.store.getState().unsynced.totalCount;
+    if (beforeCount === 0) {
+      this.opts.notifySuccess(requestId, "同期するものはありません。");
+    } else if (afterCount < beforeCount) {
+      this.opts.notifySuccess(requestId, "全件同期が完了しました。");
+    } else {
+      this.opts.notifyError(requestId, "一部の同期に失敗しました。VS Codeの通知をご確認ください。");
     }
   }
 
@@ -336,20 +384,20 @@ export class DashboardController {
   }
 
   private async createTicketFromDashboard(): Promise<void> {
-    const selection = getProjectSelection();
-    if (!selection.id) {
+    const project = this.getResolvedProject();
+    if (!project) {
       showError("プロジェクトを選択してからチケットを作成してください。");
       return;
     }
     const templateResolution = resolveNewTicketDraftContent({
-      projectName: selection.name,
+      projectName: project.name,
     });
     if (templateResolution.isTemplateConfigured && templateResolution.errorMessage) {
       showError(templateResolution.errorMessage);
     }
     await openNewTicketDraft({
-      content: templateResolution.content ?? buildNewTicketDraftContent({ projectId: selection.id }),
-      projectId: selection.id,
+      content: templateResolution.content ?? buildNewTicketDraftContent({ projectId: project.id }),
+      projectId: project.id,
     });
   }
 
@@ -364,9 +412,9 @@ export class DashboardController {
       return;
     }
 
-    const selection = getProjectSelection();
+    const project = this.getResolvedProject();
     const templateResolution = resolveNewTicketDraftContent({
-      projectName: selection.name,
+      projectName: project?.name,
     });
     if (templateResolution.isTemplateConfigured && templateResolution.errorMessage) {
       showError(templateResolution.errorMessage);

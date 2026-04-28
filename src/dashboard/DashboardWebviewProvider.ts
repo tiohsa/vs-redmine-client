@@ -25,6 +25,9 @@ export class DashboardWebviewProvider
 
     this.controller = new DashboardController({
       store: this.store,
+      notifyOperationStarted: (requestId, label) => {
+        this.send({ type: "operation.started", requestId, label });
+      },
       notifySuccess: (requestId, msg) => {
         this.send({ type: "operation.success", requestId, message: msg });
       },

@@ -14,24 +14,24 @@ ${dashboardStyles}
 <body>
 
 <div id="header">
-  <h1>Redmine Dashboard</h1>
+  <h1>Redmine ダッシュボード</h1>
   <div id="header-row">
-    <select class="project-select" id="project-select" title="Select project">
-      <option value="">— Select project —</option>
+    <select class="project-select" id="project-select" title="プロジェクトを選択">
+      <option value="">— プロジェクトを選択 —</option>
     </select>
     <label class="toggle-children">
-      <input type="checkbox" id="include-children"> Children
+      <input type="checkbox" id="include-children"> 子を含める
     </label>
-    <button class="btn-icon" id="refresh-btn" title="Refresh">↻</button>
-    <button class="btn btn-primary" id="new-ticket-btn" title="New Ticket">+ New</button>
+    <button class="btn-icon" id="refresh-btn" title="更新">↻</button>
+    <button class="btn btn-primary" id="new-ticket-btn" title="新規チケット">新規チケット</button>
   </div>
 </div>
 
 <div id="tabs">
-  <div class="tab active" data-tab="tickets">Tickets</div>
-  <div class="tab" data-tab="unsynced">Unsynced <span class="tab-badge" id="unsynced-badge" style="display:none">0</span></div>
-  <div class="tab" data-tab="comments">Comments</div>
-  <div class="tab" data-tab="settings">Settings</div>
+  <div class="tab active" data-tab="tickets">チケット</div>
+  <div class="tab" data-tab="unsynced">未同期 <span class="tab-badge" id="unsynced-badge" style="display:none">0</span></div>
+  <div class="tab" data-tab="comments">コメント</div>
+  <div class="tab" data-tab="settings">設定</div>
 </div>
 
 <div id="content">
@@ -40,7 +40,7 @@ ${dashboardStyles}
   <div class="tab-panel active" id="panel-tickets">
     <div id="filter-bar">
       <div id="search-row">
-        <input id="search-input" type="text" placeholder="Search tickets…" autocomplete="off">
+        <input id="search-input" type="text" placeholder="チケットを検索…" autocomplete="off">
       </div>
       <div id="filter-chips"></div>
     </div>
@@ -54,7 +54,7 @@ ${dashboardStyles}
   <!-- UNSYNCED TAB -->
   <div class="tab-panel" id="panel-unsynced">
     <div id="unsynced-panel">
-      <button id="sync-all-btn" style="display:none">⬆ Sync All</button>
+      <button id="sync-all-btn" style="display:none">⬆ すべて同期</button>
       <div id="unsynced-list"></div>
     </div>
   </div>
@@ -70,11 +70,13 @@ ${dashboardStyles}
   <div class="tab-panel" id="panel-settings">
     <div id="settings-panel">
       <div id="settings-content"></div>
-      <button class="settings-reset-btn" id="settings-reset-btn">Reset all settings</button>
+      <button class="settings-reset-btn" id="settings-reset-btn">設定をリセット</button>
     </div>
   </div>
 
 </div>
+
+<div id="toast-area"></div>
 
 <script nonce="${nonce}">
 (function(){
@@ -90,6 +92,37 @@ const nextReqId = () => 'req-' + (++reqCounter);
 function esc(s){ return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
 function send(msg){ vscode.postMessage(msg); }
 function req(type, extra){ send({type, requestId:nextReqId(), ...extra}); }
+
+// ── Toast / operation feedback ─────────────────────────────────────────────
+const activeSyncRequests = new Set();
+
+function showToast(level, message){
+  const area = document.getElementById('toast-area');
+  const el = document.createElement('div');
+  el.className = 'toast toast-' + level;
+  el.textContent = message;
+  area.appendChild(el);
+  // フェードアウト
+  setTimeout(() => { el.classList.add('toast-fade'); }, 3200);
+  setTimeout(() => { if (el.parentNode) el.parentNode.removeChild(el); }, 4000);
+}
+
+function startOperation(requestId){
+  activeSyncRequests.add(requestId);
+  updateSyncButtonStates();
+}
+
+function endOperation(requestId){
+  activeSyncRequests.delete(requestId);
+  updateSyncButtonStates();
+}
+
+function updateSyncButtonStates(){
+  const busy = activeSyncRequests.size > 0;
+  document.querySelectorAll('[data-sync-key]').forEach(btn => { btn.disabled = busy; });
+  const syncAll = document.getElementById('sync-all-btn');
+  if (syncAll) syncAll.disabled = busy;
+}
 
 // ── Tabs ───────────────────────────────────────────────────────────────────
 const tabs = document.querySelectorAll('.tab');
@@ -117,6 +150,15 @@ document.getElementById('search-input').addEventListener('input',function(){
   renderTickets();
 });
 
+// ── Sync state label map ───────────────────────────────────────────────────
+const SYNC_LABEL = {
+  Dirty: '未同期',
+  Queued: 'キュー済み',
+  Conflict: '競合',
+  Failed: '失敗',
+  Syncing: '同期中',
+};
+
 // ── Ticket rendering ────────────────────────────────────────────────────────
 function flattenNodes(nodes, result=[]){
   for(const n of nodes){ result.push(n); if(n.children?.length) flattenNodes(n.children,result); }
@@ -134,26 +176,31 @@ function renderTickets(){
   if(!state) return;
   const list = document.getElementById('ticket-list');
   if(!state.selectedProject && !state.tickets.length && !state.loading.tickets){
-    list.innerHTML='<div class="state-msg"><strong>No project selected</strong>Select a project above to view tickets.</div>';
+    list.innerHTML='<div class="state-msg"><strong>プロジェクト未選択</strong>上でプロジェクトを選択してチケットを表示します。</div>';
+    updateSyncButtonStates();
     return;
   }
   if(state.loading.tickets){
-    list.innerHTML='<div class="state-msg">Loading tickets…</div>';
+    list.innerHTML='<div class="state-msg">チケットを読み込み中…</div>';
+    updateSyncButtonStates();
     return;
   }
   if(state.errors.tickets){
-    list.innerHTML='<div class="state-msg error-msg"><strong>Error</strong>'+esc(state.errors.tickets)+'</div>';
+    list.innerHTML='<div class="state-msg error-msg"><strong>エラー</strong>'+esc(state.errors.tickets)+'</div>';
+    updateSyncButtonStates();
     return;
   }
   const flat = flattenNodes(state.tickets).filter(matchesSearch);
   if(!flat.length){
-    list.innerHTML='<div class="state-msg">No tickets match the current filter.</div>';
+    list.innerHTML='<div class="state-msg">フィルター条件に一致するチケットがありません。</div>';
   } else {
     list.innerHTML = flat.map(t=>{
       const indent = t.level*14;
       const sel = t.id===state.selectedTicketId?' selected':'';
       const syncCls = syncBadgeClass(t.syncState);
-      const syncBadge = (t.syncState&&t.syncState!=='Synced')?'<span class="badge '+syncCls+'">'+esc(t.syncState)+'</span>':'';
+      const syncLabel = SYNC_LABEL[t.syncState] || t.syncState;
+      const syncBadge = (t.syncState&&t.syncState!=='Synced')
+        ?'<span class="badge '+syncCls+'">'+esc(syncLabel)+'</span>':'';
       const priCls = t.priorityName?.toLowerCase().includes('high')?'priority-high':t.priorityName?.toLowerCase().includes('low')?'priority-low':'';
       const priBadge = t.priorityName?'<span class="badge '+priCls+'">'+esc(t.priorityName)+'</span>':'';
       const stBadge = t.statusName?'<span class="badge">'+esc(t.statusName)+'</span>':'';
@@ -174,9 +221,10 @@ function renderTickets(){
   const lm = document.getElementById('load-more-row');
   if(state.loadedTicketCount < state.totalTicketCount){
     lm.style.display='block';
-    lm.textContent='Load more… ('+state.loadedTicketCount+' / '+state.totalTicketCount+')';
+    lm.textContent='さらに読み込む… ('+state.loadedTicketCount+' / '+state.totalTicketCount+')';
     lm.onclick=()=>req('tickets.loadMore');
   } else { lm.style.display='none'; }
+  updateSyncButtonStates();
 }
 
 // ── Detail card ──────────────────────────────────────────────────────────────
@@ -187,7 +235,9 @@ function renderDetail(){
   if(!t){ card.style.display='none'; return; }
   card.style.display='block';
   const syncCls = syncBadgeClass(t.syncState);
-  const syncBadge = (t.syncState&&t.syncState!=='Synced')?'<span class="badge '+syncCls+'">'+esc(t.syncState)+'</span>':'';
+  const syncLabel = SYNC_LABEL[t.syncState] || t.syncState;
+  const syncBadge = (t.syncState&&t.syncState!=='Synced')
+    ?'<span class="badge '+syncCls+'">'+esc(syncLabel)+'</span>':'';
   card.innerHTML=
     '<div class="detail-title">#'+t.id+' '+esc(t.subject)+'</div>'
     +'<div class="detail-meta">'
@@ -195,14 +245,14 @@ function renderDetail(){
     +(t.priorityName?'<span class="badge">'+esc(t.priorityName)+'</span>':'')
     +(t.trackerName?'<span class="badge">'+esc(t.trackerName)+'</span>':'')
     +(t.assigneeName?'<span class="badge">'+esc(t.assigneeName)+'</span>':'')
-    +(t.dueDate?'<span class="badge">Due: '+esc(t.dueDate)+'</span>':'')
+    +(t.dueDate?'<span class="badge">期日: '+esc(t.dueDate)+'</span>':'')
     +syncBadge
     +'</div>'
     +'<div class="detail-actions">'
-    +'<button class="btn btn-primary" id="d-open">Open Editor</button>'
-    +'<button class="btn btn-secondary" id="d-comment">Add Comment</button>'
-    +'<button class="btn btn-secondary" id="d-browser">Browser</button>'
-    +'<button class="btn btn-secondary" id="d-child">Child</button>'
+    +'<button class="btn btn-primary" id="d-open">エディタで開く</button>'
+    +'<button class="btn btn-secondary" id="d-comment">コメント追加</button>'
+    +'<button class="btn btn-secondary" id="d-browser">ブラウザで開く</button>'
+    +'<button class="btn btn-secondary" id="d-child">子チケット</button>'
     +'</div>';
   card.querySelector('#d-open').onclick=()=>req('ticket.openEditor',{ticketId:t.id});
   card.querySelector('#d-comment').onclick=()=>req('comment.add',{ticketId:t.id});
@@ -215,10 +265,9 @@ function renderFilterChips(){
   if(!state) return;
   const f = state.settings.filters;
   const chips=[];
-  if(f.subjectQuery) chips.push(['Subject: '+f.subjectQuery,'subjectQuery','']);
-  // Add more chip types as needed
+  if(f.subjectQuery) chips.push('件名: '+f.subjectQuery);
   const el=document.getElementById('filter-chips');
-  el.innerHTML=chips.map(([label])=>'<span class="filter-chip">'+esc(label)+'<span class="filter-chip-x">×</span></span>').join('');
+  el.innerHTML=chips.map(label=>'<span class="filter-chip">'+esc(label)+'<span class="filter-chip-x">×</span></span>').join('');
 }
 
 // ── Unsynced ────────────────────────────────────────────────────────────────
@@ -234,11 +283,11 @@ function renderUnsynced(){
   syncAllBtn.onclick=()=>req('unsynced.syncAll');
 
   const list=document.getElementById('unsynced-list');
-  if(!n){ list.innerHTML='<div class="state-msg">No local changes.</div>'; return; }
+  if(!n){ list.innerHTML='<div class="state-msg">未同期の変更はありません。</div>'; updateSyncButtonStates(); return; }
   const iconMap={ticket:'📝',newTicket:'✨',comment:'💬'};
   list.innerHTML=state.unsynced.items.map(item=>{
     const icon=iconMap[item.key.kind]||'📄';
-    const openBtn=item.documentUri?'<button class="btn btn-secondary" data-uri="'+esc(item.documentUri)+'">Open</button>':'';
+    const openBtn=item.documentUri?'<button class="btn btn-secondary" data-uri="'+esc(item.documentUri)+'">開く</button>':'';
     return '<div class="unsynced-card">'
       +'<span class="unsynced-icon">'+icon+'</span>'
       +'<div class="unsynced-body">'
@@ -247,7 +296,7 @@ function renderUnsynced(){
       +'</div>'
       +'<div class="unsynced-actions">'
       +openBtn
-      +'<button class="btn btn-primary" data-sync-key="'+esc(JSON.stringify(item.key))+'">Sync</button>'
+      +'<button class="btn btn-primary" data-sync-key="'+esc(JSON.stringify(item.key))+'">同期</button>'
       +'</div>'
       +'</div>';
   }).join('');
@@ -259,6 +308,7 @@ function renderUnsynced(){
       try{ req('unsynced.syncOne',{key:JSON.parse(btn.dataset.syncKey)}); }catch{}
     });
   });
+  updateSyncButtonStates();
 }
 
 // ── Comments ────────────────────────────────────────────────────────────────
@@ -269,20 +319,20 @@ function renderComments(){
   const ticketId=state.selectedTicketId;
   const header=ticketId
     ?'<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">'
-      +'<span style="font-size:12px;font-weight:600;color:var(--c-text2)">Comments for #'+ticketId+'</span>'
+      +'<span style="font-size:12px;font-weight:600;color:var(--c-text2)">チケット #'+ticketId+' のコメント</span>'
       +'<div style="display:flex;gap:4px">'
-      +'<button class="btn btn-primary" id="add-comment-btn">+ Add</button>'
+      +'<button class="btn btn-primary" id="add-comment-btn">+ 追加</button>'
       +'<button class="btn btn-secondary" id="reload-comments-btn">↻</button>'
       +'</div></div>'
     :'';
-  if(!ticketId){ list.innerHTML='<div class="state-msg">Select a ticket to view comments.</div>'; return; }
-  if(c.loading){ list.innerHTML=header+'<div class="state-msg">Loading comments…</div>'; }
+  if(!ticketId){ list.innerHTML='<div class="state-msg">チケットを選択するとコメントを表示します。</div>'; return; }
+  if(c.loading){ list.innerHTML=header+'<div class="state-msg">コメントを読み込み中…</div>'; }
   else if(c.error){ list.innerHTML=header+'<div class="state-msg error-msg">'+esc(c.error)+'</div>'; }
-  else if(!c.items.length){ list.innerHTML=header+'<div class="state-msg">No comments.</div>'; }
+  else if(!c.items.length){ list.innerHTML=header+'<div class="state-msg">コメントはありません。</div>'; }
   else{
     list.innerHTML=header+c.items.map(cm=>{
       const editBtn=cm.editableByCurrentUser
-        ?'<button class="btn btn-secondary" data-edit-comment="'+cm.id+'" data-ticket="'+ticketId+'">Edit</button>':'';
+        ?'<button class="btn btn-secondary" data-edit-comment="'+cm.id+'" data-ticket="'+ticketId+'">編集</button>':'';
       return '<div class="comment-card">'
         +'<div class="comment-header"><span class="comment-author">'+esc(cm.authorName)+'</span>'
         +(cm.updatedAt?'<span class="comment-date">'+esc(cm.updatedAt.substring(0,10))+'</span>':'')
@@ -307,36 +357,36 @@ function renderSettings(){
   const s=state.settings;
   const el=document.getElementById('settings-content');
   el.innerHTML=
-    '<div class="settings-section"><h3>Ticket Filters</h3>'
-    +'<div class="setting-row"><span class="setting-label">Subject search</span>'
-    +'<input class="setting-input" id="set-subject" type="text" value="'+esc(s.filters.subjectQuery||'')+'" placeholder="Keyword…"></div>'
+    '<div class="settings-section"><h3>チケットフィルター</h3>'
+    +'<div class="setting-row"><span class="setting-label">件名検索</span>'
+    +'<input class="setting-input" id="set-subject" type="text" value="'+esc(s.filters.subjectQuery||'')+'" placeholder="キーワード…"></div>'
     +'</div>'
-    +'<div class="settings-section"><h3>Sort</h3>'
-    +'<div class="setting-row"><span class="setting-label">Sort field</span>'
+    +'<div class="settings-section"><h3>並び替え</h3>'
+    +'<div class="setting-row"><span class="setting-label">並び替えフィールド</span>'
     +'<select class="setting-select" id="set-sort-field">'
-    +'<option value=""'+(s.sort.field?'':' selected')+'>Default</option>'
-    +'<option value="priority"'+(s.sort.field==="priority"?' selected':'')+'>Priority</option>'
-    +'<option value="status"'+(s.sort.field==="status"?' selected':'')+'>Status</option>'
-    +'<option value="tracker"'+(s.sort.field==="tracker"?' selected':'')+'>Tracker</option>'
-    +'<option value="assignee"'+(s.sort.field==="assignee"?' selected':'')+'>Assignee</option>'
+    +'<option value=""'+(s.sort.field?'':' selected')+'>デフォルト</option>'
+    +'<option value="priority"'+(s.sort.field==="priority"?' selected':'')+'>優先度</option>'
+    +'<option value="status"'+(s.sort.field==="status"?' selected':'')+'>ステータス</option>'
+    +'<option value="tracker"'+(s.sort.field==="tracker"?' selected':'')+'>トラッカー</option>'
+    +'<option value="assignee"'+(s.sort.field==="assignee"?' selected':'')+'>担当者</option>'
     +'</select></div>'
-    +'<div class="setting-row"><span class="setting-label">Direction</span>'
+    +'<div class="setting-row"><span class="setting-label">並び順</span>'
     +'<select class="setting-select" id="set-sort-dir">'
-    +'<option value="asc"'+(s.sort.direction==="asc"?' selected':'')+'>Ascending</option>'
-    +'<option value="desc"'+(s.sort.direction==="desc"?' selected':'')+'>Descending</option>'
+    +'<option value="asc"'+(s.sort.direction==="asc"?' selected':'')+'>昇順</option>'
+    +'<option value="desc"'+(s.sort.direction==="desc"?' selected':'')+'>降順</option>'
     +'</select></div>'
     +'</div>'
-    +'<div class="settings-section"><h3>Due Date Indicators</h3>'
-    +'<div class="setting-row"><span class="setting-label">Overdue</span><input type="checkbox" id="set-dd-overdue"'+(s.dueDate.showOverdue?' checked':'')+' class="setting-check"></div>'
-    +'<div class="setting-row"><span class="setting-label">Within 1 day</span><input type="checkbox" id="set-dd-1d"'+(s.dueDate.showWithin1Day?' checked':'')+' class="setting-check"></div>'
-    +'<div class="setting-row"><span class="setting-label">Within 3 days</span><input type="checkbox" id="set-dd-3d"'+(s.dueDate.showWithin3Days?' checked':'')+' class="setting-check"></div>'
-    +'<div class="setting-row"><span class="setting-label">Within 7 days</span><input type="checkbox" id="set-dd-7d"'+(s.dueDate.showWithin7Days?' checked':'')+' class="setting-check"></div>'
+    +'<div class="settings-section"><h3>期日インジケーター</h3>'
+    +'<div class="setting-row"><span class="setting-label">期限超過</span><input type="checkbox" id="set-dd-overdue"'+(s.dueDate.showOverdue?' checked':'')+' class="setting-check"></div>'
+    +'<div class="setting-row"><span class="setting-label">1日以内</span><input type="checkbox" id="set-dd-1d"'+(s.dueDate.showWithin1Day?' checked':'')+' class="setting-check"></div>'
+    +'<div class="setting-row"><span class="setting-label">3日以内</span><input type="checkbox" id="set-dd-3d"'+(s.dueDate.showWithin3Days?' checked':'')+' class="setting-check"></div>'
+    +'<div class="setting-row"><span class="setting-label">7日以内</span><input type="checkbox" id="set-dd-7d"'+(s.dueDate.showWithin7Days?' checked':'')+' class="setting-check"></div>'
     +'</div>'
-    +'<div class="settings-section"><h3>General</h3>'
-    +'<div class="setting-row"><span class="setting-label">Offline sync mode</span>'
+    +'<div class="settings-section"><h3>一般</h3>'
+    +'<div class="setting-row"><span class="setting-label">オフライン同期モード</span>'
     +'<select class="setting-select" id="set-sync-mode">'
-    +'<option value="auto"'+(s.offlineSyncMode==="auto"?' selected':'')+'>Auto</option>'
-    +'<option value="manual"'+(s.offlineSyncMode==="manual"?' selected':'')+'>Manual</option>'
+    +'<option value="auto"'+(s.offlineSyncMode==="auto"?' selected':'')+'>自動</option>'
+    +'<option value="manual"'+(s.offlineSyncMode==="manual"?' selected':'')+'>手動</option>'
     +'</select></div>'
     +'</div>';
 
@@ -369,10 +419,9 @@ function renderSettings(){
 // ── Full render ──────────────────────────────────────────────────────────────
 function render(){
   if(!state) return;
-  // Populate project selector from state.projects list
+  // プロジェクトセレクタ更新
   const sel=document.getElementById('project-select');
   const currentVal=sel.value;
-  // Clear all options except placeholder
   while(sel.options.length>1) sel.remove(1);
   if(state.projects && state.projects.length>0){
     for(const p of state.projects){
@@ -401,17 +450,31 @@ function render(){
   renderUnsynced();
   renderComments();
   renderSettings();
+  updateSyncButtonStates();
 }
 
 // ── Messages from extension ──────────────────────────────────────────────────
 window.addEventListener('message',event=>{
   const msg=event.data;
-  if(msg.type==='dashboard.state'){
-    state=msg.state;
-    render();
-  } else if(msg.type==='toast'){
-    // Could show a toast — for now just log
-    console.log('[Dashboard]',msg.level,msg.message);
+  switch(msg.type){
+    case 'dashboard.state':
+      state=msg.state;
+      render();
+      break;
+    case 'operation.started':
+      startOperation(msg.requestId);
+      break;
+    case 'operation.success':
+      endOperation(msg.requestId);
+      showToast('success', msg.message);
+      break;
+    case 'operation.error':
+      endOperation(msg.requestId);
+      showToast('error', msg.message);
+      break;
+    case 'toast':
+      showToast(msg.level, msg.message);
+      break;
   }
 });
 
