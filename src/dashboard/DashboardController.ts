@@ -4,7 +4,12 @@ import { getDefaultProjectId, getIncludeChildProjects, getTicketListLimit } from
 import { listProjects } from "../redmine/projects";
 import { getIssueDetail, listIssues } from "../redmine/issues";
 import { applyTicketFilters, applyTicketSort } from "../views/projectListSettings";
-import { onOfflineSyncQueueChanged } from "../views/offlineSyncStore";
+import {
+  onOfflineSyncQueueChanged,
+  removeOfflineCommentEntry,
+  removeOfflineNewTicket,
+  removeOfflineTicketUpdate,
+} from "../views/offlineSyncStore";
 import { runOfflineSync } from "../commands/offlineSync";
 import type { OfflineSyncRunResult } from "../commands/offlineSync";
 import { syncUnsyncedFile } from "../commands/syncUnsyncedFile";
@@ -131,6 +136,9 @@ export class DashboardController {
       }
       case "unsynced.syncOne":
         await this.handleSyncOne(req.requestId, req.key);
+        break;
+      case "unsynced.discardOne":
+        await this.handleDiscardOne(req.requestId, req.key);
         break;
       case "unsynced.syncAll":
         await this.handleSyncAll(req.requestId);
@@ -350,6 +358,33 @@ export class DashboardController {
     this.opts.notifyOperationStarted(requestId, "同期中...");
     const result = await this.syncOne(key);
     this.notifySyncOneResult(requestId, result);
+  }
+
+  private async handleDiscardOne(requestId: string, key: DashboardUnsyncedKey): Promise<void> {
+    const confirmed = await vscode.window.showWarningMessage(
+      "この未同期のローカル変更を破棄します。Redmineサーバ上のチケットは削除されません。",
+      { modal: true },
+      "破棄",
+    );
+    if (confirmed !== "破棄") {
+      return;
+    }
+
+    if (key.kind === "ticket") {
+      removeOfflineTicketUpdate(key.ticketId);
+    } else if (key.kind === "newTicket") {
+      if (!key.documentUri) {
+        this.opts.notifyError(requestId, "対象の新規チケット下書きを特定できません。");
+        return;
+      }
+      removeOfflineNewTicket(key.documentUri);
+    } else if (key.kind === "comment") {
+      removeOfflineCommentEntry({ commentId: key.commentId, documentUri: key.documentUri });
+    }
+
+    this.refreshUnsynced();
+    this.pushTickets();
+    this.opts.notifySuccess(requestId, "未同期のローカル変更を破棄しました。");
   }
 
   private notifySyncOneResult(requestId: string, result: SyncUnsyncedFileResult | undefined): void {
