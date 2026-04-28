@@ -52,12 +52,10 @@ export interface DashboardTicketDetail {
 
 export type DashboardUnsyncedKind = "ticket" | "newTicket" | "comment";
 
-export interface DashboardUnsyncedKey {
-  kind: DashboardUnsyncedKind;
-  ticketId?: number;
-  commentId?: number;
-  documentUri?: string;
-}
+export type DashboardUnsyncedKey =
+  | { kind: "ticket"; ticketId: number }
+  | { kind: "newTicket"; documentUri?: string }
+  | { kind: "comment"; ticketId: number; commentId?: number; documentUri?: string };
 
 export interface DashboardUnsyncedItem {
   key: DashboardUnsyncedKey;
