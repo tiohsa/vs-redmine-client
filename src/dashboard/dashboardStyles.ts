@@ -166,19 +166,15 @@ body.vscode-high-contrast .badge.priority-high,body.vscode-high-contrast .badge.
 .load-more-row:hover{text-decoration:underline}
 
 .ticket-actions{position:relative;display:inline-flex;align-items:center;flex-shrink:0;margin-left:2px}
-.ticket-action-btn{opacity:0;pointer-events:none;border:1px solid var(--app-card-border);background:var(--app-surface);color:var(--app-text-secondary);border-radius:var(--mm-radius-pill);padding:2px 8px;font:inherit;font-size:10.5px;font-weight:600;line-height:1.5;cursor:pointer;transition:opacity .12s,background .12s,color .12s,border-color .12s}
+.ticket-action-btn{opacity:0;pointer-events:none;width:20px;height:20px;display:inline-flex;align-items:center;justify-content:center;border:none;background:transparent;color:var(--app-text-muted);border-radius:var(--mm-radius-button);cursor:pointer;flex-shrink:0;transition:opacity .12s,background .12s,color .12s}
 .ticket-row:hover .ticket-action-btn,.ticket-row:focus-within .ticket-action-btn,.ticket-row.selected .ticket-action-btn,.ticket-action-btn[aria-expanded="true"]{opacity:1;pointer-events:auto}
-.ticket-action-btn:hover,.ticket-action-btn[aria-expanded="true"]{background:var(--app-selected);color:var(--app-accent);border-color:color-mix(in srgb,var(--app-accent) 30%,var(--app-card-border))}
+.ticket-action-btn:hover,.ticket-action-btn[aria-expanded="true"]{background:var(--app-hover);color:var(--app-accent)}
 .ticket-action-btn:focus-visible{outline:1px solid var(--app-focus);outline-offset:1px;opacity:1;pointer-events:auto}
+.icon-more{display:inline-block;width:3px;height:3px;border-radius:50%;background:currentColor;box-shadow:-5px 0 0 currentColor,5px 0 0 currentColor;flex-shrink:0}
 .ticket-action-menu{position:absolute;right:0;top:calc(100% + 4px);z-index:30;min-width:138px;padding:5px;background:var(--app-surface);border:1px solid var(--app-card-border);border-radius:var(--mm-radius-control);box-shadow:var(--app-shadow);display:flex;flex-direction:column;gap:2px}
 .ticket-action-menu button{width:100%;border:none;background:transparent;color:var(--app-text);border-radius:var(--mm-radius-button);padding:5px 8px;text-align:left;font:inherit;font-size:11.5px;cursor:pointer;line-height:1.4}
 .ticket-action-menu button:hover,.ticket-action-menu button:focus-visible{background:var(--app-hover);color:var(--app-accent);outline:none}
 body.vscode-high-contrast .ticket-action-btn,body.vscode-high-contrast .ticket-action-menu{border-color:var(--app-border);box-shadow:none}
-
-#detail-card{margin:8px 10px 10px;border:1px solid var(--app-card-border);border-radius:var(--mm-radius-card);padding:10px 12px;flex-shrink:0;max-height:200px;overflow-y:auto;background:var(--app-surface);box-shadow:var(--app-shadow)}
-.detail-title{font-size:13px;font-weight:600;color:var(--app-text);margin-bottom:6px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.detail-meta{display:flex;flex-wrap:wrap;gap:4px;margin-bottom:8px}
-.detail-actions{display:flex;gap:6px;flex-wrap:wrap}
 
 .btn{padding:4px 12px;border-radius:var(--mm-radius-button);font-size:11.5px;font-weight:600;cursor:pointer;border:none;transition:background .15s;line-height:1.5}
 .btn:focus-visible{outline:1px solid var(--app-focus);outline-offset:1px}

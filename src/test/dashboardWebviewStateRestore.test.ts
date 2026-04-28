@@ -110,8 +110,9 @@ suite("Dashboard Controller — comment 同期キー検証", () => {
     // DashboardController.handleSyncOne は ticketId === undefined のとき
     // notifyError("コメント同期キーが不正です。") を呼ぶ。
     // ここではそのロジックを直接検証する。
-    const key: DashboardUnsyncedKey = { kind: "comment", commentId: 1, documentUri: "file:///a.md" };
-    const isInvalid = key.kind === "comment" && key.ticketId === undefined;
+    // WebView からの生JSONで ticketId が欠落した場合のランタイムガードを検証する
+    const key = { kind: "comment", commentId: 1, documentUri: "file:///a.md" } as unknown as DashboardUnsyncedKey;
+    const isInvalid = key.kind === "comment" && (key as { ticketId?: number }).ticketId === undefined;
     assert.strictEqual(isInvalid, true);
   });
 

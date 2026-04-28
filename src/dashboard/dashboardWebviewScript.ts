@@ -186,16 +186,13 @@ function renderTickets(){
       const syncLabel = SYNC_LABEL[t.syncState] || t.syncState;
       const syncBadge = (t.syncState&&t.syncState!=='Synced')
         ?'<span class="badge '+syncCls+'">'+esc(syncLabel)+'</span>':'';
-      const priCls = t.priorityName?.toLowerCase().includes('high')?'priority-high':t.priorityName?.toLowerCase().includes('low')?'priority-low':'';
-      const priBadge = t.priorityName?'<span class="badge '+priCls+'">'+esc(t.priorityName)+'</span>':'';
-      const stBadge = t.statusName?'<span class="badge">'+esc(t.statusName)+'</span>':'';
       const hasChildren = t.children?.length > 0;
       const isExpanded = expandedIds.has(t.id);
       const expandBtn = hasChildren
         ?'<button class="expand-btn" type="button" data-expand="'+t.id+'" aria-expanded="'+isExpanded+'" title="'+(isExpanded?'折りたたむ':'展開する')+'"><span class="expand-icon '+(isExpanded?'expanded':'collapsed')+'"></span></button>'
         :'<span class="expand-placeholder"></span>';
       const actionMenu = '<span class="ticket-actions">'
-        +'<button class="ticket-action-btn" type="button" data-ticket-action-menu="'+t.id+'" aria-haspopup="menu" aria-expanded="false" aria-controls="ticket-action-menu-'+t.id+'" title="チケット操作">操作</button>'
+        +'<button class="ticket-action-btn" type="button" data-ticket-action-menu="'+t.id+'" aria-haspopup="menu" aria-expanded="false" aria-controls="ticket-action-menu-'+t.id+'" aria-label="チケット操作" title="チケット操作"><span class="icon-more" aria-hidden="true"></span></button>'
         +'<span class="ticket-action-menu hidden" id="ticket-action-menu-'+t.id+'" role="menu">'
         +'<button type="button" role="menuitem" data-ticket-action="open" data-ticket="'+t.id+'">エディタで開く</button>'
         +'<button type="button" role="menuitem" data-ticket-action="comment" data-ticket="'+t.id+'">コメント追加</button>'
@@ -206,7 +203,7 @@ function renderTickets(){
         +expandBtn
         +'<span class="ticket-id">#'+t.id+'</span>'
         +'<span class="ticket-subject" title="'+esc(t.subject)+'">'+esc(t.subject)+'</span>'
-        +'<span class="badges">'+priBadge+stBadge+syncBadge+'</span>'
+        +'<span class="badges">'+syncBadge+'</span>'
         +actionMenu
         +'</div>';
     }).join('');
@@ -255,39 +252,6 @@ function renderTickets(){
     lm.onclick=()=>req('tickets.loadMore');
   } else { lm.style.display='none'; }
   updateSyncButtonStates();
-}
-
-// ── Detail card ──────────────────────────────────────────────────────────────
-function renderDetail(){
-  if(!state) return;
-  const card = document.getElementById('detail-card');
-  const t = state.selectedTicket;
-  if(!t){ card.classList.add('hidden'); return; }
-  card.classList.remove('hidden');
-  const syncCls = syncBadgeClass(t.syncState);
-  const syncLabel = SYNC_LABEL[t.syncState] || t.syncState;
-  const syncBadge = (t.syncState&&t.syncState!=='Synced')
-    ?'<span class="badge '+syncCls+'">'+esc(syncLabel)+'</span>':'';
-  card.innerHTML=
-    '<div class="detail-title">#'+t.id+' '+esc(t.subject)+'</div>'
-    +'<div class="detail-meta">'
-    +(t.statusName?'<span class="badge">'+esc(t.statusName)+'</span>':'')
-    +(t.priorityName?'<span class="badge">'+esc(t.priorityName)+'</span>':'')
-    +(t.trackerName?'<span class="badge">'+esc(t.trackerName)+'</span>':'')
-    +(t.assigneeName?'<span class="badge">'+esc(t.assigneeName)+'</span>':'')
-    +(t.dueDate?'<span class="badge">期日: '+esc(t.dueDate)+'</span>':'')
-    +syncBadge
-    +'</div>'
-    +'<div class="detail-actions">'
-    +'<button class="btn btn-primary" id="d-open">エディタで開く</button>'
-    +'<button class="btn btn-secondary" id="d-comment">コメント追加</button>'
-    +'<button class="btn btn-secondary" id="d-browser">ブラウザで開く</button>'
-    +'<button class="btn btn-secondary" id="d-child">子チケット</button>'
-    +'</div>';
-  card.querySelector('#d-open').onclick=()=>req('ticket.openEditor',{ticketId:t.id});
-  card.querySelector('#d-comment').onclick=()=>req('comment.add',{ticketId:t.id});
-  card.querySelector('#d-browser').onclick=()=>req('ticket.openBrowser',{ticketId:t.id});
-  card.querySelector('#d-child').onclick=()=>req('ticket.createChild',{parentTicketId:t.id});
 }
 
 // ── Filter chips ────────────────────────────────────────────────────────────
@@ -475,7 +439,6 @@ function render(){
   }
   document.getElementById('include-children').checked=state.includeChildProjects;
   renderTickets();
-  renderDetail();
   renderFilterChips();
   renderUnsynced();
   renderComments();

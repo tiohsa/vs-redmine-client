@@ -95,21 +95,26 @@ export class DashboardController {
         await this.selectTicket(req.ticketId);
         break;
       case "ticket.openEditor":
+        void this.selectTicket(req.ticketId);
         await this.openEditor(req.ticketId);
         break;
       case "ticket.openBrowser":
+        void this.selectTicket(req.ticketId);
         await this.openInBrowser(req.ticketId);
         break;
       case "ticket.create":
         await this.createTicketFromDashboard();
         break;
       case "ticket.createChild":
+        void this.selectTicket(req.parentTicketId);
         await this.createChildTicketFromDashboard(req.parentTicketId);
         break;
       case "comment.add":
+        void this.selectTicket(req.ticketId);
         await addCommentFromList(req.ticketId);
         break;
       case "comment.edit":
+        void this.selectTicket(req.ticketId);
         await this.editTicketComment(req.ticketId, req.commentId);
         break;
       case "comment.reload":
