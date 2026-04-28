@@ -10,7 +10,7 @@ let activeTicketActionMenuId = null;
 const nextReqId = () => 'req-' + (++reqCounter);
 
 // ── Utils ──────────────────────────────────────────────────────────────────
-function esc(s){ return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
+function esc(s){ return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/\"/g,'&quot;'); }
 function send(msg){ vscode.postMessage(msg); }
 function req(type, extra){ send({type, requestId:nextReqId(), ...extra}); }
 function isTicketActionTarget(target){ return !!target.closest('.ticket-action-btn,.ticket-action-menu,.expand-btn'); }
@@ -40,7 +40,7 @@ function endOperation(requestId){
 
 function updateSyncButtonStates(){
   const busy = activeSyncRequests.size > 0;
-  document.querySelectorAll('[data-sync-key]').forEach(btn => { btn.disabled = busy; });
+  document.querySelectorAll('[data-sync-key],[data-discard-key]').forEach(btn => { btn.disabled = busy; });
   const syncAll = document.getElementById('sync-all-btn');
   if (syncAll) syncAll.disabled = busy;
 }
@@ -290,12 +290,18 @@ function renderUnsynced(){
       +'</div>'
       +'<div class="unsynced-actions">'
       +openBtn
+      +'<button class="btn btn-secondary" data-discard-key="'+esc(JSON.stringify(item.key))+'" title="未同期のローカル変更を破棄">破棄</button>'
       +'<button class="btn btn-primary" data-sync-key="'+esc(JSON.stringify(item.key))+'">同期</button>'
       +'</div>'
       +'</div>';
   }).join('');
   list.querySelectorAll('[data-uri]').forEach(btn=>{
     btn.addEventListener('click',()=>req('unsynced.openLocalFile',{documentUri:btn.dataset.uri}));
+  });
+  list.querySelectorAll('[data-discard-key]').forEach(btn=>{
+    btn.addEventListener('click',()=>{
+      try{ req('unsynced.discardOne',{key:JSON.parse(btn.dataset.discardKey)}); }catch{}
+    });
   });
   list.querySelectorAll('[data-sync-key]').forEach(btn=>{
     btn.addEventListener('click',()=>{
