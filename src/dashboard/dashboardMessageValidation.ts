@@ -6,6 +6,7 @@ type ValidationResult =
   | { ok: false; reason: string };
 
 const isString = (v: unknown): v is string => typeof v === "string";
+const isNonEmptyString = (v: unknown): v is string => isString(v) && v.trim().length > 0;
 const isNumber = (v: unknown): v is number => typeof v === "number" && Number.isFinite(v);
 const isPositiveInt = (v: unknown): v is number => isNumber(v) && Number.isInteger(v) && (v as number) > 0;
 const isBoolean = (v: unknown): v is boolean => typeof v === "boolean";
@@ -13,6 +14,8 @@ const isObject = (v: unknown): v is Record<string, unknown> =>
   v !== null && typeof v === "object" && !Array.isArray(v);
 const isStringArray = (v: unknown): v is string[] =>
   Array.isArray(v) && v.every((item) => typeof item === "string");
+const isPositiveIntArray = (v: unknown): v is number[] =>
+  Array.isArray(v) && v.every((item) => isPositiveInt(item));
 
 const UNSYNCED_KINDS = new Set(["ticket", "newTicket", "comment"]);
 const OFFLINE_SYNC_MODES = new Set(["auto", "manual"]);
@@ -24,8 +27,13 @@ const validateUnsyncedKey = (v: unknown): v is DashboardUnsyncedKey => {
   const kind = v["kind"];
   if (!isString(kind) || !UNSYNCED_KINDS.has(kind)) { return false; }
   if (kind === "ticket" && !isPositiveInt(v["ticketId"])) { return false; }
-  if (kind === "newTicket" && !isString(v["documentUri"])) { return false; }
-  if (kind === "comment" && !isPositiveInt(v["ticketId"])) { return false; }
+  if (kind === "newTicket" && "documentUri" in v && !isNonEmptyString(v["documentUri"])) { return false; }
+  if (kind === "comment") {
+    if (!isPositiveInt(v["ticketId"])) { return false; }
+    if ("commentId" in v && !isPositiveInt(v["commentId"])) { return false; }
+    if ("documentUri" in v && !isNonEmptyString(v["documentUri"])) { return false; }
+    if (!("commentId" in v) && !("documentUri" in v)) { return false; }
+  }
   return true;
 };
 
@@ -35,10 +43,10 @@ const validateSettingsPatch = (v: unknown): boolean => {
     const f = v["filters"];
     if (!isObject(f)) { return false; }
     if ("subjectQuery" in f && !isString(f["subjectQuery"])) { return false; }
-    if ("priorityIds" in f && !Array.isArray(f["priorityIds"])) { return false; }
-    if ("statusIds" in f && !Array.isArray(f["statusIds"])) { return false; }
-    if ("trackerIds" in f && !Array.isArray(f["trackerIds"])) { return false; }
-    if ("assigneeIds" in f && !Array.isArray(f["assigneeIds"])) { return false; }
+    if ("priorityIds" in f && !isPositiveIntArray(f["priorityIds"])) { return false; }
+    if ("statusIds" in f && !isPositiveIntArray(f["statusIds"])) { return false; }
+    if ("trackerIds" in f && !isPositiveIntArray(f["trackerIds"])) { return false; }
+    if ("assigneeIds" in f && !isPositiveIntArray(f["assigneeIds"])) { return false; }
     if ("includeUnassigned" in f && !isBoolean(f["includeUnassigned"])) { return false; }
   }
   if ("sort" in v) {
@@ -175,7 +183,7 @@ export const validateDashboardMessage = (raw: unknown): ValidationResult => {
 
     case "unsynced.openLocalFile": {
       const documentUri = raw["documentUri"];
-      if (!isString(documentUri) || documentUri.length === 0) {
+      if (!isNonEmptyString(documentUri)) {
         return { ok: false, reason: "unsynced.openLocalFile: documentUri must be a non-empty string" };
       }
       return { ok: true, request: { type, requestId, documentUri } };
