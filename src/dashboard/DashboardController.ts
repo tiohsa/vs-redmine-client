@@ -338,6 +338,10 @@ export class DashboardController {
   }
 
   private async handleSyncOne(requestId: string, key: DashboardUnsyncedKey): Promise<void> {
+    if (key.kind === "comment" && key.ticketId === undefined) {
+      this.opts.notifyError(requestId, "コメント同期キーが不正です。");
+      return;
+    }
     this.opts.notifyOperationStarted(requestId, "同期中...");
     const result = await this.syncOne(key);
     this.notifySyncOneResult(requestId, result);
@@ -405,10 +409,10 @@ export class DashboardController {
       syncKey = { kind: "ticket", ticketId: key.ticketId };
     } else if (key.kind === "newTicket") {
       syncKey = { kind: "newTicket", documentUri: key.documentUri };
-    } else if (key.kind === "comment") {
+    } else if (key.kind === "comment" && key.ticketId !== undefined) {
       syncKey = {
         kind: "comment",
-        ticketId: key.ticketId ?? 0,
+        ticketId: key.ticketId,
         commentId: key.commentId,
         documentUri: key.documentUri,
       };

@@ -4,7 +4,7 @@ import { buildDashboardHtml } from "./dashboardHtml";
 import { DashboardController } from "./DashboardController";
 import { DashboardMessageRouter } from "./DashboardMessageRouter";
 import { DashboardStateStore } from "./DashboardStateStore";
-import type { DashboardEvent } from "./dashboardProtocol";
+import type { DashboardEvent, DashboardState } from "./dashboardProtocol";
 import { VIEW_ID_DASHBOARD } from "./dashboardProtocol";
 
 export { VIEW_ID_DASHBOARD };
@@ -15,6 +15,7 @@ export class DashboardWebviewProvider
   implements vscode.WebviewViewProvider, vscode.Disposable
 {
   private view?: vscode.WebviewView;
+  private latestState?: DashboardState;
   private readonly store: DashboardStateStore;
   private readonly controller: DashboardController;
   private readonly router: DashboardMessageRouter;
@@ -77,14 +78,17 @@ export class DashboardWebviewProvider
         await this.router.route(raw);
       }),
       webviewView.onDidChangeVisibility(() => {
-        if (webviewView.visible) {
-          this.send({ type: "dashboard.state", state: this.store.getState() });
+        if (webviewView.visible && this.latestState) {
+          this.send({ type: "dashboard.state", state: this.latestState });
         }
       }),
     );
   }
 
   private send(event: DashboardEvent): void {
+    if (event.type === "dashboard.state") {
+      this.latestState = event.state;
+    }
     if (!this.view?.visible) {
       return;
     }

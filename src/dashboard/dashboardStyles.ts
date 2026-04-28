@@ -271,11 +271,26 @@ body.vscode-high-contrast .tab.active{
 }
 .filter-chip:hover{border-color:var(--app-accent)}
 .filter-chip-x{
-  font-size:12px;
-  line-height:1;
-  opacity:.7;
+  display:inline-block;
+  width:12px;
+  height:12px;
   margin-left:2px;
+  position:relative;
+  opacity:.7;
 }
+.filter-chip-x::before,
+.filter-chip-x::after{
+  content:'';
+  position:absolute;
+  top:50%;
+  left:50%;
+  width:8px;
+  height:1.5px;
+  background:currentColor;
+  border-radius:1px;
+}
+.filter-chip-x::before{transform:translate(-50%,-50%) rotate(45deg)}
+.filter-chip-x::after{transform:translate(-50%,-50%) rotate(-45deg)}
 
 /* ── Ticket list ─────────────────────────────────────────────── */
 #ticket-scroll{flex:1;overflow-y:auto;min-height:0}
@@ -361,7 +376,8 @@ body.vscode-high-contrast .expand-btn:focus-visible{outline:2px solid var(--app-
 .badge.sync-conflict{background:#fef2f2;color:#b91c1c;border-color:#fca5a5}
 .badge.sync-failed{background:#fef2f2;color:#b91c1c;border-color:#fca5a5}
 .badge.sync-syncing{background:#f0fdf4;color:#15803d;border-color:#bbf7d0}
-body.vscode-high-contrast .badge{background:transparent;border-color:var(--app-border)}
+body.vscode-high-contrast .badge,
+body.vscode-high-contrast .unsynced-kind-label{background:transparent;border-color:var(--app-border)}
 body.vscode-high-contrast .badge.priority-high,
 body.vscode-high-contrast .badge.priority-low,
 body.vscode-high-contrast .badge.sync-dirty,
@@ -565,6 +581,58 @@ body.vscode-high-contrast .btn-primary{
   margin-bottom:4px;
 }
 .error-msg{color:#ef4444}
+
+/* ── Utility ─────────────────────────────────────────────────── */
+.hidden{display:none!important}
+
+/* ── CSS-only icons ──────────────────────────────────────────── */
+.icon-refresh{
+  display:inline-block;
+  width:12px;
+  height:12px;
+  border:2px solid currentColor;
+  border-top-color:transparent;
+  border-radius:50%;
+}
+.expand-icon{
+  display:inline-block;
+  width:0;
+  height:0;
+  border-style:solid;
+}
+.expand-icon.collapsed{
+  border-width:4px 0 4px 6px;
+  border-color:transparent transparent transparent currentColor;
+}
+.expand-icon.expanded{
+  border-width:6px 4px 0 4px;
+  border-color:currentColor transparent transparent transparent;
+}
+.unsynced-kind-label{
+  font-size:10.5px;
+  font-weight:600;
+  padding:2px 6px;
+  border-radius:var(--mm-radius-pill);
+  background:var(--app-surface-subtle);
+  color:var(--app-text-secondary);
+  border:1px solid var(--app-card-border);
+  white-space:nowrap;
+  flex-shrink:0;
+}
+
+/* ── Comments header ─────────────────────────────────────────── */
+.comments-header{
+  display:flex;
+  justify-content:space-between;
+  align-items:center;
+  margin-bottom:10px;
+}
+.comments-header-label{
+  font-size:12px;
+  font-weight:600;
+  color:var(--app-text-secondary);
+}
+.comments-header-actions{display:flex;gap:4px}
 
 /* ── Scrollbar ───────────────────────────────────────────────── */
 ::-webkit-scrollbar{width:4px}

@@ -105,6 +105,21 @@ suite("Dashboard メッセージバリデーション", () => {
     assert.strictEqual(r.ok, true);
   });
 
+  test("unsynced.syncOne: comment key に ticketId がないと拒否される", () => {
+    const r = validateDashboardMessage({ type: "unsynced.syncOne", requestId: "r", key: { kind: "comment", commentId: 1, documentUri: "file:///a.md" } });
+    assert.strictEqual(r.ok, false);
+  });
+
+  test("unsynced.syncOne: comment key に ticketId が 0 だと拒否される", () => {
+    const r = validateDashboardMessage({ type: "unsynced.syncOne", requestId: "r", key: { kind: "comment", ticketId: 0, commentId: 1, documentUri: "file:///a.md" } });
+    assert.strictEqual(r.ok, false);
+  });
+
+  test("unsynced.syncOne: comment key 正常", () => {
+    const r = validateDashboardMessage({ type: "unsynced.syncOne", requestId: "r", key: { kind: "comment", ticketId: 42, commentId: 1, documentUri: "file:///a.md" } });
+    assert.strictEqual(r.ok, true);
+  });
+
   test("unsynced.openLocalFile: documentUri が文字列でないと拒否される", () => {
     const r = validateDashboardMessage({ type: "unsynced.openLocalFile", requestId: "r", documentUri: 123 });
     assert.strictEqual(r.ok, false);
