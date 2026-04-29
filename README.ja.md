@@ -31,7 +31,6 @@ English README: `README.md`
 3. Activity Bar の **Projects** ビューでプロジェクトをクリックして選択する。
 4. **Tickets** ビューでチケットをクリックするとエディタが開く。
 5. 編集して保存すれば自動同期される（オフラインモードの場合はキューに追加）。
-6. （任意）`<editorStorageDirectory>/templates` にテンプレートを置くと新規作成に適用される。
 
 ## Activity Bar ビュー
 
@@ -56,7 +55,6 @@ English README: `README.md`
 | `redmine-client.includeChildProjects` | `false` | 子プロジェクトを一覧に含めるか |
 | `redmine-client.ticketListLimit` | `50` | 取得するチケット件数 |
 | `redmine-client.editorStorageDirectory` | `""` | エディタファイルの保存先（空の場合はワークスペース既定値） |
-| `redmine-client.newTicketTemplatePath` | `""` | 新規チケットテンプレートファイルへの絶対パス |
 | `redmine-client.offlineSyncMode` | `"auto"` | 同期モード: `auto`（即時送信）/ `manual`（キューに追加） |
 
 ## チケット一覧設定
@@ -85,30 +83,6 @@ Tickets ビューのタイトルバーにある絞り込みアイコン（`Redmi
 新規チケット作成時に適用されるデフォルト値を設定できます:
 
 - **件名 (Subject)**、**説明 (Description)**、**トラッカー (Tracker)**、**優先度 (Priority)**、**ステータス (Status)**、**期日 (Due date)**
-
-## テンプレート
-
-テンプレートは `<editorStorageDirectory>/templates` 配下に配置します。
-
-- **プロジェクト別テンプレート**: ファイル名にプロジェクト名の完全一致を含める（大文字小文字は無視）。
-- **既定テンプレート**: `default.md`（該当テンプレートがない場合に使用）。
-- **単一ファイル指定**: `redmine-client.newTicketTemplatePath` で絶対パスを直接指定することも可能。
-
-### テンプレートサンプル
-
-```markdown
----
-issue:
-  tracker:   Bug
-  priority:  Low
-  status:    New
-  due_date:  
----
-
-# 件名をここに記述
-
-詳細説明。
-```
 
 ## コマンド
 

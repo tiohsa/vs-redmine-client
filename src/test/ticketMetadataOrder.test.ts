@@ -32,6 +32,7 @@ suite("Ticket metadata order", () => {
             tracker: "Task",
             priority: "Normal",
             status: "New",
+            start_date: "2025-01-01",
             due_date: "2025-12-31",
             estimated_hours: 8,
             keyOrder: undefined, // Explicitly undefined
@@ -40,10 +41,12 @@ suite("Ticket metadata order", () => {
         const serialized = serializeIssueMetadataYaml(metadata);
         const lines = serialized.split("\n");
 
-        // Default order: tracker, priority, status, due_date...
         const trackerIndex = lines.findIndex(l => l.includes("tracker"));
         const priorityIndex = lines.findIndex(l => l.includes("priority"));
+        const startDateIndex = lines.findIndex(l => l.includes("start_date"));
+        const dueDateIndex = lines.findIndex(l => l.includes("due_date"));
 
         assert.ok(trackerIndex < priorityIndex, "tracker should appear before priority in default order");
+        assert.ok(startDateIndex < dueDateIndex, "start_date should appear before due_date in default order");
     });
 });

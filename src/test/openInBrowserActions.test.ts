@@ -23,7 +23,7 @@ suite("Open in browser actions", () => {
     assert.strictEqual(comment?.icon, "$(link-external)");
   });
 
-  test("declares Activity Bar item actions only", () => {
+  test("legacy Activity Bar item context menus are removed", () => {
     const projectItem = findContextItem(
       "redmine-client.openProjectInBrowser",
       "view == redmine-clientActivityProjects && (viewItem == redmineProject || viewItem == redmineProjectSelected)",
@@ -37,11 +37,8 @@ suite("Open in browser actions", () => {
       "view == redmine-clientActivityComments && (viewItem == redmineComment || viewItem == redmineCommentEditable)",
     );
 
-    assert.ok(projectItem, "project activity item action must exist");
-    assert.ok(ticketItem, "ticket activity item action must exist");
-    assert.ok(commentItem, "comment activity item action must exist");
-    assert.strictEqual(projectItem?.group, "inline@1");
-    assert.strictEqual(ticketItem?.group, "inline@2");
-    assert.strictEqual(commentItem?.group, "inline@1");
+    assert.ok(!projectItem, "legacy project activity item action must be removed");
+    assert.ok(!ticketItem, "legacy ticket activity item action must be removed");
+    assert.ok(!commentItem, "legacy comment activity item action must be removed");
   });
 });

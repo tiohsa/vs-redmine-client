@@ -47,6 +47,5 @@ export const getMenuItems = (menuId: string): MenuItem[] => {
   const menus = contributes.menus as Record<string, MenuItem[]> | undefined;
   assert.ok(menus, "menus must be defined");
   const items = menus[menuId] as MenuItem[] | undefined;
-  assert.ok(items, `${menuId} menu must be defined`);
-  return items;
+  return items ?? [];
 };

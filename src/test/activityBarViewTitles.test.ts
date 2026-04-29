@@ -17,19 +17,12 @@ const loadPackageJson = (): PackageJson => {
 };
 
 suite("Activity Bar view titles", () => {
-  test("uses short titles for Activity Bar views", () => {
+  test("Dashboard view has correct title", () => {
     const packageJson = loadPackageJson();
     const views = packageJson.contributes?.views?.["redmine-clientActivity"] ?? [];
-    const viewById = (id: string): ViewContribution | undefined =>
-      views.find((view) => view.id === id);
-
-    assert.strictEqual(
-      viewById("redmine-clientActivityUnsyncedFiles")?.name,
-      "Unsynced Files",
-    );
-    assert.strictEqual(viewById("redmine-clientActivityProjects")?.name, "Projects");
-    assert.strictEqual(viewById("redmine-clientActivityTickets")?.name, "Tickets");
-    assert.strictEqual(viewById("redmine-clientActivityComments")?.name, "Comments");
+    const dashboard = views.find((v) => v.id === "redmine-clientActivityDashboard");
+    assert.ok(dashboard, "Dashboard view must exist");
+    assert.strictEqual(dashboard?.name, "Dashboard");
   });
 
   test("does not use legacy Redmine view titles", () => {
@@ -40,5 +33,11 @@ suite("Activity Bar view titles", () => {
     assert.ok(!names.includes("Redmine Projects"));
     assert.ok(!names.includes("Redmine Tickets"));
     assert.ok(!names.includes("Redmine Comments"));
+    // レガシービューは削除済み
+    assert.ok(!names.includes("Local Changes"));
+    assert.ok(!names.includes("Projects"));
+    assert.ok(!names.includes("Tickets"));
+    assert.ok(!names.includes("Comments"));
+    assert.ok(!names.includes("Ticket Settings"));
   });
 });

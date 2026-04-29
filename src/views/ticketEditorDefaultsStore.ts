@@ -6,6 +6,7 @@ const EMPTY_METADATA: IssueMetadata = {
   tracker: "",
   priority: "",
   status: "",
+  start_date: "",
   due_date: "",
   children: [],
 };

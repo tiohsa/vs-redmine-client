@@ -12,8 +12,6 @@ import {
 } from "./ticketEditorRegistry";
 import { ensureCommentEdit, resolveCommentEditorBody } from "./commentEditStore";
 import {
-  buildEmptyTicketDraftContent,
-  buildNewTicketDraftContent,
   ensureTicketDraft,
   getTicketDraftContent,
 } from "./ticketDraftStore";
@@ -24,23 +22,21 @@ import {
 } from "./ticketEditorContent";
 import { IssueMetadata } from "./ticketMetadataTypes";
 import {
-  buildCommentEditorFilename,
   buildTicketEditorFilename,
 } from "./editorFilename";
 import { getEditorStorageDirectory } from "../config/settings";
 import { showError } from "../utils/notifications";
-import { DEFAULT_TEMPLATE_FILE, TEMPLATE_DIR_NAME } from "../utils/templateConstants";
-import { resolveProjectTemplateContent } from "../utils/templateResolver";
 import { rememberTicketSummary } from "./ticketSummaryStore";
 
 export const buildTicketPreviewContent = (
-  ticket: Pick<Ticket, "subject" | "description" | "trackerName" | "priorityName" | "statusName" | "dueDate">,
+  ticket: Pick<Ticket, "subject" | "description" | "trackerName" | "priorityName" | "statusName" | "dueDate" | "startDate">,
 ): string => {
   const metadata: IssueMetadata = {
     tracker: ticket.trackerName ?? "",
     priority: ticket.priorityName ?? "",
     status: ticket.statusName ?? "",
     due_date: ticket.dueDate ?? "",
+    start_date: ticket.startDate ?? "",
   };
   return buildTicketEditorContent({
     subject: ticket.subject,
@@ -184,75 +180,9 @@ export const resolveEditorStorageDir = (
   };
 };
 
-type NewTicketDraftResolution = {
-  content: TicketEditorContent;
-  errorMessage?: string;
-  usedTemplate: boolean;
-  isTemplateConfigured: boolean;
-};
-
-export const resolveNewTicketDraftContent = (options: {
-  projectName?: string;
-  templatesDir?: string;
-  readFileSync?: (targetPath: string) => string;
-  existsSync?: (targetPath: string) => boolean;
-  readdirSync?: (targetPath: string) => string[];
-  statSync?: (targetPath: string) => fs.Stats;
-} = {}): NewTicketDraftResolution => {
-  const exists = options.existsSync ?? fs.existsSync;
-  const storageResolution = resolveEditorStorageDir();
-  if (!options.templatesDir && !storageResolution.uri) {
-    return {
-      content: buildNewTicketDraftContent(),
-      usedTemplate: false,
-      isTemplateConfigured: false,
-      errorMessage: storageResolution.errorMessage,
-    };
-  }
-
-  const templatesDir =
-    options.templatesDir ??
-    path.join(storageResolution.uri?.fsPath ?? "", TEMPLATE_DIR_NAME);
-
-  if (!exists(templatesDir)) {
-    return {
-      content: buildNewTicketDraftContent(),
-      usedTemplate: false,
-      isTemplateConfigured: false,
-    };
-  }
-
-  const template = resolveProjectTemplateContent({
-    templatesDir,
-    projectName: options.projectName,
-    defaultTemplateFileName: DEFAULT_TEMPLATE_FILE,
-    readFileSync: options.readFileSync,
-    existsSync: exists,
-    readdirSync: options.readdirSync,
-    statSync: options.statSync,
-  });
-
-  if (template.content) {
-    return {
-      content: template.content,
-      usedTemplate: true,
-      isTemplateConfigured: true,
-      errorMessage: template.errorMessage,
-    };
-  }
-
-  return {
-    content: buildEmptyTicketDraftContent(),
-    errorMessage: template.errorMessage,
-    usedTemplate: false,
-    isTemplateConfigured: true,
-  };
-};
-
 const openTicketEditor = async (
   ticket: Ticket,
   kind: TicketEditorKind,
-  filename: string,
   content: string,
 ): Promise<vscode.TextEditor> => {
   const storageResolution = resolveEditorStorageDir();
@@ -285,6 +215,11 @@ export const showTicketPreview = async (
   options?: { kind?: TicketEditorKind },
 ): Promise<vscode.TextEditor> => {
   rememberTicketSummary(ticket);
+  const controlFields = {
+    mode: "ticket-update" as const,
+    project_id: ticket.projectId,
+    issue_id: ticket.id,
+  };
   const savedContent: TicketEditorContent = {
     subject: ticket.subject,
     description: ticket.description ?? "",
@@ -293,20 +228,17 @@ export const showTicketPreview = async (
       priority: ticket.priorityName ?? "",
       status: ticket.statusName ?? "",
       due_date: ticket.dueDate ?? "",
+      start_date: ticket.startDate ?? "",
     },
+    controlFields,
   };
   const draftContent = getTicketDraftContent(ticket.id);
   const display = resolveTicketEditorDisplay(savedContent, draftContent);
-  const content = withTrailingEditLines(buildTicketEditorContent(display.content));
-  const filename = buildTicketEditorFilename(
-    ticket.projectId,
-    ticket.id,
-    options?.kind ?? "primary",
-  );
+  const displayContent: TicketEditorContent = { ...display.content, controlFields };
+  const content = withTrailingEditLines(buildTicketEditorContent(displayContent));
   const editor = await openTicketEditor(
     ticket,
     options?.kind ?? "primary",
-    filename,
     content,
   );
   setEditorContentType(editor, "ticket");
@@ -331,12 +263,11 @@ export const showTicketComment = async (
 ): Promise<vscode.TextEditor> => {
   rememberTicketSummary(ticket);
   const display = resolveCommentEditorBody(commentId, comment);
-  const filename = buildCommentEditorFilename(ticket.projectId, ticket.id, commentId);
   const content =
     display.body.trim().length === 0
       ? buildCommentEditorContent(display.body)
       : withTrailingEditLines(buildCommentEditorContent(display.body));
-  const editor = await openTicketEditor(ticket, "primary", filename, content);
+  const editor = await openTicketEditor(ticket, "primary", content);
   setEditorContentType(editor, "comment");
   setEditorProjectId(editor, ticket.projectId);
   setEditorCommentId(editor, commentId);
@@ -347,4 +278,3 @@ export const showTicketComment = async (
   }
   return editor;
 };
-

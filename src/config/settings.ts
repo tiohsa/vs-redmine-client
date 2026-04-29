@@ -23,11 +23,11 @@ export const getIncludeChildProjects = (): boolean =>
 export const getTicketListLimit = (): number =>
   getSettings().get<number>("ticketListLimit", 50);
 
+export const getRequestTimeoutMs = (): number =>
+  getSettings().get<number>("requestTimeoutMs", 30000);
+
 export const getEditorStorageDirectory = (): string =>
   getSettings().get<string>("editorStorageDirectory", "").trim();
-
-export const getNewTicketTemplatePath = (): string =>
-  getSettings().get<string>("newTicketTemplatePath", "").trim();
 
 export type OfflineSyncMode = "auto" | "manual";
 

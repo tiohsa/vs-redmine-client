@@ -197,6 +197,8 @@ const computeMetadataChanges = (
   nextMetadata: IssueMetadata,
 ): Partial<IssueMetadata> => {
   const changes: Partial<IssueMetadata> = {};
+  const baseStartDate = baseMetadata.start_date ?? "";
+  const nextStartDate = nextMetadata.start_date ?? "";
   if (baseMetadata.tracker !== nextMetadata.tracker) {
     changes.tracker = nextMetadata.tracker;
   }
@@ -209,8 +211,8 @@ const computeMetadataChanges = (
   if (baseMetadata.due_date !== nextMetadata.due_date) {
     changes.due_date = nextMetadata.due_date;
   }
-  if (baseMetadata.start_date !== nextMetadata.start_date) {
-    changes.start_date = nextMetadata.start_date;
+  if (baseStartDate !== nextStartDate) {
+    changes.start_date = nextStartDate;
   }
   if (baseMetadata.done_ratio !== nextMetadata.done_ratio) {
     changes.done_ratio = nextMetadata.done_ratio;
@@ -916,6 +918,13 @@ export const applyQueuedTicketUpdate = async (input: {
   }
 
   if (Object.keys(changes).length === 0 && children.length === 0) {
+    updateDraftAfterSave(
+      update.ticketId,
+      update.subject,
+      description,
+      { ...update.metadata, children: [] },
+      update.lastKnownRemoteUpdatedAt,
+    );
     return buildResult("no_change", "No changes to save.", { uploadSummary });
   }
 

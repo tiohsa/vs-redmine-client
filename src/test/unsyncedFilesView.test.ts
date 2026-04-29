@@ -34,7 +34,7 @@ suite("UnsyncedFilesTreeProvider", () => {
   test("空のキューでは 'No unsynced local files.' を返す", async () => {
     const items = await getItems(provider);
     assert.strictEqual(items.length, 1);
-    assert.strictEqual(items[0].label, "No unsynced local files.");
+    assert.strictEqual(items[0].label, "No local changes.");
   });
 
   test("チケット更新エントリが '#123 Ticket update' として表示される", async () => {
@@ -59,7 +59,7 @@ suite("UnsyncedFilesTreeProvider", () => {
       (items[0].label as string).includes("123"),
       `label must include ticket ID 123, got: ${String(items[0].label)}`,
     );
-    assert.strictEqual(items[0].description, "Not synced");
+    assert.strictEqual(items[0].description, "Local change");
   });
 
   test("commentId あり: '#123 Comment #456 update' として表示される", async () => {
@@ -76,7 +76,7 @@ suite("UnsyncedFilesTreeProvider", () => {
       (items[0].label as string).includes("Comment #456 update"),
       `label must include 'Comment #456 update', got: ${String(items[0].label)}`,
     );
-    assert.strictEqual(items[0].description, "Not synced");
+    assert.strictEqual(items[0].description, "Local change");
   });
 
   test("commentId なし: '#123 New comment' として表示される", async () => {
@@ -92,7 +92,7 @@ suite("UnsyncedFilesTreeProvider", () => {
       (items[0].label as string).includes("New comment"),
       `label must include 'New comment', got: ${String(items[0].label)}`,
     );
-    assert.strictEqual(items[0].description, "Not synced");
+    assert.strictEqual(items[0].description, "Local change");
   });
 
   test("新規チケットエントリが 'New ticket' として表示される", async () => {
@@ -101,7 +101,7 @@ suite("UnsyncedFilesTreeProvider", () => {
     const items = await getItems(provider);
     assert.strictEqual(items.length, 1);
     assert.strictEqual(items[0].label, "New ticket");
-    assert.strictEqual(items[0].description, "Not synced");
+    assert.strictEqual(items[0].description, "Local change");
   });
 
   test("documentUri があるエントリに vscode.open コマンドが付与される", async () => {
@@ -148,7 +148,7 @@ suite("UnsyncedFilesTreeProvider", () => {
 
     const after = await getItems(provider);
     assert.strictEqual(after.length, 1);
-    assert.strictEqual(after[0].label, "No unsynced local files.");
+    assert.strictEqual(after[0].label, "No local changes.");
   });
 
   test("オフライン同期キュー変更時に自動 refresh イベントを発火する", () => {

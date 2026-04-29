@@ -47,6 +47,8 @@ const areChildrenEqual = (left?: string[], right?: string[]): boolean => {
   return left.every((value, index) => value === right[index]);
 };
 
+const normalizeOptionalText = (value?: string): string => value ?? "";
+
 export const isIssueMetadataEqual = (
   left: IssueMetadata,
   right: IssueMetadata,
@@ -55,7 +57,7 @@ export const isIssueMetadataEqual = (
   left.priority === right.priority &&
   left.status === right.status &&
   left.due_date === right.due_date &&
-  left.start_date === right.start_date &&
+  normalizeOptionalText(left.start_date) === normalizeOptionalText(right.start_date) &&
   left.done_ratio === right.done_ratio &&
   left.estimated_hours === right.estimated_hours &&
 

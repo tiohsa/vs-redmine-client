@@ -8,16 +8,22 @@ import {
 import { applyQueuedTicketUpdate, createTicketFromQueuedContent } from "../views/ticketSaveSync";
 import { applyQueuedCommentUpdate, finalizeNewCommentDraftDocument } from "../views/commentSaveSync";
 import { registerTicketDocument } from "../views/ticketEditorRegistry";
-import { UnsyncedFileTreeItem } from "../views/unsyncedFilesView";
+import { UnsyncedFileSyncKey } from "../views/unsyncedFilesView";
 import { showInfo, showWarning } from "../utils/notifications";
 import { rewriteDocumentWithRegisteredFields, RewriteDocumentDeps } from "../views/editorDocumentRewrite";
 import { removeTicketEditorByUri } from "../views/ticketEditorRegistry";
 
+export type SyncUnsyncedFileResult =
+  | { status: "success"; kind: "ticket" | "newTicket" | "comment"; id?: number }
+  | { status: "no_change"; kind: "ticket" | "newTicket" | "comment"; id?: number }
+  | { status: "conflict"; kind: "ticket" | "newTicket" | "comment"; id?: number }
+  | { status: "failed"; kind: "ticket" | "newTicket" | "comment"; message?: string };
+
 export const syncUnsyncedFile = async (
-  item: UnsyncedFileTreeItem,
+  item: { syncKey: UnsyncedFileSyncKey },
   options: { onTicketCreated?: () => void; onSubjectUpdated?: (ticketId: number, subject: string) => void } = {},
   rewriteDeps: RewriteDocumentDeps = {},
-): Promise<void> => {
+): Promise<SyncUnsyncedFileResult | undefined> => {
   const { syncKey } = item;
   const queue = getOfflineSyncQueue();
 
@@ -25,7 +31,7 @@ export const syncUnsyncedFile = async (
     const update = queue.tickets.get(syncKey.ticketId);
     if (!update) {
       showWarning("対象のチケット更新がキューに見つかりません。");
-      return;
+      return undefined;
     }
     const result = await applyQueuedTicketUpdate({ update });
     if (result.status === "success" || result.status === "no_change") {
@@ -34,12 +40,14 @@ export const syncUnsyncedFile = async (
         options.onSubjectUpdated(syncKey.ticketId, update.subject);
       }
       showInfo("チケット更新を同期しました。");
+      return { status: result.status, kind: "ticket", id: syncKey.ticketId };
     } else if (result.status === "conflict") {
       showWarning("リモートの変更と競合しています。ファイルを開いて確認してください。");
+      return { status: "conflict", kind: "ticket", id: syncKey.ticketId };
     } else {
       showWarning(`同期に失敗しました: ${result.message ?? "不明なエラー"}`);
+      return { status: "failed", kind: "ticket", message: result.message };
     }
-    return;
   }
 
   if (syncKey.kind === "newTicket") {
@@ -48,7 +56,7 @@ export const syncUnsyncedFile = async (
       : queue.newTickets[0];
     if (!entry) {
       showWarning("対象の新規チケットがキューに見つかりません。");
-      return;
+      return undefined;
     }
     const { result, createdId } = await createTicketFromQueuedContent({
       content: entry.content,
@@ -74,17 +82,20 @@ export const syncUnsyncedFile = async (
           removeOfflineNewTicket(entry.documentUri);
           options.onTicketCreated?.();
           showInfo("新規チケットを作成しました。");
+          return { status: "success", kind: "newTicket", id: createdId };
         } else {
           showWarning("チケットは作成されましたが、ファイルの書き換えに失敗しました。再度同期してください。");
+          return { status: "failed", kind: "newTicket", message: "ファイルの書き換えに失敗しました" };
         }
       } else {
         options.onTicketCreated?.();
         showInfo("新規チケットを作成しました。");
+        return { status: "success", kind: "newTicket", id: createdId };
       }
     } else {
       showWarning(`同期に失敗しました: ${result.message ?? "不明なエラー"}`);
+      return { status: "failed", kind: "newTicket", message: result.message };
     }
-    return;
   }
 
   if (syncKey.kind === "comment") {
@@ -93,7 +104,7 @@ export const syncUnsyncedFile = async (
       : queue.comments.find((c) => c.documentUri === syncKey.documentUri && c.commentId === undefined);
     if (!update) {
       showWarning("対象のコメント更新がキューに見つかりません。");
-      return;
+      return undefined;
     }
     const result = await applyQueuedCommentUpdate({ update });
     if (
@@ -117,10 +128,18 @@ export const syncUnsyncedFile = async (
     if (result.status === "success" || result.status === "no_change" || result.status === "created" || result.status === "created_unresolved") {
       removeOfflineCommentEntry({ commentId: syncKey.commentId, documentUri: syncKey.documentUri });
       showInfo("コメントを同期しました。");
+      if (result.status === "no_change") {
+        return { status: "no_change", kind: "comment" };
+      }
+      return { status: "success", kind: "comment", id: result.status === "created" ? result.commentId : undefined };
     } else if (result.status === "conflict") {
       showWarning("リモートの変更と競合しています。ファイルを開いて確認してください。");
+      return { status: "conflict", kind: "comment" };
     } else {
       showWarning(`同期に失敗しました: ${result.message ?? "不明なエラー"}`);
+      return { status: "failed", kind: "comment", message: result.message };
     }
   }
+
+  return undefined;
 };

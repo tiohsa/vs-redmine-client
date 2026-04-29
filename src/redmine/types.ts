@@ -19,6 +19,7 @@ export interface Ticket {
   assigneeId?: number;
   assigneeName?: string;
   projectId: number;
+  projectName?: string;
   parentId?: number;
   hasChildren?: boolean;
   createdAt?: string;
@@ -89,6 +90,9 @@ export interface RedmineUserRef {
 
 export interface RedmineProjectResponse {
   projects: Array<{ id: number; name: string; identifier: string; parent?: { id: number } }>;
+  total_count?: number;
+  limit?: number;
+  offset?: number;
 }
 
 export interface RedmineIssueListResponse {

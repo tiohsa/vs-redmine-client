@@ -1,6 +1,7 @@
 import * as https from "https";
 import * as http from "http";
-import { getApiKey, getBaseUrl, getIgnoreSSLErrors } from "../config/settings";
+import { getBaseUrl, getIgnoreSSLErrors, getRequestTimeoutMs } from "../config/settings";
+import { resolveApiKey } from "../config/apiKeyStore";
 
 type HttpMethod = "GET" | "POST" | "PUT" | "DELETE";
 type FetchBody = string | Uint8Array;
@@ -33,7 +34,7 @@ export const normalizeBaseUrl = (rawBaseUrl: string): string => {
 
 const ensureConfig = (): { baseUrl: string; apiKey: string } => {
   const baseUrl = getBaseUrl();
-  const apiKey = getApiKey();
+  const apiKey = resolveApiKey();
   if (!baseUrl) {
     throw new Error("Missing Redmine base URL configuration.");
   }
@@ -104,13 +105,16 @@ const performRequest = (
       });
     });
 
+    const timeoutMs = getRequestTimeoutMs();
+    req.setTimeout(timeoutMs);
+
     req.on("error", (err) => {
       reject(new Error(`Network request failed: ${err.message}`));
     });
 
     req.on("timeout", () => {
       req.destroy();
-      reject(new Error("Request timed out"));
+      reject(new Error(`Request timed out after ${timeoutMs}ms`));
     });
 
     if (bodyContent !== undefined) {
