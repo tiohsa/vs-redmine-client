@@ -989,7 +989,9 @@ export class TicketTreeItem extends vscode.TreeItem {
     isExpanded: boolean,
   ): void {
     this.node = node;
-    this.label = `#${node.data.id} ${node.data.subject}`;
+    this.label = node.level > 0
+      ? `↳ #${node.data.id} ${node.data.subject}`
+      : `#${node.data.id} ${node.data.subject}`;
     this.collapsibleState =
       node.children.length > 0
         ? isExpanded

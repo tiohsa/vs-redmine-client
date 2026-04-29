@@ -90,6 +90,7 @@ export interface DashboardTicketSettingsViewModel {
     showOverdue: boolean;
   };
   offlineSyncMode: "auto" | "manual";
+  ticketListLimit: number;
 }
 
 export interface DashboardSelectedProject {

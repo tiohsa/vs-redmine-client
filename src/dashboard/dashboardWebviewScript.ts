@@ -191,6 +191,7 @@ function renderTickets(){
       const expandBtn = hasChildren
         ?'<button class="expand-btn" type="button" data-expand="'+t.id+'" aria-expanded="'+isExpanded+'" title="'+(isExpanded?'折りたたむ':'展開する')+'"><span class="expand-icon '+(isExpanded?'expanded':'collapsed')+'"></span></button>'
         :'<span class="expand-placeholder"></span>';
+      const childConnector = t.level>0?'<span class="child-connector" aria-hidden="true">↳</span>':'';
       const actionMenu = '<span class="ticket-actions">'
         +'<button class="ticket-action-btn" type="button" data-ticket-action-menu="'+t.id+'" aria-haspopup="menu" aria-expanded="false" aria-controls="ticket-action-menu-'+t.id+'" aria-label="チケット操作" title="チケット操作"><span class="icon-more" aria-hidden="true"></span></button>'
         +'<span class="ticket-action-menu hidden" id="ticket-action-menu-'+t.id+'" role="menu">'
@@ -199,8 +200,9 @@ function renderTickets(){
         +'<button type="button" role="menuitem" data-ticket-action="browser" data-ticket="'+t.id+'">ブラウザで開く</button>'
         +'<button type="button" role="menuitem" data-ticket-action="child" data-ticket="'+t.id+'">子チケット作成</button>'
         +'</span></span>';
-      return '<div class="ticket-row'+sel+'" data-id="'+t.id+'" style="padding-left:'+(12+indent)+'px" tabindex="0">'
+      return '<div class="ticket-row'+(t.level>0?' child-row':'')+sel+'" data-id="'+t.id+'" style="padding-left:'+(12+indent)+'px" tabindex="0">'
         +expandBtn
+        +childConnector
         +'<span class="ticket-id">#'+t.id+'</span>'
         +'<span class="ticket-subject" title="'+esc(t.subject)+'">'+esc(t.subject)+'</span>'
         +'<span class="badges">'+syncBadge+'</span>'
@@ -382,12 +384,18 @@ function renderSettings(){
     +'<div class="setting-row"><span class="setting-label">3日以内</span><input type="checkbox" id="set-dd-3d"'+(s.dueDate.showWithin3Days?' checked':'')+' class="setting-check"></div>'
     +'<div class="setting-row"><span class="setting-label">7日以内</span><input type="checkbox" id="set-dd-7d"'+(s.dueDate.showWithin7Days?' checked':'')+' class="setting-check"></div>'
     +'</div>'
-    +'<div class="settings-section"><h3>一般</h3>'
+    +'<div class="settings-section"><h3>同期</h3>'
     +'<div class="setting-row"><span class="setting-label">オフライン同期モード</span>'
     +'<select class="setting-select" id="set-sync-mode">'
     +'<option value="auto"'+(s.offlineSyncMode==="auto"?' selected':'')+'>自動</option>'
     +'<option value="manual"'+(s.offlineSyncMode==="manual"?' selected':'')+'>手動</option>'
     +'</select></div>'
+    +'</div>'
+    +'<div class="settings-section"><h3>一般</h3>'
+    +'<div class="setting-row"><span class="setting-label">子プロジェクトを含める</span>'
+    +'<input type="checkbox" id="set-include-children"'+(state.includeChildProjects?' checked':'')+' class="setting-check"></div>'
+    +'<div class="setting-row"><span class="setting-label">チケット取得件数</span>'
+    +'<input class="setting-input setting-input-num" id="set-ticket-limit" type="number" min="1" max="500" value="'+s.ticketListLimit+'"></div>'
     +'</div>';
 
   const applyTicketListPatch=(patch)=>req('settings.update',{patch});
@@ -412,6 +420,15 @@ function renderSettings(){
 
   const syncModeEl=document.getElementById('set-sync-mode');
   syncModeEl.addEventListener('change',()=>req('settings.updateGeneral',{patch:{offlineSyncMode:syncModeEl.value}}));
+
+  const includeChildEl=document.getElementById('set-include-children');
+  includeChildEl.addEventListener('change',()=>req('project.toggleChildren',{includeChildProjects:includeChildEl.checked}));
+
+  const ticketLimitEl=document.getElementById('set-ticket-limit');
+  ticketLimitEl.addEventListener('change',()=>{
+    const v=Number(ticketLimitEl.value);
+    if(v>=1&&v<=500) req('settings.updateGeneral',{patch:{ticketListLimit:v}});
+  });
 
   document.getElementById('settings-reset-btn').onclick=()=>req('settings.reset');
 }

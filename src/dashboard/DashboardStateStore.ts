@@ -27,6 +27,7 @@ const DEFAULT_STATE: DashboardState = {
       showOverdue: true,
     },
     offlineSyncMode: "auto",
+    ticketListLimit: 50,
   },
   loading: { tickets: false, comments: false },
   errors: {},

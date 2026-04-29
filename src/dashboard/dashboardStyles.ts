@@ -142,6 +142,8 @@ body.vscode-high-contrast .tab.active{border-color:var(--app-border);background:
 .ticket-row.selected{background:var(--app-selected)}
 .ticket-row.selected::before{content:"";position:absolute;left:0;top:6px;bottom:6px;width:3px;border-radius:var(--mm-radius-pill);background:var(--app-accent)}
 .ticket-row:focus-visible{outline:1px solid var(--app-focus);outline-offset:-1px}
+.ticket-row.child-row{border-left:2px solid var(--app-accent)}
+.child-connector{font-size:10px;color:var(--app-text-muted);flex-shrink:0;line-height:1;margin-right:1px}
 body.vscode-high-contrast .ticket-row.selected{border-left:3px solid var(--app-border)}
 .ticket-indent{width:0;flex-shrink:0}
 .expand-btn{background:none;border:none;cursor:pointer;padding:1px 3px;border-radius:4px;color:var(--app-text-muted);font-size:11px;width:18px;min-width:18px;display:inline-flex;align-items:center;justify-content:center;flex-shrink:0;line-height:1}
@@ -210,6 +212,7 @@ body.vscode-high-contrast .btn-primary{border:1px solid var(--app-border)}
 .setting-label{color:var(--app-text);font-weight:500}
 .setting-value{color:var(--app-text-secondary);font-size:11.5px}
 .setting-input,.setting-select{background:var(--vscode-input-background, var(--app-surface));color:var(--vscode-input-foreground, var(--app-text));border:1px solid var(--vscode-input-border, var(--app-border));border-radius:var(--mm-radius-button);font:inherit;font-size:12px;padding:3px 7px}
+.setting-input-num{width:64px;text-align:right}
 .setting-input:focus,.setting-select:focus{outline:1px solid var(--app-focus);outline-offset:1px}
 .settings-reset-btn{width:100%;margin-top:12px;padding:7px;border:1px solid var(--app-card-border);border-radius:var(--mm-radius-button);background:transparent;color:var(--app-text-secondary);font:inherit;font-size:12px;cursor:pointer;transition:background .15s}
 .settings-reset-btn:hover{background:var(--app-hover);color:#ef4444}
