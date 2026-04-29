@@ -15,7 +15,6 @@ ${dashboardStyles}
 <body>
 
 <div id="header">
-  <h1>Redmine ダッシュボード</h1>
   <div id="header-row">
     <select class="project-select" id="project-select" title="プロジェクトを選択">
       <option value="">— プロジェクトを選択 —</option>
