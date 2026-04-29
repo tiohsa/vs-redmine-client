@@ -22,7 +22,6 @@ import {
 } from "./ticketEditorContent";
 import { IssueMetadata } from "./ticketMetadataTypes";
 import {
-  buildCommentEditorFilename,
   buildTicketEditorFilename,
 } from "./editorFilename";
 import { getEditorStorageDirectory } from "../config/settings";
@@ -184,7 +183,6 @@ export const resolveEditorStorageDir = (
 const openTicketEditor = async (
   ticket: Ticket,
   kind: TicketEditorKind,
-  filename: string,
   content: string,
 ): Promise<vscode.TextEditor> => {
   const storageResolution = resolveEditorStorageDir();
@@ -217,6 +215,11 @@ export const showTicketPreview = async (
   options?: { kind?: TicketEditorKind },
 ): Promise<vscode.TextEditor> => {
   rememberTicketSummary(ticket);
+  const controlFields = {
+    mode: "ticket-update" as const,
+    project_id: ticket.projectId,
+    issue_id: ticket.id,
+  };
   const savedContent: TicketEditorContent = {
     subject: ticket.subject,
     description: ticket.description ?? "",
@@ -227,19 +230,15 @@ export const showTicketPreview = async (
       due_date: ticket.dueDate ?? "",
       start_date: ticket.startDate ?? "",
     },
+    controlFields,
   };
   const draftContent = getTicketDraftContent(ticket.id);
   const display = resolveTicketEditorDisplay(savedContent, draftContent);
-  const content = withTrailingEditLines(buildTicketEditorContent(display.content));
-  const filename = buildTicketEditorFilename(
-    ticket.projectId,
-    ticket.id,
-    options?.kind ?? "primary",
-  );
+  const displayContent: TicketEditorContent = { ...display.content, controlFields };
+  const content = withTrailingEditLines(buildTicketEditorContent(displayContent));
   const editor = await openTicketEditor(
     ticket,
     options?.kind ?? "primary",
-    filename,
     content,
   );
   setEditorContentType(editor, "ticket");
@@ -264,12 +263,11 @@ export const showTicketComment = async (
 ): Promise<vscode.TextEditor> => {
   rememberTicketSummary(ticket);
   const display = resolveCommentEditorBody(commentId, comment);
-  const filename = buildCommentEditorFilename(ticket.projectId, ticket.id, commentId);
   const content =
     display.body.trim().length === 0
       ? buildCommentEditorContent(display.body)
       : withTrailingEditLines(buildCommentEditorContent(display.body));
-  const editor = await openTicketEditor(ticket, "primary", filename, content);
+  const editor = await openTicketEditor(ticket, "primary", content);
   setEditorContentType(editor, "comment");
   setEditorProjectId(editor, ticket.projectId);
   setEditorCommentId(editor, commentId);

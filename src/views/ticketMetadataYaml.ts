@@ -283,7 +283,29 @@ export const serializeIssueMetadataYaml = (metadata: IssueMetadata): string => {
     "children",
   ];
 
-  const order = metadata.keyOrder && metadata.keyOrder.length > 0 ? metadata.keyOrder : defaultOrder;
+  const rawOrder = metadata.keyOrder && metadata.keyOrder.length > 0 ? metadata.keyOrder : defaultOrder;
+  // Ensure start_date always precedes due_date regardless of stored keyOrder
+  const order = (() => {
+    const dueDateIdx = rawOrder.indexOf("due_date");
+    const startDateIdx = rawOrder.indexOf("start_date");
+    if (dueDateIdx === -1) {
+      return rawOrder;
+    }
+    if (startDateIdx === -1) {
+      // start_date missing: insert just before due_date
+      const result = [...rawOrder];
+      result.splice(dueDateIdx, 0, "start_date");
+      return result;
+    }
+    if (startDateIdx > dueDateIdx) {
+      // start_date is after due_date: move it to just before due_date
+      const result = rawOrder.filter((k) => k !== "start_date") as IssueMetadataKey[];
+      const newDueDateIdx = result.indexOf("due_date");
+      result.splice(newDueDateIdx, 0, "start_date");
+      return result;
+    }
+    return rawOrder;
+  })();
   const processed = new Set<IssueMetadataKey>();
 
   // Process keys in order
@@ -309,7 +331,7 @@ export const serializeIssueMetadataYaml = (metadata: IssueMetadata): string => {
 
 const serializeField = (lines: string[], key: IssueMetadataKey, metadata: IssueMetadata): void => {
   const value = metadata[key];
-  if (value === undefined && key !== "start_date") {
+  if (value === undefined && key !== "start_date" && key !== "due_date") {
     return;
   }
 

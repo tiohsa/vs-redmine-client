@@ -24,6 +24,30 @@ suite("Ticket preview", () => {
     assert.ok(content.includes("issue:"));
   });
 
+  test("ticket-update editor content includes mode, project_id, and issue_id control fields", () => {
+    const { buildTicketEditorContent } = require("../views/ticketEditorContent");
+    const content: string = buildTicketEditorContent({
+      subject: "Existing ticket",
+      description: "Body",
+      metadata: {
+        tracker: "Task",
+        priority: "Normal",
+        status: "In Progress",
+        due_date: "",
+        start_date: "",
+      },
+      controlFields: {
+        mode: "ticket-update",
+        project_id: 5,
+        issue_id: 42,
+      },
+    });
+
+    assert.ok(content.includes("mode: ticket-update"), "should include mode");
+    assert.ok(content.includes("project_id: 5"), "should include project_id");
+    assert.ok(content.includes("issue_id: 42"), "should include issue_id");
+  });
+
   test("renders start_date in ticket file metadata", () => {
     const content = buildTicketPreviewContent({
       subject: "Sample ticket",
