@@ -12,12 +12,10 @@ import { buildTicketEditorContent } from "../views/ticketEditorContent";
 import {
   applyEditorContent,
   findEmptySubjectPosition,
-  resolveNewTicketDraftContent,
 } from "../views/ticketPreview";
 import { buildUniqueUntitledName, buildUniqueUntitledPath } from "../views/untitledPath";
-import { buildEmptyTicketDraftContent } from "../views/ticketDraftStore";
+import { buildNewTicketDraftContent } from "../views/ticketDraftStore";
 import { TicketEditorContent, parseTicketEditorContent } from "../views/ticketEditorContent";
-import { showError } from "../utils/notifications";
 
 const DRAFT_FILENAME = "redmine-client-new-ticket.md";
 
@@ -37,7 +35,7 @@ const getEditorBasePath = (): string | undefined => {
   return getWorkspacePath();
 };
 
-const buildNewTicketTemplate = (content: TicketEditorContent): string =>
+const buildNewTicketDraftText = (content: TicketEditorContent): string =>
   buildTicketEditorContent(content);
 
 const resolveProjectId = (selection: ProjectSelection): number | undefined => {
@@ -116,10 +114,10 @@ export const openNewTicketDraft = async (input: {
   }
 
   if (document.getText().trim().length === 0) {
-    const templateText = buildNewTicketTemplate(input.content);
-    await applyEditorContent(editor, templateText);
+    const draftText = buildNewTicketDraftText(input.content);
+    await applyEditorContent(editor, draftText);
     if (input.content.subject.trim().length === 0) {
-      const position = findEmptySubjectPosition(templateText);
+      const position = findEmptySubjectPosition(draftText);
       if (position) {
         editor.selection = new vscode.Selection(
           new vscode.Position(position.line, position.character),
@@ -139,14 +137,8 @@ export const openNewTicketDraft = async (input: {
 export const createTicketFromList = async (): Promise<void> => {
   const selection = getProjectSelection();
   const projectId = resolveProjectId(selection);
-  const templateResolution = resolveNewTicketDraftContent({
-    projectName: selection.name,
-  });
-  if (templateResolution.isTemplateConfigured && templateResolution.errorMessage) {
-    showError(templateResolution.errorMessage);
-  }
   await openNewTicketDraft({
-    content: templateResolution.content ?? buildEmptyTicketDraftContent(),
+    content: buildNewTicketDraftContent({ projectId }),
     projectId,
   });
 };

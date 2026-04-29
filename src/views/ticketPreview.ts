@@ -12,8 +12,6 @@ import {
 } from "./ticketEditorRegistry";
 import { ensureCommentEdit, resolveCommentEditorBody } from "./commentEditStore";
 import {
-  buildEmptyTicketDraftContent,
-  buildNewTicketDraftContent,
   ensureTicketDraft,
   getTicketDraftContent,
 } from "./ticketDraftStore";
@@ -29,8 +27,6 @@ import {
 } from "./editorFilename";
 import { getEditorStorageDirectory } from "../config/settings";
 import { showError } from "../utils/notifications";
-import { DEFAULT_TEMPLATE_FILE, TEMPLATE_DIR_NAME } from "../utils/templateConstants";
-import { resolveProjectTemplateContent } from "../utils/templateResolver";
 import { rememberTicketSummary } from "./ticketSummaryStore";
 
 export const buildTicketPreviewContent = (
@@ -182,71 +178,6 @@ export const resolveEditorStorageDir = (
   return {
     uri: vscode.Uri.joinPath(workspace.uri, ".redmine-client", "editors"),
     usedFallback: true,
-  };
-};
-
-type NewTicketDraftResolution = {
-  content: TicketEditorContent;
-  errorMessage?: string;
-  usedTemplate: boolean;
-  isTemplateConfigured: boolean;
-};
-
-export const resolveNewTicketDraftContent = (options: {
-  projectName?: string;
-  templatesDir?: string;
-  readFileSync?: (targetPath: string) => string;
-  existsSync?: (targetPath: string) => boolean;
-  readdirSync?: (targetPath: string) => string[];
-  statSync?: (targetPath: string) => fs.Stats;
-} = {}): NewTicketDraftResolution => {
-  const exists = options.existsSync ?? fs.existsSync;
-  const storageResolution = resolveEditorStorageDir();
-  if (!options.templatesDir && !storageResolution.uri) {
-    return {
-      content: buildNewTicketDraftContent(),
-      usedTemplate: false,
-      isTemplateConfigured: false,
-      errorMessage: storageResolution.errorMessage,
-    };
-  }
-
-  const templatesDir =
-    options.templatesDir ??
-    path.join(storageResolution.uri?.fsPath ?? "", TEMPLATE_DIR_NAME);
-
-  if (!exists(templatesDir)) {
-    return {
-      content: buildNewTicketDraftContent(),
-      usedTemplate: false,
-      isTemplateConfigured: false,
-    };
-  }
-
-  const template = resolveProjectTemplateContent({
-    templatesDir,
-    projectName: options.projectName,
-    defaultTemplateFileName: DEFAULT_TEMPLATE_FILE,
-    readFileSync: options.readFileSync,
-    existsSync: exists,
-    readdirSync: options.readdirSync,
-    statSync: options.statSync,
-  });
-
-  if (template.content) {
-    return {
-      content: template.content,
-      usedTemplate: true,
-      isTemplateConfigured: true,
-      errorMessage: template.errorMessage,
-    };
-  }
-
-  return {
-    content: buildEmptyTicketDraftContent(),
-    errorMessage: template.errorMessage,
-    usedTemplate: false,
-    isTemplateConfigured: true,
   };
 };
 

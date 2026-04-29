@@ -29,9 +29,6 @@ export const getRequestTimeoutMs = (): number =>
 export const getEditorStorageDirectory = (): string =>
   getSettings().get<string>("editorStorageDirectory", "").trim();
 
-export const getNewTicketTemplatePath = (): string =>
-  getSettings().get<string>("newTicketTemplatePath", "").trim();
-
 export type OfflineSyncMode = "auto" | "manual";
 
 export const getOfflineSyncMode = (): OfflineSyncMode => {

@@ -21,7 +21,6 @@ import { addCommentFromList } from "../commands/addCommentFromList";
 import { editComment } from "../commands/editComment";
 import { rememberTicketSummaries } from "../views/ticketSummaryStore";
 import { showTicketPreview } from "../views/ticketPreview";
-import { resolveNewTicketDraftContent } from "../views/ticketPreview";
 import {
   buildNewChildTicketDraftContent,
   buildNewTicketDraftContent,
@@ -769,14 +768,8 @@ export class DashboardController {
       showError("プロジェクトを選択してからチケットを作成してください。");
       return;
     }
-    const templateResolution = resolveNewTicketDraftContent({
-      projectName: project.name,
-    });
-    if (templateResolution.isTemplateConfigured && templateResolution.errorMessage) {
-      showError(templateResolution.errorMessage);
-    }
     await openNewTicketDraft({
-      content: templateResolution.content ?? buildNewTicketDraftContent({ projectId: project.id }),
+      content: buildNewTicketDraftContent({ projectId: project.id }),
       projectId: project.id,
     });
   }
@@ -792,15 +785,7 @@ export class DashboardController {
       return;
     }
 
-    const project = this.getResolvedProject();
-    const templateResolution = resolveNewTicketDraftContent({
-      projectName: project?.name,
-    });
-    if (templateResolution.isTemplateConfigured && templateResolution.errorMessage) {
-      showError(templateResolution.errorMessage);
-    }
-
-    const baseContent = templateResolution.content ?? buildNewTicketDraftContent({ projectId: parent.projectId });
+    const baseContent = buildNewTicketDraftContent({ projectId: parent.projectId });
     await openNewTicketDraft({
       content: buildNewChildTicketDraftContent(parent, baseContent),
       projectId: parent.projectId,

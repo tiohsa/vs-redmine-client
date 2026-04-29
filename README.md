@@ -32,7 +32,6 @@ Japanese README: `README.ja.md`
 3. Open the **Projects** view in the Activity Bar and select a project.
 4. Browse tickets in the **Tickets** view and click to open an editor.
 5. Edit and save — changes are synced automatically (or queued in manual offline mode).
-6. (Optional) Place ticket templates under `<editorStorageDirectory>/templates`.
 
 ## Activity Bar Views
 
@@ -57,7 +56,6 @@ Japanese README: `README.ja.md`
 | `redmine-client.includeChildProjects` | `false` | Include child projects when listing tickets |
 | `redmine-client.ticketListLimit` | `50` | Number of tickets loaded per request |
 | `redmine-client.editorStorageDirectory` | `""` | Absolute path for storing editor files (empty = workspace default) |
-| `redmine-client.newTicketTemplatePath` | `""` | Absolute path to a default new-ticket template file |
 | `redmine-client.offlineSyncMode` | `"auto"` | Save mode: `auto` syncs immediately, `manual` queues for offline sync |
 
 ## Ticket List Settings
@@ -86,30 +84,6 @@ The `Redmine: 絞り込み表示切替` (filter icon in the Tickets view title b
 Set default values applied when creating a new ticket:
 
 - **Subject**, **Description**, **Tracker**, **Priority**, **Status**, **Due date**
-
-## Ticket Templates
-
-Templates live under `<editorStorageDirectory>/templates`.
-
-- **Project template**: file name must contain the project name (case-insensitive exact match).
-- **Default template**: `default.md` — used when no project template matches.
-- **Single file override**: `redmine-client.newTicketTemplatePath` can point directly to a template.
-
-### Template Example
-
-```markdown
----
-issue:
-  tracker:   Bug
-  priority:  Low
-  status:    New
-  due_date:  
----
-
-# Short description here
-
-Detailed description.
-```
 
 ## Commands
 

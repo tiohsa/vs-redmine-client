@@ -5,10 +5,8 @@ import {
   findEmptySubjectPosition,
   resolveTicketEditorUri,
   resolveEditorStorageDir,
-  resolveNewTicketDraftContent,
   withTrailingEditLines,
 } from "../views/ticketPreview";
-import { createTemplateFixture } from "./helpers/templateFixtures";
 
 suite("Ticket preview", () => {
   test("renders subject and description", () => {
@@ -120,39 +118,6 @@ suite("Ticket preview", () => {
 
     assert.strictEqual(resolution.usedFallback, true);
     assert.strictEqual(resolution.uri, undefined);
-  });
-
-  test("uses template content for new ticket drafts when configured", () => {
-    const template = [
-      "---",
-      "issue:",
-      "  tracker: Task",
-      "  priority: Normal",
-      "  status: New",
-      "  due_date: 2025-01-01",
-      "---",
-      "",
-      "# Template subject",
-      "",
-      "Template body",
-    ].join("\n");
-
-    const fixture = createTemplateFixture("/templates", {
-      "Project Alpha.md": template,
-      "default.md": template,
-    });
-
-    const resolution = resolveNewTicketDraftContent({
-      templatesDir: fixture.templatesDir,
-      projectName: "Project Alpha",
-      existsSync: fixture.existsSync,
-      readFileSync: fixture.readFileSync,
-      readdirSync: fixture.readdirSync,
-    });
-
-    assert.strictEqual(resolution.usedTemplate, true);
-    assert.strictEqual(resolution.isTemplateConfigured, true);
-    assert.strictEqual(resolution.content.subject, "Template subject");
   });
 
   test("locates the empty subject placeholder position", () => {
