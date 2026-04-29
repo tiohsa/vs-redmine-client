@@ -169,7 +169,7 @@ body.vscode-high-contrast .tab.active{border-color:var(--app-border);background:
 .ticket-row.selected .ticket-subject{font-weight:600;color:var(--app-selected-fg)}
 .ticket-row.selected::before{content:"";position:absolute;left:0;top:4px;bottom:4px;width:3px;border-radius:var(--mm-radius-pill);background:var(--app-accent)}
 .ticket-row:focus-visible{outline:1px solid var(--app-focus);outline-offset:-1px}
-.ticket-row.child-row{border-left:1px solid color-mix(in srgb, var(--app-focus) 35%, transparent)}
+.ticket-row.child-row{border-left:1px solid transparent}
 .child-connector{font-size:10px;color:color-mix(in srgb, var(--app-text-readable-muted) 60%, transparent);flex-shrink:0;line-height:1;margin-right:1px}
 body.vscode-high-contrast .ticket-row.selected{border-left:3px solid var(--app-border)}
 .ticket-indent{width:0;flex-shrink:0}
@@ -203,7 +203,7 @@ body.vscode-high-contrast .badge,.vscode-high-contrast .unsynced-kind-label{back
 .ticket-detail-card{
   flex-shrink:0;
   margin:8px 8px 8px;
-  padding:12px;
+  padding:6px;
   background:color-mix(in srgb, var(--vscode-panel-background, var(--surface-0)) 94%, black 6%);
   border:1px solid var(--vscode-panel-border, var(--app-card-border));
   border-top:3px solid color-mix(in srgb, var(--app-accent) 50%, transparent);
@@ -254,7 +254,7 @@ body.vscode-high-contrast .ticket-action-btn,body.vscode-high-contrast .ticket-a
 .btn-primary:hover{background:var(--app-accent-hover)}
 .btn-secondary{background:var(--surface-1);color:var(--app-text);border:1px solid var(--border-subtle)}
 .btn-secondary:hover{background:var(--app-hover);color:var(--app-accent);border-color:color-mix(in srgb, var(--app-accent) 35%, transparent)}
-.btn.btn-primary-new{height:34px;padding:0 16px}
+.btn.btn-primary-new{height:28px;padding:0 12px}
 body.vscode-high-contrast .btn-primary{border:1px solid var(--app-border)}
 
 /* ── Unsynced panel ───────────────────────────────────────────── */
