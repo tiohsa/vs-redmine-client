@@ -27,6 +27,7 @@ export const resolveTicketSyncState = (ticketId: number): DashboardSyncState => 
 const buildDashboardNode = (
   node: TreeNode<Ticket>,
   level: number,
+  subjectById: Map<number, string>,
 ): DashboardTicketNode => ({
   id: node.data.id,
   subject: node.data.subject,
@@ -39,10 +40,14 @@ const buildDashboardNode = (
   assigneeName: node.data.assigneeName,
   assigneeId: node.data.assigneeId,
   dueDate: node.data.dueDate,
+  startDate: node.data.startDate,
+  projectId: node.data.projectId,
+  projectName: node.data.projectName,
   parentId: node.data.parentId,
+  parentSubject: node.data.parentId ? subjectById.get(node.data.parentId) : undefined,
   syncState: resolveTicketSyncState(node.data.id),
   level,
-  children: node.children.map((child) => buildDashboardNode(child, level + 1)),
+  children: node.children.map((child) => buildDashboardNode(child, level + 1, subjectById)),
 });
 
 export const buildTicketDashboardNodes = (tickets: Ticket[]): DashboardTicketNode[] => {
@@ -50,6 +55,7 @@ export const buildTicketDashboardNodes = (tickets: Ticket[]): DashboardTicketNod
     return [];
   }
   const idSet = new Set(tickets.map((t) => t.id));
+  const subjectById = new Map(tickets.map((t) => [t.id, t.subject]));
   const sources: Array<TreeSource<Ticket>> = tickets.map((ticket) => ({
     id: ticket.id,
     parentId: ticket.parentId,
@@ -58,10 +64,15 @@ export const buildTicketDashboardNodes = (tickets: Ticket[]): DashboardTicketNod
     parentNotLoaded: ticket.parentId !== undefined && !idSet.has(ticket.parentId),
   }));
   const { roots } = buildTree(sources);
-  return roots.map((root) => buildDashboardNode(root, 0));
+  return roots.map((root) => buildDashboardNode(root, 0, subjectById));
 };
 
-export const buildTicketDetail = (ticket: Ticket): DashboardTicketDetail => ({
+export const buildTicketDetail = (ticket: Ticket, allTickets: Ticket[] = []): DashboardTicketDetail => {
+  const draft = getTicketDraft(ticket.id);
+  const parentSubject = ticket.parentId
+    ? allTickets.find((candidate) => candidate.id === ticket.parentId)?.subject
+    : undefined;
+  return {
   id: ticket.id,
   subject: ticket.subject,
   description: ticket.description,
@@ -70,6 +81,12 @@ export const buildTicketDetail = (ticket: Ticket): DashboardTicketDetail => ({
   trackerName: ticket.trackerName,
   assigneeName: ticket.assigneeName,
   dueDate: ticket.dueDate,
+  startDate: ticket.startDate,
   syncState: resolveTicketSyncState(ticket.id),
   projectId: ticket.projectId,
-});
+  projectName: ticket.projectName,
+  parentId: ticket.parentId,
+  parentSubject,
+  lastSyncedAt: draft?.lastSyncedAt ? new Date(draft.lastSyncedAt).toISOString() : undefined,
+  };
+};

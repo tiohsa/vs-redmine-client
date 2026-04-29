@@ -7,6 +7,7 @@ const vscode = acquireVsCodeApi();
 let state = null;
 let reqCounter = 0;
 let activeTicketActionMenuId = null;
+let ticketDetailExpanded = false;
 const nextReqId = () => 'req-' + (++reqCounter);
 
 // ── Utils ──────────────────────────────────────────────────────────────────
@@ -157,6 +158,14 @@ function syncBadgeClass(s){
   const m={Dirty:'sync-dirty',Queued:'sync-queued',Conflict:'sync-conflict',Failed:'sync-failed',Syncing:'sync-syncing'};
   return m[s]||'';
 }
+function findTicketNode(nodes, ticketId){
+  for(const node of nodes || []){
+    if(node.id === ticketId) return node;
+    const child = findTicketNode(node.children, ticketId);
+    if(child) return child;
+  }
+  return null;
+}
 function renderTickets(){
   if(!state) return;
   const list = document.getElementById('ticket-list');
@@ -213,6 +222,10 @@ function renderTickets(){
       row.addEventListener('click',e=>{
         if(isTicketActionTarget(e.target)) return;
         const id=Number(row.dataset.id);
+        if(state.selectedTicketId === id) {
+          ticketDetailExpanded = true;
+          renderTicketDetail();
+        }
         req('ticket.select',{ticketId:id});
       });
       row.addEventListener('dblclick',e=>{
@@ -254,6 +267,87 @@ function renderTickets(){
     lm.onclick=()=>req('tickets.loadMore');
   } else { lm.style.display='none'; }
   updateSyncButtonStates();
+}
+
+// ── Selected ticket detail ─────────────────────────────────────────────────
+function metadataOptionsReady(){
+  return !!(state?.metadataOptions?.trackers?.length && state.metadataOptions?.priorities?.length && state.metadataOptions?.statuses?.length);
+}
+function renderSelect(name, value, options, label){
+  const disabled = metadataOptionsReady() ? '' : ' disabled';
+  const optionList = options || [];
+  const currentOption = value && !optionList.some(option => option.name === value)
+    ? '<option value="'+esc(value)+'" selected>'+esc(value)+'</option>'
+    : '';
+  const opts = currentOption + optionList.map(option =>
+    '<option value="'+esc(option.name)+'"'+(option.name===value?' selected':'')+'>'+esc(option.name)+'</option>'
+  ).join('');
+  return '<label class="detail-field"><span>'+label+'</span><select class="detail-select" data-metadata-field="'+name+'"'+disabled+'>'+opts+'</select></label>';
+}
+function renderTicketDetail(){
+  if(!state) return;
+  const card = document.getElementById('ticket-detail-card');
+  const ticket = state.selectedTicket;
+  if(!ticket){
+    card.classList.add('hidden');
+    card.innerHTML = '';
+    return;
+  }
+  const node = findTicketNode(state.tickets, ticket.id) || {};
+  const projectLabel = ticket.projectName
+    ? esc(ticket.projectName)+' / ID: '+esc(ticket.projectId ?? '')
+    : 'Project ID: '+esc(ticket.projectId ?? '未設定');
+  const parentLabel = ticket.parentId
+    ? '<div class="detail-parent">Parent: #'+ticket.parentId+(ticket.parentSubject ? ' '+esc(ticket.parentSubject) : '')+'</div>'
+    : '';
+  const comments = state.comments?.ticketId === ticket.id ? (state.comments.items || []).slice(0,3) : [];
+  const latestComments = comments.length
+    ? '<div class="detail-comments"><div class="detail-comments-title">Latest comments</div>'
+      + comments.map(cm => '<div class="detail-comment"><span>'+esc((cm.updatedAt || cm.createdAt || '').substring(0,10))+' '+esc(cm.authorName)+':</span> '+esc(cm.body).substring(0,120)+'</div>').join('')
+      + '</div>'
+    : '';
+  const options = state.metadataOptions || {trackers:[],priorities:[],statuses:[]};
+  const readonlyHint = metadataOptionsReady() ? '' : '<div class="detail-readonly">選択肢を取得できないため編集できません。</div>';
+  const expanded = ticketDetailExpanded
+    ? '<div class="detail-expanded">'
+      + renderSelect('tracker', ticket.trackerName || node.trackerName || '', options.trackers, 'Tracker')
+      + renderSelect('priority', ticket.priorityName || node.priorityName || '', options.priorities, 'Priority')
+      + renderSelect('status', ticket.statusName || node.statusName || '', options.statuses, 'Status')
+      + '<label class="detail-field"><span>Start date</span><input class="detail-input" data-metadata-field="start_date" type="date" value="'+esc(ticket.startDate || node.startDate || '')+'"'+(metadataOptionsReady()?'':' disabled')+'></label>'
+      + '<label class="detail-field"><span>Due date</span><input class="detail-input" data-metadata-field="due_date" type="date" value="'+esc(ticket.dueDate || node.dueDate || '')+'"'+(metadataOptionsReady()?'':' disabled')+'></label>'
+      + '<div class="detail-meta"><span>Sync</span><strong>'+esc(ticket.syncState)+'</strong></div>'
+      + (ticket.lastSyncedAt ? '<div class="detail-meta"><span>Last synced</span><strong>'+esc(ticket.lastSyncedAt.substring(0,19).replace('T',' '))+'</strong></div>' : '')
+      + readonlyHint
+      + latestComments
+      + '</div>'
+    : '';
+  card.classList.remove('hidden');
+  card.innerHTML =
+    '<div class="detail-head">'
+    + '<div class="detail-title"><span class="ticket-id">#'+ticket.id+'</span><span>'+esc(ticket.subject)+'</span></div>'
+    + '<button class="btn-icon detail-toggle" id="ticket-detail-toggle" title="'+(ticketDetailExpanded?'詳細を閉じる':'詳細を開く')+'" aria-expanded="'+ticketDetailExpanded+'">'+(ticketDetailExpanded?'⌃':'⌄')+'</button>'
+    + '</div>'
+    + '<div class="detail-project">'+projectLabel+'</div>'
+    + parentLabel
+    + '<div class="detail-actions">'
+    + '<button class="btn btn-secondary" id="detail-open-btn">開く</button>'
+    + '<button class="btn btn-secondary" id="detail-comment-btn">コメント</button>'
+    + '<button class="btn btn-primary" id="detail-sync-btn">同期</button>'
+    + '</div>'
+    + expanded;
+  card.querySelector('#ticket-detail-toggle')?.addEventListener('click',()=>{
+    ticketDetailExpanded = !ticketDetailExpanded;
+    renderTicketDetail();
+  });
+  card.querySelector('#detail-open-btn')?.addEventListener('click',()=>req('ticket.openEditor',{ticketId:ticket.id}));
+  card.querySelector('#detail-comment-btn')?.addEventListener('click',()=>req('comment.add',{ticketId:ticket.id}));
+  card.querySelector('#detail-sync-btn')?.addEventListener('click',()=>req('unsynced.syncOne',{key:{kind:'ticket',ticketId:ticket.id}}));
+  card.querySelectorAll('[data-metadata-field]').forEach(input=>{
+    input.addEventListener('change',()=>{
+      const field = input.dataset.metadataField;
+      req('ticket.metadata.update',{ticketId:ticket.id,patch:{[field]:input.value}});
+    });
+  });
 }
 
 // ── Filter chips ────────────────────────────────────────────────────────────
@@ -359,11 +453,7 @@ function renderSettings(){
   const s=state.settings;
   const el=document.getElementById('settings-content');
   el.innerHTML=
-    '<div class="settings-section"><h3>チケットフィルター</h3>'
-    +'<div class="setting-row"><span class="setting-label">件名検索</span>'
-    +'<input class="setting-input" id="set-subject" type="text" value="'+esc(s.filters.subjectQuery||'')+'" placeholder="キーワード…"></div>'
-    +'</div>'
-    +'<div class="settings-section"><h3>並び替え</h3>'
+    '<div class="settings-section"><h3>並び替え</h3>'
     +'<div class="setting-row"><span class="setting-label">並び替えフィールド</span>'
     +'<select class="setting-select" id="set-sort-field">'
     +'<option value=""'+(s.sort.field?'':' selected')+'>デフォルト</option>'
@@ -392,16 +482,11 @@ function renderSettings(){
     +'</select></div>'
     +'</div>'
     +'<div class="settings-section"><h3>一般</h3>'
-    +'<div class="setting-row"><span class="setting-label">子プロジェクトを含める</span>'
-    +'<input type="checkbox" id="set-include-children"'+(state.includeChildProjects?' checked':'')+' class="setting-check"></div>'
     +'<div class="setting-row"><span class="setting-label">チケット取得件数</span>'
     +'<input class="setting-input setting-input-num" id="set-ticket-limit" type="number" min="1" max="500" value="'+s.ticketListLimit+'"></div>'
     +'</div>';
 
   const applyTicketListPatch=(patch)=>req('settings.update',{patch});
-
-  const subjectEl=document.getElementById('set-subject');
-  subjectEl.addEventListener('change',()=>applyTicketListPatch({filters:{...s.filters,subjectQuery:subjectEl.value}}));
 
   const sortFieldEl=document.getElementById('set-sort-field');
   sortFieldEl.addEventListener('change',()=>applyTicketListPatch({sort:{field:sortFieldEl.value||undefined,direction:s.sort.direction}}));
@@ -420,9 +505,6 @@ function renderSettings(){
 
   const syncModeEl=document.getElementById('set-sync-mode');
   syncModeEl.addEventListener('change',()=>req('settings.updateGeneral',{patch:{offlineSyncMode:syncModeEl.value}}));
-
-  const includeChildEl=document.getElementById('set-include-children');
-  includeChildEl.addEventListener('change',()=>req('project.toggleChildren',{includeChildProjects:includeChildEl.checked}));
 
   const ticketLimitEl=document.getElementById('set-ticket-limit');
   ticketLimitEl.addEventListener('change',()=>{
@@ -462,6 +544,7 @@ function render(){
   }
   document.getElementById('include-children').checked=state.includeChildProjects;
   renderTickets();
+  renderTicketDetail();
   renderFilterChips();
   renderUnsynced();
   renderComments();

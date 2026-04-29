@@ -916,6 +916,13 @@ export const applyQueuedTicketUpdate = async (input: {
   }
 
   if (Object.keys(changes).length === 0 && children.length === 0) {
+    updateDraftAfterSave(
+      update.ticketId,
+      update.subject,
+      description,
+      { ...update.metadata, children: [] },
+      update.lastKnownRemoteUpdatedAt,
+    );
     return buildResult("no_change", "No changes to save.", { uploadSummary });
   }
 

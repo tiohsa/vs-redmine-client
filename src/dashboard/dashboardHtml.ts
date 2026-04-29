@@ -49,6 +49,7 @@ ${dashboardStyles}
       <div id="ticket-list"></div>
       <div id="load-more-row" class="load-more-row hidden"></div>
     </div>
+    <div id="ticket-detail-card" class="ticket-detail-card hidden"></div>
   </div>
 
   <!-- UNSYNCED TAB -->

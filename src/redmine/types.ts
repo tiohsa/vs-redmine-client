@@ -19,6 +19,7 @@ export interface Ticket {
   assigneeId?: number;
   assigneeName?: string;
   projectId: number;
+  projectName?: string;
   parentId?: number;
   hasChildren?: boolean;
   createdAt?: string;

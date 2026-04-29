@@ -31,7 +31,11 @@ export interface DashboardTicketNode {
   assigneeName?: string;
   assigneeId?: number;
   dueDate?: string;
+  startDate?: string;
+  projectId?: number;
+  projectName?: string;
   parentId?: number;
+  parentSubject?: string;
   syncState: DashboardSyncState;
   children: DashboardTicketNode[];
   level: number;
@@ -46,8 +50,24 @@ export interface DashboardTicketDetail {
   trackerName?: string;
   assigneeName?: string;
   dueDate?: string;
+  startDate?: string;
   syncState: DashboardSyncState;
   projectId?: number;
+  projectName?: string;
+  parentId?: number;
+  parentSubject?: string;
+  lastSyncedAt?: string;
+}
+
+export interface DashboardMetadataOption {
+  id: number;
+  name: string;
+}
+
+export interface DashboardMetadataOptions {
+  trackers: DashboardMetadataOption[];
+  priorities: DashboardMetadataOption[];
+  statuses: DashboardMetadataOption[];
 }
 
 export type DashboardUnsyncedKind = "ticket" | "newTicket" | "comment";
@@ -108,6 +128,7 @@ export interface DashboardState {
   loadedTicketCount: number;
   selectedTicketId?: number;
   selectedTicket?: DashboardTicketDetail;
+  metadataOptions: DashboardMetadataOptions;
   unsynced: {
     totalCount: number;
     items: DashboardUnsyncedItem[];
@@ -134,6 +155,14 @@ export interface DashboardState {
 
 export type DashboardSettingsPatch = Partial<TicketListSettings>;
 
+export type TicketMetadataPatch = {
+  tracker?: string;
+  priority?: string;
+  status?: string;
+  due_date?: string;
+  start_date?: string;
+};
+
 export interface DashboardGeneralSettingsPatch {
   offlineSyncMode?: "auto" | "manual";
   includeChildProjects?: boolean;
@@ -152,6 +181,7 @@ export type DashboardRequest =
   | { type: "ticket.openBrowser"; requestId: string; ticketId: number }
   | { type: "ticket.create"; requestId: string }
   | { type: "ticket.createChild"; requestId: string; parentTicketId: number }
+  | { type: "ticket.metadata.update"; requestId: string; ticketId: number; patch: TicketMetadataPatch }
   | { type: "comment.add"; requestId: string; ticketId: number }
   | { type: "comment.edit"; requestId: string; ticketId: number; commentId: number }
   | { type: "comment.reload"; requestId: string; ticketId: number }

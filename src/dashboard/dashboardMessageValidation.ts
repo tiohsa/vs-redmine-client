@@ -21,6 +21,8 @@ const UNSYNCED_KINDS = new Set(["ticket", "newTicket", "comment"]);
 const OFFLINE_SYNC_MODES = new Set(["auto", "manual"]);
 const SORT_DIRECTIONS = new Set(["asc", "desc"]);
 const SORT_FIELDS = new Set(["priority", "status", "tracker", "assignee"]);
+const METADATA_PATCH_FIELDS = new Set(["tracker", "priority", "status", "due_date", "start_date"]);
+const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 
 const validateUnsyncedKey = (v: unknown): v is DashboardUnsyncedKey => {
   if (!isObject(v)) { return false; }
@@ -74,6 +76,27 @@ const validateGeneralPatch = (v: unknown): boolean => {
     if (!isNumber(limit) || !Number.isInteger(limit) || (limit as number) < 1 || (limit as number) > 500) {
       return false;
     }
+  }
+  return true;
+};
+
+const validateMetadataPatch = (v: unknown): boolean => {
+  if (!isObject(v)) { return false; }
+  const keys = Object.keys(v);
+  if (keys.length === 0) { return false; }
+  if (keys.some((key) => !METADATA_PATCH_FIELDS.has(key))) { return false; }
+  for (const key of ["tracker", "priority", "status"]) {
+    if (key in v && !isNonEmptyString(v[key])) { return false; }
+  }
+  if ("due_date" in v) {
+    const dueDate = v["due_date"];
+    if (!isString(dueDate)) { return false; }
+    if (dueDate.length > 0 && !DATE_RE.test(dueDate)) { return false; }
+  }
+  if ("start_date" in v) {
+    const startDate = v["start_date"];
+    if (!isString(startDate)) { return false; }
+    if (startDate.length > 0 && !DATE_RE.test(startDate)) { return false; }
   }
   return true;
 };
@@ -151,6 +174,18 @@ export const validateDashboardMessage = (raw: unknown): ValidationResult => {
         return { ok: false, reason: "ticket.createChild: parentTicketId must be a positive integer" };
       }
       return { ok: true, request: { type, requestId, parentTicketId } };
+    }
+
+    case "ticket.metadata.update": {
+      const ticketId = raw["ticketId"];
+      if (!isPositiveInt(ticketId)) {
+        return { ok: false, reason: "ticket.metadata.update: ticketId must be a positive integer" };
+      }
+      const patch = raw["patch"];
+      if (!validateMetadataPatch(patch)) {
+        return { ok: false, reason: "ticket.metadata.update: patch is invalid" };
+      }
+      return { ok: true, request: { type, requestId, ticketId, patch: patch as import("./dashboardProtocol").TicketMetadataPatch } };
     }
 
     case "comment.add": {

@@ -8,6 +8,11 @@ const DEFAULT_STATE: DashboardState = {
   tickets: [],
   totalTicketCount: 0,
   loadedTicketCount: 0,
+  metadataOptions: {
+    trackers: [],
+    priorities: [],
+    statuses: [],
+  },
   unsynced: { totalCount: 0, items: [] },
   comments: { loading: false, items: [] },
   settings: {

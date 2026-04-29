@@ -29,6 +29,88 @@ suite("Dashboard バリデーション拡張", () => {
     assert.strictEqual(r.ok, true);
   });
 
+  test("ticket.metadata.update: 正常な patch は受け入れられる", () => {
+    const r = validateDashboardMessage({
+      type: "ticket.metadata.update",
+      requestId: "r",
+      ticketId: 42,
+      patch: { tracker: "Bug", priority: "Normal", status: "New", due_date: "2026-05-01" },
+    });
+    assert.strictEqual(r.ok, true);
+    if (r.ok) {
+      assert.strictEqual(r.request.type, "ticket.metadata.update");
+      assert.strictEqual(r.request.patch.due_date, "2026-05-01");
+    }
+  });
+
+  test("ticket.metadata.update: due_date は空文字を受け入れる", () => {
+    const r = validateDashboardMessage({
+      type: "ticket.metadata.update",
+      requestId: "r",
+      ticketId: 42,
+      patch: { due_date: "" },
+    });
+    assert.strictEqual(r.ok, true);
+  });
+
+  test("ticket.metadata.update: start_date は YYYY-MM-DD と空文字を受け入れる", () => {
+    const dateResult = validateDashboardMessage({
+      type: "ticket.metadata.update",
+      requestId: "r",
+      ticketId: 42,
+      patch: { start_date: "2026-05-01" },
+    });
+    assert.strictEqual(dateResult.ok, true);
+
+    const emptyResult = validateDashboardMessage({
+      type: "ticket.metadata.update",
+      requestId: "r",
+      ticketId: 42,
+      patch: { start_date: "" },
+    });
+    assert.strictEqual(emptyResult.ok, true);
+  });
+
+  test("ticket.metadata.update: due_date が YYYY-MM-DD でないと拒否される", () => {
+    const r = validateDashboardMessage({
+      type: "ticket.metadata.update",
+      requestId: "r",
+      ticketId: 42,
+      patch: { due_date: "2026/05/01" },
+    });
+    assert.strictEqual(r.ok, false);
+  });
+
+  test("ticket.metadata.update: start_date が YYYY-MM-DD でないと拒否される", () => {
+    const r = validateDashboardMessage({
+      type: "ticket.metadata.update",
+      requestId: "r",
+      ticketId: 42,
+      patch: { start_date: "2026/05/01" },
+    });
+    assert.strictEqual(r.ok, false);
+  });
+
+  test("ticket.metadata.update: 未知 key を含む patch は拒否される", () => {
+    const r = validateDashboardMessage({
+      type: "ticket.metadata.update",
+      requestId: "r",
+      ticketId: 42,
+      patch: { projectName: "Invalid" },
+    });
+    assert.strictEqual(r.ok, false);
+  });
+
+  test("ticket.metadata.update: 空 patch は拒否される", () => {
+    const r = validateDashboardMessage({
+      type: "ticket.metadata.update",
+      requestId: "r",
+      ticketId: 42,
+      patch: {},
+    });
+    assert.strictEqual(r.ok, false);
+  });
+
   test("project.select: projectId が 0 だと拒否される", () => {
     const r = validateDashboardMessage({ type: "project.select", requestId: "r", projectId: 0 });
     assert.strictEqual(r.ok, false);

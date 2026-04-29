@@ -3,10 +3,11 @@ import {
   clearTicketDrafts,
   getTicketDraft,
   initializeTicketDraft,
+  markDraftStatus,
   setTicketDraftContent,
 } from "../views/ticketDraftStore";
 import { buildTicketEditorContent } from "../views/ticketEditorContent";
-import { reloadTicketEditor, syncTicketDraft } from "../views/ticketSaveSync";
+import { applyQueuedTicketUpdate, reloadTicketEditor, syncTicketDraft } from "../views/ticketSaveSync";
 import { createEditorStub } from "./helpers/editorStubs";
 import { buildIssueMetadataFixture } from "./helpers/ticketMetadataFixtures";
 import { buildTicketEditorMetadataContentWithChildren } from "./helpers/ticketEditorMetadataStubs";
@@ -46,6 +47,43 @@ suite("Ticket save sync", () => {
     });
 
     assert.strictEqual(result.status, "no_change");
+  });
+
+  test("queued no_change clears dirty draft status", async () => {
+    const metadata = buildIssueMetadataFixture();
+    initializeTicketDraft(101, "Title", "Body", metadata, "t1");
+    markDraftStatus(101, "Dirty");
+
+    const result = await applyQueuedTicketUpdate({
+      update: {
+        ticketId: 101,
+        baseSubject: "Title",
+        baseDescription: "Body",
+        baseMetadata: metadata,
+        lastKnownRemoteUpdatedAt: "t1",
+        subject: "Title",
+        description: "Body",
+        metadata,
+      },
+      deps: {
+        getIssueDetail: async () => {
+          throw new Error("should not load detail");
+        },
+        updateIssue: async () => {
+          throw new Error("should not update");
+        },
+        createIssue: async () => {
+          throw new Error("should not create child");
+        },
+        deleteIssue: async () => undefined,
+        listIssueStatuses: async () => [],
+        listTrackers: async () => [],
+        listIssuePriorities: async () => [],
+      },
+    });
+
+    assert.strictEqual(result.status, "no_change");
+    assert.strictEqual(getTicketDraft(101)?.status, "Synced");
   });
 
   test("returns conflict when remote updated", async () => {

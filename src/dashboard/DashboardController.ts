@@ -2,10 +2,12 @@ import * as vscode from "vscode";
 import { getProjectSelection, setProjectSelection } from "../config/projectSelection";
 import { getDefaultProjectId, getIncludeChildProjects, getTicketListLimit } from "../config/settings";
 import { listProjects } from "../redmine/projects";
-import { getIssueDetail, listIssues } from "../redmine/issues";
+import { getIssueDetail, listIssuePriorities, listIssueStatuses, listIssues, listTrackers } from "../redmine/issues";
 import { applyTicketFilters, applyTicketSort } from "../views/projectListSettings";
 import {
   onOfflineSyncQueueChanged,
+  addOfflineTicketUpdate,
+  getOfflineSyncQueue,
   removeOfflineCommentEntry,
   removeOfflineNewTicket,
   removeOfflineTicketUpdate,
@@ -20,7 +22,13 @@ import { editComment } from "../commands/editComment";
 import { rememberTicketSummaries } from "../views/ticketSummaryStore";
 import { showTicketPreview } from "../views/ticketPreview";
 import { resolveNewTicketDraftContent } from "../views/ticketPreview";
-import { buildNewChildTicketDraftContent, buildNewTicketDraftContent } from "../views/ticketDraftStore";
+import {
+  buildNewChildTicketDraftContent,
+  buildNewTicketDraftContent,
+  ensureTicketDraft,
+  markDraftStatus,
+  setTicketDraftContent,
+} from "../views/ticketDraftStore";
 import { openNewTicketDraft } from "../commands/createTicketFromList";
 import { showError } from "../utils/notifications";
 import { Ticket } from "../redmine/types";
@@ -30,8 +38,15 @@ import { buildUnsyncedDashboardItems } from "./viewModels/unsyncedDashboardViewM
 import { buildCommentDashboardItems } from "./viewModels/commentsDashboardViewModel";
 import { DashboardStateStore } from "./DashboardStateStore";
 import { SettingsController } from "./SettingsController";
-import type { DashboardProjectNode, DashboardRequest, DashboardUnsyncedKey } from "./dashboardProtocol";
+import type { DashboardProjectNode, DashboardRequest, DashboardMetadataOptions, DashboardUnsyncedKey, TicketMetadataPatch } from "./dashboardProtocol";
 import { resolveCurrentProject, type ResolvedProject } from "./resolveProject";
+import {
+  buildTicketEditorContent,
+  parseTicketEditorContent,
+  type TicketEditorContent,
+} from "../views/ticketEditorContent";
+import { getTicketEditors, registerTicketDocument } from "../views/ticketEditorRegistry";
+import { applyEditorContent } from "../views/ticketPreview";
 
 export interface DashboardControllerOptions {
   store: DashboardStateStore;
@@ -45,6 +60,7 @@ export interface DashboardControllerOptions {
 export class DashboardController {
   private tickets: Ticket[] = [];
   private projects: DashboardProjectNode[] = [];
+  private metadataOptionsLoaded = false;
   private totalCount = 0;
   private readonly settingsCtrl: SettingsController;
   private readonly disposables: vscode.Disposable[] = [];
@@ -60,7 +76,7 @@ export class DashboardController {
 
   async initialize(): Promise<void> {
     this.settingsCtrl.pushSettings();
-    await Promise.all([this.loadProjects(), this.loadTickets()]);
+    await Promise.all([this.loadProjects(), this.loadMetadataOptions(), this.loadTickets()]);
   }
 
   async handle(req: DashboardRequest): Promise<void> {
@@ -82,7 +98,7 @@ export class DashboardController {
     switch (req.type) {
       case "dashboard.ready":
       case "dashboard.refresh":
-        await Promise.all([this.loadProjects(), this.loadTickets()]);
+        await Promise.all([this.loadProjects(), this.loadMetadataOptions(), this.loadTickets()]);
         break;
       case "project.select":
         await this.selectProject(req.projectId);
@@ -113,6 +129,9 @@ export class DashboardController {
       case "ticket.createChild":
         void this.selectTicket(req.parentTicketId);
         await this.createChildTicketFromDashboard(req.parentTicketId);
+        break;
+      case "ticket.metadata.update":
+        await this.updateTicketMetadata(req.requestId, req.ticketId, req.patch);
         break;
       case "comment.add":
         void this.selectTicket(req.ticketId);
@@ -257,6 +276,26 @@ export class DashboardController {
     }
   }
 
+  private async loadMetadataOptions(): Promise<void> {
+    try {
+      const [trackers, priorities, statuses] = await Promise.all([
+        listTrackers(),
+        listIssuePriorities(),
+        listIssueStatuses(),
+      ]);
+      const options: DashboardMetadataOptions = {
+        trackers,
+        priorities,
+        statuses,
+      };
+      this.metadataOptionsLoaded = true;
+      this.opts.store.update({ metadataOptions: options });
+    } catch {
+      this.metadataOptionsLoaded = false;
+      this.opts.store.update({ metadataOptions: { trackers: [], priorities: [], statuses: [] } });
+    }
+  }
+
   private buildProjectNodes(
     projects: Array<{ id: number; name: string; identifier: string; parentId?: number }>,
   ): DashboardProjectNode[] {
@@ -300,9 +339,206 @@ export class DashboardController {
     }
     store.update({
       selectedTicketId: ticketId,
-      selectedTicket: buildTicketDetail(ticket),
+      selectedTicket: buildTicketDetail(ticket, this.tickets),
     });
     await this.loadComments(ticketId);
+  }
+
+  private validateMetadataPatchAgainstOptions(patch: TicketMetadataPatch): string | undefined {
+    if (!this.metadataOptionsLoaded) {
+      return "メタデータ選択肢が未取得のため更新できません。";
+    }
+    const options = this.opts.store.getState().metadataOptions;
+    if (patch.tracker !== undefined && !options.trackers.some((item) => item.name === patch.tracker)) {
+      return `未知のトラッカーです: ${patch.tracker}`;
+    }
+    if (patch.priority !== undefined && !options.priorities.some((item) => item.name === patch.priority)) {
+      return `未知の優先度です: ${patch.priority}`;
+    }
+    if (patch.status !== undefined && !options.statuses.some((item) => item.name === patch.status)) {
+      return `未知のステータスです: ${patch.status}`;
+    }
+    return undefined;
+  }
+
+  private patchEditorContent(content: TicketEditorContent, patch: TicketMetadataPatch): TicketEditorContent {
+    return {
+      ...content,
+      metadata: {
+        ...content.metadata,
+        ...(patch.tracker !== undefined ? { tracker: patch.tracker } : {}),
+        ...(patch.priority !== undefined ? { priority: patch.priority } : {}),
+        ...(patch.status !== undefined ? { status: patch.status } : {}),
+        ...(patch.due_date !== undefined ? { due_date: patch.due_date } : {}),
+        ...(patch.start_date !== undefined ? { start_date: patch.start_date } : {}),
+      },
+    };
+  }
+
+  private async updateTicketMetadata(
+    requestId: string,
+    ticketId: number,
+    patch: TicketMetadataPatch,
+  ): Promise<void> {
+    const validationError = this.validateMetadataPatchAgainstOptions(patch);
+    if (validationError) {
+      this.opts.notifyError(requestId, validationError);
+      return;
+    }
+
+    const ticket = this.tickets.find((candidate) => candidate.id === ticketId);
+    if (!ticket) {
+      this.opts.notifyError(requestId, "対象チケットが見つかりません。");
+      return;
+    }
+    ensureTicketDraft(
+      ticket.id,
+      ticket.subject,
+      ticket.description ?? "",
+      {
+        tracker: ticket.trackerName ?? "",
+        priority: ticket.priorityName ?? "",
+        status: ticket.statusName ?? "",
+        due_date: ticket.dueDate ?? "",
+        start_date: ticket.startDate ?? "",
+      },
+      ticket.updatedAt,
+    );
+
+    const updated = await this.updateRegisteredTicketEditor(ticket, patch)
+      || this.updateQueuedTicket(ticket, patch);
+    if (!updated) {
+      await this.openEditor(ticketId);
+      if (!await this.updateRegisteredTicketEditor(ticket, patch)) {
+        this.opts.notifyError(requestId, "更新対象のチケットエディタを特定できません。");
+        return;
+      }
+    }
+
+    this.applyPatchToLocalTicket(ticket, patch);
+    this.refreshUnsynced();
+    this.pushTickets();
+    this.opts.store.update({ selectedTicket: buildTicketDetail(ticket, this.tickets) });
+    this.opts.notifySuccess(requestId, "チケット情報を更新しました。同期は既存の同期コマンドで実行されます。");
+  }
+
+  private applyPatchToLocalTicket(ticket: Ticket, patch: TicketMetadataPatch): void {
+    if (patch.tracker !== undefined) {
+      ticket.trackerName = patch.tracker;
+      ticket.trackerId = this.opts.store.getState().metadataOptions.trackers
+        .find((item) => item.name === patch.tracker)?.id;
+    }
+    if (patch.priority !== undefined) {
+      ticket.priorityName = patch.priority;
+      ticket.priorityId = this.opts.store.getState().metadataOptions.priorities
+        .find((item) => item.name === patch.priority)?.id;
+    }
+    if (patch.status !== undefined) {
+      ticket.statusName = patch.status;
+      ticket.statusId = this.opts.store.getState().metadataOptions.statuses
+        .find((item) => item.name === patch.status)?.id;
+    }
+    if (patch.due_date !== undefined) {
+      ticket.dueDate = patch.due_date.length > 0 ? patch.due_date : undefined;
+    }
+    if (patch.start_date !== undefined) {
+      ticket.startDate = patch.start_date.length > 0 ? patch.start_date : undefined;
+    }
+  }
+
+  private async updateRegisteredTicketEditor(ticket: Ticket, patch: TicketMetadataPatch): Promise<boolean> {
+    const record = getTicketEditors(ticket.id).find((candidate) => candidate.contentType === "ticket");
+    if (!record) {
+      return false;
+    }
+    const uri = vscode.Uri.parse(record.uri);
+    let document = vscode.workspace.textDocuments.find((candidate) => candidate.uri.toString() === record.uri);
+    if (!document) {
+      document = await vscode.workspace.openTextDocument(uri);
+      registerTicketDocument(ticket.id, document, "ticket", ticket.projectId);
+    }
+    const editor = vscode.window.visibleTextEditors.find((candidate) => candidate.document.uri.toString() === record.uri);
+    const parsed = parseTicketEditorContent(document.getText(), {
+      allowMissingMetadata: true,
+      fallbackMetadata: {
+        tracker: ticket.trackerName ?? "",
+        priority: ticket.priorityName ?? "",
+        status: ticket.statusName ?? "",
+        due_date: ticket.dueDate ?? "",
+        start_date: ticket.startDate ?? "",
+      },
+    });
+    const next = this.patchEditorContent(parsed, patch);
+    const nextText = buildTicketEditorContent(next);
+    parseTicketEditorContent(nextText, {
+      allowMissingMetadata: true,
+      fallbackMetadata: next.metadata,
+    });
+    if (editor) {
+      await applyEditorContent(editor, nextText);
+    } else {
+      const edit = new vscode.WorkspaceEdit();
+      const fullRange = new vscode.Range(
+        document.positionAt(0),
+        document.positionAt(document.getText().length),
+      );
+      edit.replace(document.uri, fullRange, nextText);
+      await vscode.workspace.applyEdit(edit);
+    }
+    setTicketDraftContent(ticket.id, next);
+    markDraftStatus(ticket.id, "Dirty");
+    addOfflineTicketUpdate(ticket.id, {
+      ticketId: ticket.id,
+      baseSubject: ticket.subject,
+      baseDescription: ticket.description ?? "",
+      baseMetadata: {
+        tracker: ticket.trackerName ?? "",
+        priority: ticket.priorityName ?? "",
+        status: ticket.statusName ?? "",
+        due_date: ticket.dueDate ?? "",
+        start_date: ticket.startDate ?? "",
+      },
+      lastKnownRemoteUpdatedAt: ticket.updatedAt,
+      subject: next.subject,
+      description: next.description,
+      metadata: next.metadata,
+      layout: next.layout,
+      metadataBlock: next.metadataBlock,
+    });
+    return true;
+  }
+
+  private updateQueuedTicket(ticket: Ticket, patch: TicketMetadataPatch): boolean {
+    const queued = getOfflineSyncQueue().tickets.get(ticket.id);
+    if (!queued) {
+      return false;
+    }
+    const nextMetadata = {
+      ...queued.metadata,
+      ...(patch.tracker !== undefined ? { tracker: patch.tracker } : {}),
+      ...(patch.priority !== undefined ? { priority: patch.priority } : {}),
+      ...(patch.status !== undefined ? { status: patch.status } : {}),
+      ...(patch.due_date !== undefined ? { due_date: patch.due_date } : {}),
+      ...(patch.start_date !== undefined ? { start_date: patch.start_date } : {}),
+    };
+    const nextContent: TicketEditorContent = {
+      subject: queued.subject,
+      description: queued.description,
+      metadata: nextMetadata,
+      layout: queued.layout,
+      metadataBlock: queued.metadataBlock,
+    };
+    parseTicketEditorContent(buildTicketEditorContent(nextContent), {
+      allowMissingMetadata: true,
+      fallbackMetadata: nextMetadata,
+    });
+    setTicketDraftContent(ticket.id, nextContent);
+    markDraftStatus(ticket.id, "Dirty");
+    addOfflineTicketUpdate(ticket.id, {
+      ...queued,
+      metadata: nextMetadata,
+    });
+    return true;
   }
 
   private async loadComments(ticketId: number): Promise<void> {
@@ -383,7 +619,7 @@ export class DashboardController {
     }
 
     this.refreshUnsynced();
-    this.pushTickets();
+    this.refreshTicketPresentation();
     this.opts.notifySuccess(requestId, "未同期のローカル変更を破棄しました。");
   }
 
@@ -413,6 +649,7 @@ export class DashboardController {
     const result = await runOfflineSync();
     this.opts.onTicketsRefreshed();
     this.refreshUnsynced();
+    this.refreshTicketPresentation();
     this.notifySyncAllResult(requestId, result);
   }
 
@@ -467,6 +704,7 @@ export class DashboardController {
       { onTicketCreated: () => this.opts.onTicketsRefreshed() },
     );
     this.refreshUnsynced();
+    this.refreshTicketPresentation();
     return result;
   }
 
@@ -520,6 +758,18 @@ export class DashboardController {
       totalCount: items.length,
       items,
     });
+  }
+
+  private refreshTicketPresentation(): void {
+    this.pushTickets();
+    const selectedTicketId = this.opts.store.getState().selectedTicketId;
+    if (selectedTicketId === undefined) {
+      return;
+    }
+    const selectedTicket = this.tickets.find((ticket) => ticket.id === selectedTicketId);
+    if (selectedTicket) {
+      this.opts.store.update({ selectedTicket: buildTicketDetail(selectedTicket, this.tickets) });
+    }
   }
 
   private pushTickets(): void {

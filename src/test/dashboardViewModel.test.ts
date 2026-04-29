@@ -21,6 +21,7 @@ const makeTicket = (overrides: Partial<Ticket> & { id: number }): Ticket => ({
   id: overrides.id,
   subject: overrides.subject ?? `Ticket #${overrides.id}`,
   projectId: overrides.projectId ?? 1,
+  projectName: overrides.projectName,
   statusName: overrides.statusName,
   statusId: overrides.statusId,
   priorityName: overrides.priorityName,
@@ -30,6 +31,7 @@ const makeTicket = (overrides: Partial<Ticket> & { id: number }): Ticket => ({
   assigneeName: overrides.assigneeName,
   assigneeId: overrides.assigneeId,
   dueDate: overrides.dueDate,
+  startDate: overrides.startDate,
   parentId: overrides.parentId,
   description: overrides.description,
 });
@@ -102,6 +104,7 @@ suite("Dashboard ViewModel — チケット変換", () => {
         assigneeName: "Alice",
         assigneeId: 42,
         dueDate: "2026-05-01",
+        startDate: "2026-04-01",
       }),
     ];
     const node = buildTicketDashboardNodes(tickets)[0];
@@ -114,6 +117,7 @@ suite("Dashboard ViewModel — チケット変換", () => {
     assert.strictEqual(node.assigneeName, "Alice");
     assert.strictEqual(node.assigneeId, 42);
     assert.strictEqual(node.dueDate, "2026-05-01");
+    assert.strictEqual(node.startDate, "2026-04-01");
   });
 
   test("buildTicketDetail でチケット詳細を変換する", () => {
@@ -121,15 +125,22 @@ suite("Dashboard ViewModel — チケット変換", () => {
       id: 5,
       subject: "Detail test",
       description: "Some description",
+      projectName: "Sample Project",
       statusName: "Open",
       priorityName: "Normal",
+      startDate: "2026-04-01",
+      parentId: 3,
     });
-    const detail = buildTicketDetail(ticket);
+    const detail = buildTicketDetail(ticket, [makeTicket({ id: 3, subject: "Parent issue" }), ticket]);
     assert.strictEqual(detail.id, 5);
     assert.strictEqual(detail.subject, "Detail test");
     assert.strictEqual(detail.description, "Some description");
     assert.strictEqual(detail.statusName, "Open");
     assert.strictEqual(detail.priorityName, "Normal");
+    assert.strictEqual(detail.startDate, "2026-04-01");
+    assert.strictEqual(detail.projectName, "Sample Project");
+    assert.strictEqual(detail.parentId, 3);
+    assert.strictEqual(detail.parentSubject, "Parent issue");
   });
 });
 
