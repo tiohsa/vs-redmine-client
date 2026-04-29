@@ -34,13 +34,14 @@ import { resolveProjectTemplateContent } from "../utils/templateResolver";
 import { rememberTicketSummary } from "./ticketSummaryStore";
 
 export const buildTicketPreviewContent = (
-  ticket: Pick<Ticket, "subject" | "description" | "trackerName" | "priorityName" | "statusName" | "dueDate">,
+  ticket: Pick<Ticket, "subject" | "description" | "trackerName" | "priorityName" | "statusName" | "dueDate" | "startDate">,
 ): string => {
   const metadata: IssueMetadata = {
     tracker: ticket.trackerName ?? "",
     priority: ticket.priorityName ?? "",
     status: ticket.statusName ?? "",
     due_date: ticket.dueDate ?? "",
+    start_date: ticket.startDate ?? "",
   };
   return buildTicketEditorContent({
     subject: ticket.subject,
@@ -293,6 +294,7 @@ export const showTicketPreview = async (
       priority: ticket.priorityName ?? "",
       status: ticket.statusName ?? "",
       due_date: ticket.dueDate ?? "",
+      start_date: ticket.startDate ?? "",
     },
   };
   const draftContent = getTicketDraftContent(ticket.id);
@@ -347,4 +349,3 @@ export const showTicketComment = async (
   }
   return editor;
 };
-

@@ -140,7 +140,7 @@ body.vscode-high-contrast .tab.active{border-color:var(--app-border);background:
 .filter-chip-x::before{transform:translate(-50%,-50%) rotate(45deg)}
 .filter-chip-x::after{transform:translate(-50%,-50%) rotate(-45deg)}
 
-#ticket-scroll{flex:1;overflow-y:auto;min-height:0}
+#ticket-scroll{flex:1;overflow-y:auto;min-height:0;border-bottom:1px solid color-mix(in srgb,var(--app-border) 75%,var(--app-text) 25%)}
 .ticket-row{position:relative;display:flex;align-items:center;gap:6px;padding:6px 12px;cursor:pointer;border-bottom:1px solid var(--app-border);transition:background .1s}
 .ticket-row:hover{background:var(--app-hover)}
 .ticket-row.selected{background:var(--app-selected)}
@@ -171,7 +171,8 @@ body.vscode-high-contrast .badge.priority-high,body.vscode-high-contrast .badge.
 .load-more-row{padding:10px 12px;text-align:center;color:var(--app-accent);font-size:12px;cursor:pointer;font-weight:500}
 .load-more-row:hover{text-decoration:underline}
 
-.ticket-detail-card{flex-shrink:0;margin:0 8px 8px;padding:10px;background:var(--app-surface);border:1px solid var(--app-card-border);border-radius:8px;box-shadow:var(--app-shadow);display:flex;flex-direction:column;gap:6px}
+.ticket-detail-card{flex-shrink:0;margin:0 8px 8px;padding:10px;background:var(--app-surface);border:1px solid var(--app-card-border);border-top:3px solid color-mix(in srgb,var(--app-accent) 55%,var(--app-border) 45%);border-radius:8px;box-shadow:var(--app-shadow);display:flex;flex-direction:column;gap:6px}
+body.vscode-high-contrast .ticket-detail-card{border-top-color:var(--app-border)}
 .detail-head{display:flex;align-items:flex-start;gap:8px;justify-content:space-between}
 .detail-title{display:flex;align-items:center;gap:6px;font-size:12.5px;font-weight:700;line-height:1.35;min-width:0}
 .detail-title span:last-child{overflow:hidden;text-overflow:ellipsis;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical}
@@ -192,11 +193,6 @@ body.vscode-high-contrast .detail-input[type="date"]::-webkit-calendar-picker-in
 .detail-select:disabled,.detail-input:disabled{color:var(--app-text-readable-muted);opacity:.75}
 .detail-select:focus,.detail-input:focus{outline:1px solid var(--app-focus);outline-offset:1px}
 .detail-meta strong{font-size:11.5px;font-weight:600;color:var(--app-text)}
-.detail-comments{display:flex;flex-direction:column;gap:4px;padding-top:4px}
-.detail-comments-title{font-size:11.5px;font-weight:700;color:var(--app-text)}
-.detail-comment{font-size:11.5px;color:var(--app-text);line-height:1.35;word-break:break-word}
-.detail-comment span{color:var(--app-text-readable-muted);font-weight:600}
-
 .ticket-actions{position:relative;display:inline-flex;align-items:center;flex-shrink:0;margin-left:2px}
 .ticket-action-btn{opacity:.45;pointer-events:auto;width:20px;height:20px;display:inline-flex;align-items:center;justify-content:center;border:none;background:transparent;color:var(--app-text-readable-muted);border-radius:var(--mm-radius-button);cursor:pointer;flex-shrink:0;transition:opacity .12s,background .12s,color .12s}
 .ticket-row:hover .ticket-action-btn,.ticket-row:focus-within .ticket-action-btn,.ticket-row.selected .ticket-action-btn,.ticket-action-btn[aria-expanded="true"]{opacity:1}

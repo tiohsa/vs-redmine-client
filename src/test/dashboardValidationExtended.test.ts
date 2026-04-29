@@ -111,6 +111,20 @@ suite("Dashboard バリデーション拡張", () => {
     assert.strictEqual(r.ok, false);
   });
 
+  test("ticket.syncSelected: ticketId が正整数なら受け入れられる", () => {
+    const r = validateDashboardMessage({ type: "ticket.syncSelected", requestId: "r", ticketId: 42 });
+    assert.strictEqual(r.ok, true);
+    if (r.ok) {
+      assert.strictEqual(r.request.type, "ticket.syncSelected");
+      assert.strictEqual(r.request.ticketId, 42);
+    }
+  });
+
+  test("ticket.syncSelected: ticketId が不正なら拒否される", () => {
+    const r = validateDashboardMessage({ type: "ticket.syncSelected", requestId: "r", ticketId: 0 });
+    assert.strictEqual(r.ok, false);
+  });
+
   test("project.select: projectId が 0 だと拒否される", () => {
     const r = validateDashboardMessage({ type: "project.select", requestId: "r", projectId: 0 });
     assert.strictEqual(r.ok, false);

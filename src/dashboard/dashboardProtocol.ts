@@ -182,6 +182,7 @@ export type DashboardRequest =
   | { type: "ticket.create"; requestId: string }
   | { type: "ticket.createChild"; requestId: string; parentTicketId: number }
   | { type: "ticket.metadata.update"; requestId: string; ticketId: number; patch: TicketMetadataPatch }
+  | { type: "ticket.syncSelected"; requestId: string; ticketId: number }
   | { type: "comment.add"; requestId: string; ticketId: number }
   | { type: "comment.edit"; requestId: string; ticketId: number; commentId: number }
   | { type: "comment.reload"; requestId: string; ticketId: number }

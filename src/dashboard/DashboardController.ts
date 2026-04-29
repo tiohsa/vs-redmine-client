@@ -133,6 +133,9 @@ export class DashboardController {
       case "ticket.metadata.update":
         await this.updateTicketMetadata(req.requestId, req.ticketId, req.patch);
         break;
+      case "ticket.syncSelected":
+        await this.handleSyncSelectedTicket(req.requestId, req.ticketId);
+        break;
       case "comment.add":
         void this.selectTicket(req.ticketId);
         await addCommentFromList(req.ticketId);
@@ -594,6 +597,58 @@ export class DashboardController {
     this.opts.notifyOperationStarted(requestId, "同期中...");
     const result = await this.syncOne(key);
     this.notifySyncOneResult(requestId, result);
+  }
+
+  private async handleSyncSelectedTicket(requestId: string, ticketId: number): Promise<void> {
+    const keys = this.buildSelectedTicketSyncKeys(ticketId);
+    if (keys.length === 0) {
+      this.opts.notifySuccess(requestId, "同期する未同期変更はありません。");
+      return;
+    }
+
+    this.opts.notifyOperationStarted(requestId, "同期中...");
+    const results: Array<SyncUnsyncedFileResult | undefined> = [];
+    for (const key of keys) {
+      results.push(await this.syncOne(key));
+    }
+
+    const failures = results.filter(
+      (result) => !result || result.status === "failed" || result.status === "conflict",
+    );
+    if (failures.length > 0) {
+      this.opts.notifyError(
+        requestId,
+        `一部の同期に失敗しました。成功: ${results.length - failures.length}件 / 失敗: ${failures.length}件`,
+      );
+      return;
+    }
+
+    const synced = results.filter((result) => result?.status === "success").length;
+    if (synced === 0) {
+      this.opts.notifySuccess(requestId, "変更はありませんでした。");
+      return;
+    }
+    this.opts.notifySuccess(requestId, `同期が完了しました。同期: ${synced}件`);
+  }
+
+  private buildSelectedTicketSyncKeys(ticketId: number): DashboardUnsyncedKey[] {
+    const queue = getOfflineSyncQueue();
+    const keys: DashboardUnsyncedKey[] = [];
+    if (queue.tickets.has(ticketId)) {
+      keys.push({ kind: "ticket", ticketId });
+    }
+    for (const comment of queue.comments) {
+      if (comment.ticketId !== ticketId) {
+        continue;
+      }
+      keys.push({
+        kind: "comment",
+        ticketId,
+        commentId: comment.commentId,
+        documentUri: comment.documentUri,
+      });
+    }
+    return keys;
   }
 
   private async handleDiscardOne(requestId: string, key: DashboardUnsyncedKey): Promise<void> {

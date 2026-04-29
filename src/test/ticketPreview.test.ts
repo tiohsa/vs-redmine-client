@@ -26,6 +26,33 @@ suite("Ticket preview", () => {
     assert.ok(content.includes("issue:"));
   });
 
+  test("renders start_date in ticket file metadata", () => {
+    const content = buildTicketPreviewContent({
+      subject: "Sample ticket",
+      description: "Details",
+      trackerName: "Task",
+      priorityName: "Normal",
+      statusName: "In Progress",
+      dueDate: "2025-12-31",
+      startDate: "2025-12-01",
+    });
+
+    assert.ok(content.includes("  start_date: 2025-12-01"));
+  });
+
+  test("omits empty start_date from ticket file metadata", () => {
+    const content = buildTicketPreviewContent({
+      subject: "Sample ticket",
+      description: "Details",
+      trackerName: "Task",
+      priorityName: "Normal",
+      statusName: "In Progress",
+      dueDate: "2025-12-31",
+    });
+
+    assert.ok(!content.includes("start_date"));
+  });
+
   test("appends trailing blank lines for editing", () => {
     assert.strictEqual(withTrailingEditLines("Line"), "Line\n\n");
     assert.strictEqual(withTrailingEditLines("Line\n"), "Line\n\n");

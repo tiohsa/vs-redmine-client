@@ -188,6 +188,14 @@ export const validateDashboardMessage = (raw: unknown): ValidationResult => {
       return { ok: true, request: { type, requestId, ticketId, patch: patch as import("./dashboardProtocol").TicketMetadataPatch } };
     }
 
+    case "ticket.syncSelected": {
+      const ticketId = raw["ticketId"];
+      if (!isPositiveInt(ticketId)) {
+        return { ok: false, reason: "ticket.syncSelected: ticketId must be a positive integer" };
+      }
+      return { ok: true, request: { type, requestId, ticketId } };
+    }
+
     case "comment.add": {
       const ticketId = raw["ticketId"];
       if (!isPositiveInt(ticketId)) {

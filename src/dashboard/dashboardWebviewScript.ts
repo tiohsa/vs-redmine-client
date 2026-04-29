@@ -300,12 +300,6 @@ function renderTicketDetail(){
   const parentLabel = ticket.parentId
     ? '<div class="detail-parent">Parent: #'+ticket.parentId+(ticket.parentSubject ? ' '+esc(ticket.parentSubject) : '')+'</div>'
     : '';
-  const comments = state.comments?.ticketId === ticket.id ? (state.comments.items || []).slice(0,3) : [];
-  const latestComments = comments.length
-    ? '<div class="detail-comments"><div class="detail-comments-title">Latest comments</div>'
-      + comments.map(cm => '<div class="detail-comment"><span>'+esc((cm.updatedAt || cm.createdAt || '').substring(0,10))+' '+esc(cm.authorName)+':</span> '+esc(cm.body).substring(0,120)+'</div>').join('')
-      + '</div>'
-    : '';
   const options = state.metadataOptions || {trackers:[],priorities:[],statuses:[]};
   const readonlyHint = metadataOptionsReady() ? '' : '<div class="detail-readonly">選択肢を取得できないため編集できません。</div>';
   const expanded = ticketDetailExpanded
@@ -318,7 +312,6 @@ function renderTicketDetail(){
       + '<div class="detail-meta"><span>Sync</span><strong>'+esc(ticket.syncState)+'</strong></div>'
       + (ticket.lastSyncedAt ? '<div class="detail-meta"><span>Last synced</span><strong>'+esc(ticket.lastSyncedAt.substring(0,19).replace('T',' '))+'</strong></div>' : '')
       + readonlyHint
-      + latestComments
       + '</div>'
     : '';
   card.classList.remove('hidden');
@@ -341,7 +334,7 @@ function renderTicketDetail(){
   });
   card.querySelector('#detail-open-btn')?.addEventListener('click',()=>req('ticket.openEditor',{ticketId:ticket.id}));
   card.querySelector('#detail-comment-btn')?.addEventListener('click',()=>req('comment.add',{ticketId:ticket.id}));
-  card.querySelector('#detail-sync-btn')?.addEventListener('click',()=>req('unsynced.syncOne',{key:{kind:'ticket',ticketId:ticket.id}}));
+  card.querySelector('#detail-sync-btn')?.addEventListener('click',()=>req('ticket.syncSelected',{ticketId:ticket.id}));
   card.querySelectorAll('[data-metadata-field]').forEach(input=>{
     input.addEventListener('change',()=>{
       const field = input.dataset.metadataField;

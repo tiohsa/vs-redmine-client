@@ -26,7 +26,8 @@ suite("Dashboard Webview 改善", () => {
     assert.ok(buildDashboardHtml("nonce").includes("ticket-detail-card"));
     assert.ok(dashboardWebviewScript.includes("function renderTicketDetail()"));
     assert.ok(dashboardWebviewScript.includes("ticket.metadata.update"));
-    assert.ok(dashboardWebviewScript.includes("Latest comments"));
+    assert.ok(dashboardWebviewScript.includes("ticket.syncSelected"));
+    assert.ok(!dashboardWebviewScript.includes("Latest comments"));
   });
 
   test("開始日と日付ピッカー視認性のスタイルを持つ", () => {
@@ -34,5 +35,11 @@ suite("Dashboard Webview 改善", () => {
     assert.ok(dashboardWebviewScript.includes('data-metadata-field="start_date"'));
     assert.ok(dashboardStyles.includes('detail-input[type="date"]::-webkit-calendar-picker-indicator'));
     assert.ok(dashboardStyles.includes("body.vscode-high-contrast"));
+  });
+
+  test("チケット一覧と詳細カードの境界線を強調する", () => {
+    assert.ok(dashboardStyles.includes("#ticket-scroll{flex:1;overflow-y:auto;min-height:0;border-bottom:"));
+    assert.ok(dashboardStyles.includes("border-top:3px solid"));
+    assert.ok(dashboardStyles.includes("body.vscode-high-contrast .ticket-detail-card"));
   });
 });
