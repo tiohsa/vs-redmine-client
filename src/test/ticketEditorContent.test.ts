@@ -22,6 +22,7 @@ suite("Ticket editor content", () => {
         "  tracker:   Task",
         "  priority:  Normal",
         "  status:    In Progress",
+        "  start_date: ",
         "  due_date:  2025-12-31",
         "---",
         "",
@@ -41,6 +42,7 @@ suite("Ticket editor content", () => {
         "  priority:  Normal",
         "  status:    In Progress",
         "  due_date:  2025-12-31",
+        "  start_date: ",
         "---",
         "",
         "# Title",
@@ -55,7 +57,8 @@ suite("Ticket editor content", () => {
       description: "Line 1\nLine 2",
       metadata: {
         ...buildIssueMetadataFixture(),
-        keyOrder: ["tracker", "priority", "status", "due_date"],
+        start_date: "",
+        keyOrder: ["tracker", "priority", "status", "due_date", "start_date"],
       },
       layout: "metadata-first",
       metadataBlock: "present",
@@ -74,6 +77,7 @@ suite("Ticket editor content", () => {
         "  priority:  Normal",
         "  status:    In Progress",
         "  due_date:  2025-12-31",
+        "  start_date: ",
         "---",
         "",
         "Line 1",
@@ -86,7 +90,8 @@ suite("Ticket editor content", () => {
       description: "Line 1\nLine 2",
       metadata: {
         ...buildIssueMetadataFixture(),
-        keyOrder: ["tracker", "priority", "status", "due_date"],
+        start_date: "",
+        keyOrder: ["tracker", "priority", "status", "due_date", "start_date"],
       },
       layout: "subject-first",
       metadataBlock: "present",
@@ -113,7 +118,24 @@ suite("Ticket editor content", () => {
     const parsed = parseTicketEditorContent(input);
     const rebuilt = buildTicketEditorContent(parsed);
 
-    assert.strictEqual(rebuilt, input);
+    assert.strictEqual(
+      rebuilt,
+      [
+        "---",
+        "issue:",
+        "  tracker:   Task",
+        "  priority:  Normal",
+        "  status:    In Progress",
+        "  due_date:  2025-12-31",
+        "  start_date: ",
+        "---",
+        "",
+        "# Title",
+        "",
+        "",
+        "Body",
+      ].join("\n"),
+    );
   });
 
   test("preserves legacy subject-first ordering when rebuilt", () => {
@@ -134,7 +156,23 @@ suite("Ticket editor content", () => {
     const parsed = parseTicketEditorContent(input);
     const rebuilt = buildTicketEditorContent(parsed);
 
-    assert.strictEqual(rebuilt, input);
+    assert.strictEqual(
+      rebuilt,
+      [
+        "# Title",
+        "",
+        "---",
+        "issue:",
+        "  tracker:   Task",
+        "  priority:  Normal",
+        "  status:    In Progress",
+        "  due_date:  2025-12-31",
+        "  start_date: ",
+        "---",
+        "",
+        "Body",
+      ].join("\n"),
+    );
   });
 
   test("keeps legacy content without metadata block", () => {

@@ -1,5 +1,5 @@
 import * as assert from "assert";
-import { parseIssueMetadataYaml } from "../views/ticketMetadataYaml";
+import { parseIssueMetadataYaml, serializeIssueMetadataYaml } from "../views/ticketMetadataYaml";
 
 suite("Ticket metadata validation", () => {
   test("rejects missing issue block", () => {
@@ -64,6 +64,32 @@ suite("Ticket metadata validation", () => {
     );
 
     assert.strictEqual(parsed.due_date, "");
+  });
+
+  test("allows empty start_date", () => {
+    const parsed = parseIssueMetadataYaml(
+      [
+        "issue:",
+        "  tracker: Task",
+        "  priority: Normal",
+        "  status: In Progress",
+        "  start_date:",
+        "  due_date:",
+      ].join("\n"),
+    );
+
+    assert.strictEqual(parsed.start_date, "");
+  });
+
+  test("serializes missing start_date as an empty field", () => {
+    const serialized = serializeIssueMetadataYaml({
+      tracker: "Task",
+      priority: "Normal",
+      status: "In Progress",
+      due_date: "",
+    });
+
+    assert.ok(serialized.includes("  start_date: "));
   });
 
   test("allows numeric parent", () => {

@@ -38,7 +38,7 @@ suite("Ticket preview", () => {
     assert.ok(content.includes("  start_date: 2025-12-01"));
   });
 
-  test("omits empty start_date from ticket file metadata", () => {
+  test("renders empty start_date in ticket file metadata", () => {
     const content = buildTicketPreviewContent({
       subject: "Sample ticket",
       description: "Details",
@@ -48,7 +48,7 @@ suite("Ticket preview", () => {
       dueDate: "2025-12-31",
     });
 
-    assert.ok(!content.includes("start_date"));
+    assert.ok(content.includes("  start_date: "));
   });
 
   test("appends trailing blank lines for editing", () => {

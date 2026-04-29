@@ -107,7 +107,7 @@ const stripInlineComment = (value: string): string => {
 };
 
 const requireValue = (key: IssueMetadataKey, value: string): void => {
-  if (key !== "due_date" && value.length === 0) {
+  if (key !== "due_date" && key !== "start_date" && value.length === 0) {
     throw new Error(`Metadata value required: ${key}`);
   }
   if (key === "due_date" && value.length > 0 && !/^\d{4}-\d{2}-\d{2}$/.test(value)) {
@@ -309,7 +309,7 @@ export const serializeIssueMetadataYaml = (metadata: IssueMetadata): string => {
 
 const serializeField = (lines: string[], key: IssueMetadataKey, metadata: IssueMetadata): void => {
   const value = metadata[key];
-  if (value === undefined) {
+  if (value === undefined && key !== "start_date") {
     return;
   }
 
@@ -327,9 +327,7 @@ const serializeField = (lines: string[], key: IssueMetadataKey, metadata: IssueM
       lines.push(`  due_date:  ${value ?? ""}`);
       break;
     case "start_date":
-      if (value) {
-        lines.push(`  start_date: ${value}`);
-      }
+      lines.push(`  start_date: ${value ?? ""}`);
       break;
     case "done_ratio":
       lines.push(`  done_ratio: ${value}`);

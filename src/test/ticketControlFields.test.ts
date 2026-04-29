@@ -107,6 +107,15 @@ suite("New ticket draft includes issue_id", () => {
     );
   });
 
+  test("serialized new ticket content contains empty start_date", () => {
+    const serialized = buildTicketEditorContent({
+      ...buildNewTicketDraftContent({ projectId: 12 }),
+      subject: "New ticket",
+    });
+
+    assert.ok(serialized.includes("  start_date: "), `Expected start_date in:\n${serialized}`);
+  });
+
   test("round-trip: serialized empty issue_id parses back as null", () => {
     const content = buildNewTicketDraftContent({ projectId: 12 });
     const metadata = buildIssueMetadataFixture();

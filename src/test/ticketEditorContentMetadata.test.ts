@@ -16,7 +16,7 @@ suite("Ticket editor content metadata", () => {
 
     const parsed = parseTicketEditorContent(content);
     const { keyOrder, ...parsedMetadata } = parsed.metadata;
-    assert.deepStrictEqual(parsedMetadata, metadata);
+    assert.deepStrictEqual(parsedMetadata, { ...metadata, start_date: "" });
   });
 
   test("parses metadata and description from editor content", () => {

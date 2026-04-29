@@ -439,7 +439,7 @@ suite("Ticket save sync", () => {
       buildTicketEditorContent({
         subject: "Reloaded",
         description: "New Body",
-        metadata: buildIssueMetadataFixture(),
+        metadata: buildIssueMetadataFixture({ start_date: "" }),
       }),
     );
     const draft = getTicketDraft(5);
