@@ -50,9 +50,19 @@ import {
   parseTicketEditorContent,
   type TicketEditorContent,
 } from "../views/ticketEditorContent";
-import { getTicketEditors, registerTicketDocument } from "../views/ticketEditorRegistry";
+import { getTicketEditors, getTicketIdForEditor, registerTicketDocument } from "../views/ticketEditorRegistry";
 import { applyEditorContent } from "../views/ticketPreview";
+import { syncNewTicketDraft } from "../views/ticketSaveSync";
+import type { TicketSaveResult } from "../views/ticketSaveTypes";
 import type { SyncStatus } from "../app/syncController";
+
+export interface ComposerSyncTestHooks {
+  syncFn?: (editor: vscode.TextEditor) => Promise<TicketSaveResult>;
+  getTicketIdFn?: (editor: vscode.TextEditor) => number | undefined;
+  findEditorFn?: (draftUri: string) => vscode.TextEditor | undefined;
+  openEditorFn?: (uri: vscode.Uri) => Promise<vscode.TextEditor>;
+  afterCreatedFn?: (createdId: number) => Promise<void>;
+}
 
 export interface DashboardControllerOptions {
   store: DashboardStateStore;
@@ -61,6 +71,7 @@ export interface DashboardControllerOptions {
   notifyError: (requestId: string, msg: string) => void;
   notifyToast: (level: "info" | "warning" | "error" | "success", msg: string) => void;
   onTicketsRefreshed: () => void;
+  _composerSyncTestHooks?: ComposerSyncTestHooks;
 }
 
 export class DashboardController {
@@ -68,7 +79,6 @@ export class DashboardController {
   private projects: DashboardProjectNode[] = [];
   private metadataOptionsLoaded = false;
   private totalCount = 0;
-  private lastCreatedTicketIdFromComposer?: number;
   private readonly settingsCtrl: SettingsController;
   private readonly disposables: vscode.Disposable[] = [];
 
@@ -697,37 +707,83 @@ export class DashboardController {
   }
 
   private async handleSyncNewTicketDraftFromComposer(requestId: string): Promise<void> {
-    const queue = getOfflineSyncQueue();
-    const entry = queue.newTickets[0];
+    const workPanel = this.opts.store.getState().workPanel;
+    if (!workPanel || (workPanel.mode !== "newTicket" && workPanel.mode !== "childTicket")) {
+      this.opts.notifyError(requestId, "コンポーザーが開いていません。");
+      return;
+    }
+
+    const draftUri = workPanel.draftUri;
+    if (!draftUri) {
+      this.opts.notifyError(requestId, "下書きファイルがまだ作成されていません。まずドラフトを作成してください。");
+      return;
+    }
+
     this.opts.notifyOperationStarted(requestId, "同期中...");
-    if (entry?.documentUri) {
-      const result = await this.syncOne({ kind: "newTicket", documentUri: entry.documentUri });
-      if (result?.status === "success" && result.kind === "newTicket" && typeof result.id === "number") {
-        this.lastCreatedTicketIdFromComposer = result.id;
+
+    const hooks = this.opts._composerSyncTestHooks;
+    const findEditorFn = hooks?.findEditorFn ??
+      ((uri: string) => vscode.window.visibleTextEditors.find((e) => e.document.uri.toString() === uri));
+    const openEditorFn = hooks?.openEditorFn ??
+      (async (uri: vscode.Uri): Promise<vscode.TextEditor> => {
+        const doc = await vscode.workspace.openTextDocument(uri);
+        return vscode.window.showTextDocument(doc, { preview: false });
+      });
+    const syncFn = hooks?.syncFn ?? ((editor: vscode.TextEditor) => syncNewTicketDraft({ editor }));
+    const getTicketIdFn = hooks?.getTicketIdFn ?? getTicketIdForEditor;
+
+    let editor = findEditorFn(draftUri);
+    if (!editor) {
+      editor = await openEditorFn(vscode.Uri.parse(draftUri));
+    }
+
+    const result = await syncFn(editor);
+
+    if (result.status === "created") {
+      const createdId = getTicketIdFn(editor);
+      removeOfflineNewTicket(draftUri);
+      this.refreshUnsynced();
+      if (hooks?.afterCreatedFn) {
+        await hooks.afterCreatedFn(createdId ?? 0);
+        this.opts.onTicketsRefreshed();
+        this.opts.notifySuccess(requestId, "チケットを作成しました。");
+      } else {
+        await this.loadTickets();
+        this.opts.onTicketsRefreshed();
+        if (createdId !== undefined && createdId > 0) {
+          this.opts.store.update({ workPanel: { mode: "detail", ticketId: createdId } });
+          await this.selectTicket(createdId);
+          this.opts.notifySuccess(requestId, "チケットを作成しました。");
+        } else {
+          this.opts.notifySuccess(
+            requestId,
+            "チケットを作成しました。ただし作成後のチケットIDを特定できなかったため、一覧を更新して確認してください。",
+          );
+        }
       }
-      this.notifySyncOneResult(requestId, result);
       return;
     }
 
-    const createdTicketId = this.lastCreatedTicketIdFromComposer;
-    if (!createdTicketId) {
-      this.opts.notifySuccess(requestId, "同期する未同期変更はありません。");
+    if (result.status === "failed") {
+      const raw = result.message ?? "不明なエラー";
+      const displayMsg = raw === "Ticket subject is required."
+        ? "件名が未入力です。Markdownの「# 」見出し行に件名を入力してから同期してください。"
+        : `同期に失敗しました: ${raw}`;
+      this.opts.notifyError(requestId, displayMsg);
       return;
     }
 
-    const openTicketRecord = getTicketEditors(createdTicketId)
-      .filter((record) => record.contentType === "ticket")
-      .sort((a, b) => b.lastActiveAt - a.lastActiveAt)[0];
-    if (!openTicketRecord) {
-      this.opts.notifySuccess(requestId, "同期する未同期変更はありません。");
+    if (result.status === "queued") {
+      this.opts.notifySuccess(requestId, "オフライン同期キューに追加しました。");
       return;
     }
 
-    const status = await vscode.commands.executeCommand<SyncStatus | undefined>(
-      "redmine-client.syncOpenEditor",
-      { uri: openTicketRecord.uri },
-    );
-    this.notifySyncStatusResult(requestId, status);
+    if (result.status === "no_change") {
+      this.opts.notifySuccess(requestId, "変更はありませんでした。");
+      return;
+    }
+
+    this.opts.notifyError(requestId, `同期に失敗しました: ${result.message ?? "不明なエラー"}`);
   }
 
   private notifySyncStatusResult(requestId: string, status: SyncStatus | undefined): void {
@@ -903,7 +959,6 @@ export class DashboardController {
   }
 
   private async openNewTicketComposer(): Promise<void> {
-    this.lastCreatedTicketIdFromComposer = undefined;
     const project = this.getResolvedProject();
     if (!project) {
       this.opts.notifyToast("warning", "チケット作成前にプロジェクトを選択してください。");
@@ -926,7 +981,6 @@ export class DashboardController {
   }
 
   private async openChildTicketComposer(parentTicketId: number): Promise<void> {
-    this.lastCreatedTicketIdFromComposer = undefined;
     const parent = this.tickets.find((t) => t.id === parentTicketId);
     if (!parent) {
       this.opts.notifyError("ticket.createChild", "親チケットが見つかりません。");
@@ -1016,6 +1070,7 @@ export class DashboardController {
       priorities?: Array<{ id: number; name: string }>;
       statuses?: Array<{ id: number; name: string }>;
       values?: NewTicketComposerValues;
+      draftUri?: string;
       error?: string;
     },
   ): void {
@@ -1101,7 +1156,7 @@ export class DashboardController {
       return;
     }
     try {
-      await openNewTicketDraft({
+      const uri = await openNewTicketDraft({
         content: buildNewTicketDraftContent({
           projectId: workPanel.projectId,
           initialContent: {
@@ -1120,6 +1175,7 @@ export class DashboardController {
         }),
         projectId: workPanel.projectId,
       });
+      this.updateWorkPanelComposer({ draftUri: uri.toString() });
     } catch (err) {
       const msg = (err as Error).message;
       this.opts.notifyError(requestId, `ドラフトの作成に失敗しました: ${msg}`);

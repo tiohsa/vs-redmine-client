@@ -180,12 +180,14 @@ export const addOfflineNewTicket = (update: {
       (item) => item.documentUri === update.documentUri,
     );
     if (index !== -1) {
-      queue.newTickets[index] = { ...queue.newTickets[index], ...update };
+      const existing = queue.newTickets[index];
+      queue.newTickets.splice(index, 1);
+      queue.newTickets.unshift({ ...existing, ...update });
       persist();
       return;
     }
   }
-  queue.newTickets.push(update);
+  queue.newTickets.unshift(update);
   persist();
 };
 

@@ -97,7 +97,7 @@ const isAlreadySyncedDocument = (document: vscode.TextDocument): boolean => {
 export const openNewTicketDraft = async (input: {
   content: TicketEditorContent;
   projectId?: number;
-}): Promise<void> => {
+}): Promise<vscode.Uri> => {
   const knownUri =
     getNewTicketDraftUri() ?? buildNewTicketDraftUri(getEditorBasePath());
   let existing = findOpenDocument(knownUri);
@@ -132,6 +132,8 @@ export const openNewTicketDraft = async (input: {
       }
     }
   }
+
+  return document.uri;
 };
 
 export const createTicketFromList = async (): Promise<void> => {

@@ -20,6 +20,13 @@ export type SyncUnsyncedFileResult =
   | { status: "conflict"; kind: "ticket" | "newTicket" | "comment"; id?: number }
   | { status: "failed"; kind: "ticket" | "newTicket" | "comment"; message?: string };
 
+const normalizeNewTicketSyncFailureMessage = (message?: string): string => {
+  if (message === "Ticket subject is required.") {
+    return "件名が未入力です。Markdownファイルの「# 」行に件名を入力して保存してから同期してください。";
+  }
+  return message ?? "不明なエラー";
+};
+
 export const syncUnsyncedFile = async (
   item: { syncKey: UnsyncedFileSyncKey },
   options: { onTicketCreated?: () => void; onSubjectUpdated?: (ticketId: number, subject: string) => void } = {},
@@ -94,8 +101,9 @@ export const syncUnsyncedFile = async (
         return { status: "success", kind: "newTicket", id: createdId };
       }
     } else {
-      showWarning(`同期に失敗しました: ${result.message ?? "不明なエラー"}`);
-      return { status: "failed", kind: "newTicket", message: result.message };
+      const message = normalizeNewTicketSyncFailureMessage(result.message);
+      showWarning(`同期に失敗しました: ${message}`);
+      return { status: "failed", kind: "newTicket", message };
     }
   }
 
