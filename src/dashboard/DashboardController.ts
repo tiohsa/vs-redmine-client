@@ -52,6 +52,7 @@ import {
 } from "../views/ticketEditorContent";
 import { getTicketEditors, registerTicketDocument } from "../views/ticketEditorRegistry";
 import { applyEditorContent } from "../views/ticketPreview";
+import type { SyncStatus } from "../app/syncController";
 
 export interface DashboardControllerOptions {
   store: DashboardStateStore;
@@ -67,6 +68,7 @@ export class DashboardController {
   private projects: DashboardProjectNode[] = [];
   private metadataOptionsLoaded = false;
   private totalCount = 0;
+  private lastCreatedTicketIdFromComposer?: number;
   private readonly settingsCtrl: SettingsController;
   private readonly disposables: vscode.Disposable[] = [];
 
@@ -638,7 +640,33 @@ export class DashboardController {
   private async handleSyncSelectedTicket(requestId: string, ticketId: number): Promise<void> {
     const keys = this.buildSelectedTicketSyncKeys(ticketId);
     if (keys.length === 0) {
-      this.opts.notifySuccess(requestId, "同期する未同期変更はありません。");
+      const openTicketRecord = getTicketEditors(ticketId)
+        .filter((record) => record.contentType === "ticket")
+        .sort((a, b) => b.lastActiveAt - a.lastActiveAt)[0];
+      if (!openTicketRecord) {
+        this.opts.notifySuccess(requestId, "同期する未同期変更はありません。");
+        return;
+      }
+      this.opts.notifyOperationStarted(requestId, "同期中...");
+      const status = await vscode.commands.executeCommand<SyncStatus | undefined>(
+        "redmine-client.syncOpenEditor",
+        { uri: openTicketRecord.uri },
+      );
+      switch (status) {
+        case "uploaded":
+          this.opts.notifySuccess(requestId, "同期が完了しました。");
+          break;
+        case "noChange":
+          this.opts.notifySuccess(requestId, "変更はありませんでした。");
+          break;
+        case "conflict":
+          this.opts.notifyError(requestId, "リモートの変更と競合しています。ファイルを開いて確認してください。");
+          break;
+        case "failed":
+        default:
+          this.opts.notifyError(requestId, "同期に失敗しました。VS Code の通知をご確認ください。");
+          break;
+      }
       return;
     }
 
@@ -664,20 +692,61 @@ export class DashboardController {
       this.opts.notifySuccess(requestId, "変更はありませんでした。");
       return;
     }
+    this.opts.onTicketsRefreshed();
     this.opts.notifySuccess(requestId, `同期が完了しました。同期: ${synced}件`);
   }
 
   private async handleSyncNewTicketDraftFromComposer(requestId: string): Promise<void> {
     const queue = getOfflineSyncQueue();
     const entry = queue.newTickets[0];
-    if (!entry?.documentUri) {
+    this.opts.notifyOperationStarted(requestId, "同期中...");
+    if (entry?.documentUri) {
+      const result = await this.syncOne({ kind: "newTicket", documentUri: entry.documentUri });
+      if (result?.status === "success" && result.kind === "newTicket" && typeof result.id === "number") {
+        this.lastCreatedTicketIdFromComposer = result.id;
+      }
+      this.notifySyncOneResult(requestId, result);
+      return;
+    }
+
+    const createdTicketId = this.lastCreatedTicketIdFromComposer;
+    if (!createdTicketId) {
       this.opts.notifySuccess(requestId, "同期する未同期変更はありません。");
       return;
     }
 
-    this.opts.notifyOperationStarted(requestId, "同期中...");
-    const result = await this.syncOne({ kind: "newTicket", documentUri: entry.documentUri });
-    this.notifySyncOneResult(requestId, result);
+    const openTicketRecord = getTicketEditors(createdTicketId)
+      .filter((record) => record.contentType === "ticket")
+      .sort((a, b) => b.lastActiveAt - a.lastActiveAt)[0];
+    if (!openTicketRecord) {
+      this.opts.notifySuccess(requestId, "同期する未同期変更はありません。");
+      return;
+    }
+
+    const status = await vscode.commands.executeCommand<SyncStatus | undefined>(
+      "redmine-client.syncOpenEditor",
+      { uri: openTicketRecord.uri },
+    );
+    this.notifySyncStatusResult(requestId, status);
+  }
+
+  private notifySyncStatusResult(requestId: string, status: SyncStatus | undefined): void {
+    switch (status) {
+      case "uploaded":
+        this.opts.onTicketsRefreshed();
+        this.opts.notifySuccess(requestId, "同期が完了しました。");
+        break;
+      case "noChange":
+        this.opts.notifySuccess(requestId, "変更はありませんでした。");
+        break;
+      case "conflict":
+        this.opts.notifyError(requestId, "リモートの変更と競合しています。ファイルを開いて確認してください。");
+        break;
+      case "failed":
+      default:
+        this.opts.notifyError(requestId, "同期に失敗しました。VS Code の通知をご確認ください。");
+        break;
+    }
   }
 
   private buildSelectedTicketSyncKeys(ticketId: number): DashboardUnsyncedKey[] {
@@ -734,6 +803,7 @@ export class DashboardController {
     }
     switch (result.status) {
       case "success":
+        this.opts.onTicketsRefreshed();
         this.opts.notifySuccess(requestId, "同期が完了しました。");
         break;
       case "no_change":
@@ -833,6 +903,7 @@ export class DashboardController {
   }
 
   private async openNewTicketComposer(): Promise<void> {
+    this.lastCreatedTicketIdFromComposer = undefined;
     const project = this.getResolvedProject();
     if (!project) {
       this.opts.notifyToast("warning", "チケット作成前にプロジェクトを選択してください。");
@@ -855,6 +926,7 @@ export class DashboardController {
   }
 
   private async openChildTicketComposer(parentTicketId: number): Promise<void> {
+    this.lastCreatedTicketIdFromComposer = undefined;
     const parent = this.tickets.find((t) => t.id === parentTicketId);
     if (!parent) {
       this.opts.notifyError("ticket.createChild", "親チケットが見つかりません。");

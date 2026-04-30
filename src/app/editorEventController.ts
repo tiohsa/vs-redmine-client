@@ -64,6 +64,27 @@ export const buildRegisterEditorDocument = (): (
     }
 
     if (isNewTicketDraftFilename(filename)) {
+      try {
+        const parsedContent = parseTicketEditorContent(document.getText(), {
+          allowMissingMetadata: true,
+          fallbackMetadata: {
+            tracker: "",
+            priority: "",
+            status: "",
+            due_date: "",
+            children: [],
+          },
+          allowMissingSubject: true,
+        });
+        const issueId = parsedContent.controlFields?.issue_id;
+        const projectId = parsedContent.controlFields?.project_id;
+        if (parsedContent.controlFields?.mode === "ticket-update" && typeof issueId === "number") {
+          registerTicketDocument(issueId, document, "ticket", projectId);
+          return;
+        }
+      } catch {
+        // Ignore parse errors and fall back to new draft registration.
+      }
       registerTicketDocument(NEW_TICKET_DRAFT_ID, document, "ticket");
     }
   };
