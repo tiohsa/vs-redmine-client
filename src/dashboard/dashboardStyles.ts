@@ -213,6 +213,17 @@ body.vscode-high-contrast .badge,.vscode-high-contrast .unsynced-kind-label{back
   flex-direction:column;
   gap:8px
 }
+.ticket-work-panel{}
+.work-panel-head{display:flex;flex-direction:column;gap:4px;margin-bottom:8px}
+.work-panel-title{font-size:13px;font-weight:700;color:var(--app-text)}
+.work-panel-subtitle{font-size:11.5px;color:var(--app-text-readable-muted)}
+.composer-grid{display:flex;flex-direction:column;gap:6px}
+.composer-grid-detail{padding-top:2px}
+.composer-detail-field{grid-template-columns:70px minmax(0,1fr);font-size:11.5px}
+.composer-description-field{align-items:flex-start}
+.composer-description-field span{padding-top:4px}
+.composer-required{color:#ef4444;font-size:12px}
+.composer-textarea{min-height:72px;resize:vertical;line-height:1.5;padding-top:3px;padding-bottom:3px;font-size:12px}
 body.vscode-high-contrast .ticket-detail-card{border-top-color:var(--app-border)}
 .detail-head{display:flex;align-items:flex-start;gap:8px;justify-content:space-between}
 .detail-title{display:flex;align-items:center;gap:8px;font-size:12.5px;font-weight:700;line-height:1.35;min-width:0}
@@ -314,37 +325,13 @@ body.vscode-high-contrast .btn-primary{border:1px solid var(--app-border)}
 ::-webkit-scrollbar-thumb{background:color-mix(in srgb, var(--vscode-scrollbarSlider-background, var(--app-border)) 80%, transparent);border-radius:var(--mm-radius-pill);border:2px solid transparent;background-clip:content-box}
 ::-webkit-scrollbar-thumb:hover{background:var(--vscode-scrollbarSlider-hoverBackground, var(--app-card-border));background-clip:content-box}
 
-/* ── New Ticket Composer ──────────────────────────────────── */
-.composer-overlay{position:fixed;inset:0;z-index:100;background:rgba(0,0,0,0.38);display:flex;align-items:flex-start;justify-content:center;padding:16px 8px;overflow-y:auto}
-body.vscode-high-contrast .composer-overlay{background:var(--app-bg)}
-.composer-card{width:100%;max-width:480px;background:var(--app-surface);border:1px solid var(--app-card-border);border-radius:20px;box-shadow:0 8px 40px rgba(0,0,0,0.28);display:flex;flex-direction:column;gap:0;overflow:hidden}
-body.vscode-light .composer-card{box-shadow:0 8px 32px rgba(44,30,116,0.14)}
-body.vscode-high-contrast .composer-card{border-color:var(--app-border);box-shadow:none;border-radius:0}
-.composer-header{display:flex;align-items:center;justify-content:space-between;padding:16px 16px 12px;border-bottom:1px solid var(--border-subtle)}
-.composer-title{font-size:14px;font-weight:700;color:var(--app-text);font-family:var(--font-display)}
-.composer-close{width:28px;height:28px;font-size:14px}
-.composer-project-info,.composer-parent-info{display:flex;align-items:center;gap:8px;padding:10px 16px 0}
-.composer-field-label{font-size:11.5px;font-weight:600;color:var(--app-text-readable-muted);flex-shrink:0}
-.composer-project-name{font-size:12.5px;font-weight:600;color:var(--app-text)}
-.composer-parent-badge{font-size:12px;padding:2px 8px;border-radius:var(--mm-radius-pill);background:color-mix(in srgb,var(--app-accent) 14%,transparent);color:var(--app-accent);font-weight:600}
+/* ── Work panel composer ──────────────────────────────────── */
 .composer-error{margin:10px 16px 0;padding:8px 12px;background:rgba(239,68,68,0.1);border:1px solid rgba(239,68,68,0.3);border-radius:var(--mm-radius-button);font-size:12px;color:#ef4444;line-height:1.5}
 body.vscode-high-contrast .composer-error{background:transparent;border-color:var(--app-border);color:var(--app-text)}
-.composer-loading{padding:32px 16px;text-align:center;color:var(--app-text-readable-muted);font-size:12.5px}
-.composer-form{display:flex;flex-direction:column;gap:12px;padding:16px}
-.composer-field-group{display:flex;flex-direction:column;gap:4px}
-.composer-field{display:flex;flex-direction:column;gap:4px;flex:1;min-width:0}
-.composer-field-row{display:flex;gap:8px;flex-wrap:wrap}
-.composer-field-row .composer-field{flex:1;min-width:120px}
-.composer-required{color:#ef4444;font-size:12px}
-.composer-input,.composer-select,.composer-textarea{width:100%;background:var(--vscode-input-background,var(--surface-1));color:var(--vscode-input-foreground,var(--app-text));border:1px solid var(--vscode-input-border,var(--app-card-border));border-radius:var(--mm-radius-button);font:inherit;font-size:12.5px;padding:6px 10px;transition:border-color .15s}
-.composer-input:focus,.composer-select:focus,.composer-textarea:focus{outline:1px solid var(--app-focus);outline-offset:1px;border-color:var(--app-focus)}
-.composer-input[type="date"]{color-scheme:light dark;padding-right:6px}
-.composer-input[type="date"]::-webkit-calendar-picker-indicator{opacity:1;border-radius:4px;padding:2px;background-color:var(--app-text-readable-muted);cursor:pointer}
-body.vscode-light .composer-input[type="date"]::-webkit-calendar-picker-indicator{filter:invert(1)}
-body.vscode-dark .composer-input[type="date"]::-webkit-calendar-picker-indicator{filter:none}
-.composer-textarea{resize:vertical;line-height:1.5;min-height:72px}
+.composer-loading{padding:24px 16px;text-align:center;color:var(--app-text-readable-muted);font-size:12.5px}
 .composer-actions{display:flex;gap:8px;justify-content:flex-end;padding:12px 16px 16px;border-top:1px solid var(--border-subtle)}
-.composer-actions .btn{padding:7px 16px;font-size:13px}
+.composer-actions-top{padding:0 0 8px;border-top:none}
+.composer-actions .btn{padding:5px 8px;font-size:12px;min-width:0}
 .composer-actions .btn:disabled{opacity:.5;cursor:not-allowed}
 
 /* ── Toast ────────────────────────────────────────────────────── */

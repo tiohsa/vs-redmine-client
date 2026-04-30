@@ -184,9 +184,6 @@ export const validateDashboardMessage = (raw: unknown): ValidationResult => {
       if (!isObject(values)) {
         return { ok: false, reason: "ticket.createDraftFromComposer: values must be an object" };
       }
-      if (!isNonEmptyString(values["subject"])) {
-        return { ok: false, reason: "ticket.createDraftFromComposer: values.subject must be a non-empty string" };
-      }
       if (!isNonEmptyString(values["tracker"])) {
         return { ok: false, reason: "ticket.createDraftFromComposer: values.tracker must be a non-empty string" };
       }
@@ -206,25 +203,18 @@ export const validateDashboardMessage = (raw: unknown): ValidationResult => {
           return { ok: false, reason: "ticket.createDraftFromComposer: values.due_date must be YYYY-MM-DD or empty" };
         }
       }
-      if ("parent" in values && values["parent"] !== undefined) {
-        if (!isPositiveInt(values["parent"])) {
-          return { ok: false, reason: "ticket.createDraftFromComposer: values.parent must be a positive integer" };
-        }
-      }
       return {
         ok: true,
         request: {
           type,
           requestId,
           values: {
-            subject: values["subject"] as string,
             tracker: values["tracker"] as string,
             priority: values["priority"] as string,
             status: values["status"] as string,
             start_date: (values["start_date"] as string | undefined) ?? undefined,
             due_date: (values["due_date"] as string | undefined) ?? undefined,
             description: (values["description"] as string | undefined) ?? undefined,
-            parent: (values["parent"] as number | undefined) ?? undefined,
           },
         },
       };

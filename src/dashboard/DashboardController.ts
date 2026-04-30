@@ -28,7 +28,6 @@ import {
   setTicketDraftContent,
 } from "../views/ticketDraftStore";
 import { openNewTicketDraft } from "../commands/createTicketFromList";
-import { showError } from "../utils/notifications";
 import { Ticket } from "../redmine/types";
 import type { UnsyncedFileSyncKey } from "../views/unsyncedFilesView";
 import { buildTicketDashboardNodes, buildTicketDetail } from "./viewModels/ticketDashboardViewModel";
@@ -36,7 +35,15 @@ import { buildUnsyncedDashboardItems } from "./viewModels/unsyncedDashboardViewM
 import { buildCommentDashboardItems } from "./viewModels/commentsDashboardViewModel";
 import { DashboardStateStore } from "./DashboardStateStore";
 import { SettingsController } from "./SettingsController";
-import type { DashboardProjectNode, DashboardRequest, DashboardMetadataOptions, DashboardUnsyncedKey, TicketMetadataPatch, NewTicketComposerState } from "./dashboardProtocol";
+import type {
+  DashboardProjectNode,
+  DashboardRequest,
+  DashboardMetadataOptions,
+  DashboardUnsyncedKey,
+  TicketMetadataPatch,
+  DashboardWorkPanel,
+  NewTicketComposerValues,
+} from "./dashboardProtocol";
 import { resolveCurrentProject, type ResolvedProject } from "./resolveProject";
 import {
   buildTicketEditorContent,
@@ -122,17 +129,17 @@ export class DashboardController {
         await this.openInBrowser(req.ticketId);
         break;
       case "ticket.create":
-        await this.openComposer();
+        await this.openNewTicketComposer();
         break;
       case "ticket.createChild":
         void this.selectTicket(req.parentTicketId);
-        await this.openComposerWithParent(req.parentTicketId);
+        await this.openChildTicketComposer(req.parentTicketId);
         break;
       case "ticket.cancelComposer":
-        this.closeComposer();
+        this.cancelComposer();
         break;
       case "ticket.createDraftFromComposer":
-        await this.handleCreateDraftFromComposer(req.requestId, req.values);
+        await this.createDraftFromComposer(req.requestId, req.values);
         break;
       case "ticket.metadata.update":
         await this.updateTicketMetadata(req.requestId, req.ticketId, req.patch);
@@ -350,6 +357,7 @@ export class DashboardController {
     store.update({
       selectedTicketId: ticketId,
       selectedTicket: buildTicketDetail(ticket, this.tickets),
+      workPanel: { mode: "detail", ticketId },
     });
     await this.loadComments(ticketId);
   }
@@ -788,165 +796,243 @@ export class DashboardController {
     return result;
   }
 
-  private async openComposer(): Promise<void> {
+  private buildComposerValues(input: {
+    tracker?: string;
+    priority?: string;
+    status?: string;
+    start_date?: string;
+    due_date?: string;
+    subject?: string;
+    description?: string;
+  }): NewTicketComposerValues {
+    return {
+      subject: input.subject ?? "",
+      tracker: input.tracker,
+      priority: input.priority,
+      status: input.status,
+      start_date: input.start_date ?? "",
+      due_date: input.due_date ?? "",
+      description: input.description ?? "",
+    };
+  }
+
+  private async openNewTicketComposer(): Promise<void> {
     const project = this.getResolvedProject();
     if (!project) {
-      this.opts.store.update({
-        newTicketComposer: {
-          visible: true,
-          loading: false,
-          projectId: 0,
-          projectName: "",
-          trackers: [],
-          priorities: this.opts.store.getState().metadataOptions.priorities,
-          statuses: this.opts.store.getState().metadataOptions.statuses,
-          values: { subject: "", tracker: "", priority: "", status: "", start_date: "", due_date: "", description: "" },
-          error: "プロジェクトを選択してからチケットを作成してください。",
-        },
-      });
+      this.opts.notifyToast("warning", "チケット作成前にプロジェクトを選択してください。");
       return;
     }
+    const defaults = this.opts.store.getState().metadataOptions;
     this.opts.store.update({
-      newTicketComposer: {
-        visible: true,
+      workPanel: {
+        mode: "newTicket",
         loading: true,
         projectId: project.id,
         projectName: project.name,
         trackers: [],
-        priorities: this.opts.store.getState().metadataOptions.priorities,
-        statuses: this.opts.store.getState().metadataOptions.statuses,
-        values: { subject: "", tracker: "", priority: "", status: "", start_date: "", due_date: "", description: "" },
+        priorities: defaults.priorities,
+        statuses: defaults.statuses,
+        values: this.buildComposerValues({}),
       },
     });
-    await this.loadComposerTrackers(project.id, undefined, undefined);
+    await this.loadComposerTrackers(project.id);
   }
 
-  private async openComposerWithParent(parentTicketId: number): Promise<void> {
+  private async openChildTicketComposer(parentTicketId: number): Promise<void> {
     const parent = this.tickets.find((t) => t.id === parentTicketId);
     if (!parent) {
-      showError("親チケットが見つかりません。");
+      this.opts.notifyError("ticket.createChild", "親チケットが見つかりません。");
       return;
     }
     if (!parent.projectId) {
-      showError("親チケットのプロジェクト情報が不足しています。");
+      this.opts.notifyError("ticket.createChild", "親チケットのプロジェクト情報が不足しています。");
       return;
     }
     const projectName = parent.projectName ?? String(parent.projectId);
+    const defaults = this.opts.store.getState().metadataOptions;
     this.opts.store.update({
-      newTicketComposer: {
-        visible: true,
+      workPanel: {
+        mode: "childTicket",
         loading: true,
         projectId: parent.projectId,
         projectName,
-        parentTicketId: parent.id,
-        parentSubject: parent.subject,
+        parentTicketId,
+        parentSubject: parent.subject ?? "",
         trackers: [],
-        priorities: this.opts.store.getState().metadataOptions.priorities,
-        statuses: this.opts.store.getState().metadataOptions.statuses,
-        values: { subject: "", tracker: "", priority: "", status: "", start_date: "", due_date: "", description: "" },
+        priorities: defaults.priorities,
+        statuses: defaults.statuses,
+        values: this.buildComposerValues({}),
       },
     });
-    await this.loadComposerTrackers(parent.projectId, parent.id, parent.subject);
+    await this.loadComposerTrackers(parent.projectId, parent);
   }
 
   private async loadComposerTrackers(
     projectId: number,
-    parentTicketId: number | undefined,
-    parentSubject: string | undefined,
+    parentTicket?: Ticket,
   ): Promise<void> {
     try {
       const trackers = await getProjectTrackers(projectId);
       if (trackers.length === 0) {
-        this.updateComposerState({ loading: false, trackers: [], error: "このプロジェクトにはトラッカーが設定されていません。" });
+        this.updateWorkPanelComposer({ loading: false, trackers: [], error: "このプロジェクトにはトラッカーが設定されていません。" });
         return;
       }
       const defaults = this.opts.store.getState().metadataOptions;
-      const defaultTracker = this.suggestDefaultTracker(trackers);
-      this.updateComposerState({
+      const firstTracker = trackers[0]?.name;
+      const defaultTracker = this.suggestDefaultTracker(trackers, parentTicket?.trackerName) ?? firstTracker;
+      const defaultPriority = this.pickOptionName(defaults.priorities, parentTicket?.priorityName) ?? defaults.priorities[0]?.name;
+      const defaultStatus = this.pickOptionName(defaults.statuses, parentTicket?.statusName) ?? defaults.statuses[0]?.name;
+      this.updateWorkPanelComposer({
         loading: false,
         trackers,
-        parentTicketId,
-        parentSubject: parentSubject ?? undefined,
         error: undefined,
-        values: {
-          subject: "",
+        values: this.buildComposerValues({
           tracker: defaultTracker,
-          priority: defaults.priorities[0]?.name ?? "",
-          status: defaults.statuses[0]?.name ?? "",
-          start_date: "",
-          due_date: "",
-          description: "",
-        },
+          priority: defaultPriority,
+          status: defaultStatus,
+          due_date: parentTicket?.dueDate,
+        }),
       });
     } catch (err) {
       const msg = (err as Error).message;
-      this.updateComposerState({ loading: false, trackers: [], error: `トラッカーの取得に失敗しました: ${msg}` });
+      this.updateWorkPanelComposer({ loading: false, trackers: [], error: `トラッカーの取得に失敗しました: ${msg}` });
     }
   }
 
-  private suggestDefaultTracker(trackers: Array<{ id: number; name: string }>): string {
+  private pickOptionName(
+    options: Array<{ name: string }>,
+    candidate?: string,
+  ): string | undefined {
+    if (!candidate) {
+      return undefined;
+    }
+    return options.some((option) => option.name === candidate) ? candidate : undefined;
+  }
+
+  private suggestDefaultTracker(
+    trackers: Array<{ id: number; name: string }>,
+    preferred?: string,
+  ): string | undefined {
+    if (preferred && trackers.some((tracker) => tracker.name === preferred)) {
+      return preferred;
+    }
     const defaultTracker = this.opts.store.getState().metadataOptions.trackers
-      .find((t) => trackers.some((pt) => pt.id === t.id));
-    if (defaultTracker && trackers.some((t) => t.name === defaultTracker.name)) {
-      return defaultTracker.name;
+      .find((tracker) => trackers.some((projectTracker) => projectTracker.id === tracker.id));
+    return defaultTracker?.name;
+  }
+
+  private updateWorkPanelComposer(
+    patch: {
+      loading?: boolean;
+      trackers?: Array<{ id: number; name: string }>;
+      priorities?: Array<{ id: number; name: string }>;
+      statuses?: Array<{ id: number; name: string }>;
+      values?: NewTicketComposerValues;
+      error?: string;
+    },
+  ): void {
+    const current = this.opts.store.getState().workPanel;
+    if (!current || (current.mode !== "newTicket" && current.mode !== "childTicket")) {
+      return;
     }
-    return trackers[0]?.name ?? "";
+    if (current.mode === "newTicket") {
+      this.opts.store.update({ workPanel: { ...current, ...patch, mode: "newTicket" } });
+      return;
+    }
+    this.opts.store.update({ workPanel: { ...current, ...patch, mode: "childTicket" } });
   }
 
-  private updateComposerState(patch: Partial<NewTicketComposerState>): void {
-    const current = this.opts.store.getState().newTicketComposer;
-    if (!current) { return; }
-    this.opts.store.update({ newTicketComposer: { ...current, ...patch } });
+  private cancelComposer(): void {
+    const selectedTicketId = this.opts.store.getState().selectedTicketId;
+    if (selectedTicketId) {
+      this.opts.store.update({ workPanel: { mode: "detail", ticketId: selectedTicketId } });
+      return;
+    }
+    this.opts.store.update({ workPanel: undefined });
   }
 
-  private closeComposer(): void {
-    this.opts.store.update({ newTicketComposer: undefined });
-  }
-
-  private async handleCreateDraftFromComposer(
-    requestId: string,
+  private validateComposerValues(
+    panel: Extract<DashboardWorkPanel, { mode: "newTicket" | "childTicket" }>,
     values: {
-      subject: string;
       tracker: string;
       priority: string;
       status: string;
       start_date?: string;
       due_date?: string;
       description?: string;
-      parent?: number;
+    },
+  ): string | undefined {
+    if (!panel.projectId) {
+      return "プロジェクトが選択されていません。";
+    }
+    if (!values.tracker.trim()) {
+      return "トラッカーを選択してください。";
+    }
+    if (!panel.trackers.some((tracker) => tracker.name === values.tracker)) {
+      return `このプロジェクトでは使用できないトラッカーです: ${values.tracker}`;
+    }
+    if (!values.priority.trim()) {
+      return "優先度を選択してください。";
+    }
+    if (!values.status.trim()) {
+      return "ステータスを選択してください。";
+    }
+    const isValidDate = (value?: string): boolean =>
+      value === undefined || value.length === 0 || /^\d{4}-\d{2}-\d{2}$/.test(value);
+    if (!isValidDate(values.start_date)) {
+      return "開始日の形式が不正です（YYYY-MM-DD）。";
+    }
+    if (!isValidDate(values.due_date)) {
+      return "期日の形式が不正です（YYYY-MM-DD）。";
+    }
+    if (panel.mode === "childTicket" && !panel.parentTicketId) {
+      return "親チケット情報が不足しています。";
+    }
+    return undefined;
+  }
+
+  private async createDraftFromComposer(
+    requestId: string,
+    values: {
+      tracker: string;
+      priority: string;
+      status: string;
+      start_date?: string;
+      due_date?: string;
+      description?: string;
     },
   ): Promise<void> {
-    const composer = this.opts.store.getState().newTicketComposer;
-    if (!composer) {
-      this.opts.notifyError(requestId, "コンポーザーが開いていません。");
+    const workPanel = this.opts.store.getState().workPanel;
+    if (!workPanel || (workPanel.mode !== "newTicket" && workPanel.mode !== "childTicket")) {
+      this.opts.notifyError(requestId, "チケット作成パネルが開いていません。");
       return;
     }
-    if (composer.projectId === 0) {
-      this.opts.notifyError(requestId, "プロジェクトを選択してください。");
-      return;
-    }
-    if (!composer.trackers.some((t) => t.name === values.tracker)) {
-      this.opts.notifyError(requestId, `このプロジェクトでは使用できないトラッカーです: ${values.tracker}`);
+    const validationError = this.validateComposerValues(workPanel, values);
+    if (validationError) {
+      this.updateWorkPanelComposer({ error: validationError });
       return;
     }
     try {
       await openNewTicketDraft({
         content: buildNewTicketDraftContent({
-          projectId: composer.projectId,
-          initialValues: {
-            subject: values.subject,
+          projectId: workPanel.projectId,
+          initialContent: {
+            subject: "",
             description: values.description ?? "",
-            tracker: values.tracker,
-            priority: values.priority,
-            status: values.status,
-            start_date: values.start_date ?? "",
-            due_date: values.due_date ?? "",
-            parent: values.parent,
+            metadata: {
+              tracker: values.tracker,
+              priority: values.priority,
+              status: values.status,
+              start_date: values.start_date ?? "",
+              due_date: values.due_date ?? "",
+              parent: workPanel.mode === "childTicket" ? workPanel.parentTicketId : undefined,
+              children: [],
+            },
           },
         }),
-        projectId: composer.projectId,
+        projectId: workPanel.projectId,
       });
-      this.closeComposer();
+      this.cancelComposer();
     } catch (err) {
       const msg = (err as Error).message;
       this.opts.notifyError(requestId, `ドラフトの作成に失敗しました: ${msg}`);

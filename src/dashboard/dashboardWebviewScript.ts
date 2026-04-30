@@ -284,15 +284,8 @@ function renderSelect(name, value, options, label){
   ).join('');
   return '<label class="detail-field"><span>'+label+'</span><select class="detail-select" data-metadata-field="'+name+'"'+disabled+'>'+opts+'</select></label>';
 }
-function renderTicketDetail(){
-  if(!state) return;
+function renderTicketDetailPanel(ticket){
   const card = document.getElementById('ticket-detail-card');
-  const ticket = state.selectedTicket;
-  if(!ticket){
-    card.classList.add('hidden');
-    card.innerHTML = '';
-    return;
-  }
   const node = findTicketNode(state.tickets, ticket.id) || {};
   const projectLabel = ticket.projectName
     ? esc(ticket.projectName)+' / ID: '+esc(ticket.projectId ?? '')
@@ -341,6 +334,83 @@ function renderTicketDetail(){
       req('ticket.metadata.update',{ticketId:ticket.id,patch:{[field]:input.value}});
     });
   });
+}
+
+function renderComposerPanel(panel){
+  const card = document.getElementById('ticket-detail-card');
+  card.classList.remove('hidden');
+  const title = panel.mode === 'childTicket' ? '子チケット作成' : '新規チケット作成';
+  const parentLabel = panel.mode === 'childTicket'
+    ? '<div class="work-panel-subtitle">Parent: #'+panel.parentTicketId+' '+esc(panel.parentSubject || '')+'</div>'
+    : '';
+  const errorHtml = panel.error ? '<div class="composer-error">'+esc(panel.error)+'</div>' : '';
+  if(panel.loading){
+    card.innerHTML =
+      '<div class="work-panel-head"><div class="work-panel-title">'+title+'</div></div>'
+      +'<div class="composer-loading">トラッカーを読み込み中…</div>';
+    return;
+  }
+  const values = panel.values || {};
+  const trackerOptions = (panel.trackers || []).map(item => '<option value="'+esc(item.name)+'"'+(item.name===values.tracker?' selected':'')+'>'+esc(item.name)+'</option>').join('');
+  const priorityOptions = (panel.priorities || []).map(item => '<option value="'+esc(item.name)+'"'+(item.name===values.priority?' selected':'')+'>'+esc(item.name)+'</option>').join('');
+  const statusOptions = (panel.statuses || []).map(item => '<option value="'+esc(item.name)+'"'+(item.name===values.status?' selected':'')+'>'+esc(item.name)+'</option>').join('');
+  const canCreate = values.tracker && values.priority && values.status;
+  card.innerHTML =
+    '<div class="work-panel-head"><div class="work-panel-title">'+title+'</div><div class="work-panel-subtitle">'+esc(panel.projectName || ('Project #'+panel.projectId))+'</div>'+parentLabel+'</div>'
+    +errorHtml
+    +'<div class="composer-actions composer-actions-top"><button class="btn btn-secondary" id="work-cancel">キャンセル</button><button class="btn btn-primary" id="work-create"'+(canCreate?'':' disabled')+'>Markdownドラフト作成</button></div>'
+    +'<div class="composer-grid composer-grid-detail">'
+    +'<label class="detail-field composer-detail-field"><span>Tracker <span class="composer-required">*</span></span><select class="detail-select composer-select" id="work-tracker"><option value="">Select...</option>'+trackerOptions+'</select></label>'
+    +'<label class="detail-field composer-detail-field"><span>Priority <span class="composer-required">*</span></span><select class="detail-select composer-select" id="work-priority"><option value="">Select...</option>'+priorityOptions+'</select></label>'
+    +'<label class="detail-field composer-detail-field"><span>Status <span class="composer-required">*</span></span><select class="detail-select composer-select" id="work-status"><option value="">Select...</option>'+statusOptions+'</select></label>'
+    +'<label class="detail-field composer-detail-field"><span>Start date</span><input class="detail-input composer-input" id="work-start-date" type="date" value="'+esc(values.start_date || '')+'"></label>'
+    +'<label class="detail-field composer-detail-field"><span>Due date</span><input class="detail-input composer-input" id="work-due-date" type="date" value="'+esc(values.due_date || '')+'"></label>'
+    +'</div>';
+
+  const trackerEl = card.querySelector('#work-tracker');
+  const priorityEl = card.querySelector('#work-priority');
+  const statusEl = card.querySelector('#work-status');
+  const startDateEl = card.querySelector('#work-start-date');
+  const dueDateEl = card.querySelector('#work-due-date');
+  const readValues = () => ({
+    tracker: trackerEl?.value || '',
+    priority: priorityEl?.value || '',
+    status: statusEl?.value || '',
+    start_date: startDateEl?.value || undefined,
+    due_date: dueDateEl?.value || undefined,
+  });
+
+  card.querySelector('#work-cancel')?.addEventListener('click',()=>req('ticket.cancelComposer'));
+  card.querySelector('#work-create')?.addEventListener('click',()=>req('ticket.createDraftFromComposer',{values:readValues()}));
+}
+
+function renderTicketDetail(){
+  if(!state) return;
+  const card = document.getElementById('ticket-detail-card');
+  const panel = state.workPanel;
+  if(!panel){
+    const ticket = state.selectedTicket;
+    if(!ticket){
+      card.classList.add('hidden');
+      card.innerHTML='';
+      return;
+    }
+    renderTicketDetailPanel(ticket);
+    return;
+  }
+  if(panel.mode === 'detail'){
+    const ticket = state.selectedTicket && state.selectedTicket.id===panel.ticketId
+      ? state.selectedTicket
+      : null;
+    if(ticket){
+      renderTicketDetailPanel(ticket);
+    }else{
+      card.classList.add('hidden');
+      card.innerHTML='';
+    }
+    return;
+  }
+  renderComposerPanel(panel);
 }
 
 // ── Filter chips ────────────────────────────────────────────────────────────
@@ -517,129 +587,6 @@ function renderSettings(){
   document.getElementById('settings-reset-btn').onclick=()=>req('settings.reset');
 }
 
-// ── New Ticket Composer ──────────────────────────────────────────────────────
-let composerValues = { subject:'', tracker:'', priority:'', status:'', start_date:'', due_date:'', description:'' };
-
-function renderComposer(){
-  if(!state) return;
-  const overlay = document.getElementById('composer-overlay');
-  const c = state.newTicketComposer;
-  if(!c || !c.visible){ overlay.classList.add('hidden'); return; }
-  overlay.classList.remove('hidden');
-
-  if(c.loading){
-    overlay.innerHTML='<div class="composer-card"><div class="composer-loading">トラッカーを読み込み中…</div></div>';
-    return;
-  }
-
-  const parentInfo = c.parentTicketId
-    ? '<div class="composer-parent-info"><span class="composer-field-label">親チケット</span><span class="composer-parent-badge">#'+c.parentTicketId+(c.parentSubject?' '+esc(c.parentSubject):'')+'</span></div>'
-    : '';
-  const errorHtml = c.error
-    ? '<div class="composer-error">'+esc(c.error)+'</div>'
-    : '';
-  const trackerOpts = c.trackers.map(t=>'<option value="'+esc(t.name)+'"'+(composerValues.tracker===t.name?' selected':'')+'>'+esc(t.name)+'</option>').join('');
-  const priorityOpts = c.priorities.map(p=>'<option value="'+esc(p.name)+'"'+(composerValues.priority===p.name?' selected':'')+'>'+esc(p.name)+'</option>').join('');
-  const statusOpts = c.statuses.map(s=>'<option value="'+esc(s.name)+'"'+(composerValues.status===s.name?' selected':'')+'>'+esc(s.name)+'</option>').join('');
-
-  const canCreate = !c.error && c.trackers.length > 0
-    && composerValues.subject.trim().length > 0
-    && composerValues.tracker.length > 0
-    && composerValues.priority.length > 0
-    && composerValues.status.length > 0;
-
-  overlay.innerHTML =
-    '<div class="composer-card">'
-    +'<div class="composer-header">'
-    +'<span class="composer-title">'+(c.parentTicketId ? '子チケット作成' : '新規チケット作成')+'</span>'
-    +'<button class="btn-icon composer-close" id="composer-cancel-btn" aria-label="閉じる" title="キャンセル">✕</button>'
-    +'</div>'
-    +'<div class="composer-project-info"><span class="composer-field-label">プロジェクト</span><span class="composer-project-name">'+esc(c.projectName || 'Project #'+c.projectId)+'</span></div>'
-    +parentInfo
-    +errorHtml
-    +(c.trackers.length > 0 ? (
-      '<div class="composer-form">'
-      +'<div class="composer-field-group">'
-      +'<label class="composer-field"><span class="composer-field-label">件名 <span class="composer-required" aria-hidden="true">*</span></span>'
-      +'<input class="composer-input" id="composer-subject" type="text" placeholder="チケットの件名" value="'+esc(composerValues.subject)+'" autocomplete="off"></label>'
-      +'</div>'
-      +'<div class="composer-field-row">'
-      +'<label class="composer-field"><span class="composer-field-label">トラッカー <span class="composer-required" aria-hidden="true">*</span></span>'
-      +'<select class="composer-select" id="composer-tracker"><option value="">選択…</option>'+trackerOpts+'</select></label>'
-      +'<label class="composer-field"><span class="composer-field-label">優先度 <span class="composer-required" aria-hidden="true">*</span></span>'
-      +'<select class="composer-select" id="composer-priority"><option value="">選択…</option>'+priorityOpts+'</select></label>'
-      +'<label class="composer-field"><span class="composer-field-label">ステータス <span class="composer-required" aria-hidden="true">*</span></span>'
-      +'<select class="composer-select" id="composer-status"><option value="">選択…</option>'+statusOpts+'</select></label>'
-      +'</div>'
-      +'<div class="composer-field-row">'
-      +'<label class="composer-field"><span class="composer-field-label">開始日</span>'
-      +'<input class="composer-input" id="composer-start-date" type="date" value="'+esc(composerValues.start_date)+'"></label>'
-      +'<label class="composer-field"><span class="composer-field-label">期日</span>'
-      +'<input class="composer-input" id="composer-due-date" type="date" value="'+esc(composerValues.due_date)+'"></label>'
-      +'</div>'
-      +'<div class="composer-field-group">'
-      +'<label class="composer-field"><span class="composer-field-label">説明（初期値）</span>'
-      +'<textarea class="composer-textarea" id="composer-description" rows="4" placeholder="チケットの説明（省略可）">'+esc(composerValues.description)+'</textarea></label>'
-      +'</div>'
-      +'</div>'
-    ) : '')
-    +'<div class="composer-actions">'
-    +'<button class="btn btn-secondary" id="composer-cancel-btn2">キャンセル</button>'
-    +(c.trackers.length > 0 ? '<button class="btn btn-primary" id="composer-create-btn"'+(canCreate?'':' disabled')+'>Markdownドラフト作成</button>' : '')
-    +'</div>'
-    +'</div>';
-
-  overlay.querySelector('#composer-cancel-btn')?.addEventListener('click',()=>{
-    composerValues={subject:'',tracker:'',priority:'',status:'',start_date:'',due_date:'',description:''};
-    req('ticket.cancelComposer');
-  });
-  overlay.querySelector('#composer-cancel-btn2')?.addEventListener('click',()=>{
-    composerValues={subject:'',tracker:'',priority:'',status:'',start_date:'',due_date:'',description:''};
-    req('ticket.cancelComposer');
-  });
-
-  const subjectEl = overlay.querySelector('#composer-subject');
-  const trackerEl = overlay.querySelector('#composer-tracker');
-  const priorityEl = overlay.querySelector('#composer-priority');
-  const statusEl = overlay.querySelector('#composer-status');
-  const startDateEl = overlay.querySelector('#composer-start-date');
-  const dueDateEl = overlay.querySelector('#composer-due-date');
-  const descEl = overlay.querySelector('#composer-description');
-
-  function syncComposerButton(){
-    const createBtn = overlay.querySelector('#composer-create-btn');
-    if(!createBtn) return;
-    const ok = composerValues.subject.trim().length>0
-      && composerValues.tracker.length>0
-      && composerValues.priority.length>0
-      && composerValues.status.length>0;
-    createBtn.disabled = !ok;
-  }
-
-  if(subjectEl){ subjectEl.addEventListener('input',()=>{ composerValues.subject=subjectEl.value; syncComposerButton(); }); }
-  if(trackerEl){ trackerEl.addEventListener('change',()=>{ composerValues.tracker=trackerEl.value; syncComposerButton(); }); }
-  if(priorityEl){ priorityEl.addEventListener('change',()=>{ composerValues.priority=priorityEl.value; syncComposerButton(); }); }
-  if(statusEl){ statusEl.addEventListener('change',()=>{ composerValues.status=statusEl.value; syncComposerButton(); }); }
-  if(startDateEl){ startDateEl.addEventListener('change',()=>{ composerValues.start_date=startDateEl.value; }); }
-  if(dueDateEl){ dueDateEl.addEventListener('change',()=>{ composerValues.due_date=dueDateEl.value; }); }
-  if(descEl){ descEl.addEventListener('input',()=>{ composerValues.description=descEl.value; }); }
-
-  overlay.querySelector('#composer-create-btn')?.addEventListener('click',()=>{
-    const vals = {
-      subject: composerValues.subject.trim(),
-      tracker: composerValues.tracker,
-      priority: composerValues.priority,
-      status: composerValues.status,
-      start_date: composerValues.start_date || undefined,
-      due_date: composerValues.due_date || undefined,
-      description: composerValues.description || undefined,
-      parent: c.parentTicketId || undefined,
-    };
-    composerValues={subject:'',tracker:'',priority:'',status:'',start_date:'',due_date:'',description:''};
-    req('ticket.createDraftFromComposer',{values:vals});
-  });
-}
-
 // ── Full render ──────────────────────────────────────────────────────────────
 function render(){
   if(!state) return;
@@ -668,16 +615,6 @@ function render(){
     sel.value=currentVal;
   }
   document.getElementById('include-children').checked=state.includeChildProjects;
-  renderComposer();
-  if(state.newTicketComposer?.visible){
-    renderTicketDetail();
-    renderFilterChips();
-    renderUnsynced();
-    renderComments();
-    renderSettings();
-    updateSyncButtonStates();
-    return;
-  }
   renderTickets();
   renderTicketDetail();
   renderFilterChips();

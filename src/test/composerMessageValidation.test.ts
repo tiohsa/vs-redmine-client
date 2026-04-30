@@ -12,7 +12,6 @@ suite("コンポーザー メッセージバリデーション", () => {
       type: "ticket.createDraftFromComposer",
       requestId: "r2",
       values: {
-        subject: "テストチケット",
         tracker: "Bug",
         priority: "High",
         status: "New",
@@ -21,20 +20,20 @@ suite("コンポーザー メッセージバリデーション", () => {
     assert.strictEqual(r.ok, true);
   });
 
-  test("ticket.createDraftFromComposer: subject が空は拒否される", () => {
+  test("ticket.createDraftFromComposer: subject なしでも受け入れられる", () => {
     const r = validateDashboardMessage({
       type: "ticket.createDraftFromComposer",
       requestId: "r3",
-      values: { subject: "", tracker: "Bug", priority: "Normal", status: "New" },
+      values: { tracker: "Bug", priority: "Normal", status: "New" },
     });
-    assert.strictEqual(r.ok, false);
+    assert.strictEqual(r.ok, true);
   });
 
   test("ticket.createDraftFromComposer: tracker が空は拒否される", () => {
     const r = validateDashboardMessage({
       type: "ticket.createDraftFromComposer",
       requestId: "r4",
-      values: { subject: "テスト", tracker: "", priority: "Normal", status: "New" },
+      values: { tracker: "", priority: "Normal", status: "New" },
     });
     assert.strictEqual(r.ok, false);
   });
@@ -43,7 +42,7 @@ suite("コンポーザー メッセージバリデーション", () => {
     const r = validateDashboardMessage({
       type: "ticket.createDraftFromComposer",
       requestId: "r5",
-      values: { subject: "テスト", tracker: "Task", priority: "", status: "New" },
+      values: { tracker: "Task", priority: "", status: "New" },
     });
     assert.strictEqual(r.ok, false);
   });
@@ -52,7 +51,7 @@ suite("コンポーザー メッセージバリデーション", () => {
     const r = validateDashboardMessage({
       type: "ticket.createDraftFromComposer",
       requestId: "r6",
-      values: { subject: "テスト", tracker: "Task", priority: "Normal", status: "" },
+      values: { tracker: "Task", priority: "Normal", status: "" },
     });
     assert.strictEqual(r.ok, false);
   });
@@ -61,7 +60,7 @@ suite("コンポーザー メッセージバリデーション", () => {
     const r = validateDashboardMessage({
       type: "ticket.createDraftFromComposer",
       requestId: "r7",
-      values: { subject: "テスト", tracker: "Task", priority: "Normal", status: "New", due_date: "invalid-date" },
+      values: { tracker: "Task", priority: "Normal", status: "New", due_date: "invalid-date" },
     });
     assert.strictEqual(r.ok, false);
   });
@@ -70,32 +69,23 @@ suite("コンポーザー メッセージバリデーション", () => {
     const r = validateDashboardMessage({
       type: "ticket.createDraftFromComposer",
       requestId: "r8",
-      values: { subject: "テスト", tracker: "Task", priority: "Normal", status: "New", due_date: "2026-12-31", start_date: "2026-01-01" },
+      values: { tracker: "Task", priority: "Normal", status: "New", due_date: "2026-12-31", start_date: "2026-01-01" },
     });
     assert.strictEqual(r.ok, true);
   });
 
-  test("ticket.createDraftFromComposer: parent が正の整数の場合は受け入れられる", () => {
+  test("ticket.createDraftFromComposer: 余分なフィールドがあっても必須値が正しければ受け入れられる", () => {
     const r = validateDashboardMessage({
       type: "ticket.createDraftFromComposer",
       requestId: "r9",
-      values: { subject: "子チケット", tracker: "Task", priority: "Normal", status: "New", parent: 100 },
+      values: { tracker: "Task", priority: "Normal", status: "New", extra: "noop" },
     });
     assert.strictEqual(r.ok, true);
     if (r.ok) { assert.strictEqual(r.request.type, "ticket.createDraftFromComposer"); }
   });
 
-  test("ticket.createDraftFromComposer: parent が負の数は拒否される", () => {
-    const r = validateDashboardMessage({
-      type: "ticket.createDraftFromComposer",
-      requestId: "r10",
-      values: { subject: "テスト", tracker: "Task", priority: "Normal", status: "New", parent: -1 },
-    });
-    assert.strictEqual(r.ok, false);
-  });
-
   test("ticket.createDraftFromComposer: values がなければ拒否される", () => {
-    const r = validateDashboardMessage({ type: "ticket.createDraftFromComposer", requestId: "r11" });
+    const r = validateDashboardMessage({ type: "ticket.createDraftFromComposer", requestId: "r10" });
     assert.strictEqual(r.ok, false);
   });
 });

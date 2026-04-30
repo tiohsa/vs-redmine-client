@@ -36,22 +36,32 @@ export interface NewTicketInitialValues {
 export const buildNewTicketDraftContent = (options?: {
   draftId?: string;
   projectId?: number;
+  initialContent?: Partial<TicketEditorContent>;
   initialValues?: NewTicketInitialValues;
 }): TicketEditorContent => {
   const base = applyTicketEditorDefaults(getTicketEditorDefaults());
+  const ic = options?.initialContent;
   const iv = options?.initialValues;
+  const initialTracker = ic?.metadata?.tracker ?? iv?.tracker;
+  const initialPriority = ic?.metadata?.priority ?? iv?.priority;
+  const initialStatus = ic?.metadata?.status ?? iv?.status;
+  const initialStartDate = ic?.metadata?.start_date ?? iv?.start_date;
+  const initialDueDate = ic?.metadata?.due_date ?? iv?.due_date;
+  const initialParent = ic?.metadata?.parent ?? iv?.parent;
   return {
     ...base,
-    subject: iv?.subject !== undefined ? iv.subject : base.subject,
-    description: iv?.description !== undefined ? iv.description : base.description,
+    ...ic,
+    subject: ic?.subject ?? iv?.subject ?? base.subject,
+    description: ic?.description ?? iv?.description ?? base.description,
     metadata: {
       ...base.metadata,
-      ...(iv?.tracker !== undefined ? { tracker: iv.tracker } : {}),
-      ...(iv?.priority !== undefined ? { priority: iv.priority } : {}),
-      ...(iv?.status !== undefined ? { status: iv.status } : {}),
-      ...(iv?.start_date !== undefined ? { start_date: iv.start_date } : {}),
-      ...(iv?.due_date !== undefined ? { due_date: iv.due_date } : {}),
-      ...(iv?.parent !== undefined ? { parent: iv.parent } : {}),
+      ...(ic?.metadata ?? {}),
+      ...(initialTracker !== undefined ? { tracker: initialTracker } : {}),
+      ...(initialPriority !== undefined ? { priority: initialPriority } : {}),
+      ...(initialStatus !== undefined ? { status: initialStatus } : {}),
+      ...(initialStartDate !== undefined ? { start_date: initialStartDate } : {}),
+      ...(initialDueDate !== undefined ? { due_date: initialDueDate } : {}),
+      ...(initialParent !== undefined ? { parent: initialParent } : {}),
     },
     controlFields: {
       mode: "new-ticket",

@@ -58,4 +58,17 @@ suite("getProjectTrackers API レスポンス解析", () => {
     assert.ok(content.metadata.priority !== undefined);
     assert.ok(content.metadata.status !== undefined);
   });
+
+  test("buildNewTicketDraftContent: initialContent が initialValues より優先される", () => {
+    const content = buildNewTicketDraftContent({
+      projectId: 7,
+      initialValues: { tracker: "Support", subject: "old" },
+      initialContent: {
+        subject: "new",
+        metadata: { tracker: "Bug", priority: "High", status: "New", due_date: "", children: [] },
+      },
+    });
+    assert.strictEqual(content.subject, "new");
+    assert.strictEqual(content.metadata.tracker, "Bug");
+  });
 });

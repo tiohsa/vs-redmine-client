@@ -48,7 +48,7 @@ ${dashboardStyles}
       <div id="ticket-list"></div>
       <div id="load-more-row" class="load-more-row hidden"></div>
     </div>
-    <div id="ticket-detail-card" class="ticket-detail-card hidden"></div>
+    <div id="ticket-detail-card" class="ticket-work-panel ticket-detail-card hidden"></div>
   </div>
 
   <!-- UNSYNCED TAB -->
@@ -75,8 +75,6 @@ ${dashboardStyles}
   </div>
 
 </div>
-
-<div id="composer-overlay" class="composer-overlay hidden"></div>
 
 <div id="toast-area"></div>
 
