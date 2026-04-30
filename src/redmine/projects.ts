@@ -1,6 +1,14 @@
 import { requestJson } from "./client";
 import { Project, RedmineProjectResponse } from "./types";
 
+interface RedmineProjectDetailResponse {
+  project: {
+    id: number;
+    name: string;
+    trackers?: Array<{ id: number; name: string }>;
+  };
+}
+
 const PROJECTS_PAGE_LIMIT = 100;
 
 const mapProjects = (
@@ -52,4 +60,15 @@ export const listProjects = async (includeChildren: boolean): Promise<Project[]>
   }
 
   return all;
+};
+
+export const getProjectTrackers = async (
+  projectId: number,
+): Promise<Array<{ id: number; name: string }>> => {
+  const response = await requestJson<RedmineProjectDetailResponse>({
+    method: "GET",
+    path: `/projects/${projectId}.json`,
+    query: { include: "trackers" },
+  });
+  return response.project.trackers ?? [];
 };

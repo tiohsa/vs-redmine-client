@@ -1,7 +1,7 @@
 import * as vscode from "vscode";
 import { getProjectSelection, setProjectSelection } from "../config/projectSelection";
 import { getDefaultProjectId, getIncludeChildProjects, getTicketListLimit } from "../config/settings";
-import { listProjects } from "../redmine/projects";
+import { listProjects, getProjectTrackers } from "../redmine/projects";
 import { getIssueDetail, listIssuePriorities, listIssueStatuses, listIssues, listTrackers } from "../redmine/issues";
 import { applyTicketFilters, applyTicketSort } from "../views/projectListSettings";
 import {
@@ -22,7 +22,6 @@ import { openCommentUpdateDraft } from "../commands/openCommentUpdateDraft";
 import { rememberTicketSummaries } from "../views/ticketSummaryStore";
 import { showTicketPreview } from "../views/ticketPreview";
 import {
-  buildNewChildTicketDraftContent,
   buildNewTicketDraftContent,
   ensureTicketDraft,
   markDraftStatus,
@@ -37,7 +36,7 @@ import { buildUnsyncedDashboardItems } from "./viewModels/unsyncedDashboardViewM
 import { buildCommentDashboardItems } from "./viewModels/commentsDashboardViewModel";
 import { DashboardStateStore } from "./DashboardStateStore";
 import { SettingsController } from "./SettingsController";
-import type { DashboardProjectNode, DashboardRequest, DashboardMetadataOptions, DashboardUnsyncedKey, TicketMetadataPatch } from "./dashboardProtocol";
+import type { DashboardProjectNode, DashboardRequest, DashboardMetadataOptions, DashboardUnsyncedKey, TicketMetadataPatch, NewTicketComposerState } from "./dashboardProtocol";
 import { resolveCurrentProject, type ResolvedProject } from "./resolveProject";
 import {
   buildTicketEditorContent,
@@ -123,11 +122,17 @@ export class DashboardController {
         await this.openInBrowser(req.ticketId);
         break;
       case "ticket.create":
-        await this.createTicketFromDashboard();
+        await this.openComposer();
         break;
       case "ticket.createChild":
         void this.selectTicket(req.parentTicketId);
-        await this.createChildTicketFromDashboard(req.parentTicketId);
+        await this.openComposerWithParent(req.parentTicketId);
+        break;
+      case "ticket.cancelComposer":
+        this.closeComposer();
+        break;
+      case "ticket.createDraftFromComposer":
+        await this.handleCreateDraftFromComposer(req.requestId, req.values);
         break;
       case "ticket.metadata.update":
         await this.updateTicketMetadata(req.requestId, req.ticketId, req.patch);
@@ -783,19 +788,40 @@ export class DashboardController {
     return result;
   }
 
-  private async createTicketFromDashboard(): Promise<void> {
+  private async openComposer(): Promise<void> {
     const project = this.getResolvedProject();
     if (!project) {
-      showError("プロジェクトを選択してからチケットを作成してください。");
+      this.opts.store.update({
+        newTicketComposer: {
+          visible: true,
+          loading: false,
+          projectId: 0,
+          projectName: "",
+          trackers: [],
+          priorities: this.opts.store.getState().metadataOptions.priorities,
+          statuses: this.opts.store.getState().metadataOptions.statuses,
+          values: { subject: "", tracker: "", priority: "", status: "", start_date: "", due_date: "", description: "" },
+          error: "プロジェクトを選択してからチケットを作成してください。",
+        },
+      });
       return;
     }
-    await openNewTicketDraft({
-      content: buildNewTicketDraftContent({ projectId: project.id }),
-      projectId: project.id,
+    this.opts.store.update({
+      newTicketComposer: {
+        visible: true,
+        loading: true,
+        projectId: project.id,
+        projectName: project.name,
+        trackers: [],
+        priorities: this.opts.store.getState().metadataOptions.priorities,
+        statuses: this.opts.store.getState().metadataOptions.statuses,
+        values: { subject: "", tracker: "", priority: "", status: "", start_date: "", due_date: "", description: "" },
+      },
     });
+    await this.loadComposerTrackers(project.id, undefined, undefined);
   }
 
-  private async createChildTicketFromDashboard(parentTicketId: number): Promise<void> {
+  private async openComposerWithParent(parentTicketId: number): Promise<void> {
     const parent = this.tickets.find((t) => t.id === parentTicketId);
     if (!parent) {
       showError("親チケットが見つかりません。");
@@ -805,12 +831,126 @@ export class DashboardController {
       showError("親チケットのプロジェクト情報が不足しています。");
       return;
     }
-
-    const baseContent = buildNewTicketDraftContent({ projectId: parent.projectId });
-    await openNewTicketDraft({
-      content: buildNewChildTicketDraftContent(parent, baseContent),
-      projectId: parent.projectId,
+    const projectName = parent.projectName ?? String(parent.projectId);
+    this.opts.store.update({
+      newTicketComposer: {
+        visible: true,
+        loading: true,
+        projectId: parent.projectId,
+        projectName,
+        parentTicketId: parent.id,
+        parentSubject: parent.subject,
+        trackers: [],
+        priorities: this.opts.store.getState().metadataOptions.priorities,
+        statuses: this.opts.store.getState().metadataOptions.statuses,
+        values: { subject: "", tracker: "", priority: "", status: "", start_date: "", due_date: "", description: "" },
+      },
     });
+    await this.loadComposerTrackers(parent.projectId, parent.id, parent.subject);
+  }
+
+  private async loadComposerTrackers(
+    projectId: number,
+    parentTicketId: number | undefined,
+    parentSubject: string | undefined,
+  ): Promise<void> {
+    try {
+      const trackers = await getProjectTrackers(projectId);
+      if (trackers.length === 0) {
+        this.updateComposerState({ loading: false, trackers: [], error: "このプロジェクトにはトラッカーが設定されていません。" });
+        return;
+      }
+      const defaults = this.opts.store.getState().metadataOptions;
+      const defaultTracker = this.suggestDefaultTracker(trackers);
+      this.updateComposerState({
+        loading: false,
+        trackers,
+        parentTicketId,
+        parentSubject: parentSubject ?? undefined,
+        error: undefined,
+        values: {
+          subject: "",
+          tracker: defaultTracker,
+          priority: defaults.priorities[0]?.name ?? "",
+          status: defaults.statuses[0]?.name ?? "",
+          start_date: "",
+          due_date: "",
+          description: "",
+        },
+      });
+    } catch (err) {
+      const msg = (err as Error).message;
+      this.updateComposerState({ loading: false, trackers: [], error: `トラッカーの取得に失敗しました: ${msg}` });
+    }
+  }
+
+  private suggestDefaultTracker(trackers: Array<{ id: number; name: string }>): string {
+    const defaultTracker = this.opts.store.getState().metadataOptions.trackers
+      .find((t) => trackers.some((pt) => pt.id === t.id));
+    if (defaultTracker && trackers.some((t) => t.name === defaultTracker.name)) {
+      return defaultTracker.name;
+    }
+    return trackers[0]?.name ?? "";
+  }
+
+  private updateComposerState(patch: Partial<NewTicketComposerState>): void {
+    const current = this.opts.store.getState().newTicketComposer;
+    if (!current) { return; }
+    this.opts.store.update({ newTicketComposer: { ...current, ...patch } });
+  }
+
+  private closeComposer(): void {
+    this.opts.store.update({ newTicketComposer: undefined });
+  }
+
+  private async handleCreateDraftFromComposer(
+    requestId: string,
+    values: {
+      subject: string;
+      tracker: string;
+      priority: string;
+      status: string;
+      start_date?: string;
+      due_date?: string;
+      description?: string;
+      parent?: number;
+    },
+  ): Promise<void> {
+    const composer = this.opts.store.getState().newTicketComposer;
+    if (!composer) {
+      this.opts.notifyError(requestId, "コンポーザーが開いていません。");
+      return;
+    }
+    if (composer.projectId === 0) {
+      this.opts.notifyError(requestId, "プロジェクトを選択してください。");
+      return;
+    }
+    if (!composer.trackers.some((t) => t.name === values.tracker)) {
+      this.opts.notifyError(requestId, `このプロジェクトでは使用できないトラッカーです: ${values.tracker}`);
+      return;
+    }
+    try {
+      await openNewTicketDraft({
+        content: buildNewTicketDraftContent({
+          projectId: composer.projectId,
+          initialValues: {
+            subject: values.subject,
+            description: values.description ?? "",
+            tracker: values.tracker,
+            priority: values.priority,
+            status: values.status,
+            start_date: values.start_date ?? "",
+            due_date: values.due_date ?? "",
+            parent: values.parent,
+          },
+        }),
+        projectId: composer.projectId,
+      });
+      this.closeComposer();
+    } catch (err) {
+      const msg = (err as Error).message;
+      this.opts.notifyError(requestId, `ドラフトの作成に失敗しました: ${msg}`);
+    }
   }
 
   private refreshUnsynced(): void {

@@ -76,6 +76,8 @@ ${dashboardStyles}
 
 </div>
 
+<div id="composer-overlay" class="composer-overlay hidden"></div>
+
 <div id="toast-area"></div>
 
 <script nonce="${nonce}">

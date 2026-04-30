@@ -22,13 +22,37 @@ const persist = (ticketId: number, draft: TicketDraftState): void => {
 export const getTicketDraft = (ticketId: number): TicketDraftState | undefined =>
   cache.get(ticketId);
 
+export interface NewTicketInitialValues {
+  subject?: string;
+  description?: string;
+  tracker?: string;
+  priority?: string;
+  status?: string;
+  start_date?: string;
+  due_date?: string;
+  parent?: number;
+}
+
 export const buildNewTicketDraftContent = (options?: {
   draftId?: string;
   projectId?: number;
+  initialValues?: NewTicketInitialValues;
 }): TicketEditorContent => {
   const base = applyTicketEditorDefaults(getTicketEditorDefaults());
+  const iv = options?.initialValues;
   return {
     ...base,
+    subject: iv?.subject !== undefined ? iv.subject : base.subject,
+    description: iv?.description !== undefined ? iv.description : base.description,
+    metadata: {
+      ...base.metadata,
+      ...(iv?.tracker !== undefined ? { tracker: iv.tracker } : {}),
+      ...(iv?.priority !== undefined ? { priority: iv.priority } : {}),
+      ...(iv?.status !== undefined ? { status: iv.status } : {}),
+      ...(iv?.start_date !== undefined ? { start_date: iv.start_date } : {}),
+      ...(iv?.due_date !== undefined ? { due_date: iv.due_date } : {}),
+      ...(iv?.parent !== undefined ? { parent: iv.parent } : {}),
+    },
     controlFields: {
       mode: "new-ticket",
       ...(options?.projectId !== undefined ? { project_id: options.projectId } : {}),
