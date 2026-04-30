@@ -216,6 +216,19 @@ export const validateDashboardMessage = (raw: unknown): ValidationResult => {
       return { ok: true, request: { type, requestId, ticketId, commentId } };
     }
 
+    case "comment.openBrowser": {
+      const ticketId = raw["ticketId"];
+      const commentId = raw["commentId"];
+      if (!isPositiveInt(ticketId)) {
+        return { ok: false, reason: "comment.openBrowser: ticketId must be a positive integer" };
+      }
+      if (!isPositiveInt(commentId)) {
+        return { ok: false, reason: "comment.openBrowser: commentId must be a positive integer" };
+      }
+      const noteIndex = raw["noteIndex"];
+      return { ok: true, request: { type, requestId, ticketId, commentId, noteIndex: isPositiveInt(noteIndex) ? noteIndex : undefined } };
+    }
+
     case "comment.reload": {
       const ticketId = raw["ticketId"];
       if (!isPositiveInt(ticketId)) {

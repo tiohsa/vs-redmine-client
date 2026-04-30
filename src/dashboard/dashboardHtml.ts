@@ -22,8 +22,8 @@ ${dashboardStyles}
     <label class="toggle-children">
       <input type="checkbox" id="include-children"> 子を含める
     </label>
-    <button class="btn-icon" id="refresh-btn" title="更新"><span class="icon-refresh" aria-hidden="true"></span></button>
-    <button class="btn btn-primary" id="new-ticket-btn" title="新規チケット">新規チケット</button>
+    <button class="btn-icon" id="refresh-btn" title="更新" aria-label="更新"><span class="icon-refresh" aria-hidden="true"></span></button>
+    <button class="btn btn-primary btn-primary-new" id="new-ticket-btn" title="新規チケット">新規チケット</button>
   </div>
 </div>
 

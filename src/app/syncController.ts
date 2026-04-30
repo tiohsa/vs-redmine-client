@@ -31,6 +31,12 @@ import {
   parseEditorFilename,
   parseNewCommentDraftFilename,
 } from "../views/editorFilename";
+import {
+  isCommentUpdateFilename,
+  parseCommentUpdateFile,
+} from "../views/commentUpdateFile";
+import { addOfflineCommentUpdate, removeOfflineCommentEntry } from "../views/offlineSyncStore";
+import { computeNotesHash } from "../utils/notesHash";
 import type { CommentsTreeProvider } from "../views/commentsView";
 import type { TicketsTreeProvider } from "../views/ticketsView";
 import type { UnsyncedFilesTreeProvider } from "../views/unsyncedFilesView";
@@ -147,6 +153,31 @@ export const createSyncController = (deps: SyncControllerDeps): SyncController =
           }
           return;
         }
+      }
+
+      // comment-update ファイルの保存検知: 本文変更があればキューに追加する
+      if (isCommentUpdateFilename(path.basename(document.uri.path))) {
+        const parsed = parseCommentUpdateFile(document.getText());
+        if (parsed) {
+          const currentHash = computeNotesHash(parsed.body);
+          if (currentHash === parsed.fields.sourceNotesHash) {
+            // 本文が元コメントと同一 → 未同期扱いしない
+            removeOfflineCommentEntry({
+              commentId: parsed.fields.journalId,
+              documentUri: document.uri.toString(),
+            });
+          } else {
+            addOfflineCommentUpdate({
+              ticketId: parsed.fields.issueId,
+              commentId: parsed.fields.journalId,
+              body: parsed.body,
+              documentUri: document.uri.toString(),
+              sourceNotesHash: parsed.fields.sourceNotesHash,
+            });
+          }
+          unsyncedFilesProvider.refresh();
+        }
+        return;
       }
 
       const commentIdForDocument =

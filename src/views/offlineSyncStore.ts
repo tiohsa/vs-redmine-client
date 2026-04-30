@@ -24,6 +24,7 @@ export type OfflineCommentUpdate = {
   body: string;
   baseDir?: string;
   documentUri?: string;
+  sourceNotesHash?: string;
 };
 
 export type OfflineSyncQueue = {
