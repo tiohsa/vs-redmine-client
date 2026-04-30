@@ -162,28 +162,6 @@ export type DashboardWorkPanel =
     error?: string;
   };
 
-export interface NewTicketComposerState {
-  visible: boolean;
-  loading: boolean;
-  projectId: number;
-  projectName: string;
-  parentTicketId?: number;
-  parentSubject?: string;
-  trackers: DashboardMetadataOption[];
-  priorities: DashboardMetadataOption[];
-  statuses: DashboardMetadataOption[];
-  values: {
-    subject: string;
-    tracker: string;
-    priority: string;
-    status: string;
-    start_date: string;
-    due_date: string;
-    description: string;
-  };
-  error?: string;
-}
-
 export interface DashboardState {
   selectedProject?: DashboardSelectedProject;
   includeChildProjects: boolean;
@@ -215,7 +193,6 @@ export interface DashboardState {
     operation?: string;
   };
   workPanel?: DashboardWorkPanel;
-  newTicketComposer?: NewTicketComposerState;
 }
 
 // ── Message Protocol ──────────────────────────────────────────────────────

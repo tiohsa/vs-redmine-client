@@ -150,6 +150,44 @@ suite("composerSync – draftUri ルーティング", () => {
     assert.strictEqual(queue.newTickets.length, 1, "キューは変更されないべき");
     assert.strictEqual(queue.newTickets[0].documentUri, "untitled:other.md", "キューのエントリが変更されないべき");
   });
+
+  test("作成成功後、同じ draftUri のキューエントリが削除され、他エントリは残る", async () => {
+    const store = new DashboardStateStore();
+    store.update({ workPanel: makeComposerWorkPanel(DRAFT_URI) });
+
+    // DRAFT_URI のエントリと、別URIのエントリをキューに追加
+    addOfflineNewTicket({ content: makeNewTicketContent("作成予定チケット"), projectId: 1, documentUri: DRAFT_URI });
+    addOfflineNewTicket({ content: makeNewTicketContent("別のチケット"), projectId: 1, documentUri: "untitled:other.md" });
+
+    const editorStub = makeEditorStub(makeNewTicketContent("作成予定チケット"));
+
+    const ctrl = new DashboardController({
+      store,
+      notifyOperationStarted: () => {},
+      notifySuccess: () => {},
+      notifyError: () => {},
+      notifyToast: () => {},
+      onTicketsRefreshed: () => {},
+      _composerSyncTestHooks: {
+        findEditorFn: (_uri) => editorStub,
+        syncFn: async (_editor): Promise<TicketSaveResult> => ({ status: "created", message: "Ticket created." }),
+        getTicketIdFn: (_editor) => 77,
+        afterCreatedFn: async () => {},
+      },
+    });
+
+    await ctrl.handle({ type: "ticket.syncNewTicketDraftFromComposer", requestId: "r-queue" });
+
+    const queue = getOfflineSyncQueue();
+    assert.ok(
+      !queue.newTickets.some((item) => item.documentUri === DRAFT_URI),
+      "作成済み draftUri のキューエントリが削除されるべき",
+    );
+    assert.ok(
+      queue.newTickets.some((item) => item.documentUri === "untitled:other.md"),
+      "別URIのキューエントリは残るべき",
+    );
+  });
 });
 
 // ── suite 2: 空件名エラー ──────────────────────────────────────────────────

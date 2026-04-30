@@ -741,17 +741,26 @@ export class DashboardController {
 
     if (result.status === "created") {
       const createdId = getTicketIdFn(editor);
+      removeOfflineNewTicket(draftUri);
+      this.refreshUnsynced();
       if (hooks?.afterCreatedFn) {
         await hooks.afterCreatedFn(createdId ?? 0);
+        this.opts.onTicketsRefreshed();
+        this.opts.notifySuccess(requestId, "チケットを作成しました。");
       } else {
         await this.loadTickets();
+        this.opts.onTicketsRefreshed();
         if (createdId !== undefined && createdId > 0) {
           this.opts.store.update({ workPanel: { mode: "detail", ticketId: createdId } });
           await this.selectTicket(createdId);
+          this.opts.notifySuccess(requestId, "チケットを作成しました。");
+        } else {
+          this.opts.notifySuccess(
+            requestId,
+            "チケットを作成しました。ただし作成後のチケットIDを特定できなかったため、一覧を更新して確認してください。",
+          );
         }
       }
-      this.opts.onTicketsRefreshed();
-      this.opts.notifySuccess(requestId, "チケットを作成しました。");
       return;
     }
 
