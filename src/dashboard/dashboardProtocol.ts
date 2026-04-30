@@ -144,6 +144,7 @@ export type DashboardWorkPanel =
     priorities: DashboardMetadataOption[];
     statuses: DashboardMetadataOption[];
     values: NewTicketComposerValues;
+    draftUri?: string;
     error?: string;
   }
   | {
@@ -157,6 +158,7 @@ export type DashboardWorkPanel =
     priorities: DashboardMetadataOption[];
     statuses: DashboardMetadataOption[];
     values: NewTicketComposerValues;
+    draftUri?: string;
     error?: string;
   };
 
