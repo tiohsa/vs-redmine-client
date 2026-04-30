@@ -138,6 +138,9 @@ export class DashboardController {
       case "ticket.cancelComposer":
         this.cancelComposer();
         break;
+      case "ticket.syncNewTicketDraftFromComposer":
+        await this.handleSyncNewTicketDraftFromComposer(req.requestId);
+        break;
       case "ticket.createDraftFromComposer":
         await this.createDraftFromComposer(req.requestId, req.values);
         break;
@@ -664,6 +667,19 @@ export class DashboardController {
     this.opts.notifySuccess(requestId, `同期が完了しました。同期: ${synced}件`);
   }
 
+  private async handleSyncNewTicketDraftFromComposer(requestId: string): Promise<void> {
+    const queue = getOfflineSyncQueue();
+    const entry = queue.newTickets[0];
+    if (!entry?.documentUri) {
+      this.opts.notifySuccess(requestId, "同期する未同期変更はありません。");
+      return;
+    }
+
+    this.opts.notifyOperationStarted(requestId, "同期中...");
+    const result = await this.syncOne({ kind: "newTicket", documentUri: entry.documentUri });
+    this.notifySyncOneResult(requestId, result);
+  }
+
   private buildSelectedTicketSyncKeys(ticketId: number): DashboardUnsyncedKey[] {
     const queue = getOfflineSyncQueue();
     const keys: DashboardUnsyncedKey[] = [];
@@ -1032,7 +1048,6 @@ export class DashboardController {
         }),
         projectId: workPanel.projectId,
       });
-      this.cancelComposer();
     } catch (err) {
       const msg = (err as Error).message;
       this.opts.notifyError(requestId, `ドラフトの作成に失敗しました: ${msg}`);

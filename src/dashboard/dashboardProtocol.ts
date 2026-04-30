@@ -247,6 +247,7 @@ export type DashboardRequest =
   | { type: "ticket.create"; requestId: string }
   | { type: "ticket.createChild"; requestId: string; parentTicketId: number }
   | { type: "ticket.cancelComposer"; requestId: string }
+  | { type: "ticket.syncNewTicketDraftFromComposer"; requestId: string }
   | {
       type: "ticket.createDraftFromComposer";
       requestId: string;

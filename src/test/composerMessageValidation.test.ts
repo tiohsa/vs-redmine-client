@@ -7,6 +7,11 @@ suite("コンポーザー メッセージバリデーション", () => {
     assert.strictEqual(r.ok, true);
   });
 
+  test("ticket.syncNewTicketDraftFromComposer: 受け入れられる", () => {
+    const r = validateDashboardMessage({ type: "ticket.syncNewTicketDraftFromComposer", requestId: "r1-1" });
+    assert.strictEqual(r.ok, true);
+  });
+
   test("ticket.createDraftFromComposer: 正常なリクエスト", () => {
     const r = validateDashboardMessage({
       type: "ticket.createDraftFromComposer",

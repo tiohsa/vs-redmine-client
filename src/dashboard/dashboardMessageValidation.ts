@@ -179,6 +179,9 @@ export const validateDashboardMessage = (raw: unknown): ValidationResult => {
     case "ticket.cancelComposer":
       return { ok: true, request: { type, requestId } };
 
+    case "ticket.syncNewTicketDraftFromComposer":
+      return { ok: true, request: { type, requestId } };
+
     case "ticket.createDraftFromComposer": {
       const values = raw["values"];
       if (!isObject(values)) {

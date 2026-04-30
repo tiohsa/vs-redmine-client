@@ -80,6 +80,11 @@ suite("Dashboard メッセージバリデーション", () => {
     assert.strictEqual(r.ok, true);
   });
 
+  test("ticket.syncNewTicketDraftFromComposer: 正常", () => {
+    const r = validateDashboardMessage({ type: "ticket.syncNewTicketDraftFromComposer", requestId: "r-sync" });
+    assert.strictEqual(r.ok, true);
+  });
+
   test("comment.edit: commentId が数値でないと拒否される", () => {
     const r = validateDashboardMessage({ type: "comment.edit", requestId: "r", ticketId: 1, commentId: "x" });
     assert.strictEqual(r.ok, false);

@@ -358,7 +358,7 @@ function renderComposerPanel(panel){
   card.innerHTML =
     '<div class="work-panel-head"><div class="work-panel-title">'+title+'</div><div class="work-panel-subtitle">'+esc(panel.projectName || ('Project #'+panel.projectId))+'</div>'+parentLabel+'</div>'
     +errorHtml
-    +'<div class="composer-actions composer-actions-top"><button class="btn btn-secondary" id="work-cancel">キャンセル</button><button class="btn btn-primary" id="work-create"'+(canCreate?'':' disabled')+'>Markdownドラフト作成</button></div>'
+    +'<div class="composer-actions composer-actions-top"><button class="btn btn-secondary" id="work-cancel">キャンセル</button><button class="btn btn-primary" id="work-create"'+(canCreate?'':' disabled')+'>Markdownドラフト作成</button><button class="btn btn-secondary" id="work-sync-new-ticket">同期</button></div>'
     +'<div class="composer-grid composer-grid-detail">'
     +'<label class="detail-field composer-detail-field"><span>Tracker <span class="composer-required">*</span></span><select class="detail-select composer-select" id="work-tracker"><option value="">Select...</option>'+trackerOptions+'</select></label>'
     +'<label class="detail-field composer-detail-field"><span>Priority <span class="composer-required">*</span></span><select class="detail-select composer-select" id="work-priority"><option value="">Select...</option>'+priorityOptions+'</select></label>'
@@ -382,6 +382,7 @@ function renderComposerPanel(panel){
 
   card.querySelector('#work-cancel')?.addEventListener('click',()=>req('ticket.cancelComposer'));
   card.querySelector('#work-create')?.addEventListener('click',()=>req('ticket.createDraftFromComposer',{values:readValues()}));
+  card.querySelector('#work-sync-new-ticket')?.addEventListener('click',()=>req('ticket.syncNewTicketDraftFromComposer'));
 }
 
 function renderTicketDetail(){
