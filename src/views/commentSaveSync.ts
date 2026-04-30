@@ -1,6 +1,7 @@
 import * as vscode from "vscode";
 import { addComment, updateComment } from "../redmine/comments";
 import { getIssueDetail, updateIssue } from "../redmine/issues";
+import { computeNotesHash } from "../utils/notesHash";
 import { getCurrentUserId } from "../redmine/users";
 import { Comment } from "../redmine/types";
 import { validateComment } from "../utils/commentValidation";
@@ -463,7 +464,32 @@ export const applyQueuedCommentUpdate = async (input: {
       return buildResult("no_change", "No changes to save.", { uploadSummary });
     }
 
-    if (update.lastKnownRemoteUpdatedAt) {
+    if (update.sourceNotesHash) {
+      // hash ベースの競合検知: source_notes_hash と現在の Redmine 側 notes hash を比較する
+      try {
+        const detail = await deps.getIssueDetail(update.ticketId);
+        const remoteComment = detail.comments.find((c) => c.id === update.commentId);
+        if (!remoteComment) {
+          return buildResult("not_found", "対象コメントが見つかりません。Redmine側で削除または変更された可能性があります。");
+        }
+        const remoteHash = computeNotesHash(remoteComment.body);
+        if (remoteHash !== update.sourceNotesHash) {
+          return buildResult("conflict", "Redmine側でコメントが更新されています。同期前に差分を確認してください。", {
+            conflictContext: {
+              commentId: update.commentId,
+              ticketId: update.ticketId,
+              localBody: nextContent,
+              remoteBody: remoteComment.body,
+              remoteUpdatedAt: remoteComment.updatedAt,
+            },
+          });
+        }
+      } catch (err) {
+        const mapped = mapErrorToResult(err);
+        if (mapped.status === "not_found") { return mapped; }
+        // 取得エラーは無視して更新を試みる
+      }
+    } else if (update.lastKnownRemoteUpdatedAt) {
       try {
         const detail = await deps.getIssueDetail(update.ticketId);
         const remoteComment = detail.comments.find((c) => c.id === update.commentId);
@@ -490,7 +516,20 @@ export const applyQueuedCommentUpdate = async (input: {
         uploadResult.uploads.length > 0 ? uploadResult.uploads : undefined,
       );
     } catch (error) {
-      return mapErrorToResult(error);
+      const mapped = mapErrorToResult(error);
+      if (update.sourceNotesHash) {
+        // 405 は API 非対応として案内する
+        if (mapped.status === "failed" && /405/.test(mapped.message)) {
+          return buildResult("failed", "このRedmine環境では、Webviewから既存コメントを直接更新できません。Redmine標準画面で編集してください。");
+        }
+        if (mapped.status === "forbidden") {
+          return buildResult("forbidden", "このコメントを編集する権限がありません。Redmineの権限設定を確認してください。");
+        }
+        if (mapped.status === "not_found") {
+          return buildResult("not_found", "対象コメントが見つかりません。Redmine側で削除または変更された可能性があります。");
+        }
+      }
+      return mapped;
     }
 
     updateCommentEdit(update.commentId, nextContent, update.lastKnownRemoteUpdatedAt);

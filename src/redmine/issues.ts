@@ -228,16 +228,18 @@ export const getIssueDetail = async (issueId: number): Promise<IssueDetailResult
     // authorId removed
   };
 
-  const comments: Comment[] = (issue.journals ?? []).map((journal) => ({
-    id: journal.id,
-    ticketId: issue.id,
-    authorId: journal.user?.id ?? 0,
-    authorName: journal.user?.name ?? "Unknown",
-    body: journal.notes ?? "",
-    createdAt: journal.created_on,
-    updatedAt: journal.updated_on,
-    editableByCurrentUser: false,
-  }));
+  const comments: Comment[] = (issue.journals ?? [])
+    .filter((journal) => (journal.notes ?? "").trim().length > 0)
+    .map((journal) => ({
+      id: journal.id,
+      ticketId: issue.id,
+      authorId: journal.user?.id ?? 0,
+      authorName: journal.user?.name ?? "Unknown",
+      body: journal.notes ?? "",
+      createdAt: journal.created_on,
+      updatedAt: journal.updated_on,
+      editableByCurrentUser: false,
+    }));
 
   return { ticket, comments };
 };

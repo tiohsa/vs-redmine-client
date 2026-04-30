@@ -7,6 +7,7 @@ import {
 } from "../views/offlineSyncStore";
 import { applyQueuedTicketUpdate, createTicketFromQueuedContent } from "../views/ticketSaveSync";
 import { applyQueuedCommentUpdate, finalizeNewCommentDraftDocument } from "../views/commentSaveSync";
+import { updateCommentUpdateFileAfterSync } from "../views/commentUpdateFile";
 import { registerTicketDocument } from "../views/ticketEditorRegistry";
 import { UnsyncedFileSyncKey } from "../views/unsyncedFilesView";
 import { showInfo, showWarning } from "../utils/notifications";
@@ -124,6 +125,9 @@ export const syncUnsyncedFile = async (
           commentId: result.commentId,
         });
       }
+    }
+    if (result.status === "success" && update.sourceNotesHash && update.documentUri) {
+      await updateCommentUpdateFileAfterSync(update.documentUri, update.body);
     }
     if (result.status === "success" || result.status === "no_change" || result.status === "created" || result.status === "created_unresolved") {
       removeOfflineCommentEntry({ commentId: syncKey.commentId, documentUri: syncKey.documentUri });

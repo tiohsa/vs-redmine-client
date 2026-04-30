@@ -16,9 +16,9 @@ import { runOfflineSync } from "../commands/offlineSync";
 import type { OfflineSyncRunResult } from "../commands/offlineSync";
 import { syncUnsyncedFile } from "../commands/syncUnsyncedFile";
 import type { SyncUnsyncedFileResult } from "../commands/syncUnsyncedFile";
-import { openTicketInBrowser } from "../commands/openInBrowser";
+import { openTicketInBrowser, openCommentInBrowser } from "../commands/openInBrowser";
 import { addCommentFromList } from "../commands/addCommentFromList";
-import { editComment } from "../commands/editComment";
+import { openCommentUpdateDraft } from "../commands/openCommentUpdateDraft";
 import { rememberTicketSummaries } from "../views/ticketSummaryStore";
 import { showTicketPreview } from "../views/ticketPreview";
 import {
@@ -142,6 +142,9 @@ export class DashboardController {
       case "comment.edit":
         void this.selectTicket(req.ticketId);
         await this.editTicketComment(req.ticketId, req.commentId);
+        break;
+      case "comment.openBrowser":
+        await this.openCommentInBrowser(req.ticketId, req.commentId, req.noteIndex);
         break;
       case "comment.reload":
         await this.loadComments(req.ticketId);
@@ -576,12 +579,30 @@ export class DashboardController {
     await openTicketInBrowser({ ticket });
   }
 
+  private async openCommentInBrowser(
+    ticketId: number,
+    commentId: number,
+    noteIndex?: number,
+  ): Promise<void> {
+    await openCommentInBrowser({
+      comment: {
+        id: commentId,
+        ticketId,
+        authorId: 0,
+        authorName: "",
+        body: "",
+        editableByCurrentUser: false,
+        noteIndex,
+      },
+    });
+  }
+
   private async editTicketComment(ticketId: number, commentId: number): Promise<void> {
     try {
       const detail = await getIssueDetail(ticketId);
       const comment = detail.comments.find((c) => c.id === commentId);
       if (comment) {
-        await editComment(comment);
+        await openCommentUpdateDraft(comment, detail.ticket);
       }
     } catch {
       // コメント編集準備に失敗した場合は無視する

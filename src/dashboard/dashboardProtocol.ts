@@ -91,6 +91,7 @@ export interface DashboardCommentItem {
   createdAt?: string;
   updatedAt?: string;
   editableByCurrentUser: boolean;
+  hasUnsyncedEdit: boolean;
 }
 
 export interface DashboardTicketSettingsViewModel {
@@ -185,6 +186,7 @@ export type DashboardRequest =
   | { type: "ticket.syncSelected"; requestId: string; ticketId: number }
   | { type: "comment.add"; requestId: string; ticketId: number }
   | { type: "comment.edit"; requestId: string; ticketId: number; commentId: number }
+  | { type: "comment.openBrowser"; requestId: string; ticketId: number; commentId: number; noteIndex?: number }
   | { type: "comment.reload"; requestId: string; ticketId: number }
   | { type: "unsynced.openLocalFile"; requestId: string; documentUri: string }
   | { type: "unsynced.syncOne"; requestId: string; key: DashboardUnsyncedKey }

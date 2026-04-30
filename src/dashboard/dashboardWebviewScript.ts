@@ -420,14 +420,18 @@ function renderComments(){
   else if(!c.items.length){ list.innerHTML=header+'<div class="state-msg">コメントはありません。</div>'; }
   else{
     list.innerHTML=header+c.items.map(cm=>{
-      const editBtn=cm.editableByCurrentUser
-        ?'<button class="btn btn-secondary" data-edit-comment="'+cm.id+'" data-ticket="'+ticketId+'">編集</button>':'';
+      const unsyncedBadge=cm.hasUnsyncedEdit
+        ?'<span class="badge sync-dirty" aria-label="未同期の修正があります">未同期の修正あり</span>':'' ;
+      const editBtn='<button class="btn btn-secondary" data-edit-comment="'+cm.id+'" data-ticket="'+ticketId+'" aria-label="コメントを編集">編集</button>';
+      const browserBtn='<button class="btn btn-secondary" data-open-comment="'+cm.id+'" data-ticket="'+ticketId+'" aria-label="Redmineで開く">Redmineで開く</button>';
       return '<div class="comment-card">'
         +'<div class="comment-header"><span class="comment-author">'+esc(cm.authorName)+'</span>'
         +(cm.updatedAt?'<span class="comment-date">'+esc(cm.updatedAt.substring(0,10))+'</span>':'')
+        +'<span class="comment-id">journal #'+cm.id+'</span>'
+        +unsyncedBadge
         +'</div>'
         +'<div class="comment-body">'+esc(cm.body)+'</div>'
-        +(editBtn?'<div class="comment-actions">'+editBtn+'</div>':'')
+        +'<div class="comment-actions">'+browserBtn+(editBtn||'')+'</div>'
         +'</div>';
     }).join('');
   }
@@ -436,6 +440,11 @@ function renderComments(){
   list.querySelectorAll('[data-edit-comment]').forEach(btn=>{
     btn.addEventListener('click',()=>{
       req('comment.edit',{ticketId:Number(btn.dataset.ticket),commentId:Number(btn.dataset.editComment)});
+    });
+  });
+  list.querySelectorAll('[data-open-comment]').forEach(btn=>{
+    btn.addEventListener('click',()=>{
+      req('comment.openBrowser',{ticketId:Number(btn.dataset.ticket),commentId:Number(btn.dataset.openComment)});
     });
   });
 }
