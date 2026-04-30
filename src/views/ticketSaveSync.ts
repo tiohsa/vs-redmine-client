@@ -858,12 +858,21 @@ export const createTicketFromQueuedContent = async (input: {
   parsed?: TicketEditorContent;
 }> => {
   const deps = { ...defaultCreateDeps, ...input.deps };
-  return createTicketFromContent({
+  const output = await createTicketFromContent({
     content: input.content,
     projectId: input.projectId,
     baseDir: input.baseDir,
     deps,
   });
+  if (output.result.status === "created" && output.createdId && output.parsed) {
+    updateDraftAfterSave(
+      output.createdId,
+      output.parsed.subject,
+      output.parsed.description,
+      output.parsed.metadata,
+    );
+  }
+  return output;
 };
 
 export const applyQueuedTicketUpdate = async (input: {

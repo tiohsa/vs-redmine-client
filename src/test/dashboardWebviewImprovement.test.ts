@@ -24,9 +24,14 @@ suite("Dashboard Webview 改善", () => {
 
   test("selected ticket detail card のコンテナと renderer を持つ", () => {
     assert.ok(buildDashboardHtml("nonce").includes("ticket-detail-card"));
+    assert.ok(buildDashboardHtml("nonce").includes("ticket-work-panel"));
     assert.ok(dashboardWebviewScript.includes("function renderTicketDetail()"));
+    assert.ok(dashboardWebviewScript.includes("function renderComposerPanel(panel)"));
     assert.ok(dashboardWebviewScript.includes("ticket.metadata.update"));
     assert.ok(dashboardWebviewScript.includes("ticket.syncSelected"));
+    assert.ok(dashboardWebviewScript.includes("ticket.createDraftFromComposer"));
+    assert.ok(dashboardWebviewScript.includes("ticket.syncNewTicketDraftFromComposer"));
+    assert.ok(dashboardWebviewScript.includes("work-sync-new-ticket"));
     assert.ok(!dashboardWebviewScript.includes("Latest comments"));
   });
 

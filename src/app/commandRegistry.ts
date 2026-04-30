@@ -93,24 +93,41 @@ export const registerCommands = (
   // ── 明示同期コマンド ──────────────────────────────────────────────────────
   context.subscriptions.push(
     vscode.commands.registerCommand("redmine-client.syncToRedmine", async () => {
-      const editor = vscode.window.activeTextEditor;
-      if (!editor) {
-        return;
+      const activeEditor = vscode.window.activeTextEditor;
+      if (activeEditor && isTicketEditor(activeEditor)) {
+        return sync.syncEditorAndNotify(activeEditor);
       }
-      await sync.syncEditorAndNotify(editor);
+
+      const fallbackRecord = getAllEditorRecords()
+        .filter(
+          (record) =>
+            record.contentType === "ticket" ||
+            record.contentType === "comment" ||
+            record.contentType === "commentDraft",
+        )
+        .sort((a, b) => b.lastActiveAt - a.lastActiveAt)[0];
+      if (!fallbackRecord) {
+        return undefined;
+      }
+
+      const document = await vscode.workspace.openTextDocument(vscode.Uri.parse(fallbackRecord.uri));
+      const editor =
+        vscode.window.visibleTextEditors.find((e) => e.document === document) ??
+        (await vscode.window.showTextDocument(document, { preview: false }));
+      return sync.syncEditorAndNotify(editor);
     }),
     vscode.commands.registerCommand(
       "redmine-client.syncOpenEditor",
       async (item: { uri?: string } & { record?: { uri?: string } }) => {
         const uriStr = item?.uri ?? item?.record?.uri;
         if (!uriStr) {
-          return;
+          return undefined;
         }
         const document = await vscode.workspace.openTextDocument(vscode.Uri.parse(uriStr));
         const editor =
           vscode.window.visibleTextEditors.find((e) => e.document === document) ??
           (await vscode.window.showTextDocument(document, { preview: false }));
-        await sync.syncEditorAndNotify(editor);
+        return sync.syncEditorAndNotify(editor);
       },
     ),
     vscode.commands.registerCommand("redmine-client.syncAllOpenEditors", async () => {

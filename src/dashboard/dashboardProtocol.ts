@@ -120,6 +120,68 @@ export interface DashboardSelectedProject {
   name?: string;
 }
 
+export interface NewTicketComposerValues {
+  subject: string;
+  tracker?: string;
+  priority?: string;
+  status?: string;
+  start_date: string;
+  due_date: string;
+  description: string;
+}
+
+export type DashboardWorkPanel =
+  | {
+    mode: "detail";
+    ticketId: number;
+  }
+  | {
+    mode: "newTicket";
+    loading: boolean;
+    projectId: number;
+    projectName: string;
+    trackers: DashboardMetadataOption[];
+    priorities: DashboardMetadataOption[];
+    statuses: DashboardMetadataOption[];
+    values: NewTicketComposerValues;
+    error?: string;
+  }
+  | {
+    mode: "childTicket";
+    loading: boolean;
+    projectId: number;
+    projectName: string;
+    parentTicketId: number;
+    parentSubject: string;
+    trackers: DashboardMetadataOption[];
+    priorities: DashboardMetadataOption[];
+    statuses: DashboardMetadataOption[];
+    values: NewTicketComposerValues;
+    error?: string;
+  };
+
+export interface NewTicketComposerState {
+  visible: boolean;
+  loading: boolean;
+  projectId: number;
+  projectName: string;
+  parentTicketId?: number;
+  parentSubject?: string;
+  trackers: DashboardMetadataOption[];
+  priorities: DashboardMetadataOption[];
+  statuses: DashboardMetadataOption[];
+  values: {
+    subject: string;
+    tracker: string;
+    priority: string;
+    status: string;
+    start_date: string;
+    due_date: string;
+    description: string;
+  };
+  error?: string;
+}
+
 export interface DashboardState {
   selectedProject?: DashboardSelectedProject;
   includeChildProjects: boolean;
@@ -150,6 +212,8 @@ export interface DashboardState {
     comments?: string;
     operation?: string;
   };
+  workPanel?: DashboardWorkPanel;
+  newTicketComposer?: NewTicketComposerState;
 }
 
 // ── Message Protocol ──────────────────────────────────────────────────────
@@ -182,6 +246,20 @@ export type DashboardRequest =
   | { type: "ticket.openBrowser"; requestId: string; ticketId: number }
   | { type: "ticket.create"; requestId: string }
   | { type: "ticket.createChild"; requestId: string; parentTicketId: number }
+  | { type: "ticket.cancelComposer"; requestId: string }
+  | { type: "ticket.syncNewTicketDraftFromComposer"; requestId: string }
+  | {
+      type: "ticket.createDraftFromComposer";
+      requestId: string;
+      values: {
+        tracker: string;
+        priority: string;
+        status: string;
+        start_date?: string;
+        due_date?: string;
+        description?: string;
+      };
+    }
   | { type: "ticket.metadata.update"; requestId: string; ticketId: number; patch: TicketMetadataPatch }
   | { type: "ticket.syncSelected"; requestId: string; ticketId: number }
   | { type: "comment.add"; requestId: string; ticketId: number }

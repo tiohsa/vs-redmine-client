@@ -1,12 +1,17 @@
 import * as assert from "assert";
 import { buildIssueCreatePayload } from "../redmine/issues";
-import { syncNewTicketDraftContent } from "../views/ticketSaveSync";
+import { createTicketFromQueuedContent, syncNewTicketDraftContent } from "../views/ticketSaveSync";
+import { clearTicketDrafts, getTicketDraft } from "../views/ticketDraftStore";
 import {
   buildTicketEditorMetadataContent,
   buildTicketEditorMetadataContentWithChildren,
 } from "./helpers/ticketEditorMetadataStubs";
 
 suite("Ticket creation payload", () => {
+  teardown(() => {
+    clearTicketDrafts();
+  });
+
   test("builds payload from editor content", () => {
     const payload = buildIssueCreatePayload({
       projectId: 10,
@@ -227,6 +232,29 @@ suite("Ticket creation payload", () => {
     assert.strictEqual(result.status, "failed");
     assert.strictEqual(created.length, 2);
     assert.deepStrictEqual(deleted, [300, 301]);
+  });
+
+  test("createTicketFromQueuedContent: 作成成功時にドラフト状態を初期化する", async () => {
+    const deps = {
+      createIssue: async () => 9876,
+      deleteIssue: async () => undefined,
+      listIssueStatuses: async () => [{ id: 1, name: "In Progress" }],
+      listTrackers: async () => [{ id: 2, name: "Task" }],
+      listIssuePriorities: async () => [{ id: 3, name: "Normal" }],
+      searchUsers: async () => [],
+      uploadFile: async () => ({ token: "token", filename: "foo.png", contentType: "image/png" }),
+    };
+    const content = buildTicketEditorMetadataContent("Parent Ticket", "Parent body");
+
+    const { result, createdId } = await createTicketFromQueuedContent({
+      content,
+      projectId: 10,
+      deps,
+    });
+
+    assert.strictEqual(result.status, "created");
+    assert.strictEqual(createdId, 9876);
+    assert.strictEqual(getTicketDraft(9876)?.status, "Synced");
   });
 
   // Relaxed matching test removed

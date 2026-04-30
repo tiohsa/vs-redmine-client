@@ -284,15 +284,8 @@ function renderSelect(name, value, options, label){
   ).join('');
   return '<label class="detail-field"><span>'+label+'</span><select class="detail-select" data-metadata-field="'+name+'"'+disabled+'>'+opts+'</select></label>';
 }
-function renderTicketDetail(){
-  if(!state) return;
+function renderTicketDetailPanel(ticket){
   const card = document.getElementById('ticket-detail-card');
-  const ticket = state.selectedTicket;
-  if(!ticket){
-    card.classList.add('hidden');
-    card.innerHTML = '';
-    return;
-  }
   const node = findTicketNode(state.tickets, ticket.id) || {};
   const projectLabel = ticket.projectName
     ? esc(ticket.projectName)+' / ID: '+esc(ticket.projectId ?? '')
@@ -341,6 +334,84 @@ function renderTicketDetail(){
       req('ticket.metadata.update',{ticketId:ticket.id,patch:{[field]:input.value}});
     });
   });
+}
+
+function renderComposerPanel(panel){
+  const card = document.getElementById('ticket-detail-card');
+  card.classList.remove('hidden');
+  const title = panel.mode === 'childTicket' ? '子チケット作成' : '新規チケット作成';
+  const parentLabel = panel.mode === 'childTicket'
+    ? '<div class="work-panel-subtitle">Parent: #'+panel.parentTicketId+' '+esc(panel.parentSubject || '')+'</div>'
+    : '';
+  const errorHtml = panel.error ? '<div class="composer-error">'+esc(panel.error)+'</div>' : '';
+  if(panel.loading){
+    card.innerHTML =
+      '<div class="work-panel-head"><div class="work-panel-title">'+title+'</div></div>'
+      +'<div class="composer-loading">トラッカーを読み込み中…</div>';
+    return;
+  }
+  const values = panel.values || {};
+  const trackerOptions = (panel.trackers || []).map(item => '<option value="'+esc(item.name)+'"'+(item.name===values.tracker?' selected':'')+'>'+esc(item.name)+'</option>').join('');
+  const priorityOptions = (panel.priorities || []).map(item => '<option value="'+esc(item.name)+'"'+(item.name===values.priority?' selected':'')+'>'+esc(item.name)+'</option>').join('');
+  const statusOptions = (panel.statuses || []).map(item => '<option value="'+esc(item.name)+'"'+(item.name===values.status?' selected':'')+'>'+esc(item.name)+'</option>').join('');
+  const canCreate = values.tracker && values.priority && values.status;
+  card.innerHTML =
+    '<div class="work-panel-head"><div class="work-panel-title">'+title+'</div><div class="work-panel-subtitle">'+esc(panel.projectName || ('Project #'+panel.projectId))+'</div>'+parentLabel+'</div>'
+    +errorHtml
+    +'<div class="composer-actions composer-actions-top"><button class="btn btn-secondary" id="work-cancel">キャンセル</button><button class="btn btn-primary" id="work-create"'+(canCreate?'':' disabled')+'>Markdownドラフト作成</button><button class="btn btn-secondary" id="work-sync-new-ticket">同期</button></div>'
+    +'<div class="composer-grid composer-grid-detail">'
+    +'<label class="detail-field composer-detail-field"><span>Tracker <span class="composer-required">*</span></span><select class="detail-select composer-select" id="work-tracker"><option value="">Select...</option>'+trackerOptions+'</select></label>'
+    +'<label class="detail-field composer-detail-field"><span>Priority <span class="composer-required">*</span></span><select class="detail-select composer-select" id="work-priority"><option value="">Select...</option>'+priorityOptions+'</select></label>'
+    +'<label class="detail-field composer-detail-field"><span>Status <span class="composer-required">*</span></span><select class="detail-select composer-select" id="work-status"><option value="">Select...</option>'+statusOptions+'</select></label>'
+    +'<label class="detail-field composer-detail-field"><span>Start date</span><input class="detail-input composer-input" id="work-start-date" type="date" value="'+esc(values.start_date || '')+'"></label>'
+    +'<label class="detail-field composer-detail-field"><span>Due date</span><input class="detail-input composer-input" id="work-due-date" type="date" value="'+esc(values.due_date || '')+'"></label>'
+    +'</div>';
+
+  const trackerEl = card.querySelector('#work-tracker');
+  const priorityEl = card.querySelector('#work-priority');
+  const statusEl = card.querySelector('#work-status');
+  const startDateEl = card.querySelector('#work-start-date');
+  const dueDateEl = card.querySelector('#work-due-date');
+  const readValues = () => ({
+    tracker: trackerEl?.value || '',
+    priority: priorityEl?.value || '',
+    status: statusEl?.value || '',
+    start_date: startDateEl?.value || undefined,
+    due_date: dueDateEl?.value || undefined,
+  });
+
+  card.querySelector('#work-cancel')?.addEventListener('click',()=>req('ticket.cancelComposer'));
+  card.querySelector('#work-create')?.addEventListener('click',()=>req('ticket.createDraftFromComposer',{values:readValues()}));
+  card.querySelector('#work-sync-new-ticket')?.addEventListener('click',()=>req('ticket.syncNewTicketDraftFromComposer'));
+}
+
+function renderTicketDetail(){
+  if(!state) return;
+  const card = document.getElementById('ticket-detail-card');
+  const panel = state.workPanel;
+  if(!panel){
+    const ticket = state.selectedTicket;
+    if(!ticket){
+      card.classList.add('hidden');
+      card.innerHTML='';
+      return;
+    }
+    renderTicketDetailPanel(ticket);
+    return;
+  }
+  if(panel.mode === 'detail'){
+    const ticket = state.selectedTicket && state.selectedTicket.id===panel.ticketId
+      ? state.selectedTicket
+      : null;
+    if(ticket){
+      renderTicketDetailPanel(ticket);
+    }else{
+      card.classList.add('hidden');
+      card.innerHTML='';
+    }
+    return;
+  }
+  renderComposerPanel(panel);
 }
 
 // ── Filter chips ────────────────────────────────────────────────────────────

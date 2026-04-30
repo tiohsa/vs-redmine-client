@@ -1,7 +1,7 @@
 import * as vscode from "vscode";
 import { getProjectSelection, setProjectSelection } from "../config/projectSelection";
 import { getDefaultProjectId, getIncludeChildProjects, getTicketListLimit } from "../config/settings";
-import { listProjects } from "../redmine/projects";
+import { listProjects, getProjectTrackers } from "../redmine/projects";
 import { getIssueDetail, listIssuePriorities, listIssueStatuses, listIssues, listTrackers } from "../redmine/issues";
 import { applyTicketFilters, applyTicketSort } from "../views/projectListSettings";
 import {
@@ -22,14 +22,12 @@ import { openCommentUpdateDraft } from "../commands/openCommentUpdateDraft";
 import { rememberTicketSummaries } from "../views/ticketSummaryStore";
 import { showTicketPreview } from "../views/ticketPreview";
 import {
-  buildNewChildTicketDraftContent,
   buildNewTicketDraftContent,
   ensureTicketDraft,
   markDraftStatus,
   setTicketDraftContent,
 } from "../views/ticketDraftStore";
 import { openNewTicketDraft } from "../commands/createTicketFromList";
-import { showError } from "../utils/notifications";
 import { Ticket } from "../redmine/types";
 import type { UnsyncedFileSyncKey } from "../views/unsyncedFilesView";
 import { buildTicketDashboardNodes, buildTicketDetail } from "./viewModels/ticketDashboardViewModel";
@@ -37,7 +35,15 @@ import { buildUnsyncedDashboardItems } from "./viewModels/unsyncedDashboardViewM
 import { buildCommentDashboardItems } from "./viewModels/commentsDashboardViewModel";
 import { DashboardStateStore } from "./DashboardStateStore";
 import { SettingsController } from "./SettingsController";
-import type { DashboardProjectNode, DashboardRequest, DashboardMetadataOptions, DashboardUnsyncedKey, TicketMetadataPatch } from "./dashboardProtocol";
+import type {
+  DashboardProjectNode,
+  DashboardRequest,
+  DashboardMetadataOptions,
+  DashboardUnsyncedKey,
+  TicketMetadataPatch,
+  DashboardWorkPanel,
+  NewTicketComposerValues,
+} from "./dashboardProtocol";
 import { resolveCurrentProject, type ResolvedProject } from "./resolveProject";
 import {
   buildTicketEditorContent,
@@ -46,6 +52,7 @@ import {
 } from "../views/ticketEditorContent";
 import { getTicketEditors, registerTicketDocument } from "../views/ticketEditorRegistry";
 import { applyEditorContent } from "../views/ticketPreview";
+import type { SyncStatus } from "../app/syncController";
 
 export interface DashboardControllerOptions {
   store: DashboardStateStore;
@@ -61,6 +68,7 @@ export class DashboardController {
   private projects: DashboardProjectNode[] = [];
   private metadataOptionsLoaded = false;
   private totalCount = 0;
+  private lastCreatedTicketIdFromComposer?: number;
   private readonly settingsCtrl: SettingsController;
   private readonly disposables: vscode.Disposable[] = [];
 
@@ -123,11 +131,20 @@ export class DashboardController {
         await this.openInBrowser(req.ticketId);
         break;
       case "ticket.create":
-        await this.createTicketFromDashboard();
+        await this.openNewTicketComposer();
         break;
       case "ticket.createChild":
         void this.selectTicket(req.parentTicketId);
-        await this.createChildTicketFromDashboard(req.parentTicketId);
+        await this.openChildTicketComposer(req.parentTicketId);
+        break;
+      case "ticket.cancelComposer":
+        this.cancelComposer();
+        break;
+      case "ticket.syncNewTicketDraftFromComposer":
+        await this.handleSyncNewTicketDraftFromComposer(req.requestId);
+        break;
+      case "ticket.createDraftFromComposer":
+        await this.createDraftFromComposer(req.requestId, req.values);
         break;
       case "ticket.metadata.update":
         await this.updateTicketMetadata(req.requestId, req.ticketId, req.patch);
@@ -345,6 +362,7 @@ export class DashboardController {
     store.update({
       selectedTicketId: ticketId,
       selectedTicket: buildTicketDetail(ticket, this.tickets),
+      workPanel: { mode: "detail", ticketId },
     });
     await this.loadComments(ticketId);
   }
@@ -622,7 +640,33 @@ export class DashboardController {
   private async handleSyncSelectedTicket(requestId: string, ticketId: number): Promise<void> {
     const keys = this.buildSelectedTicketSyncKeys(ticketId);
     if (keys.length === 0) {
-      this.opts.notifySuccess(requestId, "同期する未同期変更はありません。");
+      const openTicketRecord = getTicketEditors(ticketId)
+        .filter((record) => record.contentType === "ticket")
+        .sort((a, b) => b.lastActiveAt - a.lastActiveAt)[0];
+      if (!openTicketRecord) {
+        this.opts.notifySuccess(requestId, "同期する未同期変更はありません。");
+        return;
+      }
+      this.opts.notifyOperationStarted(requestId, "同期中...");
+      const status = await vscode.commands.executeCommand<SyncStatus | undefined>(
+        "redmine-client.syncOpenEditor",
+        { uri: openTicketRecord.uri },
+      );
+      switch (status) {
+        case "uploaded":
+          this.opts.notifySuccess(requestId, "同期が完了しました。");
+          break;
+        case "noChange":
+          this.opts.notifySuccess(requestId, "変更はありませんでした。");
+          break;
+        case "conflict":
+          this.opts.notifyError(requestId, "リモートの変更と競合しています。ファイルを開いて確認してください。");
+          break;
+        case "failed":
+        default:
+          this.opts.notifyError(requestId, "同期に失敗しました。VS Code の通知をご確認ください。");
+          break;
+      }
       return;
     }
 
@@ -648,7 +692,61 @@ export class DashboardController {
       this.opts.notifySuccess(requestId, "変更はありませんでした。");
       return;
     }
+    this.opts.onTicketsRefreshed();
     this.opts.notifySuccess(requestId, `同期が完了しました。同期: ${synced}件`);
+  }
+
+  private async handleSyncNewTicketDraftFromComposer(requestId: string): Promise<void> {
+    const queue = getOfflineSyncQueue();
+    const entry = queue.newTickets[0];
+    this.opts.notifyOperationStarted(requestId, "同期中...");
+    if (entry?.documentUri) {
+      const result = await this.syncOne({ kind: "newTicket", documentUri: entry.documentUri });
+      if (result?.status === "success" && result.kind === "newTicket" && typeof result.id === "number") {
+        this.lastCreatedTicketIdFromComposer = result.id;
+      }
+      this.notifySyncOneResult(requestId, result);
+      return;
+    }
+
+    const createdTicketId = this.lastCreatedTicketIdFromComposer;
+    if (!createdTicketId) {
+      this.opts.notifySuccess(requestId, "同期する未同期変更はありません。");
+      return;
+    }
+
+    const openTicketRecord = getTicketEditors(createdTicketId)
+      .filter((record) => record.contentType === "ticket")
+      .sort((a, b) => b.lastActiveAt - a.lastActiveAt)[0];
+    if (!openTicketRecord) {
+      this.opts.notifySuccess(requestId, "同期する未同期変更はありません。");
+      return;
+    }
+
+    const status = await vscode.commands.executeCommand<SyncStatus | undefined>(
+      "redmine-client.syncOpenEditor",
+      { uri: openTicketRecord.uri },
+    );
+    this.notifySyncStatusResult(requestId, status);
+  }
+
+  private notifySyncStatusResult(requestId: string, status: SyncStatus | undefined): void {
+    switch (status) {
+      case "uploaded":
+        this.opts.onTicketsRefreshed();
+        this.opts.notifySuccess(requestId, "同期が完了しました。");
+        break;
+      case "noChange":
+        this.opts.notifySuccess(requestId, "変更はありませんでした。");
+        break;
+      case "conflict":
+        this.opts.notifyError(requestId, "リモートの変更と競合しています。ファイルを開いて確認してください。");
+        break;
+      case "failed":
+      default:
+        this.opts.notifyError(requestId, "同期に失敗しました。VS Code の通知をご確認ください。");
+        break;
+    }
   }
 
   private buildSelectedTicketSyncKeys(ticketId: number): DashboardUnsyncedKey[] {
@@ -705,6 +803,7 @@ export class DashboardController {
     }
     switch (result.status) {
       case "success":
+        this.opts.onTicketsRefreshed();
         this.opts.notifySuccess(requestId, "同期が完了しました。");
         break;
       case "no_change":
@@ -783,34 +882,248 @@ export class DashboardController {
     return result;
   }
 
-  private async createTicketFromDashboard(): Promise<void> {
-    const project = this.getResolvedProject();
-    if (!project) {
-      showError("プロジェクトを選択してからチケットを作成してください。");
-      return;
-    }
-    await openNewTicketDraft({
-      content: buildNewTicketDraftContent({ projectId: project.id }),
-      projectId: project.id,
-    });
+  private buildComposerValues(input: {
+    tracker?: string;
+    priority?: string;
+    status?: string;
+    start_date?: string;
+    due_date?: string;
+    subject?: string;
+    description?: string;
+  }): NewTicketComposerValues {
+    return {
+      subject: input.subject ?? "",
+      tracker: input.tracker,
+      priority: input.priority,
+      status: input.status,
+      start_date: input.start_date ?? "",
+      due_date: input.due_date ?? "",
+      description: input.description ?? "",
+    };
   }
 
-  private async createChildTicketFromDashboard(parentTicketId: number): Promise<void> {
+  private async openNewTicketComposer(): Promise<void> {
+    this.lastCreatedTicketIdFromComposer = undefined;
+    const project = this.getResolvedProject();
+    if (!project) {
+      this.opts.notifyToast("warning", "チケット作成前にプロジェクトを選択してください。");
+      return;
+    }
+    const defaults = this.opts.store.getState().metadataOptions;
+    this.opts.store.update({
+      workPanel: {
+        mode: "newTicket",
+        loading: true,
+        projectId: project.id,
+        projectName: project.name,
+        trackers: [],
+        priorities: defaults.priorities,
+        statuses: defaults.statuses,
+        values: this.buildComposerValues({}),
+      },
+    });
+    await this.loadComposerTrackers(project.id);
+  }
+
+  private async openChildTicketComposer(parentTicketId: number): Promise<void> {
+    this.lastCreatedTicketIdFromComposer = undefined;
     const parent = this.tickets.find((t) => t.id === parentTicketId);
     if (!parent) {
-      showError("親チケットが見つかりません。");
+      this.opts.notifyError("ticket.createChild", "親チケットが見つかりません。");
       return;
     }
     if (!parent.projectId) {
-      showError("親チケットのプロジェクト情報が不足しています。");
+      this.opts.notifyError("ticket.createChild", "親チケットのプロジェクト情報が不足しています。");
       return;
     }
-
-    const baseContent = buildNewTicketDraftContent({ projectId: parent.projectId });
-    await openNewTicketDraft({
-      content: buildNewChildTicketDraftContent(parent, baseContent),
-      projectId: parent.projectId,
+    const projectName = parent.projectName ?? String(parent.projectId);
+    const defaults = this.opts.store.getState().metadataOptions;
+    this.opts.store.update({
+      workPanel: {
+        mode: "childTicket",
+        loading: true,
+        projectId: parent.projectId,
+        projectName,
+        parentTicketId,
+        parentSubject: parent.subject ?? "",
+        trackers: [],
+        priorities: defaults.priorities,
+        statuses: defaults.statuses,
+        values: this.buildComposerValues({}),
+      },
     });
+    await this.loadComposerTrackers(parent.projectId, parent);
+  }
+
+  private async loadComposerTrackers(
+    projectId: number,
+    parentTicket?: Ticket,
+  ): Promise<void> {
+    try {
+      const trackers = await getProjectTrackers(projectId);
+      if (trackers.length === 0) {
+        this.updateWorkPanelComposer({ loading: false, trackers: [], error: "このプロジェクトにはトラッカーが設定されていません。" });
+        return;
+      }
+      const defaults = this.opts.store.getState().metadataOptions;
+      const firstTracker = trackers[0]?.name;
+      const defaultTracker = this.suggestDefaultTracker(trackers, parentTicket?.trackerName) ?? firstTracker;
+      const defaultPriority = this.pickOptionName(defaults.priorities, parentTicket?.priorityName) ?? defaults.priorities[0]?.name;
+      const defaultStatus = this.pickOptionName(defaults.statuses, parentTicket?.statusName) ?? defaults.statuses[0]?.name;
+      this.updateWorkPanelComposer({
+        loading: false,
+        trackers,
+        error: undefined,
+        values: this.buildComposerValues({
+          tracker: defaultTracker,
+          priority: defaultPriority,
+          status: defaultStatus,
+          due_date: parentTicket?.dueDate,
+        }),
+      });
+    } catch (err) {
+      const msg = (err as Error).message;
+      this.updateWorkPanelComposer({ loading: false, trackers: [], error: `トラッカーの取得に失敗しました: ${msg}` });
+    }
+  }
+
+  private pickOptionName(
+    options: Array<{ name: string }>,
+    candidate?: string,
+  ): string | undefined {
+    if (!candidate) {
+      return undefined;
+    }
+    return options.some((option) => option.name === candidate) ? candidate : undefined;
+  }
+
+  private suggestDefaultTracker(
+    trackers: Array<{ id: number; name: string }>,
+    preferred?: string,
+  ): string | undefined {
+    if (preferred && trackers.some((tracker) => tracker.name === preferred)) {
+      return preferred;
+    }
+    const defaultTracker = this.opts.store.getState().metadataOptions.trackers
+      .find((tracker) => trackers.some((projectTracker) => projectTracker.id === tracker.id));
+    return defaultTracker?.name;
+  }
+
+  private updateWorkPanelComposer(
+    patch: {
+      loading?: boolean;
+      trackers?: Array<{ id: number; name: string }>;
+      priorities?: Array<{ id: number; name: string }>;
+      statuses?: Array<{ id: number; name: string }>;
+      values?: NewTicketComposerValues;
+      error?: string;
+    },
+  ): void {
+    const current = this.opts.store.getState().workPanel;
+    if (!current || (current.mode !== "newTicket" && current.mode !== "childTicket")) {
+      return;
+    }
+    if (current.mode === "newTicket") {
+      this.opts.store.update({ workPanel: { ...current, ...patch, mode: "newTicket" } });
+      return;
+    }
+    this.opts.store.update({ workPanel: { ...current, ...patch, mode: "childTicket" } });
+  }
+
+  private cancelComposer(): void {
+    const selectedTicketId = this.opts.store.getState().selectedTicketId;
+    if (selectedTicketId) {
+      this.opts.store.update({ workPanel: { mode: "detail", ticketId: selectedTicketId } });
+      return;
+    }
+    this.opts.store.update({ workPanel: undefined });
+  }
+
+  private validateComposerValues(
+    panel: Extract<DashboardWorkPanel, { mode: "newTicket" | "childTicket" }>,
+    values: {
+      tracker: string;
+      priority: string;
+      status: string;
+      start_date?: string;
+      due_date?: string;
+      description?: string;
+    },
+  ): string | undefined {
+    if (!panel.projectId) {
+      return "プロジェクトが選択されていません。";
+    }
+    if (!values.tracker.trim()) {
+      return "トラッカーを選択してください。";
+    }
+    if (!panel.trackers.some((tracker) => tracker.name === values.tracker)) {
+      return `このプロジェクトでは使用できないトラッカーです: ${values.tracker}`;
+    }
+    if (!values.priority.trim()) {
+      return "優先度を選択してください。";
+    }
+    if (!values.status.trim()) {
+      return "ステータスを選択してください。";
+    }
+    const isValidDate = (value?: string): boolean =>
+      value === undefined || value.length === 0 || /^\d{4}-\d{2}-\d{2}$/.test(value);
+    if (!isValidDate(values.start_date)) {
+      return "開始日の形式が不正です（YYYY-MM-DD）。";
+    }
+    if (!isValidDate(values.due_date)) {
+      return "期日の形式が不正です（YYYY-MM-DD）。";
+    }
+    if (panel.mode === "childTicket" && !panel.parentTicketId) {
+      return "親チケット情報が不足しています。";
+    }
+    return undefined;
+  }
+
+  private async createDraftFromComposer(
+    requestId: string,
+    values: {
+      tracker: string;
+      priority: string;
+      status: string;
+      start_date?: string;
+      due_date?: string;
+      description?: string;
+    },
+  ): Promise<void> {
+    const workPanel = this.opts.store.getState().workPanel;
+    if (!workPanel || (workPanel.mode !== "newTicket" && workPanel.mode !== "childTicket")) {
+      this.opts.notifyError(requestId, "チケット作成パネルが開いていません。");
+      return;
+    }
+    const validationError = this.validateComposerValues(workPanel, values);
+    if (validationError) {
+      this.updateWorkPanelComposer({ error: validationError });
+      return;
+    }
+    try {
+      await openNewTicketDraft({
+        content: buildNewTicketDraftContent({
+          projectId: workPanel.projectId,
+          initialContent: {
+            subject: "",
+            description: values.description ?? "",
+            metadata: {
+              tracker: values.tracker,
+              priority: values.priority,
+              status: values.status,
+              start_date: values.start_date ?? "",
+              due_date: values.due_date ?? "",
+              parent: workPanel.mode === "childTicket" ? workPanel.parentTicketId : undefined,
+              children: [],
+            },
+          },
+        }),
+        projectId: workPanel.projectId,
+      });
+    } catch (err) {
+      const msg = (err as Error).message;
+      this.opts.notifyError(requestId, `ドラフトの作成に失敗しました: ${msg}`);
+    }
   }
 
   private refreshUnsynced(): void {

@@ -213,6 +213,17 @@ body.vscode-high-contrast .badge,.vscode-high-contrast .unsynced-kind-label{back
   flex-direction:column;
   gap:8px
 }
+.ticket-work-panel{}
+.work-panel-head{display:flex;flex-direction:column;gap:4px;margin-bottom:8px}
+.work-panel-title{font-size:13px;font-weight:700;color:var(--app-text)}
+.work-panel-subtitle{font-size:11.5px;color:var(--app-text-readable-muted)}
+.composer-grid{display:flex;flex-direction:column;gap:6px}
+.composer-grid-detail{padding-top:2px}
+.composer-detail-field{grid-template-columns:70px minmax(0,1fr);font-size:11.5px}
+.composer-description-field{align-items:flex-start}
+.composer-description-field span{padding-top:4px}
+.composer-required{color:#ef4444;font-size:12px}
+.composer-textarea{min-height:72px;resize:vertical;line-height:1.5;padding-top:3px;padding-bottom:3px;font-size:12px}
 body.vscode-high-contrast .ticket-detail-card{border-top-color:var(--app-border)}
 .detail-head{display:flex;align-items:flex-start;gap:8px;justify-content:space-between}
 .detail-title{display:flex;align-items:center;gap:8px;font-size:12.5px;font-weight:700;line-height:1.35;min-width:0}
@@ -313,6 +324,15 @@ body.vscode-high-contrast .btn-primary{border:1px solid var(--app-border)}
 ::-webkit-scrollbar-track{background:transparent}
 ::-webkit-scrollbar-thumb{background:color-mix(in srgb, var(--vscode-scrollbarSlider-background, var(--app-border)) 80%, transparent);border-radius:var(--mm-radius-pill);border:2px solid transparent;background-clip:content-box}
 ::-webkit-scrollbar-thumb:hover{background:var(--vscode-scrollbarSlider-hoverBackground, var(--app-card-border));background-clip:content-box}
+
+/* ── Work panel composer ──────────────────────────────────── */
+.composer-error{margin:10px 16px 0;padding:8px 12px;background:rgba(239,68,68,0.1);border:1px solid rgba(239,68,68,0.3);border-radius:var(--mm-radius-button);font-size:12px;color:#ef4444;line-height:1.5}
+body.vscode-high-contrast .composer-error{background:transparent;border-color:var(--app-border);color:var(--app-text)}
+.composer-loading{padding:24px 16px;text-align:center;color:var(--app-text-readable-muted);font-size:12.5px}
+.composer-actions{display:flex;gap:8px;justify-content:flex-end;padding:12px 16px 16px;border-top:1px solid var(--border-subtle)}
+.composer-actions-top{padding:0 0 8px;border-top:none}
+.composer-actions .btn{padding:5px 8px;font-size:12px;min-width:0}
+.composer-actions .btn:disabled{opacity:.5;cursor:not-allowed}
 
 /* ── Toast ────────────────────────────────────────────────────── */
 #toast-area{position:fixed;bottom:12px;left:12px;right:12px;z-index:999;display:flex;flex-direction:column;gap:6px;pointer-events:none}
