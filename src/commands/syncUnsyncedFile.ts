@@ -9,7 +9,7 @@ import { applyQueuedTicketUpdate, createTicketFromQueuedContent } from "../views
 import { applyQueuedCommentUpdate, finalizeNewCommentDraftDocument } from "../views/commentSaveSync";
 import { updateCommentUpdateFileAfterSync } from "../views/commentUpdateFile";
 import { registerTicketDocument } from "../views/ticketEditorRegistry";
-import { UnsyncedFileSyncKey } from "../views/unsyncedFilesView";
+import { UnsyncedFileSyncKey } from "../app/unsyncedTypes";
 import { showInfo, showWarning } from "../utils/notifications";
 import { rewriteDocumentWithRegisteredFields, RewriteDocumentDeps } from "../views/editorDocumentRewrite";
 import { removeTicketEditorByUri } from "../views/ticketEditorRegistry";

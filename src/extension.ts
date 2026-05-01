@@ -68,31 +68,13 @@ export async function activate(context: vscode.ExtensionContext) {
 
   // ── コマンド登録 ─────────────────────────────────────────────────────────
   registerCommands(context, {
-    projectsProvider: { refresh: () => {} },
-    ticketsProvider: {
-      refresh: () => views.ticketsPresentation.refresh(),
-      setSelectedProjectId: (projectId: number) =>
-        views.ticketsPresentation.setSelectedProjectId(projectId),
-      loadMoreTickets: async () => {},
-      toggleRelevantView: () => {},
-      configureTitleFilter: async () => {},
-      configurePriorityFilter: async () => {},
-      configureStatusFilter: async () => {},
-      configureTrackerFilter: async () => {},
-      configureAssigneeFilter: async () => {},
-      configureSort: async () => {},
-      configureDueDateDisplay: async () => {},
-      resetTicketSettings: () => {},
-    },
-    commentsProvider: {
-      refresh: () => views.commentsPresentation.refresh(),
-      setTicketId: (_ticketId: number) => {},
-      getTicketId: () => undefined,
-    },
-    unsyncedFilesProvider: { refresh: () => views.unsyncedPresentation.refresh() },
-    settingsProvider: { refresh: () => views.settingsPresentation.refresh() },
+    ticketsPresentation: views.ticketsPresentation,
+    commentsPresentation: views.commentsPresentation,
+    unsyncedPresentation: views.unsyncedPresentation,
+    settingsPresentation: views.settingsPresentation,
+    dashboardProvider: views.dashboardProvider,
     sync,
-  } as never);
+  });
 
   // ── オフライン同期モード ─────────────────────────────────────────────────
   void refreshOfflineSyncContext();

@@ -32,18 +32,7 @@ import {
   TicketListSettings,
   TicketSortField,
 } from "./projectListSettings";
-
-export const TICKET_SETTINGS_COMMANDS = {
-  titleFilter: "redmine-client.configureTicketTitleFilter",
-  priorityFilter: "redmine-client.configureTicketPriorityFilter",
-  statusFilter: "redmine-client.configureTicketStatusFilter",
-  trackerFilter: "redmine-client.configureTicketTrackerFilter",
-  assigneeFilter: "redmine-client.configureTicketAssigneeFilter",
-  sort: "redmine-client.configureTicketSort",
-  dueDate: "redmine-client.configureTicketDueDateDisplay",
-  offlineSyncMode: "redmine-client.configureOfflineSyncMode",
-  reset: "redmine-client.resetTicketListSettings",
-};
+import { TICKET_SETTINGS_COMMANDS } from "../app/commandIds";
 
 const TICKET_SETTINGS_ICON_IDS = {
   titleFilter: "search",

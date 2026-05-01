@@ -126,4 +126,8 @@ export class DashboardWebviewProvider
   notifyTicketChanged(): void {
     this.controller.notifyTicketChanged();
   }
+
+  getStateSnapshot(): DashboardState {
+    return this.store.getState();
+  }
 }
