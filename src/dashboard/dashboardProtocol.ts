@@ -70,6 +70,11 @@ export interface DashboardMetadataOptions {
   statuses: DashboardMetadataOption[];
 }
 
+export interface DashboardTicketFilterOptions {
+  assignees: DashboardMetadataOption[];
+  statuses: DashboardMetadataOption[];
+}
+
 export type DashboardUnsyncedKind = "ticket" | "newTicket" | "comment";
 
 export type DashboardUnsyncedKey =
@@ -169,6 +174,7 @@ export interface DashboardState {
   tickets: DashboardTicketNode[];
   totalTicketCount: number;
   loadedTicketCount: number;
+  ticketFilterOptions: DashboardTicketFilterOptions;
   selectedTicketId?: number;
   selectedTicket?: DashboardTicketDetail;
   metadataOptions: DashboardMetadataOptions;
