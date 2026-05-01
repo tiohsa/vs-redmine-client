@@ -8,7 +8,6 @@ import { initializeDraftStore } from "./views/ticketDraftStore";
 import { createGlobalStateDraftStorage } from "./views/draftPersistence";
 import { initializeNewTicketDraftStore } from "./views/newTicketDraftStore";
 import { initializeOfflineSyncStore } from "./views/offlineSyncStore";
-import { initializeTreeExpansionState } from "./views/treeState";
 import { isTicketEditor } from "./views/ticketEditorRegistry";
 import { setViewContext } from "./views/viewContext";
 import { registerConflictDiffProvider } from "./views/conflictDiffProvider";
@@ -27,7 +26,6 @@ export async function activate(context: vscode.ExtensionContext) {
   // ── ストア初期化 ─────────────────────────────────────────────────────────
   initializeDraftStore(createGlobalStateDraftStorage(context.globalState));
   initializeNewTicketDraftStore(context.globalState);
-  initializeTreeExpansionState(context.workspaceState);
   initializeOfflineSyncStore(context.workspaceState);
   await initializeApiKeyStore(context.secrets, context.subscriptions);
   registerConflictDiffProvider(context);
@@ -41,7 +39,7 @@ export async function activate(context: vscode.ExtensionContext) {
 
   // ── 通知コントローラー ───────────────────────────────────────────────────
   const notifications = createNotificationController({
-    refreshUnsyncedFiles: () => views.unsyncedFilesProvider.refresh(),
+    unsyncedPresentation: views.unsyncedPresentation,
   });
 
   // ── エディタドキュメント登録関数 ─────────────────────────────────────────
@@ -49,9 +47,9 @@ export async function activate(context: vscode.ExtensionContext) {
 
   // ── 同期コントローラー ───────────────────────────────────────────────────
   const sync = createSyncController({
-    ticketsProvider: views.ticketsProvider,
-    commentsProvider: views.commentsProvider,
-    unsyncedFilesProvider: views.unsyncedFilesProvider,
+    ticketsPresentation: views.ticketsPresentation,
+    commentsPresentation: views.commentsPresentation,
+    unsyncedPresentation: views.unsyncedPresentation,
     notifications,
     registerEditorDocument,
   });
@@ -69,7 +67,32 @@ export async function activate(context: vscode.ExtensionContext) {
   registerEditorEvents(context, { registerEditorDocument, updateTicketStatus, sync });
 
   // ── コマンド登録 ─────────────────────────────────────────────────────────
-  registerCommands(context, { ...views, sync });
+  registerCommands(context, {
+    projectsProvider: { refresh: () => {} },
+    ticketsProvider: {
+      refresh: () => views.ticketsPresentation.refresh(),
+      setSelectedProjectId: (projectId: number) =>
+        views.ticketsPresentation.setSelectedProjectId(projectId),
+      loadMoreTickets: async () => {},
+      toggleRelevantView: () => {},
+      configureTitleFilter: async () => {},
+      configurePriorityFilter: async () => {},
+      configureStatusFilter: async () => {},
+      configureTrackerFilter: async () => {},
+      configureAssigneeFilter: async () => {},
+      configureSort: async () => {},
+      configureDueDateDisplay: async () => {},
+      resetTicketSettings: () => {},
+    },
+    commentsProvider: {
+      refresh: () => views.commentsPresentation.refresh(),
+      setTicketId: (_ticketId: number) => {},
+      getTicketId: () => undefined,
+    },
+    unsyncedFilesProvider: { refresh: () => views.unsyncedPresentation.refresh() },
+    settingsProvider: { refresh: () => views.settingsPresentation.refresh() },
+    sync,
+  } as never);
 
   // ── オフライン同期モード ─────────────────────────────────────────────────
   void refreshOfflineSyncContext();
@@ -77,7 +100,7 @@ export async function activate(context: vscode.ExtensionContext) {
     vscode.workspace.onDidChangeConfiguration((event) => {
       if (event.affectsConfiguration("redmine-client.offlineSyncMode")) {
         void refreshOfflineSyncContext();
-        views.settingsProvider.refresh();
+        views.settingsPresentation.refresh();
       }
       if (event.affectsConfiguration("redmine-client.ignoreSSLErrors")) {
         if (getIgnoreSSLErrors()) {
@@ -90,15 +113,15 @@ export async function activate(context: vscode.ExtensionContext) {
   // ── 初期ロード ───────────────────────────────────────────────────────────
   const initialSelection = getProjectSelection();
   if (initialSelection.id) {
-    views.ticketsProvider.setSelectedProjectId(initialSelection.id);
+    views.ticketsPresentation.setSelectedProjectId(initialSelection.id);
   }
 
   vscode.workspace.textDocuments.forEach((document) => {
     registerEditorDocument(document);
   });
 
-  views.unsyncedFilesProvider.refresh();
-  views.ticketsProvider.refresh();
+  views.unsyncedPresentation.refresh();
+  views.ticketsPresentation.refresh();
 
   const initialEditor = vscode.window.activeTextEditor;
   void setViewContext(

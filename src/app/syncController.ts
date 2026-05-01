@@ -3,12 +3,14 @@ import { syncEditorToRedmine } from "../commands/syncToRedmine";
 import { handleConflict, handleCommentConflict } from "../views/conflictResolver";
 import { shouldRefreshComments } from "../views/commentSaveSync";
 import { isSaveSyncSuppressed } from "../views/saveSyncSuppression";
-import type { CommentsTreeProvider } from "../views/commentsView";
-import type { TicketsTreeProvider } from "../views/ticketsView";
-import type { UnsyncedFilesTreeProvider } from "../views/unsyncedFilesView";
 import type { NotificationController } from "./notificationController";
 import { performSyncOnSave } from "./saveSyncExecutor";
 import { scheduleSave } from "./saveSyncQueue";
+import type {
+  CommentPresentationPort,
+  TicketPresentationPort,
+  UnsyncedPresentationPort,
+} from "./presentationPorts";
 
 export type SyncStatus = "uploaded" | "noChange" | "conflict" | "failed";
 
@@ -22,9 +24,9 @@ const toSyncStatus = (s: string): SyncStatus =>
         : "failed";
 
 export interface SyncControllerDeps {
-  ticketsProvider: TicketsTreeProvider;
-  commentsProvider: CommentsTreeProvider;
-  unsyncedFilesProvider: UnsyncedFilesTreeProvider;
+  ticketsPresentation: TicketPresentationPort;
+  commentsPresentation: CommentPresentationPort;
+  unsyncedPresentation: UnsyncedPresentationPort;
   notifications: NotificationController;
   registerEditorDocument: (document: vscode.TextDocument) => void;
 }
@@ -36,18 +38,18 @@ export interface SyncController {
 }
 
 export const createSyncController = (deps: SyncControllerDeps): SyncController => {
-  const { ticketsProvider, commentsProvider, unsyncedFilesProvider, notifications } = deps;
+  const { ticketsPresentation, commentsPresentation, unsyncedPresentation, notifications } = deps;
 
   const updateTicketListSubject = (ticketId: number, subject: string): void => {
-    ticketsProvider.updateTicketSubject(ticketId, subject);
+    ticketsPresentation.updateTicketSubject(ticketId, subject);
   };
 
   const syncEditorAndNotify = async (editor: vscode.TextEditor): Promise<SyncStatus> => {
     try {
       const syncResult = await syncEditorToRedmine(editor, {
         onSubjectUpdated: updateTicketListSubject,
-        onTicketCreated: () => ticketsProvider.refresh(),
-        onCommentsRefresh: (ticketId) => commentsProvider.refreshForTicket(ticketId),
+        onTicketCreated: () => ticketsPresentation.refresh(),
+        onCommentsRefresh: (ticketId) => commentsPresentation.refreshForTicket(ticketId),
       });
       if (!syncResult) {
         return "failed";
@@ -59,9 +61,9 @@ export const createSyncController = (deps: SyncControllerDeps): SyncController =
         }
         notifications.notifyTicketSaveResult(result);
         if (result.status === "created") {
-          ticketsProvider.refresh();
+          ticketsPresentation.refresh();
         } else {
-          ticketsProvider.notifyChange();
+          ticketsPresentation.notifyChange();
         }
         return toSyncStatus(result.status);
       } else {
@@ -71,7 +73,7 @@ export const createSyncController = (deps: SyncControllerDeps): SyncController =
         }
         notifications.notifyCommentSaveResult(result);
         if (shouldRefreshComments(result.status)) {
-          commentsProvider.refreshForTicket(syncResult.ticketId);
+          commentsPresentation.refreshForTicket(syncResult.ticketId);
         }
         return toSyncStatus(result.status);
       }
@@ -87,9 +89,9 @@ export const createSyncController = (deps: SyncControllerDeps): SyncController =
         ? vscode.window.activeTextEditor
         : undefined);
     await performSyncOnSave(document, editor, {
-      ticketsProvider,
-      commentsProvider,
-      unsyncedFilesProvider,
+      ticketsPresentation,
+      commentsPresentation,
+      unsyncedPresentation,
       notifications,
       updateTicketListSubject,
     });

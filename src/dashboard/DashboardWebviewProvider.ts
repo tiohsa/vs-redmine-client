@@ -98,4 +98,32 @@ export class DashboardWebviewProvider
   dispose(): void {
     this.disposables.forEach((d) => d.dispose());
   }
+
+  refreshTickets(): void {
+    this.controller.refreshTickets();
+  }
+
+  refreshCommentsForTicket(ticketId: number): void {
+    this.controller.refreshCommentsForTicket(ticketId);
+  }
+
+  refreshUnsynced(): void {
+    this.controller.refreshUnsyncedPresentation();
+  }
+
+  refreshSettings(): void {
+    this.controller.refreshSettings();
+  }
+
+  selectProject(projectId: number): void {
+    this.controller.selectProject(projectId);
+  }
+
+  updateTicketSubject(ticketId: number, subject: string): void {
+    this.controller.updateTicketSubject(ticketId, subject);
+  }
+
+  notifyTicketChanged(): void {
+    this.controller.notifyTicketChanged();
+  }
 }

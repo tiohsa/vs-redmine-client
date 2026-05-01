@@ -14,16 +14,18 @@ import {
 import { getTicketIdForDocument, getTicketIdForUri } from "../views/ticketEditorRegistry";
 import { addOfflineCommentUpdate, removeOfflineCommentEntry } from "../views/offlineSyncStore";
 import { computeNotesHash } from "../utils/notesHash";
-import type { CommentsTreeProvider } from "../views/commentsView";
-import type { TicketsTreeProvider } from "../views/ticketsView";
-import type { UnsyncedFilesTreeProvider } from "../views/unsyncedFilesView";
 import type { NotificationController } from "./notificationController";
 import { classifyDocumentSave } from "./saveSyncClassifier";
+import type {
+  CommentPresentationPort,
+  TicketPresentationPort,
+  UnsyncedPresentationPort,
+} from "./presentationPorts";
 
 export interface SaveSyncExecutorDeps {
-  ticketsProvider: TicketsTreeProvider;
-  commentsProvider: CommentsTreeProvider;
-  unsyncedFilesProvider: UnsyncedFilesTreeProvider;
+  ticketsPresentation: TicketPresentationPort;
+  commentsPresentation: CommentPresentationPort;
+  unsyncedPresentation: UnsyncedPresentationPort;
   notifications: NotificationController;
   updateTicketListSubject: (ticketId: number, subject: string) => void;
 }
@@ -33,7 +35,7 @@ export const performSyncOnSave = async (
   editor: vscode.TextEditor | undefined,
   deps: SaveSyncExecutorDeps,
 ): Promise<void> => {
-  const { ticketsProvider, commentsProvider, unsyncedFilesProvider, notifications } = deps;
+  const { ticketsPresentation, commentsPresentation, unsyncedPresentation, notifications } = deps;
 
   if (editor) {
     let ticketResult = await handleTicketEditorSave(editor, {
@@ -45,7 +47,7 @@ export const performSyncOnSave = async (
       }
       notifications.notifyTicketSaveResult(ticketResult);
       if (ticketResult.status === "created") {
-        ticketsProvider.refresh();
+        ticketsPresentation.refresh();
       }
       return;
     }
@@ -61,7 +63,7 @@ export const performSyncOnSave = async (
           getTicketIdForDocument(editor.document) ??
           getTicketIdForUri(editor.document.uri);
         if (ticketId) {
-          commentsProvider.refreshForTicket(ticketId);
+          commentsPresentation.refreshForTicket(ticketId);
         }
       }
       return;
@@ -87,7 +89,7 @@ export const performSyncOnSave = async (
           sourceNotesHash: classification.parsed.fields.sourceNotesHash,
         });
       }
-      unsyncedFilesProvider.refresh();
+      unsyncedPresentation.refresh();
       return;
     }
 
@@ -171,7 +173,7 @@ export const performSyncOnSave = async (
         documentUri: document.uri,
       });
       notifications.notifyCommentSaveResult(commentResult);
-      unsyncedFilesProvider.refresh();
+      unsyncedPresentation.refresh();
       return;
     }
 

@@ -3,9 +3,10 @@ import { getSaveNotification } from "../views/ticketSaveNotifications";
 import { getCommentSaveNotification } from "../views/commentSaveNotifications";
 import type { TicketSaveResult } from "../views/ticketSaveTypes";
 import type { CommentSaveResult } from "../views/commentSaveTypes";
+import type { UnsyncedPresentationPort } from "./presentationPorts";
 
 export interface NotificationDeps {
-  refreshUnsyncedFiles: () => void;
+  unsyncedPresentation: UnsyncedPresentationPort;
 }
 
 export interface NotificationController {
@@ -31,7 +32,7 @@ export const createNotificationController = (
     } else {
       showError(notification.message);
     }
-    deps.refreshUnsyncedFiles();
+    deps.unsyncedPresentation.refresh();
   };
 
   const notifyCommentSaveResult = (result: CommentSaveResult | undefined): void => {
@@ -49,7 +50,7 @@ export const createNotificationController = (
     } else {
       showError(notification.message);
     }
-    deps.refreshUnsyncedFiles();
+    deps.unsyncedPresentation.refresh();
   };
 
   return { notifyTicketSaveResult, notifyCommentSaveResult };
