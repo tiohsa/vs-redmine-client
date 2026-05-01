@@ -11,6 +11,7 @@ import {
   listTrackers,
   updateIssue,
 } from "../redmine/issues";
+import { getProjectTrackers } from "../redmine/projects";
 import { uploadFileAttachment } from "../redmine/attachments";
 import { searchUsers } from "../redmine/users";
 import { TicketUpdateFields } from "../redmine/types";
@@ -67,6 +68,7 @@ export interface TicketSaveDependencies {
   listIssuePriorities: typeof listIssuePriorities;
   searchUsers: typeof searchUsers;
   uploadFile: typeof uploadFileAttachment;
+  getProjectTrackers?: typeof getProjectTrackers;
 }
 
 const defaultDeps: TicketSaveDependencies = {
@@ -79,6 +81,7 @@ const defaultDeps: TicketSaveDependencies = {
   listIssuePriorities,
   searchUsers,
   uploadFile: uploadFileAttachment,
+  getProjectTrackers,
 };
 
 export interface TicketCreateDependencies {
@@ -89,6 +92,7 @@ export interface TicketCreateDependencies {
   listIssuePriorities: typeof listIssuePriorities;
   searchUsers: typeof searchUsers;
   uploadFile: typeof uploadFileAttachment;
+  getProjectTrackers?: typeof getProjectTrackers;
 }
 
 const defaultCreateDeps: TicketCreateDependencies = {
@@ -99,6 +103,7 @@ const defaultCreateDeps: TicketCreateDependencies = {
   listIssuePriorities,
   searchUsers,
   uploadFile: uploadFileAttachment,
+  getProjectTrackers,
 };
 
 export interface TicketReloadDependencies {
@@ -241,9 +246,11 @@ const resolveMetadataUpdates = async (
     return updateFields;
   }
 
+  const useProjectTrackers = changes.tracker !== undefined && projectId !== undefined && deps.getProjectTrackers !== undefined;
+
   const [statuses, trackers, priorities] = await Promise.all([
     deps.listIssueStatuses(),
-    deps.listTrackers(),
+    useProjectTrackers ? Promise.resolve([]) : deps.listTrackers(),
     deps.listIssuePriorities(),
   ]);
 
@@ -256,11 +263,20 @@ const resolveMetadataUpdates = async (
   }
 
   if (changes.tracker !== undefined) {
-    const match = trackers.find((item) => item.name === changes.tracker);
-    if (!match) {
-      throw new Error(`Unknown tracker: ${changes.tracker}`);
+    if (useProjectTrackers) {
+      const projectTrackers = await deps.getProjectTrackers!(projectId!);
+      const match = projectTrackers.find((item) => item.name === changes.tracker);
+      if (!match) {
+        throw new Error(`このプロジェクトでは使用できないトラッカーです: ${changes.tracker}`);
+      }
+      updateFields.trackerId = match.id;
+    } else {
+      const match = trackers.find((item) => item.name === changes.tracker);
+      if (!match) {
+        throw new Error(`Unknown tracker: ${changes.tracker}`);
+      }
+      updateFields.trackerId = match.id;
     }
-    updateFields.trackerId = match.id;
   }
 
   if (changes.priority !== undefined) {
@@ -293,9 +309,11 @@ const resolveMetadataForCreate = async (
   deps: TicketCreateDependencies,
   projectId?: number,
 ): Promise<TicketUpdateFields> => {
+  const useProjectTrackers = projectId !== undefined && deps.getProjectTrackers !== undefined;
+
   const [statuses, trackers, priorities] = await Promise.all([
     deps.listIssueStatuses(),
-    deps.listTrackers(),
+    useProjectTrackers ? Promise.resolve([]) : deps.listTrackers(),
     deps.listIssuePriorities(),
   ]);
 
@@ -304,9 +322,18 @@ const resolveMetadataForCreate = async (
     throw new Error(`Unknown status: ${metadata.status}`);
   }
 
-  const trackerMatch = trackers.find((item) => item.name === metadata.tracker);
-  if (!trackerMatch) {
-    throw new Error(`Unknown tracker: ${metadata.tracker}`);
+  let trackerMatch: { id: number; name: string } | undefined;
+  if (useProjectTrackers) {
+    const projectTrackers = await deps.getProjectTrackers!(projectId!);
+    trackerMatch = projectTrackers.find((item) => item.name === metadata.tracker);
+    if (!trackerMatch) {
+      throw new Error(`このプロジェクトでは使用できないトラッカーです: ${metadata.tracker}`);
+    }
+  } else {
+    trackerMatch = trackers.find((item) => item.name === metadata.tracker);
+    if (!trackerMatch) {
+      throw new Error(`Unknown tracker: ${metadata.tracker}`);
+    }
   }
 
   const priorityMatch = priorities.find((item) => item.name === metadata.priority);
@@ -399,6 +426,14 @@ export const syncTicketDraft = async (input: {
   const metadataChanges = computeMetadataChanges(draft.baseMetadata, metadata);
 
   let remoteDetail: IssueDetailResult | undefined;
+
+  if (metadataChanges.tracker !== undefined) {
+    try {
+      remoteDetail = await deps.getIssueDetail(input.ticketId);
+    } catch (error) {
+      return mapErrorToResult(error);
+    }
+  }
 
   let metadataFields: TicketUpdateFields = {};
   try {
@@ -913,6 +948,14 @@ export const applyQueuedTicketUpdate = async (input: {
   });
 
   let remoteDetail: IssueDetailResult | undefined;
+
+  if (metadataChanges.tracker !== undefined) {
+    try {
+      remoteDetail = await deps.getIssueDetail(update.ticketId);
+    } catch (error) {
+      return mapErrorToResult(error);
+    }
+  }
 
   let metadataFields: TicketUpdateFields = {};
   try {

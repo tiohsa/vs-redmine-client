@@ -95,6 +95,7 @@ suite("Ticket creation payload", () => {
       listIssueCategories: async () => [{ id: 4, name: "Development" }],
       searchUsers: async () => [{ id: 7, name: "John Doe" }],
       uploadFile: async () => ({ token: "token", filename: "foo.png", contentType: "image/png" }),
+      getProjectTrackers: async () => [{ id: 2, name: "Task" }],
     };
 
     let content = buildTicketEditorMetadataContentWithChildren(
@@ -142,6 +143,7 @@ suite("Ticket creation payload", () => {
       listIssueStatuses: async () => [{ id: 1, name: "In Progress" }],
       listTrackers: async () => [{ id: 2, name: "Task" }],
       listIssuePriorities: async () => [{ id: 3, name: "Normal" }],
+      getProjectTrackers: async () => [{ id: 2, name: "Task" }],
     };
 
     const content = buildTicketEditorMetadataContent(
@@ -177,6 +179,7 @@ suite("Ticket creation payload", () => {
       listIssueStatuses: async () => [{ id: 1, name: "In Progress" }],
       listTrackers: async () => [{ id: 2, name: "Task" }],
       listIssuePriorities: async () => [{ id: 3, name: "Normal" }],
+      getProjectTrackers: async () => [{ id: 2, name: "Task" }],
     };
 
     const content = buildTicketEditorMetadataContent(
@@ -215,6 +218,7 @@ suite("Ticket creation payload", () => {
       listIssueStatuses: async () => [{ id: 1, name: "In Progress" }],
       listTrackers: async () => [{ id: 2, name: "Task" }],
       listIssuePriorities: async () => [{ id: 3, name: "Normal" }],
+      getProjectTrackers: async () => [{ id: 2, name: "Task" }],
     };
 
     const content = buildTicketEditorMetadataContentWithChildren(
@@ -243,6 +247,7 @@ suite("Ticket creation payload", () => {
       listIssuePriorities: async () => [{ id: 3, name: "Normal" }],
       searchUsers: async () => [],
       uploadFile: async () => ({ token: "token", filename: "foo.png", contentType: "image/png" }),
+      getProjectTrackers: async () => [{ id: 2, name: "Task" }],
     };
     const content = buildTicketEditorMetadataContent("Parent Ticket", "Parent body");
 

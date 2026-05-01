@@ -60,6 +60,7 @@ const defaultSyncDeps = {
   listIssuePriorities: async () => [{ id: 3, name: "Normal" }],
   searchUsers: async () => [],
   uploadFile: async () => ({ token: "t", filename: "f.png", contentType: "image/png" }),
+  getProjectTrackers: async () => [{ id: 2, name: "Task" }],
 };
 
 // ── suite 1: draftUri ルーティング ─────────────────────────────────────────

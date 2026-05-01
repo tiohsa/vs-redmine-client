@@ -229,12 +229,6 @@ export const registerCommands = (
         }
       },
     ),
-    vscode.commands.registerCommand("redmine-client.collapseAllProjects", () => {
-      // Dashboard 移行後: TreeView は存在しないため no-op
-    }),
-    vscode.commands.registerCommand("redmine-client.collapseAllTickets", () => {
-      // Dashboard 移行後: TreeView は存在しないため no-op
-    }),
     vscode.commands.registerCommand("redmine-client.selectProject", async () => {
       const projectId = await vscode.window.showInputBox({
         prompt: "Enter Redmine project ID",

@@ -248,6 +248,7 @@ suite("Ticket save sync", () => {
         listIssueStatuses: async () => [{ id: 1, name: "In Progress" }],
         listTrackers: async () => [{ id: 2, name: "Task" }],
         listIssuePriorities: async () => [{ id: 3, name: "Normal" }],
+        getProjectTrackers: async () => [{ id: 2, name: "Task" }],
       },
     });
 
@@ -283,6 +284,7 @@ suite("Ticket save sync", () => {
         listIssueStatuses: async () => [{ id: 1, name: "In Progress" }],
         listTrackers: async () => [{ id: 2, name: "Task" }],
         listIssuePriorities: async () => [{ id: 3, name: "Normal" }],
+        getProjectTrackers: async () => [{ id: 2, name: "Task" }],
       },
     });
 
@@ -321,6 +323,7 @@ suite("Ticket save sync", () => {
         listIssueStatuses: async () => [{ id: 1, name: "In Progress" }],
         listTrackers: async () => [{ id: 2, name: "Task" }],
         listIssuePriorities: async () => [{ id: 3, name: "Normal" }],
+        getProjectTrackers: async () => [{ id: 2, name: "Task" }],
       },
     });
 

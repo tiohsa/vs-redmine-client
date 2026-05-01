@@ -81,6 +81,7 @@ export class DashboardController {
   private totalCount = 0;
   private readonly settingsCtrl: SettingsController;
   private readonly disposables: vscode.Disposable[] = [];
+  private readonly projectTrackerCache = new Map<number, Array<{ id: number; name: string }>>();
 
   constructor(private readonly opts: DashboardControllerOptions) {
     this.settingsCtrl = new SettingsController(opts.store);
@@ -382,9 +383,6 @@ export class DashboardController {
       return "メタデータ選択肢が未取得のため更新できません。";
     }
     const options = this.opts.store.getState().metadataOptions;
-    if (patch.tracker !== undefined && !options.trackers.some((item) => item.name === patch.tracker)) {
-      return `未知のトラッカーです: ${patch.tracker}`;
-    }
     if (patch.priority !== undefined && !options.priorities.some((item) => item.name === patch.priority)) {
       return `未知の優先度です: ${patch.priority}`;
     }
@@ -392,6 +390,22 @@ export class DashboardController {
       return `未知のステータスです: ${patch.status}`;
     }
     return undefined;
+  }
+
+  private async validateTrackerForProject(trackerName: string, projectId: number): Promise<string | undefined> {
+    try {
+      let trackers = this.projectTrackerCache.get(projectId);
+      if (!trackers) {
+        trackers = await getProjectTrackers(projectId);
+        this.projectTrackerCache.set(projectId, trackers);
+      }
+      if (!trackers.some((t) => t.name === trackerName)) {
+        return `このプロジェクトでは使用できないトラッカーです: ${trackerName}`;
+      }
+      return undefined;
+    } catch {
+      return `このプロジェクトのトラッカー選択肢を取得できないため更新できません。`;
+    }
   }
 
   private patchEditorContent(content: TicketEditorContent, patch: TicketMetadataPatch): TicketEditorContent {
@@ -424,6 +438,15 @@ export class DashboardController {
       this.opts.notifyError(requestId, "対象チケットが見つかりません。");
       return;
     }
+
+    if (patch.tracker !== undefined && ticket.projectId) {
+      const trackerError = await this.validateTrackerForProject(patch.tracker, ticket.projectId);
+      if (trackerError) {
+        this.opts.notifyError(requestId, trackerError);
+        return;
+      }
+    }
+
     ensureTicketDraft(
       ticket.id,
       ticket.subject,
@@ -458,7 +481,8 @@ export class DashboardController {
   private applyPatchToLocalTicket(ticket: Ticket, patch: TicketMetadataPatch): void {
     if (patch.tracker !== undefined) {
       ticket.trackerName = patch.tracker;
-      ticket.trackerId = this.opts.store.getState().metadataOptions.trackers
+      const projectTrackers = ticket.projectId ? this.projectTrackerCache.get(ticket.projectId) : undefined;
+      ticket.trackerId = (projectTrackers ?? this.opts.store.getState().metadataOptions.trackers)
         .find((item) => item.name === patch.tracker)?.id;
     }
     if (patch.priority !== undefined) {

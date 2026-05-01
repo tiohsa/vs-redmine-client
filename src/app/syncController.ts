@@ -36,6 +36,7 @@ import {
   parseCommentUpdateFile,
 } from "../views/commentUpdateFile";
 import { addOfflineCommentUpdate, removeOfflineCommentEntry } from "../views/offlineSyncStore";
+import { isSaveSyncSuppressed } from "../views/saveSyncSuppression";
 import { computeNotesHash } from "../utils/notesHash";
 import type { CommentsTreeProvider } from "../views/commentsView";
 import type { TicketsTreeProvider } from "../views/ticketsView";
@@ -66,6 +67,24 @@ export interface SyncController {
   syncEditorAndNotify: (editor: vscode.TextEditor) => Promise<SyncStatus>;
   syncOnSave: (document: vscode.TextDocument) => void;
 }
+
+const SAVE_DEBOUNCE_MS = 150;
+
+const saveDebounce = new Map<string, ReturnType<typeof setTimeout>>();
+const saveQueues = new Map<string, Promise<void>>();
+
+const enqueueSave = (uri: string, task: () => Promise<void>): void => {
+  const previous = saveQueues.get(uri) ?? Promise.resolve();
+  const next = previous
+    .catch(() => undefined)
+    .then(task)
+    .finally(() => {
+      if (saveQueues.get(uri) === next) {
+        saveQueues.delete(uri);
+      }
+    });
+  saveQueues.set(uri, next);
+};
 
 export const createSyncController = (deps: SyncControllerDeps): SyncController => {
   const { ticketsProvider, commentsProvider, unsyncedFilesProvider, notifications } = deps;
@@ -112,85 +131,158 @@ export const createSyncController = (deps: SyncControllerDeps): SyncController =
     }
   };
 
-  const syncOnSave = (document: vscode.TextDocument): void => {
-    // untitled→file 保存時に onDidOpenTextDocument より先に発火するケースがあるため明示的に登録する。
-    deps.registerEditorDocument(document);
+  const performSyncOnSave = async (document: vscode.TextDocument): Promise<void> => {
     const editor =
       vscode.window.visibleTextEditors.find((candidate) => candidate.document === document) ??
       (vscode.window.activeTextEditor?.document === document
         ? vscode.window.activeTextEditor
         : undefined);
 
-    void (async () => {
-      if (editor) {
-        let ticketResult = await handleTicketEditorSave(editor, {
-          onSubjectUpdated: updateTicketListSubject,
-        });
-        if (ticketResult) {
-          if (ticketResult.status === "conflict" && ticketResult.conflictContext) {
-            ticketResult = await handleConflict(ticketResult, editor);
-          }
-          notifications.notifyTicketSaveResult(ticketResult);
-          if (ticketResult.status === "created") {
-            ticketsProvider.refresh();
-          }
-          return;
+    if (editor) {
+      let ticketResult = await handleTicketEditorSave(editor, {
+        onSubjectUpdated: updateTicketListSubject,
+      });
+      if (ticketResult) {
+        if (ticketResult.status === "conflict" && ticketResult.conflictContext) {
+          ticketResult = await handleConflict(ticketResult, editor);
         }
-
-        let commentResult = await handleCommentEditorSave(editor);
-        if (commentResult) {
-          if (commentResult.status === "conflict" && commentResult.conflictContext) {
-            commentResult = await handleCommentConflict(commentResult, editor);
-          }
-          notifications.notifyCommentSaveResult(commentResult);
-          if (shouldRefreshComments(commentResult.status)) {
-            const ticketId =
-              getTicketIdForDocument(editor.document) ??
-              getTicketIdForUri(editor.document.uri);
-            if (ticketId) {
-              commentsProvider.refreshForTicket(ticketId);
-            }
-          }
-          return;
-        }
-      }
-
-      // comment-update ファイルの保存検知: 本文変更があればキューに追加する
-      if (isCommentUpdateFilename(path.basename(document.uri.path))) {
-        const parsed = parseCommentUpdateFile(document.getText());
-        if (parsed) {
-          const currentHash = computeNotesHash(parsed.body);
-          if (currentHash === parsed.fields.sourceNotesHash) {
-            // 本文が元コメントと同一 → 未同期扱いしない
-            removeOfflineCommentEntry({
-              commentId: parsed.fields.journalId,
-              documentUri: document.uri.toString(),
-            });
-          } else {
-            addOfflineCommentUpdate({
-              ticketId: parsed.fields.issueId,
-              commentId: parsed.fields.journalId,
-              body: parsed.body,
-              documentUri: document.uri.toString(),
-              sourceNotesHash: parsed.fields.sourceNotesHash,
-            });
-          }
-          unsyncedFilesProvider.refresh();
+        notifications.notifyTicketSaveResult(ticketResult);
+        if (ticketResult.status === "created") {
+          ticketsProvider.refresh();
         }
         return;
       }
 
-      const commentIdForDocument =
-        getCommentIdForDocument(document) ?? getCommentIdForUri(document.uri);
-      if (commentIdForDocument) {
-        const ticketIdForDocument =
-          getTicketIdForDocument(document) ?? getTicketIdForUri(document.uri);
-        if (!ticketIdForDocument) {
+      let commentResult = await handleCommentEditorSave(editor);
+      if (commentResult) {
+        if (commentResult.status === "conflict" && commentResult.conflictContext) {
+          commentResult = await handleCommentConflict(commentResult, editor);
+        }
+        notifications.notifyCommentSaveResult(commentResult);
+        if (shouldRefreshComments(commentResult.status)) {
+          const ticketId =
+            getTicketIdForDocument(editor.document) ??
+            getTicketIdForUri(editor.document.uri);
+          if (ticketId) {
+            commentsProvider.refreshForTicket(ticketId);
+          }
+        }
+        return;
+      }
+    }
+
+    // comment-update ファイルの保存検知: 本文変更があればキューに追加する
+    if (isCommentUpdateFilename(path.basename(document.uri.path))) {
+      const parsed = parseCommentUpdateFile(document.getText());
+      if (parsed) {
+        const currentHash = computeNotesHash(parsed.body);
+        if (currentHash === parsed.fields.sourceNotesHash) {
+          // 本文が元コメントと同一 → 未同期扱いしない
+          removeOfflineCommentEntry({
+            commentId: parsed.fields.journalId,
+            documentUri: document.uri.toString(),
+          });
+        } else {
+          addOfflineCommentUpdate({
+            ticketId: parsed.fields.issueId,
+            commentId: parsed.fields.journalId,
+            body: parsed.body,
+            documentUri: document.uri.toString(),
+            sourceNotesHash: parsed.fields.sourceNotesHash,
+          });
+        }
+        unsyncedFilesProvider.refresh();
+      }
+      return;
+    }
+
+    const commentIdForDocument =
+      getCommentIdForDocument(document) ?? getCommentIdForUri(document.uri);
+    if (commentIdForDocument) {
+      const ticketIdForDocument =
+        getTicketIdForDocument(document) ?? getTicketIdForUri(document.uri);
+      if (!ticketIdForDocument) {
+        return;
+      }
+      const commentResult = saveCommentDocumentLocally({
+        ticketId: ticketIdForDocument,
+        commentId: commentIdForDocument,
+        content: document.getText(),
+        documentUri: document.uri,
+      });
+      notifications.notifyCommentSaveResult(commentResult);
+      return;
+    }
+
+    const ticketIdForDocument =
+      getTicketIdForDocument(document) ?? getTicketIdForUri(document.uri);
+    const contentTypeForDocument =
+      getEditorContentTypeForDocument(document) ??
+      getEditorContentTypeForUri(document.uri);
+    if (ticketIdForDocument && contentTypeForDocument === "ticket") {
+      if (ticketIdForDocument === NEW_TICKET_DRAFT_ID) {
+        const projectId =
+          getProjectIdForDocument(document) ?? getProjectIdForUri(document.uri);
+        const result = await queueNewTicketDraftContent({
+          content: document.getText(),
+          projectId,
+          documentUri: document.uri,
+        });
+        notifications.notifyTicketSaveResult(result);
+        return;
+      }
+
+      const result = await queueTicketDraft({
+        ticketId: ticketIdForDocument,
+        content: document.getText(),
+        documentUri: document.uri,
+      });
+      notifications.notifyTicketSaveResult(result);
+      return;
+    }
+
+    const filename = path.basename(document.uri.path);
+    const parsed = parseEditorFilename(filename);
+    if (!parsed) {
+      const draftTicketId = parseNewCommentDraftFilename(filename);
+      if (!draftTicketId) {
+        if (!isNewTicketDraftFilename(filename)) {
           return;
         }
+
+        const existingTicketId = getTicketIdForDraftUri(document.uri.toString());
+        if (existingTicketId && existingTicketId !== NEW_TICKET_DRAFT_ID) {
+          const result = await queueTicketDraft({
+            ticketId: existingTicketId,
+            content: document.getText(),
+            documentUri: document.uri,
+          });
+          notifications.notifyTicketSaveResult(result);
+          return;
+        }
+
+        if (editor) {
+          const result = await queueNewTicketDraft({ editor });
+          notifications.notifyTicketSaveResult(result);
+          return;
+        }
+
+        const result = await queueNewTicketDraftContent({
+          content: document.getText(),
+          documentUri: document.uri,
+        });
+        notifications.notifyTicketSaveResult(result);
+        return;
+      }
+
+      const existingCommentId =
+        getCommentIdForDocument(document) ??
+        getCommentIdForUri(document.uri) ??
+        getCommentIdForDraftUri(draftTicketId, document.uri.toString());
+      if (existingCommentId) {
         const commentResult = saveCommentDocumentLocally({
-          ticketId: ticketIdForDocument,
-          commentId: commentIdForDocument,
+          ticketId: draftTicketId,
+          commentId: existingCommentId,
           content: document.getText(),
           documentUri: document.uri,
         });
@@ -198,110 +290,57 @@ export const createSyncController = (deps: SyncControllerDeps): SyncController =
         return;
       }
 
-      const ticketIdForDocument =
-        getTicketIdForDocument(document) ?? getTicketIdForUri(document.uri);
-      const contentTypeForDocument =
-        getEditorContentTypeForDocument(document) ??
-        getEditorContentTypeForUri(document.uri);
-      if (ticketIdForDocument && contentTypeForDocument === "ticket") {
-        if (ticketIdForDocument === NEW_TICKET_DRAFT_ID) {
-          const projectId =
-            getProjectIdForDocument(document) ?? getProjectIdForUri(document.uri);
-          const result = await queueNewTicketDraftContent({
-            content: document.getText(),
-            projectId,
-            documentUri: document.uri,
-          });
-          notifications.notifyTicketSaveResult(result);
-          return;
-        }
-
-        const result = await queueTicketDraft({
-          ticketId: ticketIdForDocument,
-          content: document.getText(),
-          documentUri: document.uri,
-        });
-        notifications.notifyTicketSaveResult(result);
-        return;
-      }
-
-      const filename = path.basename(document.uri.path);
-      const parsed = parseEditorFilename(filename);
-      if (!parsed) {
-        const draftTicketId = parseNewCommentDraftFilename(filename);
-        if (!draftTicketId) {
-          if (!isNewTicketDraftFilename(filename)) {
-            return;
-          }
-
-          const existingTicketId = getTicketIdForDraftUri(document.uri.toString());
-          if (existingTicketId && existingTicketId !== NEW_TICKET_DRAFT_ID) {
-            const result = await queueTicketDraft({
-              ticketId: existingTicketId,
-              content: document.getText(),
-              documentUri: document.uri,
-            });
-            notifications.notifyTicketSaveResult(result);
-            return;
-          }
-
-          if (editor) {
-            const result = await queueNewTicketDraft({ editor });
-            notifications.notifyTicketSaveResult(result);
-            return;
-          }
-
-          const result = await queueNewTicketDraftContent({
-            content: document.getText(),
-            documentUri: document.uri,
-          });
-          notifications.notifyTicketSaveResult(result);
-          return;
-        }
-
-        const existingCommentId =
-          getCommentIdForDocument(document) ??
-          getCommentIdForUri(document.uri) ??
-          getCommentIdForDraftUri(draftTicketId, document.uri.toString());
-        if (existingCommentId) {
-          const commentResult = saveCommentDocumentLocally({
-            ticketId: draftTicketId,
-            commentId: existingCommentId,
-            content: document.getText(),
-            documentUri: document.uri,
-          });
-          notifications.notifyCommentSaveResult(commentResult);
-          return;
-        }
-
-        const result = saveCommentDocumentLocally({
-          ticketId: draftTicketId,
-          content: document.getText(),
-          documentUri: document.uri,
-        });
-        notifications.notifyCommentSaveResult(result);
-        return;
-      }
-
-      if (parsed.type === "ticket") {
-        const result = await queueTicketDraft({
-          ticketId: parsed.ticketId,
-          content: document.getText(),
-          documentUri: document.uri,
-        });
-        notifications.notifyTicketSaveResult(result);
-        return;
-      }
-
-      const commentResult = saveCommentDocumentLocally({
-        ticketId: parsed.ticketId,
-        commentId: parsed.commentId,
+      const result = saveCommentDocumentLocally({
+        ticketId: draftTicketId,
         content: document.getText(),
         documentUri: document.uri,
       });
-      notifications.notifyCommentSaveResult(commentResult);
-      unsyncedFilesProvider.refresh();
-    })();
+      notifications.notifyCommentSaveResult(result);
+      return;
+    }
+
+    if (parsed.type === "ticket") {
+      const result = await queueTicketDraft({
+        ticketId: parsed.ticketId,
+        content: document.getText(),
+        documentUri: document.uri,
+      });
+      notifications.notifyTicketSaveResult(result);
+      return;
+    }
+
+    const commentResult = saveCommentDocumentLocally({
+      ticketId: parsed.ticketId,
+      commentId: parsed.commentId,
+      content: document.getText(),
+      documentUri: document.uri,
+    });
+    notifications.notifyCommentSaveResult(commentResult);
+    unsyncedFilesProvider.refresh();
+  };
+
+  const syncOnSave = (document: vscode.TextDocument): void => {
+    // untitled→file 保存時に onDidOpenTextDocument より先に発火するケースがあるため明示的に登録する。
+    deps.registerEditorDocument(document);
+    const uriString = document.uri.toString();
+
+    // suppressSaveSync が有効な場合はスキップ（applyEditorContent 後の自動保存など）
+    if (isSaveSyncSuppressed(uriString)) {
+      return;
+    }
+
+    // デバウンス: 同一 URI への連続保存は最後のものだけを処理する
+    const existingTimer = saveDebounce.get(uriString);
+    if (existingTimer !== undefined) {
+      clearTimeout(existingTimer);
+    }
+
+    const timer = setTimeout(() => {
+      saveDebounce.delete(uriString);
+      // シリアライズ: 同一 URI の操作を順番に実行し、重複エントリを防ぐ
+      enqueueSave(uriString, () => performSyncOnSave(document));
+    }, SAVE_DEBOUNCE_MS);
+    saveDebounce.set(uriString, timer);
   };
 
   return { updateTicketListSubject, syncEditorAndNotify, syncOnSave };

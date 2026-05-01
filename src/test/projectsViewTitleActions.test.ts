@@ -13,14 +13,9 @@ const findViewTitleEntry = (commandId: string): MenuItem | undefined =>
   getViewTitleMenuItems().find((item) => item.command === commandId);
 
 suite("Projects view title actions", () => {
-  test("collapseAllProjects command still exists in Command Palette", () => {
+  test("collapseAllProjects command is absent from contributes.commands (removed)", () => {
     const collapseCommand = findCommand("redmine-client.collapseAllProjects");
-    assert.ok(collapseCommand, "redmine-client.collapseAllProjects command must exist");
-  });
-
-  test("collapseAllProjects has no view/title entry (legacy view removed)", () => {
-    const collapseEntry = findViewTitleEntry("redmine-client.collapseAllProjects");
-    assert.ok(!collapseEntry, "collapse projects view/title entry must be removed");
+    assert.ok(!collapseCommand, "redmine-client.collapseAllProjects はユーザー向けコマンドとして残っていないこと");
   });
 
   test("runOfflineSync command still exists in Command Palette", () => {
