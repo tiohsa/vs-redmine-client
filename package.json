@@ -256,7 +256,7 @@
       },
       {
         "command": "redmine-client.revealActiveTicket",
-        "title": "Redmine: Focus Active Ticket in Tree"
+        "title": "Redmine: Focus Active Ticket"
       },
       {
         "command": "redmine-client.focusTicketEditor",

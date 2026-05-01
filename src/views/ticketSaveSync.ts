@@ -423,6 +423,14 @@ export const syncTicketDraft = async (input: {
 
   let remoteDetail: IssueDetailResult | undefined;
 
+  if (metadataChanges.tracker !== undefined) {
+    try {
+      remoteDetail = await deps.getIssueDetail(input.ticketId);
+    } catch (error) {
+      return mapErrorToResult(error);
+    }
+  }
+
   let metadataFields: TicketUpdateFields = {};
   try {
     metadataFields = await resolveMetadataUpdates(metadataChanges, deps, remoteDetail?.ticket.projectId);
@@ -936,6 +944,14 @@ export const applyQueuedTicketUpdate = async (input: {
   });
 
   let remoteDetail: IssueDetailResult | undefined;
+
+  if (metadataChanges.tracker !== undefined) {
+    try {
+      remoteDetail = await deps.getIssueDetail(update.ticketId);
+    } catch (error) {
+      return mapErrorToResult(error);
+    }
+  }
 
   let metadataFields: TicketUpdateFields = {};
   try {

@@ -24,7 +24,7 @@ suite("0.1.3 安定化: パッケージ・README サニティチェック", () =
   });
 
   test("README に Open Editors view の現行機能説明が含まれない", () => {
-    const readmePath = path.resolve(__dirname, "../../../README.md");
+    const readmePath = path.resolve(process.cwd(), "README.md");
     const readme = fs.readFileSync(readmePath, "utf8");
     const hasOldEditorView = readme.includes("**Open Editors**") &&
       readme.includes("List all currently open ticket");
@@ -36,7 +36,7 @@ suite("0.1.3 安定化: パッケージ・README サニティチェック", () =
   });
 
   test("README に Dashboard Webview の説明が含まれる", () => {
-    const readmePath = path.resolve(__dirname, "../../../README.md");
+    const readmePath = path.resolve(process.cwd(), "README.md");
     const readme = fs.readFileSync(readmePath, "utf8");
     assert.ok(
       readme.includes("Dashboard"),

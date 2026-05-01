@@ -404,12 +404,7 @@ export class DashboardController {
       }
       return undefined;
     } catch {
-      // project trackers を取得できない場合はグローバル選択肢でフォールバック
-      const globalTrackers = this.opts.store.getState().metadataOptions.trackers;
-      if (globalTrackers.length > 0 && !globalTrackers.some((t) => t.name === trackerName)) {
-        return `未知のトラッカーです: ${trackerName}`;
-      }
-      return undefined;
+      return `このプロジェクトのトラッカー選択肢を取得できないため更新できません。`;
     }
   }
 

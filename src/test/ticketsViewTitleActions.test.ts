@@ -67,13 +67,9 @@ suite("Tickets view title actions", () => {
     assert.strictEqual(reloadCommand?.icon, "$(refresh)");
   });
 
-  test("collapseAllTickets command still exists (no legacy view/title entry)", () => {
+  test("collapseAllTickets command is absent from contributes.commands (removed)", () => {
     const collapseCommand = findCommand("redmine-client.collapseAllTickets");
-    assert.ok(collapseCommand, "redmine-client.collapseAllTickets command must exist");
-    assert.strictEqual(collapseCommand?.icon, "$(collapse-all)");
-
-    const collapseEntry = findViewTitleEntry("redmine-client.collapseAllTickets");
-    assert.ok(!collapseEntry, "collapse tickets view/title entry must be removed");
+    assert.ok(!collapseCommand, "redmine-client.collapseAllTickets はユーザー向けコマンドとして残っていないこと");
   });
 
   test("stale Explorer view context menu entries are removed after Dashboard migration", () => {
