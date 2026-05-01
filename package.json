@@ -3,7 +3,7 @@
   "displayName": "Redmine Client",
   "description": "Redmine ticket workflows into VS Code",
   "version": "0.1.2",
-  "publisher": "your-publisher-id",
+  "publisher": "tiohsa",
   "author": {
     "name": "tiohsa",
     "url": "https://github.com/tiohsa/vs-redmine-client"
@@ -22,8 +22,6 @@
     "onView:redmine-clientActivityDashboard",
     "onCommand:redmine-client.refreshTickets",
     "onCommand:redmine-client.refreshProjects",
-    "onCommand:redmine-client.collapseAllProjects",
-    "onCommand:redmine-client.collapseAllTickets",
     "onCommand:redmine-client.selectProject",
     "onCommand:redmine-client.toggleChildProjects",
     "onCommand:redmine-client.openTicketPreview",
@@ -108,16 +106,6 @@
         "command": "redmine-client.refreshComments",
         "title": "Redmine: Refresh Comments",
         "icon": "$(refresh)"
-      },
-      {
-        "command": "redmine-client.collapseAllProjects",
-        "title": "Redmine: Collapse All Projects",
-        "icon": "$(collapse-all)"
-      },
-      {
-        "command": "redmine-client.collapseAllTickets",
-        "title": "Redmine: Collapse All Tickets",
-        "icon": "$(collapse-all)"
       },
       {
         "command": "redmine-client.reloadProject",
@@ -397,6 +385,7 @@
     "webpack": "^5.103.0",
     "webpack-cli": "^6.0.1",
     "@vscode/test-cli": "^0.0.12",
-    "@vscode/test-electron": "^2.5.2"
+    "@vscode/test-electron": "^2.5.2",
+    "@vscode/vsce": "^3.0.0"
   }
 }
