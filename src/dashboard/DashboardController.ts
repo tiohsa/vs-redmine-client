@@ -161,6 +161,45 @@ export class DashboardController {
     this.disposables.forEach((d) => d.dispose());
   }
 
+  refreshTickets(): void {
+    void this.loadTickets();
+  }
+
+  refreshCommentsForTicket(ticketId: number): void {
+    void this.loadComments(ticketId);
+  }
+
+  refreshUnsyncedPresentation(): void {
+    this.unsyncedService.refreshUnsynced();
+  }
+
+  refreshSettings(): void {
+    this.settingsCtrl.pushSettings();
+  }
+
+  selectProject(projectId: number): void {
+    void this.projectService.selectProject(projectId);
+  }
+
+  updateTicketSubject(ticketId: number, subject: string): void {
+    const ticket = this.tickets.find((item) => item.id === ticketId);
+    if (!ticket) {
+      return;
+    }
+    ticket.subject = subject;
+    this.pushTickets();
+    const state = this.opts.store.getState();
+    if (state.selectedTicketId === ticketId && state.selectedTicket) {
+      this.opts.store.update({
+        selectedTicket: { ...state.selectedTicket, subject },
+      });
+    }
+  }
+
+  notifyTicketChanged(): void {
+    this.pushTickets();
+  }
+
   // ── Private request handler ────────────────────────────────────────────
 
   private async handleRequest(req: DashboardRequest): Promise<void> {
