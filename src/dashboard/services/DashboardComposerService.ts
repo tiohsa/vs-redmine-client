@@ -1,5 +1,6 @@
 import type { DashboardServiceContext } from "./DashboardServiceContext";
 import * as vscode from "vscode";
+import * as fs from "fs";
 import { getProjectTrackers } from "../../redmine/projects";
 import { buildNewTicketDraftContent } from "../../views/ticketDraftStore";
 import { openNewTicketDraft } from "../../commands/createTicketFromList";
@@ -135,6 +136,8 @@ export class DashboardComposerService {
       getTicketIdFn?: (editor: vscode.TextEditor) => number | undefined;
       findEditorFn?: (draftUri: string) => vscode.TextEditor | undefined;
       openEditorFn?: (uri: vscode.Uri) => Promise<vscode.TextEditor>;
+      findDocumentFn?: (draftUri: string) => vscode.TextDocument | undefined;
+      fileExistsFn?: (path: string) => boolean;
       afterCreatedFn?: (createdId: number) => Promise<void>;
     },
   ): Promise<void> {
@@ -152,8 +155,6 @@ export class DashboardComposerService {
 
     this.deps.context.notifyOperationStarted(requestId, "同期中...");
 
-    const findEditorFn = hooks?.findEditorFn ??
-      ((uri: string) => vscode.window.visibleTextEditors.find((e) => e.document.uri.toString() === uri));
     const openEditorFn = hooks?.openEditorFn ??
       (async (uri: vscode.Uri): Promise<vscode.TextEditor> => {
         const doc = await vscode.workspace.openTextDocument(uri);
@@ -162,16 +163,23 @@ export class DashboardComposerService {
     const syncFn = hooks?.syncFn ?? ((editor: vscode.TextEditor) => syncNewTicketDraft({ editor }));
     const getTicketIdFn = hooks?.getTicketIdFn ?? getTicketIdForEditor;
 
-    let editor = findEditorFn(draftUri);
-    if (!editor) {
-      editor = await openEditorFn(vscode.Uri.parse(draftUri));
+    const editor = await this.openDraftEditorSafely(draftUri, {
+      findEditorFn: hooks?.findEditorFn,
+      findDocumentFn: hooks?.findDocumentFn,
+      openEditorFn,
+      fileExistsFn: hooks?.fileExistsFn,
+    });
+    const resolvedUri = editor.document.uri.toString();
+    if (resolvedUri !== draftUri) {
+      this.updateWorkPanelComposer({ draftUri: resolvedUri });
     }
 
     const result = await syncFn(editor);
 
     if (result.status === "created") {
       const createdId = getTicketIdFn(editor);
-      removeOfflineNewTicket(draftUri);
+      this.removeOfflineNewTicketByUriVariants(draftUri);
+      this.removeOfflineNewTicketByUriVariants(resolvedUri);
       this.deps.refreshUnsynced();
       if (hooks?.afterCreatedFn) {
         await hooks.afterCreatedFn(createdId ?? 0);
@@ -214,6 +222,66 @@ export class DashboardComposerService {
     }
 
     this.deps.context.notifyError(requestId, `同期に失敗しました: ${result.message ?? "不明なエラー"}`);
+  }
+
+  private findDraftEditorByUri(
+    draftUri: string,
+    editors: readonly vscode.TextEditor[] = vscode.window.visibleTextEditors,
+  ): vscode.TextEditor | undefined {
+    const parsed = vscode.Uri.parse(draftUri);
+    return editors.find((editor) =>
+      editor.document.uri.toString() === draftUri || editor.document.uri.fsPath === parsed.fsPath
+    );
+  }
+
+  private findTextDocumentByUri(
+    draftUri: string,
+    docs: readonly vscode.TextDocument[] = vscode.workspace.textDocuments,
+  ): vscode.TextDocument | undefined {
+    const parsed = vscode.Uri.parse(draftUri);
+    return docs.find((doc) => doc.uri.toString() === draftUri || doc.uri.fsPath === parsed.fsPath);
+  }
+
+  private async openDraftEditorSafely(
+    draftUri: string,
+    deps: {
+      findEditorFn?: (draftUri: string) => vscode.TextEditor | undefined;
+      findDocumentFn?: (draftUri: string) => vscode.TextDocument | undefined;
+      openEditorFn: (uri: vscode.Uri) => Promise<vscode.TextEditor>;
+      fileExistsFn?: (path: string) => boolean;
+    },
+  ): Promise<vscode.TextEditor> {
+    const foundEditor = deps.findEditorFn?.(draftUri) ?? this.findDraftEditorByUri(draftUri);
+    if (foundEditor) {
+      return foundEditor;
+    }
+
+    const foundDoc = deps.findDocumentFn?.(draftUri) ?? this.findTextDocumentByUri(draftUri);
+    if (foundDoc) {
+      return deps.openEditorFn(foundDoc.uri);
+    }
+
+    const parsed = vscode.Uri.parse(draftUri);
+    if (parsed.scheme === "untitled") {
+      const fileExistsFn = deps.fileExistsFn ?? fs.existsSync;
+      if (fileExistsFn(parsed.fsPath)) {
+        return deps.openEditorFn(vscode.Uri.file(parsed.fsPath));
+      }
+    }
+    return deps.openEditorFn(parsed);
+  }
+
+  private removeOfflineNewTicketByUriVariants(uriText: string): void {
+    const variants = new Set<string>([uriText]);
+    const parsed = vscode.Uri.parse(uriText);
+    variants.add(parsed.toString());
+    if (parsed.fsPath) {
+      variants.add(vscode.Uri.file(parsed.fsPath).toString());
+    }
+    if (parsed.scheme === "file" && parsed.path) {
+      variants.add(`file:${parsed.path}`);
+    }
+    variants.forEach((uri) => removeOfflineNewTicket(uri));
   }
 
   private buildComposerValues(input: {

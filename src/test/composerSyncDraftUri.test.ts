@@ -32,10 +32,10 @@ const makeTicketUpdateContent = (subject: string, issueId: number): string =>
     controlFields: { mode: "ticket-update", project_id: 1, issue_id: issueId },
   });
 
-const makeEditorStub = (text: string): vscode.TextEditor =>
+const makeEditorStub = (text: string, uri: string = DRAFT_URI): vscode.TextEditor =>
   ({
     document: {
-      uri: vscode.Uri.parse(DRAFT_URI),
+      uri: vscode.Uri.parse(uri),
       getText: () => text,
     } as vscode.TextDocument,
   }) as vscode.TextEditor;
@@ -188,6 +188,114 @@ suite("composerSync – draftUri ルーティング", () => {
       queue.newTickets.some((item) => item.documentUri === "untitled:other.md"),
       "別URIのキューエントリは残るべき",
     );
+  });
+
+  test("保存済み untitled ドラフト同期では file URI の既存エディタを再利用し stale untitled を開かない", async () => {
+    const staleUntitled = "untitled:/tmp/redmine-client-new-ticket-71.md";
+    const savedFile = vscode.Uri.file("/tmp/redmine-client-new-ticket-71.md").toString();
+    const store = new DashboardStateStore();
+    store.update({ workPanel: makeComposerWorkPanel(staleUntitled) });
+
+    const editorStub = makeEditorStub(makeNewTicketContent("保存済みドラフト"), savedFile);
+    const openedUris: string[] = [];
+
+    const ctrl = new DashboardController({
+      store,
+      notifyOperationStarted: () => {},
+      notifySuccess: () => {},
+      notifyError: () => {},
+      notifyToast: () => {},
+      onTicketsRefreshed: () => {},
+      _composerSyncTestHooks: {
+        findEditorFn: (_uri) => editorStub,
+        openEditorFn: async (uri) => {
+          openedUris.push(uri.toString());
+          return editorStub;
+        },
+        syncFn: async (_editor): Promise<TicketSaveResult> => ({ status: "created", message: "Ticket created." }),
+        getTicketIdFn: (_editor) => 90,
+        afterCreatedFn: async () => {},
+      },
+    });
+
+    await ctrl.handle({ type: "ticket.syncNewTicketDraftFromComposer", requestId: "r-saved-untitled" });
+
+    assert.strictEqual(openedUris.length, 0, "既存エディタ再利用時は openTextDocument 経路を通らないべき");
+    const panel = store.getState().workPanel;
+    assert.ok(panel && (panel.mode === "newTicket" || panel.mode === "childTicket"));
+    assert.strictEqual(panel?.draftUri, savedFile, "workPanel.draftUri は file URI に更新されるべき");
+  });
+
+  test("stale untitled URI かつファイル存在時は file URI で開く", async () => {
+    const staleUntitled = "untitled:/tmp/redmine-client-new-ticket-72.md";
+    const expectedFileUri = vscode.Uri.file("/tmp/redmine-client-new-ticket-72.md").toString();
+    const store = new DashboardStateStore();
+    store.update({ workPanel: makeComposerWorkPanel(staleUntitled) });
+
+    const editorStub = makeEditorStub(makeNewTicketContent("存在ファイルを開く"), expectedFileUri);
+    const openedUris: string[] = [];
+
+    const ctrl = new DashboardController({
+      store,
+      notifyOperationStarted: () => {},
+      notifySuccess: () => {},
+      notifyError: () => {},
+      notifyToast: () => {},
+      onTicketsRefreshed: () => {},
+      _composerSyncTestHooks: {
+        findEditorFn: (_uri) => undefined,
+        findDocumentFn: (_uri) => undefined,
+        fileExistsFn: (_path) => true,
+        openEditorFn: async (uri) => {
+          openedUris.push(uri.toString());
+          return editorStub;
+        },
+        syncFn: async (_editor): Promise<TicketSaveResult> => ({ status: "created", message: "Ticket created." }),
+        getTicketIdFn: (_editor) => 91,
+        afterCreatedFn: async () => {},
+      },
+    });
+
+    await ctrl.handle({ type: "ticket.syncNewTicketDraftFromComposer", requestId: "r-stale-untitled" });
+
+    assert.deepStrictEqual(openedUris, [expectedFileUri], "untitled ではなく file URI を開くべき");
+  });
+
+  test("作成成功時に stale untitled と current file の両方のキューが削除される", async () => {
+    const staleUntitled = "untitled:/tmp/redmine-client-new-ticket-73.md";
+    const currentFile = "file:/tmp/redmine-client-new-ticket-73.md";
+    const normalizedCurrentFile = vscode.Uri.file("/tmp/redmine-client-new-ticket-73.md").toString();
+    const store = new DashboardStateStore();
+    store.update({ workPanel: makeComposerWorkPanel(staleUntitled) });
+
+    addOfflineNewTicket({ content: makeNewTicketContent("旧URI"), projectId: 1, documentUri: staleUntitled });
+    addOfflineNewTicket({ content: makeNewTicketContent("新URI"), projectId: 1, documentUri: currentFile });
+    addOfflineNewTicket({ content: makeNewTicketContent("正規化URI"), projectId: 1, documentUri: normalizedCurrentFile });
+    addOfflineNewTicket({ content: makeNewTicketContent("残存"), projectId: 1, documentUri: "untitled:other.md" });
+
+    const editorStub = makeEditorStub(makeNewTicketContent("同期待ち"), normalizedCurrentFile);
+    const ctrl = new DashboardController({
+      store,
+      notifyOperationStarted: () => {},
+      notifySuccess: () => {},
+      notifyError: () => {},
+      notifyToast: () => {},
+      onTicketsRefreshed: () => {},
+      _composerSyncTestHooks: {
+        findEditorFn: (_uri) => editorStub,
+        syncFn: async (_editor): Promise<TicketSaveResult> => ({ status: "created", message: "Ticket created." }),
+        getTicketIdFn: (_editor) => 92,
+        afterCreatedFn: async () => {},
+      },
+    });
+
+    await ctrl.handle({ type: "ticket.syncNewTicketDraftFromComposer", requestId: "r-cleanup-both" });
+
+    const queue = getOfflineSyncQueue();
+    assert.ok(!queue.newTickets.some((item) => item.documentUri === staleUntitled), "stale untitled URI は削除されるべき");
+    assert.ok(!queue.newTickets.some((item) => item.documentUri === currentFile), "current file URI は削除されるべき");
+    assert.ok(!queue.newTickets.some((item) => item.documentUri === normalizedCurrentFile), "正規化 current file URI も削除されるべき");
+    assert.ok(queue.newTickets.some((item) => item.documentUri === "untitled:other.md"), "別URIは残るべき");
   });
 });
 

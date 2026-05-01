@@ -49,6 +49,8 @@ export interface ComposerSyncTestHooks {
   getTicketIdFn?: (editor: vscode.TextEditor) => number | undefined;
   findEditorFn?: (draftUri: string) => vscode.TextEditor | undefined;
   openEditorFn?: (uri: vscode.Uri) => Promise<vscode.TextEditor>;
+  findDocumentFn?: (draftUri: string) => vscode.TextDocument | undefined;
+  fileExistsFn?: (path: string) => boolean;
   afterCreatedFn?: (createdId: number) => Promise<void>;
 }
 
