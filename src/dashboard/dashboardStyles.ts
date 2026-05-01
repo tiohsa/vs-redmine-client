@@ -153,6 +153,13 @@ body.vscode-high-contrast .tab.active{border-color:var(--app-border);background:
 #search-input{flex:1;height:34px;padding:0 14px;background:var(--vscode-input-background, var(--surface-1));color:var(--vscode-input-foreground, var(--app-text));border:1px solid var(--vscode-input-border, var(--app-card-border));border-radius:var(--mm-radius-pill);font:inherit;font-size:12px;outline:none;transition:border .15s}
 #search-input:focus{outline:1px solid var(--app-focus);outline-offset:1px;border-color:var(--app-focus)}
 #search-input::placeholder{color:var(--vscode-input-placeholderForeground, var(--app-text-readable-muted))}
+#quick-filter-row{display:grid;grid-template-columns:auto minmax(120px,1fr) auto auto minmax(120px,1fr);gap:6px;align-items:center;margin-top:6px}
+.quick-filter-label{font-size:11.5px;color:var(--app-text-readable-muted);font-weight:600;white-space:nowrap}
+.quick-filter-select{min-height:70px;padding:4px 6px;background:var(--vscode-dropdown-background, var(--surface-1));color:var(--vscode-dropdown-foreground, var(--app-text));border:1px solid var(--vscode-input-border, var(--app-card-border));border-radius:var(--mm-radius-button);font:inherit;font-size:12px}
+.quick-filter-select:focus{outline:1px solid var(--app-focus);outline-offset:1px}
+.quick-filter-select:disabled{opacity:.65}
+.quick-filter-check{display:flex;align-items:center;gap:4px;font-size:11.5px;color:var(--app-text-readable-muted);white-space:nowrap}
+.quick-filter-check input{accent-color:var(--app-accent)}
 #filter-chips{display:flex;flex-wrap:wrap;gap:4px;margin-top:6px}
 .filter-chip{display:flex;align-items:center;gap:4px;padding:2px 8px 2px 10px;background:color-mix(in srgb, var(--app-accent) 15%, transparent);color:var(--app-accent);border-radius:var(--mm-radius-pill);font-size:11px;font-weight:500;cursor:pointer;border:1px solid transparent}
 .filter-chip:hover{border-color:var(--app-accent)}
@@ -160,6 +167,10 @@ body.vscode-high-contrast .tab.active{border-color:var(--app-border);background:
 .filter-chip-x::before,.filter-chip-x::after{content:'';position:absolute;top:50%;left:50%;width:8px;height:1.5px;background:currentColor;border-radius:1px}
 .filter-chip-x::before{transform:translate(-50%,-50%) rotate(45deg)}
 .filter-chip-x::after{transform:translate(-50%,-50%) rotate(-45deg)}
+@media (max-width: 780px){
+  #quick-filter-row{grid-template-columns:1fr}
+  .quick-filter-select{min-height:84px}
+}
 
 /* ── Ticket list ──────────────────────────────────────────────── */
 #ticket-scroll{flex:1;overflow-y:auto;min-height:0;border-bottom:1px solid var(--border-subtle)}
@@ -195,6 +206,7 @@ body.vscode-high-contrast .expand-btn:focus-visible{outline:2px solid var(--app-
 .badge.sync-conflict{background:rgba(185,28,28,0.12);color:#e05d5d;border-color:rgba(185,28,28,0.25)}
 .badge.sync-failed{background:rgba(185,28,28,0.12);color:#e05d5d;border-color:rgba(185,28,28,0.25)}
 .badge.sync-syncing{background:rgba(21,128,61,0.12);color:#4caf72;border-color:rgba(21,128,61,0.25)}
+.badge.ticket-status{background:color-mix(in srgb, var(--app-accent) 12%, var(--surface-1));color:var(--app-text);border-color:color-mix(in srgb, var(--app-accent) 38%, transparent)}
 body.vscode-high-contrast .badge,.vscode-high-contrast .unsynced-kind-label{background:transparent;border-color:var(--app-border);color:var(--app-text)}
 .load-more-row{padding:10px 12px;text-align:center;color:var(--app-accent);font-size:12px;cursor:pointer;font-weight:500}
 .load-more-row:hover{text-decoration:underline}

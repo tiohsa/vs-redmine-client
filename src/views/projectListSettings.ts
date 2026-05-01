@@ -64,6 +64,12 @@ export const applyTicketFilters = (
   filters: TicketFilterSelection,
 ): Ticket[] => {
   const normalizedSubjectQuery = filters.subjectQuery.trim().toLowerCase();
+  const selectedStatusNames = new Set(
+    tickets
+      .filter((ticket) => ticket.statusId !== undefined && filters.statusIds.includes(ticket.statusId))
+      .map((ticket) => ticket.statusName)
+      .filter((statusName): statusName is string => typeof statusName === "string" && statusName.length > 0),
+  );
 
   const matchesSelection = (value: number | undefined, selections: number[]): boolean => {
     if (selections.length === 0) {
@@ -92,7 +98,10 @@ export const applyTicketFilters = (
     if (!matchesSelection(ticket.priorityId, filters.priorityIds)) {
       return false;
     }
-    if (!matchesSelection(ticket.statusId, filters.statusIds)) {
+    if (
+      !matchesSelection(ticket.statusId, filters.statusIds) &&
+      !(ticket.statusId === undefined && ticket.statusName && selectedStatusNames.has(ticket.statusName))
+    ) {
       return false;
     }
     if (!matchesSelection(ticket.trackerId, filters.trackerIds)) {

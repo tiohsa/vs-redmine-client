@@ -166,6 +166,76 @@ function findTicketNode(nodes, ticketId){
   }
   return null;
 }
+function flattenAll(nodes, result=[]){
+  for(const n of nodes || []){
+    result.push(n);
+    if(n.children?.length) flattenAll(n.children, result);
+  }
+  return result;
+}
+function uniqueSortedOptions(items){
+  const map = new Map();
+  for(const item of items){
+    if(!item || item.id===undefined || !item.label) continue;
+    if(!map.has(item.id)) map.set(item.id, item.label);
+  }
+  return Array.from(map.entries())
+    .map(([id,label])=>({id,label}))
+    .sort((a,b)=>a.label.localeCompare(b.label, 'ja'));
+}
+function selectedNumericValues(selectEl){
+  return Array.from(selectEl?.selectedOptions || [])
+    .map(option=>Number(option.value))
+    .filter(v=>Number.isInteger(v) && v > 0);
+}
+function applyDashboardFilters(){
+  const assigneeSelect = document.getElementById('assignee-filter-select');
+  const statusSelect = document.getElementById('status-filter-select');
+  const includeUnassigned = document.getElementById('assignee-unassigned-toggle');
+  const patch = {
+    filters: {
+      ...state.settings.filters,
+      assigneeIds: selectedNumericValues(assigneeSelect),
+      statusIds: selectedNumericValues(statusSelect),
+      includeUnassigned: !!includeUnassigned?.checked,
+    },
+  };
+  req('settings.update', { patch });
+}
+function bindDashboardFilterHandlers(){
+  const assigneeSelect = document.getElementById('assignee-filter-select');
+  const statusSelect = document.getElementById('status-filter-select');
+  const includeUnassigned = document.getElementById('assignee-unassigned-toggle');
+  assigneeSelect?.addEventListener('change', applyDashboardFilters);
+  statusSelect?.addEventListener('change', applyDashboardFilters);
+  includeUnassigned?.addEventListener('change', applyDashboardFilters);
+}
+function renderQuickFilters(){
+  if(!state) return;
+  const assigneeSelect = document.getElementById('assignee-filter-select');
+  const statusSelect = document.getElementById('status-filter-select');
+  const includeUnassigned = document.getElementById('assignee-unassigned-toggle');
+  if(!assigneeSelect || !statusSelect || !includeUnassigned) return;
+  const assigneeOptions = (state.ticketFilterOptions?.assignees || []).map(option => ({
+    id: option.id,
+    label: option.name,
+  }));
+  const statusOptions = (state.ticketFilterOptions?.statuses || []).map(option => ({
+    id: option.id,
+    label: option.name,
+  }));
+  const selectedAssignees = new Set(state.settings.filters.assigneeIds || []);
+  const selectedStatuses = new Set(state.settings.filters.statusIds || []);
+  assigneeSelect.disabled = assigneeOptions.length === 0;
+  statusSelect.disabled = statusOptions.length === 0;
+  assigneeSelect.innerHTML = assigneeOptions.map(option =>
+    '<option value="'+option.id+'"'+(selectedAssignees.has(option.id)?' selected':'')+'>'+esc(option.label)+'</option>'
+  ).join('');
+  statusSelect.innerHTML = statusOptions.map(option =>
+    '<option value="'+option.id+'"'+(selectedStatuses.has(option.id)?' selected':'')+'>'+esc(option.label)+'</option>'
+  ).join('');
+  includeUnassigned.checked = !!state.settings.filters.includeUnassigned;
+}
 function renderTickets(){
   if(!state) return;
   const list = document.getElementById('ticket-list');
@@ -195,6 +265,9 @@ function renderTickets(){
       const syncLabel = SYNC_LABEL[t.syncState] || t.syncState;
       const syncBadge = (t.syncState&&t.syncState!=='Synced')
         ?'<span class="badge '+syncCls+'">'+esc(syncLabel)+'</span>':'';
+      const statusBadge = t.statusName
+        ?'<span class="badge ticket-status">'+esc(t.statusName)+'</span>'
+        :'';
       const hasChildren = t.children?.length > 0;
       const isExpanded = expandedIds.has(t.id);
       const expandBtn = hasChildren
@@ -214,7 +287,7 @@ function renderTickets(){
         +childConnector
         +'<span class="ticket-id">#'+t.id+'</span>'
         +'<span class="ticket-subject" title="'+esc(t.subject)+'">'+esc(t.subject)+'</span>'
-        +'<span class="badges">'+syncBadge+'</span>'
+        +'<span class="badges">'+statusBadge+syncBadge+'</span>'
         +actionMenu
         +'</div>';
     }).join('');
@@ -420,6 +493,9 @@ function renderFilterChips(){
   const f = state.settings.filters;
   const chips=[];
   if(f.subjectQuery) chips.push('件名: '+f.subjectQuery);
+  if((f.assigneeIds||[]).length) chips.push('担当者: '+f.assigneeIds.length+'件');
+  if(f.includeUnassigned) chips.push('未担当を含む');
+  if((f.statusIds||[]).length) chips.push('ステータス: '+f.statusIds.length+'件');
   const el=document.getElementById('filter-chips');
   el.innerHTML=chips.map(label=>'<span class="filter-chip">'+esc(label)+'<span class="filter-chip-x" aria-hidden="true"></span></span>').join('');
 }
@@ -526,7 +602,16 @@ function renderSettings(){
   const s=state.settings;
   const el=document.getElementById('settings-content');
   el.innerHTML=
-    '<div class="settings-section"><h3>並び替え</h3>'
+    '<div class="settings-section"><h3>チケットフィルタ</h3>'
+    +'<div id="quick-filter-row">'
+    +'<label class="quick-filter-label" for="assignee-filter-select">担当者</label>'
+    +'<select id="assignee-filter-select" class="quick-filter-select" multiple size="4" aria-label="担当者フィルター"></select>'
+    +'<label class="quick-filter-check"><input type="checkbox" id="assignee-unassigned-toggle"> 未担当を含む</label>'
+    +'<label class="quick-filter-label" for="status-filter-select">ステータス</label>'
+    +'<select id="status-filter-select" class="quick-filter-select" multiple size="4" aria-label="ステータスフィルター"></select>'
+    +'</div>'
+    +'</div>'
+    +'<div class="settings-section"><h3>並び替え</h3>'
     +'<div class="setting-row"><span class="setting-label">並び替えフィールド</span>'
     +'<select class="setting-select" id="set-sort-field">'
     +'<option value=""'+(s.sort.field?'':' selected')+'>デフォルト</option>'
@@ -560,6 +645,8 @@ function renderSettings(){
     +'</div>';
 
   const applyTicketListPatch=(patch)=>req('settings.update',{patch});
+  renderQuickFilters();
+  bindDashboardFilterHandlers();
 
   const sortFieldEl=document.getElementById('set-sort-field');
   sortFieldEl.addEventListener('change',()=>applyTicketListPatch({sort:{field:sortFieldEl.value||undefined,direction:s.sort.direction}}));

@@ -126,10 +126,28 @@ export class DashboardTicketService {
     const filtered = applyTicketFilters(tickets, settings.filters);
     const sorted = applyTicketSort(filtered, settings.sort);
     const nodes = buildTicketDashboardNodes(sorted);
+    const assignees = new Map<number, string>();
+    const statuses = new Map<number, string>();
+    for (const ticket of tickets) {
+      if (ticket.assigneeId !== undefined) {
+        assignees.set(ticket.assigneeId, ticket.assigneeName ?? `User #${ticket.assigneeId}`);
+      }
+      if (ticket.statusId !== undefined) {
+        statuses.set(ticket.statusId, ticket.statusName ?? `Status #${ticket.statusId}`);
+      }
+    }
+    const toSortedOptions = (options: Map<number, string>) =>
+      Array.from(options.entries())
+        .map(([id, name]) => ({ id, name }))
+        .sort((left, right) => left.name.localeCompare(right.name, "ja"));
     this.deps.context.store.update({
       tickets: nodes,
       totalTicketCount: this.deps.getTotalCount(),
       loadedTicketCount: tickets.length,
+      ticketFilterOptions: {
+        assignees: toSortedOptions(assignees),
+        statuses: toSortedOptions(statuses),
+      },
     });
   }
 }

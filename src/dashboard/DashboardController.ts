@@ -448,5 +448,29 @@ export class DashboardController {
 
   private pushTickets(): void {
     this.ticketService.pushTickets();
+    const state = this.opts.store.getState();
+    if (state.selectedTicketId === undefined) {
+      return;
+    }
+    const visibleIds = new Set<number>();
+    const stack = [...state.tickets];
+    while (stack.length > 0) {
+      const node = stack.pop();
+      if (!node) {
+        continue;
+      }
+      visibleIds.add(node.id);
+      if (node.children.length > 0) {
+        stack.push(...node.children);
+      }
+    }
+    if (!visibleIds.has(state.selectedTicketId)) {
+      this.opts.store.update({
+        selectedTicketId: undefined,
+        selectedTicket: undefined,
+        workPanel: undefined,
+        comments: { ...state.comments, ticketId: undefined, items: [], error: undefined },
+      });
+    }
   }
 }
