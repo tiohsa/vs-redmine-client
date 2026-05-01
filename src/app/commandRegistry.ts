@@ -15,82 +15,175 @@ import {
 } from "../commands/openInBrowser";
 import { reloadCommentFromEditor } from "../commands/reloadComment";
 import { reloadTicketFromEditor } from "../commands/reloadTicket";
-import { searchTickets } from "../commands/searchTickets";
 import { setApiKey, clearApiKey, getApiKeyStatus } from "../config/apiKeyStore";
 import { showError, showSuccess } from "../utils/notifications";
-import { CommentTreeItem, CommentsTreeProvider } from "../views/commentsView";
 import {
   configureEditorDefaultField,
-  EDITOR_DEFAULT_COMMANDS,
   resetEditorDefaults,
-  TicketSettingsTreeProvider,
-} from "../views/ticketSettingsView";
+} from "../views/editorDefaultCommands";
+import { EDITOR_DEFAULT_COMMANDS, TICKET_SETTINGS_COMMANDS } from "./commandIds";
 import {
-  TicketTreeItem,
-  TicketsTreeProvider,
-  TICKET_SETTINGS_COMMANDS,
-} from "../views/ticketsView";
-import { getAllEditorRecords, isTicketEditor, getTicketIdForEditor, NEW_TICKET_DRAFT_ID } from "../views/ticketEditorRegistry";
+  getAllEditorRecords,
+  getTicketIdForEditor,
+  isTicketEditor,
+  NEW_TICKET_DRAFT_ID,
+} from "../views/ticketEditorRegistry";
 import { showTicketPreview } from "../views/ticketPreview";
-import { ProjectTreeItem, ProjectsTreeProvider } from "../views/projectsView";
-import { UnsyncedFileTreeItem, UnsyncedFilesTreeProvider } from "../views/unsyncedFilesView";
+import type { Comment, Project, Ticket } from "../redmine/types";
+import type {
+  CommentPresentationPort,
+  SettingsPresentationPort,
+  TicketPresentationPort,
+  UnsyncedPresentationPort,
+} from "./presentationPorts";
 import type { SyncController, SyncStatus } from "./syncController";
+import type { DashboardWebviewProvider } from "../dashboard/DashboardWebviewProvider";
+import type { DashboardState, DashboardUnsyncedKey } from "../dashboard/dashboardProtocol";
 
 export interface CommandDeps {
-  projectsProvider: ProjectsTreeProvider;
-  ticketsProvider: TicketsTreeProvider;
-  commentsProvider: CommentsTreeProvider;
-  unsyncedFilesProvider: UnsyncedFilesTreeProvider;
-  settingsProvider: TicketSettingsTreeProvider;
+  ticketsPresentation: TicketPresentationPort;
+  commentsPresentation: CommentPresentationPort;
+  unsyncedPresentation: UnsyncedPresentationPort;
+  settingsPresentation: SettingsPresentationPort;
+  dashboardProvider: DashboardWebviewProvider;
   sync: Pick<SyncController, "syncEditorAndNotify">;
 }
+
+const toSelectedTicket = (state: DashboardState): Ticket | undefined => {
+  const id = state.selectedTicketId;
+  if (!id) {
+    return undefined;
+  }
+  const fromList = state.tickets.find((t) => t.id === id);
+  if (fromList?.projectId) {
+    return {
+      id: fromList.id,
+      subject: fromList.subject,
+      description: state.selectedTicket?.description,
+      statusName: fromList.statusName,
+      priorityName: fromList.priorityName,
+      trackerName: fromList.trackerName,
+      assigneeName: fromList.assigneeName,
+      dueDate: fromList.dueDate,
+      startDate: fromList.startDate,
+      projectId: fromList.projectId,
+      projectName: fromList.projectName,
+      parentId: fromList.parentId,
+      updatedAt: state.selectedTicket?.lastSyncedAt,
+    };
+  }
+  const detail = state.selectedTicket;
+  if (!detail?.projectId) {
+    return undefined;
+  }
+  return {
+    id: detail.id,
+    subject: detail.subject,
+    description: detail.description,
+    statusName: detail.statusName,
+    priorityName: detail.priorityName,
+    trackerName: detail.trackerName,
+    assigneeName: detail.assigneeName,
+    dueDate: detail.dueDate,
+    startDate: detail.startDate,
+    projectId: detail.projectId,
+    projectName: detail.projectName,
+    parentId: detail.parentId,
+    updatedAt: detail.lastSyncedAt,
+  };
+};
+
+const pickDashboardComment = async (state: DashboardState): Promise<Comment | undefined> => {
+  const ticketId = state.comments.ticketId;
+  if (!ticketId || state.comments.items.length === 0) {
+    return undefined;
+  }
+  const items = state.comments.items.map((comment) => ({
+    label: `#${comment.id} ${comment.authorName}`,
+    description: comment.updatedAt ?? comment.createdAt ?? "",
+    detail: comment.body.slice(0, 80),
+    comment,
+  }));
+  const picked = await vscode.window.showQuickPick(items, {
+    title: "コメントを選択",
+    placeHolder: "編集またはブラウザ表示するコメントを選択してください",
+    matchOnDescription: true,
+    matchOnDetail: true,
+  });
+  if (!picked) {
+    return undefined;
+  }
+  return {
+    id: picked.comment.id,
+    ticketId,
+    authorId: 0,
+    authorName: picked.comment.authorName,
+    body: picked.comment.body,
+    createdAt: picked.comment.createdAt,
+    updatedAt: picked.comment.updatedAt,
+    editableByCurrentUser: picked.comment.editableByCurrentUser,
+  };
+};
+
+const isDashboardUnsyncedKey = (value: unknown): value is DashboardUnsyncedKey => {
+  if (!value || typeof value !== "object") {
+    return false;
+  }
+  const candidate = value as { kind?: unknown };
+  return candidate.kind === "ticket" || candidate.kind === "newTicket" || candidate.kind === "comment";
+};
 
 export const registerCommands = (
   context: vscode.ExtensionContext,
   deps: CommandDeps,
 ): void => {
   const {
-    projectsProvider,
-    ticketsProvider,
-    commentsProvider,
-    unsyncedFilesProvider,
-    settingsProvider,
+    ticketsPresentation,
+    commentsPresentation,
+    unsyncedPresentation,
+    settingsPresentation,
+    dashboardProvider,
     sync,
   } = deps;
 
-  // ── 基本コマンド ──────────────────────────────────────────────────────────
+  const getState = (): DashboardState => dashboardProvider.getStateSnapshot();
+
   context.subscriptions.push(
     vscode.commands.registerCommand("redmine-client.refreshProjects", () =>
-      projectsProvider.refresh(),
+      ticketsPresentation.refresh(),
     ),
     vscode.commands.registerCommand("redmine-client.refreshTickets", () =>
-      ticketsProvider.refresh(),
+      ticketsPresentation.refresh(),
     ),
     vscode.commands.registerCommand("redmine-client.refreshComments", () =>
-      commentsProvider.refresh(),
+      commentsPresentation.refresh(),
     ),
     vscode.commands.registerCommand("redmine-client.loadMoreTickets", async () => {
-      await ticketsProvider.loadMoreTickets();
+      vscode.window.showErrorMessage("Dashboard の「もっと読み込む」を使用してください。");
     }),
   );
 
-  // ── Offline Sync ──────────────────────────────────────────────────────────
   context.subscriptions.push(
     vscode.commands.registerCommand("redmine-client.runOfflineSync", async () => {
       await runOfflineSync();
-      ticketsProvider.refresh();
-      commentsProvider.refresh();
-      unsyncedFilesProvider.refresh();
+      ticketsPresentation.refresh();
+      commentsPresentation.refresh();
+      unsyncedPresentation.refresh();
     }),
-    vscode.commands.registerCommand("redmine-client.syncUnsyncedFile", async (item) => {
-      if (!(item instanceof UnsyncedFileTreeItem)) {
+    vscode.commands.registerCommand("redmine-client.syncUnsyncedFile", async (item: unknown) => {
+      const withKey = item as { syncKey?: unknown } | undefined;
+      if (!isDashboardUnsyncedKey(withKey?.syncKey)) {
+        vscode.window.showErrorMessage("Dashboard の未同期一覧から同期対象を選択してください。");
         return;
       }
-      await syncUnsyncedFile(item, { onTicketCreated: () => ticketsProvider.refresh() });
+      await syncUnsyncedFile(
+        { syncKey: withKey.syncKey },
+        { onTicketCreated: () => ticketsPresentation.refresh() },
+      );
+      unsyncedPresentation.refresh();
     }),
   );
 
-  // ── 明示同期コマンド ──────────────────────────────────────────────────────
   context.subscriptions.push(
     vscode.commands.registerCommand("redmine-client.syncToRedmine", async () => {
       const activeEditor = vscode.window.activeTextEditor;
@@ -112,7 +205,7 @@ export const registerCommands = (
 
       const document = await vscode.workspace.openTextDocument(vscode.Uri.parse(fallbackRecord.uri));
       const editor =
-        vscode.window.visibleTextEditors.find((e) => e.document === document) ??
+        vscode.window.visibleTextEditors.find((e: vscode.TextEditor) => e.document === document) ??
         (await vscode.window.showTextDocument(document, { preview: false }));
       return sync.syncEditorAndNotify(editor);
     }),
@@ -125,7 +218,7 @@ export const registerCommands = (
         }
         const document = await vscode.workspace.openTextDocument(vscode.Uri.parse(uriStr));
         const editor =
-          vscode.window.visibleTextEditors.find((e) => e.document === document) ??
+          vscode.window.visibleTextEditors.find((e: vscode.TextEditor) => e.document === document) ??
           (await vscode.window.showTextDocument(document, { preview: false }));
         return sync.syncEditorAndNotify(editor);
       },
@@ -150,7 +243,7 @@ export const registerCommands = (
         try {
           const document = await vscode.workspace.openTextDocument(vscode.Uri.parse(record.uri));
           const editor =
-            vscode.window.visibleTextEditors.find((e) => e.document === document) ??
+            vscode.window.visibleTextEditors.find((e: vscode.TextEditor) => e.document === document) ??
             (await vscode.window.showTextDocument(document, { preview: false }));
           const status = await sync.syncEditorAndNotify(editor);
           counts[status]++;
@@ -164,16 +257,15 @@ export const registerCommands = (
       if (counts.failed > 0) { parts.push(`Failed: ${counts.failed}`); }
       if (counts.conflict > 0) { parts.push(`Conflict: ${counts.conflict}`); }
       showSuccess(parts.join(". ") + ".");
-      unsyncedFilesProvider.refresh();
+      unsyncedPresentation.refresh();
     }),
   );
 
-  // ── チケット操作 ──────────────────────────────────────────────────────────
   context.subscriptions.push(
     vscode.commands.registerCommand("redmine-client.searchTickets", async () => {
-      await searchTickets(ticketsProvider, commentsProvider);
+      vscode.window.showErrorMessage("Dashboard からチケットを検索・選択してください。");
     }),
-    vscode.commands.registerCommand("redmine-client.focusTicketEditor", async (input) => {
+    vscode.commands.registerCommand("redmine-client.focusTicketEditor", async (input: unknown) => {
       const payload = input as { ticketId?: number; uri?: string } | number | undefined;
       const ticketId = typeof payload === "number" ? payload : payload?.ticketId;
       if (!payload || (!ticketId && !(payload as { uri?: string })?.uri)) {
@@ -182,7 +274,7 @@ export const registerCommands = (
       }
       await focusTicketEditor(payload);
       if (ticketId && ticketId !== NEW_TICKET_DRAFT_ID) {
-        commentsProvider.setTicketId(ticketId);
+        commentsPresentation.refreshForTicket(ticketId);
       }
     }),
     vscode.commands.registerCommand("redmine-client.revealActiveTicket", async () => {
@@ -196,14 +288,13 @@ export const registerCommands = (
         showError("New ticket drafts are not listed in the ticket tree.");
         return;
       }
-      // Dashboard 移行後: チケットIDを通知するのみ（TreeView reveal は不要）
       showSuccess(`Ticket #${ticketId} is active in the editor.`);
     }),
     vscode.commands.registerCommand("redmine-client.reloadTicket", async () => {
       await reloadTicketFromEditor();
     }),
     vscode.commands.registerCommand("redmine-client.toggleRelevantTickets", () => {
-      ticketsProvider.toggleRelevantView();
+      vscode.window.showErrorMessage("Dashboard のフィルタ設定を使用してください。");
     }),
     vscode.commands.registerCommand("redmine-client.createTicket", async () => {
       await createTicketFromEditor();
@@ -211,24 +302,20 @@ export const registerCommands = (
     vscode.commands.registerCommand("redmine-client.createTicketFromList", async () => {
       await createTicketFromList();
     }),
-    vscode.commands.registerCommand(
-      "redmine-client.createChildTicketFromList",
-      async (item) => {
-        await createChildTicketFromList(item as TicketTreeItem | undefined);
-      },
-    ),
+    vscode.commands.registerCommand("redmine-client.createChildTicketFromList", async () => {
+      const selected = toSelectedTicket(getState());
+      if (!selected) {
+        vscode.window.showErrorMessage("Dashboard から親チケットを選択してください。");
+        return;
+      }
+      await createChildTicketFromList(selected);
+    }),
   );
 
-  // ── プロジェクト操作 ──────────────────────────────────────────────────────
   context.subscriptions.push(
-    vscode.commands.registerCommand(
-      "redmine-client.reloadProject",
-      async (item?: ProjectTreeItem) => {
-        if (item instanceof ProjectTreeItem) {
-          projectsProvider.refresh();
-        }
-      },
-    ),
+    vscode.commands.registerCommand("redmine-client.reloadProject", async () => {
+      ticketsPresentation.refresh();
+    }),
     vscode.commands.registerCommand("redmine-client.selectProject", async () => {
       const projectId = await vscode.window.showInputBox({
         prompt: "Enter Redmine project ID",
@@ -242,162 +329,149 @@ export const registerCommands = (
         vscode.window.showErrorMessage("Project ID must be a number.");
         return;
       }
-      ticketsProvider.setSelectedProjectId(numericId);
-      ticketsProvider.refresh();
+      ticketsPresentation.setSelectedProjectId(numericId);
+      ticketsPresentation.refresh();
     }),
     vscode.commands.registerCommand("redmine-client.toggleChildProjects", async () => {
       const config = vscode.workspace.getConfiguration("redmine-client");
       const current = config.get<boolean>("includeChildProjects", false);
       await config.update("includeChildProjects", !current, vscode.ConfigurationTarget.Global);
-      ticketsProvider.refresh();
+      ticketsPresentation.refresh();
     }),
   );
 
-  // ── コメント操作 ──────────────────────────────────────────────────────────
   context.subscriptions.push(
     vscode.commands.registerCommand("redmine-client.reloadComment", async () => {
       await reloadCommentFromEditor();
     }),
-    vscode.commands.registerCommand(
-      "redmine-client.editComment",
-      async (item?: CommentTreeItem) => {
-        if (!(item instanceof CommentTreeItem)) {
-          vscode.window.showErrorMessage("Dashboard からコメントを選択して編集してください。");
-          return;
-        }
-        await editComment(item.comment);
-      },
-    ),
+    vscode.commands.registerCommand("redmine-client.editComment", async () => {
+      const comment = await pickDashboardComment(getState());
+      if (!comment) {
+        vscode.window.showErrorMessage("Dashboard からコメントを選択してから実行してください。");
+        return;
+      }
+      await editComment(comment);
+    }),
     vscode.commands.registerCommand("redmine-client.addComment", async () => {
       vscode.window.showErrorMessage("Dashboard からチケットを選択してコメントを追加してください。");
     }),
     vscode.commands.registerCommand("redmine-client.addCommentFromComments", async () => {
-      const ticketId = commentsProvider.getTicketId();
+      const ticketId = getState().selectedTicketId;
       await addCommentFromList(ticketId);
     }),
   );
 
-  // ── チケット/コメントプレビュー ───────────────────────────────────────────
   context.subscriptions.push(
-    vscode.commands.registerCommand(
-      "redmine-client.openTicketPreview",
-      async (item?: TicketTreeItem) => {
-        if (!(item instanceof TicketTreeItem)) {
-          vscode.window.showErrorMessage("Dashboard からチケットを選択してください。");
-          return;
-        }
-        commentsProvider.setTicketId(item.ticket.id);
-        await showTicketPreview(item.ticket);
-      },
-    ),
-    vscode.commands.registerCommand(
-      "redmine-client.openExtraTicketEditor",
-      async (item?: TicketTreeItem) => {
-        if (!(item instanceof TicketTreeItem)) {
-          vscode.window.showErrorMessage("Dashboard からチケットを選択してください。");
-          return;
-        }
-        commentsProvider.setTicketId(item.ticket.id);
-        await showTicketPreview(item.ticket, { kind: "extra" });
-      },
-    ),
+    vscode.commands.registerCommand("redmine-client.openTicketPreview", async () => {
+      const selected = toSelectedTicket(getState());
+      if (!selected) {
+        vscode.window.showErrorMessage("Dashboard からチケットを選択してください。");
+        return;
+      }
+      await showTicketPreview(selected);
+      commentsPresentation.refreshForTicket(selected.id);
+    }),
+    vscode.commands.registerCommand("redmine-client.openExtraTicketEditor", async () => {
+      const selected = toSelectedTicket(getState());
+      if (!selected) {
+        vscode.window.showErrorMessage("Dashboard からチケットを選択してください。");
+        return;
+      }
+      await showTicketPreview(selected, { kind: "extra" });
+      commentsPresentation.refreshForTicket(selected.id);
+    }),
   );
 
-  // ── ブラウザで開く ────────────────────────────────────────────────────────
   context.subscriptions.push(
-    vscode.commands.registerCommand(
-      "redmine-client.openProjectInBrowser",
-      async (item?: ProjectTreeItem) => {
-        await openProjectInBrowser(item instanceof ProjectTreeItem ? item : undefined);
-      },
-    ),
-    vscode.commands.registerCommand(
-      "redmine-client.openTicketInBrowser",
-      async (item?: TicketTreeItem) => {
-        await openTicketInBrowser(item instanceof TicketTreeItem ? item : undefined);
-      },
-    ),
-    vscode.commands.registerCommand(
-      "redmine-client.openCommentInBrowser",
-      async (item?: CommentTreeItem) => {
-        await openCommentInBrowser(item instanceof CommentTreeItem ? item : undefined);
-      },
-    ),
+    vscode.commands.registerCommand("redmine-client.openProjectInBrowser", async () => {
+      const selected = getState().selectedProject;
+      if (!selected?.id || !selected.name || !selected.identifier) {
+        vscode.window.showErrorMessage("Dashboard でプロジェクトを選択してください。");
+        return;
+      }
+      const project: Project = { id: selected.id, name: selected.name, identifier: selected.identifier };
+      await openProjectInBrowser({ project });
+    }),
+    vscode.commands.registerCommand("redmine-client.openTicketInBrowser", async () => {
+      const selected = toSelectedTicket(getState());
+      if (!selected) {
+        vscode.window.showErrorMessage("Dashboard でチケットを選択してください。");
+        return;
+      }
+      await openTicketInBrowser({ ticket: selected });
+    }),
+    vscode.commands.registerCommand("redmine-client.openCommentInBrowser", async () => {
+      const comment = await pickDashboardComment(getState());
+      if (!comment) {
+        vscode.window.showErrorMessage("Dashboard でコメントを選択してください。");
+        return;
+      }
+      await openCommentInBrowser({ comment });
+    }),
   );
 
-  // ── Ticket Settings ───────────────────────────────────────────────────────
   context.subscriptions.push(
     vscode.commands.registerCommand(TICKET_SETTINGS_COMMANDS.titleFilter, async () => {
-      await ticketsProvider.configureTitleFilter();
-      settingsProvider.refresh();
+      vscode.window.showErrorMessage("Dashboard の Settings タブでフィルタを設定してください。");
     }),
     vscode.commands.registerCommand(TICKET_SETTINGS_COMMANDS.priorityFilter, async () => {
-      await ticketsProvider.configurePriorityFilter();
-      settingsProvider.refresh();
+      vscode.window.showErrorMessage("Dashboard の Settings タブでフィルタを設定してください。");
     }),
     vscode.commands.registerCommand(TICKET_SETTINGS_COMMANDS.statusFilter, async () => {
-      await ticketsProvider.configureStatusFilter();
-      settingsProvider.refresh();
+      vscode.window.showErrorMessage("Dashboard の Settings タブでフィルタを設定してください。");
     }),
     vscode.commands.registerCommand(TICKET_SETTINGS_COMMANDS.trackerFilter, async () => {
-      await ticketsProvider.configureTrackerFilter();
-      settingsProvider.refresh();
+      vscode.window.showErrorMessage("Dashboard の Settings タブでフィルタを設定してください。");
     }),
     vscode.commands.registerCommand(TICKET_SETTINGS_COMMANDS.assigneeFilter, async () => {
-      await ticketsProvider.configureAssigneeFilter();
-      settingsProvider.refresh();
+      vscode.window.showErrorMessage("Dashboard の Settings タブでフィルタを設定してください。");
     }),
     vscode.commands.registerCommand(TICKET_SETTINGS_COMMANDS.sort, async () => {
-      await ticketsProvider.configureSort();
-      settingsProvider.refresh();
+      vscode.window.showErrorMessage("Dashboard の Settings タブで並び順を設定してください。");
     }),
     vscode.commands.registerCommand(TICKET_SETTINGS_COMMANDS.dueDate, async () => {
-      await ticketsProvider.configureDueDateDisplay();
-      settingsProvider.refresh();
+      vscode.window.showErrorMessage("Dashboard の Settings タブで期限表示を設定してください。");
     }),
     vscode.commands.registerCommand(TICKET_SETTINGS_COMMANDS.offlineSyncMode, async () => {
       await configureOfflineSyncMode();
-      settingsProvider.refresh();
+      settingsPresentation.refresh();
     }),
     vscode.commands.registerCommand(TICKET_SETTINGS_COMMANDS.reset, () => {
-      ticketsProvider.resetTicketSettings();
-      settingsProvider.refresh();
+      vscode.window.showErrorMessage("Dashboard の Settings タブから設定をリセットしてください。");
     }),
   );
 
-  // ── Editor Defaults ───────────────────────────────────────────────────────
   context.subscriptions.push(
     vscode.commands.registerCommand(EDITOR_DEFAULT_COMMANDS.subject, async () => {
       await configureEditorDefaultField("subject");
-      settingsProvider.refresh();
+      settingsPresentation.refresh();
     }),
     vscode.commands.registerCommand(EDITOR_DEFAULT_COMMANDS.description, async () => {
       await configureEditorDefaultField("description");
-      settingsProvider.refresh();
+      settingsPresentation.refresh();
     }),
     vscode.commands.registerCommand(EDITOR_DEFAULT_COMMANDS.tracker, async () => {
       await configureEditorDefaultField("tracker");
-      settingsProvider.refresh();
+      settingsPresentation.refresh();
     }),
     vscode.commands.registerCommand(EDITOR_DEFAULT_COMMANDS.priority, async () => {
       await configureEditorDefaultField("priority");
-      settingsProvider.refresh();
+      settingsPresentation.refresh();
     }),
     vscode.commands.registerCommand(EDITOR_DEFAULT_COMMANDS.status, async () => {
       await configureEditorDefaultField("status");
-      settingsProvider.refresh();
+      settingsPresentation.refresh();
     }),
     vscode.commands.registerCommand(EDITOR_DEFAULT_COMMANDS.dueDate, async () => {
       await configureEditorDefaultField("due_date");
-      settingsProvider.refresh();
+      settingsPresentation.refresh();
     }),
     vscode.commands.registerCommand(EDITOR_DEFAULT_COMMANDS.reset, async () => {
       await resetEditorDefaults();
-      settingsProvider.refresh();
+      settingsPresentation.refresh();
     }),
   );
 
-  // ── API キー管理 ──────────────────────────────────────────────────────────
   context.subscriptions.push(
     vscode.commands.registerCommand("redmine-client.setApiKey", async () => {
       const key = await vscode.window.showInputBox({

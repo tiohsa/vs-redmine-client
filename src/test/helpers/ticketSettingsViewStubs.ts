@@ -1,8 +1,8 @@
 import * as vscode from "vscode";
+import { TICKET_SETTINGS_COMMANDS } from "../../app/commandIds";
 import {
   TicketSettingsItem,
   TicketsTreeProvider,
-  TICKET_SETTINGS_COMMANDS,
 } from "../../views/ticketsView";
 
 export const buildTicketSettingsItemsFixture = (): vscode.TreeItem[] => [

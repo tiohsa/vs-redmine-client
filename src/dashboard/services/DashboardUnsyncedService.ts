@@ -12,7 +12,7 @@ import {
 } from "../../views/offlineSyncStore";
 import { buildUnsyncedDashboardItems } from "../viewModels/unsyncedDashboardViewModel";
 import type { DashboardUnsyncedKey } from "../dashboardProtocol";
-import type { UnsyncedFileSyncKey } from "../../views/unsyncedFilesView";
+import type { UnsyncedFileSyncKey } from "../../app/unsyncedTypes";
 import { getTicketEditors } from "../../views/ticketEditorRegistry";
 import type { SyncStatus } from "../../app/syncController";
 
