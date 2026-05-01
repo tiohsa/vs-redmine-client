@@ -246,9 +246,11 @@ const resolveMetadataUpdates = async (
     return updateFields;
   }
 
+  const useProjectTrackers = changes.tracker !== undefined && projectId !== undefined && deps.getProjectTrackers !== undefined;
+
   const [statuses, trackers, priorities] = await Promise.all([
     deps.listIssueStatuses(),
-    deps.listTrackers(),
+    useProjectTrackers ? Promise.resolve([]) : deps.listTrackers(),
     deps.listIssuePriorities(),
   ]);
 
@@ -261,8 +263,8 @@ const resolveMetadataUpdates = async (
   }
 
   if (changes.tracker !== undefined) {
-    if (projectId !== undefined && deps.getProjectTrackers) {
-      const projectTrackers = await deps.getProjectTrackers(projectId);
+    if (useProjectTrackers) {
+      const projectTrackers = await deps.getProjectTrackers!(projectId!);
       const match = projectTrackers.find((item) => item.name === changes.tracker);
       if (!match) {
         throw new Error(`このプロジェクトでは使用できないトラッカーです: ${changes.tracker}`);
@@ -307,9 +309,11 @@ const resolveMetadataForCreate = async (
   deps: TicketCreateDependencies,
   projectId?: number,
 ): Promise<TicketUpdateFields> => {
+  const useProjectTrackers = projectId !== undefined && deps.getProjectTrackers !== undefined;
+
   const [statuses, trackers, priorities] = await Promise.all([
     deps.listIssueStatuses(),
-    deps.listTrackers(),
+    useProjectTrackers ? Promise.resolve([]) : deps.listTrackers(),
     deps.listIssuePriorities(),
   ]);
 
@@ -319,8 +323,8 @@ const resolveMetadataForCreate = async (
   }
 
   let trackerMatch: { id: number; name: string } | undefined;
-  if (projectId !== undefined && deps.getProjectTrackers) {
-    const projectTrackers = await deps.getProjectTrackers(projectId);
+  if (useProjectTrackers) {
+    const projectTrackers = await deps.getProjectTrackers!(projectId!);
     trackerMatch = projectTrackers.find((item) => item.name === metadata.tracker);
     if (!trackerMatch) {
       throw new Error(`このプロジェクトでは使用できないトラッカーです: ${metadata.tracker}`);

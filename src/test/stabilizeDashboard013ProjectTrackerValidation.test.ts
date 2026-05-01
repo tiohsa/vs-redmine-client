@@ -12,9 +12,11 @@ suite("0.1.3 安定化: プロジェクト固有トラッカー検証", () => {
     clearNewTicketDrafts();
   });
 
-  test("プロジェクト固有トラッカーが提供される場合、有効なトラッカーは受け入れられる", async () => {
+  test("プロジェクト固有トラッカーが提供される場合、有効なトラッカーは受け入れられ listTrackers は呼ばれない", async () => {
     const baseMetadata = buildIssueMetadataFixture({ tracker: "Bug" });
     initializeTicketDraft(30, "Title", "Body", buildIssueMetadataFixture({ tracker: "Task" }), "t1");
+
+    let listTrackersCallCount = 0;
 
     const result = await syncTicketDraft({
       ticketId: 30,
@@ -32,7 +34,7 @@ suite("0.1.3 安定化: プロジェクト固有トラッカー検証", () => {
         createIssue: async () => undefined,
         deleteIssue: async () => undefined,
         listIssueStatuses: async () => [{ id: 1, name: "In Progress" }],
-        listTrackers: async () => [{ id: 1, name: "Task" }, { id: 2, name: "Bug" }],
+        listTrackers: async () => { listTrackersCallCount++; return [{ id: 1, name: "Task" }, { id: 2, name: "Bug" }]; },
         listIssuePriorities: async () => [{ id: 3, name: "Normal" }],
         searchUsers: async () => [],
         uploadFile: async () => ({ token: "t", filename: "f.png", contentType: "image/png" }),
@@ -45,6 +47,7 @@ suite("0.1.3 安定化: プロジェクト固有トラッカー検証", () => {
     });
 
     assert.strictEqual(result.status, "success");
+    assert.strictEqual(listTrackersCallCount, 0, "プロジェクト固有トラッカー経路では listTrackers を呼ばないこと");
   });
 
   test("プロジェクト固有トラッカーが提供される場合、無効なトラッカーはエラーになる", async () => {
@@ -114,13 +117,15 @@ suite("0.1.3 安定化: プロジェクト固有トラッカー検証", () => {
     assert.strictEqual(result.status, "success");
   });
 
-  test("syncNewTicketDraftContent: プロジェクト固有トラッカーが無効な場合はエラーになる", async () => {
+  test("syncNewTicketDraftContent: プロジェクト固有トラッカーが無効な場合はエラーになり listTrackers は呼ばれない", async () => {
     const content = buildTicketEditorContent({
       subject: "New Issue",
       description: "Description",
       metadata: buildIssueMetadataFixture({ tracker: "Bug" }),
       controlFields: { mode: "new-ticket", project_id: 10 },
     });
+
+    let listTrackersCallCount = 0;
 
     const result = await syncNewTicketDraftContent({
       content,
@@ -130,7 +135,7 @@ suite("0.1.3 安定化: プロジェクト固有トラッカー検証", () => {
         createIssue: async () => 100,
         deleteIssue: async () => undefined,
         listIssueStatuses: async () => [{ id: 1, name: "In Progress" }],
-        listTrackers: async () => [{ id: 1, name: "Task" }, { id: 2, name: "Bug" }],
+        listTrackers: async () => { listTrackersCallCount++; return [{ id: 1, name: "Task" }, { id: 2, name: "Bug" }]; },
         listIssuePriorities: async () => [{ id: 3, name: "Normal" }],
         searchUsers: async () => [],
         uploadFile: async () => ({ token: "t", filename: "f.png", contentType: "image/png" }),
@@ -141,5 +146,6 @@ suite("0.1.3 安定化: プロジェクト固有トラッカー検証", () => {
 
     assert.strictEqual(result.status, "failed");
     assert.ok(result.message.includes("Bug"), `エラーメッセージにトラッカー名が含まれること: ${result.message}`);
+    assert.strictEqual(listTrackersCallCount, 0, "プロジェクト固有トラッカー経路では listTrackers を呼ばないこと");
   });
 });
