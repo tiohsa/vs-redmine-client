@@ -44,7 +44,7 @@ suite("Dashboard Webview 改善", () => {
 
   test("チケット一覧と詳細カードの境界線を強調する", () => {
     assert.ok(dashboardStyles.includes("#ticket-scroll{flex:1;overflow-y:auto;min-height:0;border-bottom:"));
-    assert.ok(dashboardStyles.includes("border-top:3px solid"));
+    assert.ok(dashboardStyles.includes("border-top:2px solid"));
     assert.ok(dashboardStyles.includes("body.vscode-high-contrast .ticket-detail-card"));
   });
 });

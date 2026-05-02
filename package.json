@@ -84,10 +84,6 @@
         "title": "Redmine: Show API Key Status"
       },
       {
-        "command": "redmine-client.loadMoreTickets",
-        "title": "Redmine: Load More Tickets"
-      },
-      {
         "command": "redmine-client.refreshProjects",
         "title": "Redmine: Refresh Projects",
         "icon": "$(refresh)"
@@ -137,38 +133,6 @@
       {
         "command": "redmine-client.openExtraTicketEditor",
         "title": "Redmine: Open Ticket Editor (New)"
-      },
-      {
-        "command": "redmine-client.configureTicketPriorityFilter",
-        "title": "Redmine: Configure Ticket Priority Filter"
-      },
-      {
-        "command": "redmine-client.configureTicketTitleFilter",
-        "title": "Redmine: Configure Ticket Title Filter"
-      },
-      {
-        "command": "redmine-client.configureTicketStatusFilter",
-        "title": "Redmine: Configure Ticket Status Filter"
-      },
-      {
-        "command": "redmine-client.configureTicketTrackerFilter",
-        "title": "Redmine: Configure Ticket Tracker Filter"
-      },
-      {
-        "command": "redmine-client.configureTicketAssigneeFilter",
-        "title": "Redmine: Configure Ticket Assignee Filter"
-      },
-      {
-        "command": "redmine-client.configureTicketSort",
-        "title": "Redmine: Configure Ticket Sort"
-      },
-      {
-        "command": "redmine-client.configureTicketDueDateDisplay",
-        "title": "Redmine: Configure Ticket Due Date Display"
-      },
-      {
-        "command": "redmine-client.resetTicketListSettings",
-        "title": "Redmine: Reset Ticket Settings"
       },
       {
         "command": "redmine-client.configureEditorDefaultSubject",
@@ -276,11 +240,6 @@
         "command": "redmine-client.syncAllOpenEditors",
         "title": "Redmine: Upload All Open Editors",
         "icon": "$(cloud-upload)"
-      },
-      {
-        "command": "redmine-client.toggleRelevantTickets",
-        "title": "Redmine: 絞り込み表示切替",
-        "icon": "$(filter)"
       }
     ],
     "views": {

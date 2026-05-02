@@ -28,6 +28,7 @@ export const rewriteNewTicketEditorToTicketMode = async (
   const newControlFields = withRegisteredTicketControlFields(
     input.originalControlFields ?? {},
     input.createdId,
+    input.projectId,
   );
   const newContent = buildTicketEditorContent({
     subject: input.parsed.subject,

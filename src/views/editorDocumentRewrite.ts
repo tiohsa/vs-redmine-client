@@ -14,6 +14,7 @@ const FALLBACK_METADATA = {
 export const buildRegisteredDocumentContent = (
   currentContent: string,
   createdId: number,
+  projectId?: number,
 ): string => {
   const parsed = parseTicketEditorContent(currentContent, {
     allowMissingMetadata: true,
@@ -23,6 +24,7 @@ export const buildRegisteredDocumentContent = (
   const newControlFields = withRegisteredTicketControlFields(
     parsed.controlFields ?? {},
     createdId,
+    projectId,
   );
   return buildTicketEditorContent({ ...parsed, controlFields: newControlFields });
 };
@@ -38,6 +40,7 @@ export const rewriteDocumentWithRegisteredFields = async (
   documentUriString: string,
   createdId: number,
   deps: RewriteDocumentDeps = {},
+  projectId?: number,
 ): Promise<boolean> => {
   const textDocuments = deps.textDocuments ?? vscode.workspace.textDocuments;
   const applyEdit = deps.applyEdit ?? ((edit: vscode.WorkspaceEdit) => vscode.workspace.applyEdit(edit));
@@ -50,7 +53,7 @@ export const rewriteDocumentWithRegisteredFields = async (
   if (document) {
     let newContent: string;
     try {
-      newContent = buildRegisteredDocumentContent(document.getText(), createdId);
+      newContent = buildRegisteredDocumentContent(document.getText(), createdId, projectId);
     } catch {
       return false;
     }
@@ -82,7 +85,7 @@ export const rewriteDocumentWithRegisteredFields = async (
   try {
     const fileContent = await readFile(uri);
     const currentContent = Buffer.from(fileContent).toString("utf8");
-    const newContent = buildRegisteredDocumentContent(currentContent, createdId);
+    const newContent = buildRegisteredDocumentContent(currentContent, createdId, projectId);
     await writeFile(uri, Buffer.from(newContent, "utf8"));
     return true;
   } catch {
