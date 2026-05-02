@@ -70,6 +70,17 @@ export interface DashboardMetadataOptions {
   statuses: DashboardMetadataOption[];
 }
 
+export interface DashboardEditOptions {
+  ticketId: number;
+  projectId: number;
+  trackers: DashboardMetadataOption[];
+  priorities: DashboardMetadataOption[];
+  statuses: DashboardMetadataOption[];
+  statusFallback: boolean;
+  loading: boolean;
+  error?: string;
+}
+
 export interface DashboardTicketFilterOptions {
   assignees: DashboardMetadataOption[];
   statuses: DashboardMetadataOption[];
@@ -178,6 +189,7 @@ export interface DashboardState {
   selectedTicketId?: number;
   selectedTicket?: DashboardTicketDetail;
   metadataOptions: DashboardMetadataOptions;
+  editOptions?: DashboardEditOptions;
   unsynced: {
     totalCount: number;
     items: DashboardUnsyncedItem[];

@@ -137,6 +137,7 @@ export interface RedmineIssueDetailResponse {
     start_date?: string;
     done_ratio?: number;
     estimated_hours?: number;
+    allowed_statuses?: Array<{ id: number; name: string }>;
     journals?: Array<{
       id: number;
       notes?: string;

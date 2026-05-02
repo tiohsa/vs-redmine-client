@@ -1,6 +1,7 @@
 import type { DashboardServiceContext } from "./DashboardServiceContext";
 import * as vscode from "vscode";
 import { getProjectTrackers } from "../../redmine/projects";
+import { getIssueAllowedStatuses } from "../../redmine/issues";
 import { ensureTicketDraft, markDraftStatus, setTicketDraftContent } from "../../views/ticketDraftStore";
 import { getOfflineSyncQueue, addOfflineTicketUpdate } from "../../views/offlineSyncStore";
 import { buildTicketDetail } from "../viewModels/ticketDashboardViewModel";
@@ -22,12 +23,65 @@ export class DashboardMetadataService {
     openEditor: (ticketId: number) => Promise<void>;
   }) {}
 
+  async loadEditOptions(ticketId: number, projectId: number): Promise<void> {
+    const { store } = this.deps.context;
+    store.update({
+      editOptions: {
+        ticketId,
+        projectId,
+        trackers: [],
+        priorities: [],
+        statuses: [],
+        statusFallback: false,
+        loading: true,
+      },
+    });
+    const globalOptions = store.getState().metadataOptions;
+    try {
+      const [trackers, allowedStatuses] = await Promise.all([
+        getProjectTrackers(projectId),
+        getIssueAllowedStatuses(ticketId).catch(() => null),
+      ]);
+      this.projectTrackerCache.set(projectId, trackers);
+      const statusFallback = allowedStatuses === null || allowedStatuses.length === 0;
+      const statuses = !statusFallback ? allowedStatuses! : globalOptions.statuses;
+      store.update({
+        editOptions: {
+          ticketId,
+          projectId,
+          trackers,
+          priorities: globalOptions.priorities,
+          statuses,
+          statusFallback,
+          loading: false,
+          error: trackers.length === 0
+            ? "このプロジェクトにはトラッカーが設定されていません。"
+            : undefined,
+        },
+      });
+    } catch (err) {
+      const msg = (err as Error).message;
+      store.update({
+        editOptions: {
+          ticketId,
+          projectId,
+          trackers: [],
+          priorities: globalOptions.priorities,
+          statuses: globalOptions.statuses,
+          statusFallback: true,
+          loading: false,
+          error: `プロジェクトのトラッカー取得に失敗しました: ${msg}`,
+        },
+      });
+    }
+  }
+
   async updateTicketMetadata(
     requestId: string,
     ticketId: number,
     patch: TicketMetadataPatch,
   ): Promise<void> {
-    const validationError = this.validateMetadataPatchAgainstOptions(patch);
+    const validationError = this.validateMetadataPatchAgainstOptions(patch, ticketId);
     if (validationError) {
       this.deps.context.notifyError(requestId, validationError);
       return;
@@ -41,7 +95,7 @@ export class DashboardMetadataService {
     }
 
     if (patch.tracker !== undefined && ticket.projectId) {
-      const trackerError = await this.validateTrackerForProject(patch.tracker, ticket.projectId);
+      const trackerError = await this.validateTrackerForProject(patch.tracker, ticket.projectId, ticket.id);
       if (trackerError) {
         this.deps.context.notifyError(requestId, trackerError);
         return;
@@ -79,23 +133,32 @@ export class DashboardMetadataService {
     this.deps.context.notifySuccess(requestId, "チケット情報を更新しました。同期は既存の同期コマンドで実行されます。");
   }
 
-  private validateMetadataPatchAgainstOptions(patch: TicketMetadataPatch): string | undefined {
+  private validateMetadataPatchAgainstOptions(patch: TicketMetadataPatch, ticketId?: number): string | undefined {
     if (!this.deps.isMetadataOptionsLoaded()) {
       return "メタデータ選択肢が未取得のため更新できません。";
     }
-    const options = this.deps.context.store.getState().metadataOptions;
-    if (patch.priority !== undefined && !options.priorities.some((item) => item.name === patch.priority)) {
+    const state = this.deps.context.store.getState();
+    const editOptions = state.editOptions?.ticketId === ticketId ? state.editOptions : undefined;
+    const priorityOptions = editOptions ? editOptions.priorities : state.metadataOptions.priorities;
+    const statusOptions = editOptions ? editOptions.statuses : state.metadataOptions.statuses;
+    if (patch.priority !== undefined && !priorityOptions.some((item) => item.name === patch.priority)) {
       return `未知の優先度です: ${patch.priority}`;
     }
-    if (patch.status !== undefined && !options.statuses.some((item) => item.name === patch.status)) {
+    if (patch.status !== undefined && !statusOptions.some((item) => item.name === patch.status)) {
       return `未知のステータスです: ${patch.status}`;
     }
     return undefined;
   }
 
-  private async validateTrackerForProject(trackerName: string, projectId: number): Promise<string | undefined> {
+  private async validateTrackerForProject(trackerName: string, projectId: number, ticketId?: number): Promise<string | undefined> {
     try {
-      let trackers = this.projectTrackerCache.get(projectId);
+      const state = this.deps.context.store.getState();
+      const stateEditOpts = state.editOptions;
+      const editOptionsMatch = stateEditOpts !== undefined
+        && stateEditOpts.ticketId === ticketId
+        && stateEditOpts.projectId === projectId;
+      const editOptions = editOptionsMatch ? stateEditOpts : undefined;
+      let trackers = editOptions ? editOptions.trackers : this.projectTrackerCache.get(projectId);
       if (!trackers) {
         trackers = await getProjectTrackers(projectId);
         this.projectTrackerCache.set(projectId, trackers);
