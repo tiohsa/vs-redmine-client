@@ -257,7 +257,7 @@ suite("syncUnsyncedFileNewTicket – updateOfflineNewTicket", () => {
 
   test("updateOfflineNewTicket sets createdIssueId and status", () => {
     addOfflineNewTicket({ content: "# T", documentUri: DOC_URI_UPD, projectId: 5 });
-    updateOfflineNewTicket(DOC_URI_UPD, { createdIssueId: 123, status: "created_rewrite_failed" });
+    updateOfflineNewTicket({ documentUri: DOC_URI_UPD }, { createdIssueId: 123, status: "created_rewrite_failed" });
 
     const q = getOfflineSyncQueue();
     const entry = q.newTickets.find((t) => t.documentUri === DOC_URI_UPD);
@@ -269,7 +269,7 @@ suite("syncUnsyncedFileNewTicket – updateOfflineNewTicket", () => {
 
   test("updateOfflineNewTicket is no-op when documentUri not found", () => {
     addOfflineNewTicket({ content: "# T", documentUri: DOC_URI_UPD });
-    updateOfflineNewTicket("file:///tmp/nonexistent.md", { createdIssueId: 999 });
+    updateOfflineNewTicket({ documentUri: "file:///tmp/nonexistent.md" }, { createdIssueId: 999 });
 
     const q = getOfflineSyncQueue();
     const entry = q.newTickets.find((t) => t.documentUri === DOC_URI_UPD);
@@ -278,7 +278,7 @@ suite("syncUnsyncedFileNewTicket – updateOfflineNewTicket", () => {
 
   test("queue entry with createdIssueId still exists after failed rewrite (regression)", () => {
     addOfflineNewTicket({ content: "# T", documentUri: DOC_URI_UPD });
-    updateOfflineNewTicket(DOC_URI_UPD, { createdIssueId: 77 });
+    updateOfflineNewTicket({ documentUri: DOC_URI_UPD }, { createdIssueId: 77 });
 
     const q = getOfflineSyncQueue();
     assert.strictEqual(q.newTickets.length, 1, "entry must remain in queue");

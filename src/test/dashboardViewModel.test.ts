@@ -237,7 +237,7 @@ suite("Dashboard ViewModel — 未同期アイテム変換", () => {
     replaceOfflineSyncQueue({
       tickets: new Map(),
       comments: [],
-      newTickets: [{ documentUri: "file:///new.md", projectId: 1, content: "" }],
+      newTickets: [{ queueId: "test-q1", documentUri: "file:///new.md", projectId: 1, content: "" }],
     });
     const items = buildUnsyncedDashboardItems();
     assert.strictEqual(items.length, 1);
@@ -269,7 +269,7 @@ suite("Dashboard ViewModel — 未同期アイテム変換", () => {
     replaceOfflineSyncQueue({
       tickets: new Map([[1, { ticketId: 1 } as never], [2, { ticketId: 2 } as never]]),
       comments: [{ ticketId: 3, commentId: 10, documentUri: "file:///c.md", body: "" }],
-      newTickets: [{ documentUri: "file:///n.md", projectId: 2, content: "" }],
+      newTickets: [{ queueId: "test-q2", documentUri: "file:///n.md", projectId: 2, content: "" }],
     });
     const items = buildUnsyncedDashboardItems();
     assert.strictEqual(items.length, 4);

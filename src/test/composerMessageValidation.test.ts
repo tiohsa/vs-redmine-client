@@ -52,13 +52,13 @@ suite("コンポーザー メッセージバリデーション", () => {
     assert.strictEqual(r.ok, false);
   });
 
-  test("ticket.createDraftFromComposer: status が空は拒否される", () => {
+  test("ticket.createDraftFromComposer: status が空でも受け入れられる", () => {
     const r = validateDashboardMessage({
       type: "ticket.createDraftFromComposer",
       requestId: "r6",
       values: { tracker: "Task", priority: "Normal", status: "" },
     });
-    assert.strictEqual(r.ok, false);
+    assert.strictEqual(r.ok, true);
   });
 
   test("ticket.createDraftFromComposer: 不正な due_date は拒否される", () => {

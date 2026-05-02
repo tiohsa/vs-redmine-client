@@ -141,11 +141,6 @@ export const resolveMetadataForCreate = async (
     deps.listIssuePriorities(),
   ]);
 
-  const statusMatch = statuses.find((item) => item.name === metadata.status);
-  if (!statusMatch) {
-    throw new Error(`Unknown status: ${metadata.status}`);
-  }
-
   let trackerMatch: { id: number; name: string } | undefined;
   if (useProjectTrackers) {
     const projectTrackers = await deps.getProjectTrackers!(projectId!);
@@ -166,10 +161,17 @@ export const resolveMetadataForCreate = async (
   }
 
   const fields: TicketUpdateFields = {
-    statusId: statusMatch.id,
     trackerId: trackerMatch.id,
     priorityId: priorityMatch.id,
   };
+
+  if (metadata.status && metadata.status.trim().length > 0) {
+    const statusMatch = statuses.find((item) => item.name === metadata.status);
+    if (!statusMatch) {
+      throw new Error(`Unknown status: ${metadata.status}`);
+    }
+    fields.statusId = statusMatch.id;
+  }
 
   if (metadata.due_date.length > 0) {
     fields.dueDate = metadata.due_date;

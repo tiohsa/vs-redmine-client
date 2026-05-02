@@ -1,3 +1,4 @@
+import { randomUUID } from "crypto";
 import type { Memento } from "vscode";
 import { IssueMetadata } from "./ticketMetadataTypes";
 import { TicketEditorLayout, TicketEditorMetadataBlock } from "./ticketEditorContent";
@@ -28,6 +29,7 @@ export type OfflineCommentUpdate = {
 };
 
 export type OfflineNewTicket = {
+  queueId: string;
   content: string;
   projectId?: number;
   documentUri?: string;
@@ -168,20 +170,28 @@ export const addOfflineCommentUpdate = (update: OfflineCommentUpdate): void => {
   persist();
 };
 
-export const addOfflineNewTicket = (update: OfflineNewTicket): void => {
-  if (update.documentUri) {
-    const index = queue.newTickets.findIndex(
-      (item) => item.documentUri === update.documentUri,
-    );
-    if (index !== -1) {
-      const existing = queue.newTickets[index];
-      queue.newTickets.splice(index, 1);
-      queue.newTickets.unshift({ ...existing, ...update });
-      persist();
-      return;
-    }
+const findNewTicketIndex = (key: { queueId?: string; documentUri?: string }): number => {
+  if (key.queueId) {
+    const idx = queue.newTickets.findIndex((t) => t.queueId === key.queueId);
+    if (idx !== -1) { return idx; }
   }
-  queue.newTickets.unshift(update);
+  if (key.documentUri) {
+    return queue.newTickets.findIndex((t) => t.documentUri === key.documentUri);
+  }
+  return -1;
+};
+
+export const addOfflineNewTicket = (update: Omit<OfflineNewTicket, "queueId">): void => {
+  const index = update.documentUri
+    ? queue.newTickets.findIndex((item) => item.documentUri === update.documentUri)
+    : -1;
+  if (index !== -1) {
+    const existing = queue.newTickets[index];
+    queue.newTickets.splice(index, 1);
+    queue.newTickets.unshift({ ...existing, ...update });
+  } else {
+    queue.newTickets.unshift({ ...update, queueId: randomUUID() });
+  }
   persist();
 };
 
@@ -211,19 +221,22 @@ export const removeOfflineTicketUpdate = (ticketId: number): void => {
 };
 
 export const updateOfflineNewTicket = (
-  documentUri: string,
+  key: { queueId?: string; documentUri?: string },
   updates: Partial<Pick<OfflineNewTicket, "createdIssueId" | "status">>,
 ): void => {
-  const index = queue.newTickets.findIndex((item) => item.documentUri === documentUri);
+  const index = findNewTicketIndex(key);
   if (index !== -1) {
     queue.newTickets[index] = { ...queue.newTickets[index], ...updates };
     persist();
   }
 };
 
-export const removeOfflineNewTicket = (documentUri: string): void => {
-  queue.newTickets = queue.newTickets.filter((item) => item.documentUri !== documentUri);
-  persist();
+export const removeOfflineNewTicket = (key: { queueId?: string; documentUri?: string }): void => {
+  const index = findNewTicketIndex(key);
+  if (index !== -1) {
+    queue.newTickets.splice(index, 1);
+    persist();
+  }
 };
 
 export const removeOfflineCommentEntry = (params: { commentId?: number; documentUri?: string }): void => {

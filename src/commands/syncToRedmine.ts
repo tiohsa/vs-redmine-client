@@ -56,7 +56,7 @@ export const syncEditorToRedmine = async (
     const result = await syncNewTicketDraft({ editor, deps: options.deps });
     if (result.status === "created") {
       options.onTicketCreated?.();
-      removeOfflineNewTicket(editor.document.uri.toString());
+      removeOfflineNewTicket({ documentUri: editor.document.uri.toString() });
     }
     return { kind: "ticket", result };
   }
