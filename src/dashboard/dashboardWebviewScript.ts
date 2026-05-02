@@ -459,6 +459,7 @@ function renderComposerPanel(panel){
   const values = panel.values || {};
   const trackerOptions = (panel.trackers || []).map(item => '<option value="'+esc(item.name)+'"'+(item.name===values.tracker?' selected':'')+'>'+esc(item.name)+'</option>').join('');
   const priorityOptions = (panel.priorities || []).map(item => '<option value="'+esc(item.name)+'"'+(item.name===values.priority?' selected':'')+'>'+esc(item.name)+'</option>').join('');
+  const statusOptions = (panel.statuses || []).map(item => '<option value="'+esc(item.name)+'"'+(item.name===values.status?' selected':'')+'>'+esc(item.name)+'</option>').join('');
   const canCreate = values.tracker && values.priority;
   card.innerHTML =
     '<div class="work-panel-head"><div class="work-panel-title">'+title+'</div><div class="work-panel-subtitle">'+esc(panel.projectName || ('Project #'+panel.projectId))+'</div>'+parentLabel+'</div>'
@@ -467,18 +468,20 @@ function renderComposerPanel(panel){
     +'<div class="composer-grid composer-grid-detail">'
     +'<label class="detail-field composer-detail-field"><span>Tracker <span class="composer-required">*</span></span><select class="detail-select composer-select" id="work-tracker"><option value="">Select...</option>'+trackerOptions+'</select></label>'
     +'<label class="detail-field composer-detail-field"><span>Priority <span class="composer-required">*</span></span><select class="detail-select composer-select" id="work-priority"><option value="">Select...</option>'+priorityOptions+'</select></label>'
+    +'<label class="detail-field composer-detail-field"><span>Status</span><select class="detail-select composer-select" id="work-status"><option value="">Select...</option>'+statusOptions+'</select></label>'
     +'<label class="detail-field composer-detail-field"><span>Start date</span><input class="detail-input composer-input" id="work-start-date" type="date" value="'+esc(values.start_date || '')+'"></label>'
     +'<label class="detail-field composer-detail-field"><span>Due date</span><input class="detail-input composer-input" id="work-due-date" type="date" value="'+esc(values.due_date || '')+'"></label>'
     +'</div>';
 
   const trackerEl = card.querySelector('#work-tracker');
   const priorityEl = card.querySelector('#work-priority');
+  const statusEl = card.querySelector('#work-status');
   const startDateEl = card.querySelector('#work-start-date');
   const dueDateEl = card.querySelector('#work-due-date');
   const readValues = () => ({
     tracker: trackerEl?.value || '',
     priority: priorityEl?.value || '',
-    status: '',
+    status: statusEl?.value || '',
     start_date: startDateEl?.value || undefined,
     due_date: dueDateEl?.value || undefined,
   });

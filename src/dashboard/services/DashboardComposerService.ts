@@ -281,7 +281,7 @@ export class DashboardComposerService {
     if (parsed.scheme === "file" && parsed.path) {
       variants.add(`file:${parsed.path}`);
     }
-    variants.forEach((uri) => removeOfflineNewTicket(uri));
+    variants.forEach((uri) => removeOfflineNewTicket({ documentUri: uri }));
   }
 
   private buildComposerValues(input: {
@@ -318,6 +318,7 @@ export class DashboardComposerService {
       const firstTracker = trackers[0]?.name;
       const defaultTracker = this.suggestDefaultTracker(trackers, parentTicket?.trackerName) ?? firstTracker;
       const defaultPriority = this.pickOptionName(defaults.priorities, parentTicket?.priorityName) ?? defaults.priorities[0]?.name;
+      const defaultStatus = this.pickOptionName(defaults.statuses, "New") ?? defaults.statuses[0]?.name;
       this.updateWorkPanelComposer({
         loading: false,
         trackers,
@@ -325,6 +326,7 @@ export class DashboardComposerService {
         values: this.buildComposerValues({
           tracker: defaultTracker,
           priority: defaultPriority,
+          status: defaultStatus,
           due_date: parentTicket?.dueDate,
         }),
       });

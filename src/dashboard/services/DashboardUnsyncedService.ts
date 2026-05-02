@@ -102,7 +102,7 @@ export class DashboardUnsyncedService {
         this.deps.context.notifyError(requestId, "対象の新規チケット下書きを特定できません。");
         return;
       }
-      removeOfflineNewTicket(key.documentUri);
+      removeOfflineNewTicket({ documentUri: key.documentUri });
     } else if (key.kind === "comment") {
       removeOfflineCommentEntry({ commentId: key.commentId, documentUri: key.documentUri });
     }

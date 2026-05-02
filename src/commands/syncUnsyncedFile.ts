@@ -93,9 +93,10 @@ export const syncUnsyncedFile = async (
       }
       resolvedId = createdId;
       // 作成成功を即座にキューに記録してから書き換えへ（重複作成防止）
-      if (entry.documentUri) {
-        updateOfflineNewTicket(entry.documentUri, { createdIssueId: resolvedId });
-      }
+      updateOfflineNewTicket(
+        { queueId: entry.queueId, documentUri: entry.documentUri },
+        { createdIssueId: resolvedId },
+      );
     }
 
     if (entry.documentUri) {
@@ -114,12 +115,15 @@ export const syncUnsyncedFile = async (
         registerTicketDocument(resolvedId, document, "ticket", entry.projectId);
       }
       if (rewriteSuccess) {
-        removeOfflineNewTicket(entry.documentUri);
+        removeOfflineNewTicket({ queueId: entry.queueId, documentUri: entry.documentUri });
         options.onTicketCreated?.();
         showInfo("新規チケットを作成しました。");
         return { status: "success", kind: "newTicket", id: resolvedId };
       } else {
-        updateOfflineNewTicket(entry.documentUri, { status: "created_rewrite_failed" });
+        updateOfflineNewTicket(
+          { queueId: entry.queueId, documentUri: entry.documentUri },
+          { status: "created_rewrite_failed" },
+        );
         showWarning(
           `Redmineチケットは作成済みです（#${resolvedId}）。` +
           "ファイルの書き換えに失敗しました。再度同期するとローカルファイルの変換のみ再試行します。",

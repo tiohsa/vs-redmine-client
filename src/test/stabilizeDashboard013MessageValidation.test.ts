@@ -22,13 +22,13 @@ suite("0.1.3 安定化: Dashboard メッセージバリデーション追加テ�
     assert.strictEqual(r.ok, false);
   });
 
-  test("createDraftFromComposer: status が必須", () => {
+  test("createDraftFromComposer: status が省略可能", () => {
     const r = validateDashboardMessage({
       type: "ticket.createDraftFromComposer",
       requestId: "r3",
       values: { tracker: "Bug", priority: "Normal" },
     });
-    assert.strictEqual(r.ok, false);
+    assert.strictEqual(r.ok, true);
   });
 
   test("createDraftFromComposer: start_date が不正形式は拒否される", () => {

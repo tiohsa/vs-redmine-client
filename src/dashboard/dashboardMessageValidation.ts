@@ -193,8 +193,8 @@ export const validateDashboardMessage = (raw: unknown): ValidationResult => {
       if (!isNonEmptyString(values["priority"])) {
         return { ok: false, reason: "ticket.createDraftFromComposer: values.priority must be a non-empty string" };
       }
-      if (!isNonEmptyString(values["status"])) {
-        return { ok: false, reason: "ticket.createDraftFromComposer: values.status must be a non-empty string" };
+      if ("status" in values && values["status"] !== undefined && values["status"] !== "" && !isString(values["status"])) {
+        return { ok: false, reason: "ticket.createDraftFromComposer: values.status must be a string" };
       }
       if ("start_date" in values && values["start_date"] !== undefined && values["start_date"] !== "") {
         if (!isString(values["start_date"]) || !DATE_RE.test(values["start_date"] as string)) {
@@ -214,7 +214,7 @@ export const validateDashboardMessage = (raw: unknown): ValidationResult => {
           values: {
             tracker: values["tracker"] as string,
             priority: values["priority"] as string,
-            status: values["status"] as string,
+            status: (values["status"] as string | undefined) ?? "",
             start_date: (values["start_date"] as string | undefined) ?? undefined,
             due_date: (values["due_date"] as string | undefined) ?? undefined,
             description: (values["description"] as string | undefined) ?? undefined,
