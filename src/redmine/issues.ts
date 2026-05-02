@@ -262,6 +262,15 @@ export const listTrackers = async (): Promise<Array<{ id: number; name: string }
   return response.trackers ?? [];
 };
 
+export const getIssueAllowedStatuses = async (issueId: number): Promise<Array<{ id: number; name: string }>> => {
+  const response = await requestJson<RedmineIssueDetailResponse>({
+    method: "GET",
+    path: `/issues/${issueId}.json`,
+    query: { include: "allowed_statuses" },
+  });
+  return response.issue.allowed_statuses ?? [];
+};
+
 export const listIssuePriorities = async (): Promise<Array<{ id: number; name: string }>> => {
   const response = await requestJson<RedminePriorityResponse>({
     method: "GET",

@@ -318,7 +318,6 @@ export class DashboardComposerService {
       const firstTracker = trackers[0]?.name;
       const defaultTracker = this.suggestDefaultTracker(trackers, parentTicket?.trackerName) ?? firstTracker;
       const defaultPriority = this.pickOptionName(defaults.priorities, parentTicket?.priorityName) ?? defaults.priorities[0]?.name;
-      const defaultStatus = this.pickOptionName(defaults.statuses, parentTicket?.statusName) ?? defaults.statuses[0]?.name;
       this.updateWorkPanelComposer({
         loading: false,
         trackers,
@@ -326,7 +325,6 @@ export class DashboardComposerService {
         values: this.buildComposerValues({
           tracker: defaultTracker,
           priority: defaultPriority,
-          status: defaultStatus,
           due_date: parentTicket?.dueDate,
         }),
       });
@@ -402,9 +400,6 @@ export class DashboardComposerService {
     }
     if (!values.priority.trim()) {
       return "優先度を選択してください。";
-    }
-    if (!values.status.trim()) {
-      return "ステータスを選択してください。";
     }
     const isValidDate = (value?: string): boolean =>
       value === undefined || value.length === 0 || /^\d{4}-\d{2}-\d{2}$/.test(value);

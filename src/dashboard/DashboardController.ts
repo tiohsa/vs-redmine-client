@@ -1,25 +1,12 @@
 import * as vscode from "vscode";
-import { getProjectTrackers } from "../redmine/projects";
-import { getIssueDetail, listIssuePriorities, listIssueStatuses, listTrackers } from "../redmine/issues";
-import {
-  onOfflineSyncQueueChanged,
-  addOfflineTicketUpdate,
-  getOfflineSyncQueue,
-  removeOfflineNewTicket,
-} from "../views/offlineSyncStore";
+import { listIssuePriorities, listIssueStatuses, listTrackers } from "../redmine/issues";
+import { onOfflineSyncQueueChanged } from "../views/offlineSyncStore";
 import { DashboardProjectService } from "./services/DashboardProjectService";
 import { DashboardTicketService } from "./services/DashboardTicketService";
 import { DashboardCommentService } from "./services/DashboardCommentService";
 import { DashboardUnsyncedService } from "./services/DashboardUnsyncedService";
 import { DashboardMetadataService } from "./services/DashboardMetadataService";
 import { DashboardComposerService } from "./services/DashboardComposerService";
-import {
-  buildNewTicketDraftContent,
-  ensureTicketDraft,
-  markDraftStatus,
-  setTicketDraftContent,
-} from "../views/ticketDraftStore";
-import { openNewTicketDraft } from "../commands/createTicketFromList";
 import { Ticket } from "../redmine/types";
 import { buildTicketDetail } from "./viewModels/ticketDashboardViewModel";
 import { DashboardStateStore } from "./DashboardStateStore";
@@ -30,17 +17,7 @@ import type {
   DashboardMetadataOptions,
   DashboardUnsyncedKey,
   TicketMetadataPatch,
-  DashboardWorkPanel,
-  NewTicketComposerValues,
 } from "./dashboardProtocol";
-import {
-  buildTicketEditorContent,
-  parseTicketEditorContent,
-  type TicketEditorContent,
-} from "../views/ticketEditorContent";
-import { getTicketEditors, getTicketIdForEditor, registerTicketDocument } from "../views/ticketEditorRegistry";
-import { applyEditorContent } from "../views/ticketPreview";
-import { syncNewTicketDraft } from "../views/ticketSaveSync";
 import type { TicketSaveResult } from "../views/ticketSaveTypes";
 import type { DashboardServiceContext } from "./services/DashboardServiceContext";
 
@@ -347,6 +324,10 @@ export class DashboardController {
 
   private async selectTicket(ticketId: number): Promise<void> {
     await this.ticketService.selectTicket(ticketId);
+    const ticket = this.tickets.find((t) => t.id === ticketId);
+    if (ticket?.projectId) {
+      void this.metadataService.loadEditOptions(ticketId, ticket.projectId);
+    }
   }
 
   private async updateTicketMetadata(

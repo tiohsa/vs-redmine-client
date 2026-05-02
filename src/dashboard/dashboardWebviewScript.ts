@@ -346,8 +346,18 @@ function renderTickets(){
 function metadataOptionsReady(){
   return !!(state?.metadataOptions?.trackers?.length && state.metadataOptions?.priorities?.length && state.metadataOptions?.statuses?.length);
 }
-function renderSelect(name, value, options, label){
-  const disabled = metadataOptionsReady() ? '' : ' disabled';
+function editOptionsForTicket(ticketId){
+  const eo = state?.editOptions;
+  if(!eo || eo.ticketId !== ticketId) return null;
+  return eo;
+}
+function editOptionsReady(ticketId){
+  const eo = editOptionsForTicket(ticketId);
+  if(!eo) return false;
+  return !eo.loading;
+}
+function renderSelect(name, value, options, label, disabled){
+  const disabledAttr = disabled ? ' disabled' : '';
   const optionList = options || [];
   const currentOption = value && !optionList.some(option => option.name === value)
     ? '<option value="'+esc(value)+'" selected>'+esc(value)+'</option>'
@@ -355,7 +365,7 @@ function renderSelect(name, value, options, label){
   const opts = currentOption + optionList.map(option =>
     '<option value="'+esc(option.name)+'"'+(option.name===value?' selected':'')+'>'+esc(option.name)+'</option>'
   ).join('');
-  return '<label class="detail-field"><span>'+label+'</span><select class="detail-select" data-metadata-field="'+name+'"'+disabled+'>'+opts+'</select></label>';
+  return '<label class="detail-field"><span>'+label+'</span><select class="detail-select" data-metadata-field="'+name+'"'+disabledAttr+'>'+opts+'</select></label>';
 }
 function renderTicketDetailPanel(ticket){
   const card = document.getElementById('ticket-detail-card');
@@ -366,17 +376,40 @@ function renderTicketDetailPanel(ticket){
   const parentLabel = ticket.parentId
     ? '<div class="detail-parent">Parent: #'+ticket.parentId+(ticket.parentSubject ? ' '+esc(ticket.parentSubject) : '')+'</div>'
     : '';
-  const options = state.metadataOptions || {trackers:[],priorities:[],statuses:[]};
-  const readonlyHint = metadataOptionsReady() ? '' : '<div class="detail-readonly">選択肢を取得できないため編集できません。</div>';
+  const eo = editOptionsForTicket(ticket.id);
+  const eoReady = editOptionsReady(ticket.id);
+  const eoLoading = eo?.loading ?? !eoReady;
+  const trackers = eo ? eo.trackers : [];
+  const priorities = eo ? eo.priorities : (state.metadataOptions?.priorities || []);
+  const statuses = eo ? eo.statuses : (state.metadataOptions?.statuses || []);
+  const trackerDisabled = !eoReady || trackers.length === 0;
+  const priorityDisabled = !eoReady && !metadataOptionsReady();
+  const statusDisabled = !eoReady && !metadataOptionsReady();
+  const dateDisabled = !eoReady && !metadataOptionsReady();
+  const statusFallbackHint = (eo && eo.statusFallback)
+    ? '<div class="detail-readonly">ステータス選択肢はグローバルのフォールバックを使用しています。</div>'
+    : '';
+  const loadingHint = eoLoading
+    ? '<div class="detail-readonly">編集選択肢を読み込み中…</div>'
+    : '';
+  const errorHint = (eo && eo.error)
+    ? '<div class="detail-readonly">'+esc(eo.error)+'</div>'
+    : '';
+  const readonlyHint = !eoReady && !eoLoading
+    ? '<div class="detail-readonly">トラッカー選択肢を取得できないため編集できません。</div>'
+    : '';
   const expanded = ticketDetailExpanded
     ? '<div class="detail-expanded">'
-      + renderSelect('tracker', ticket.trackerName || node.trackerName || '', options.trackers, 'Tracker')
-      + renderSelect('priority', ticket.priorityName || node.priorityName || '', options.priorities, 'Priority')
-      + renderSelect('status', ticket.statusName || node.statusName || '', options.statuses, 'Status')
-      + '<label class="detail-field"><span>Start date</span><input class="detail-input" data-metadata-field="start_date" type="date" value="'+esc(ticket.startDate || node.startDate || '')+'"'+(metadataOptionsReady()?'':' disabled')+'></label>'
-      + '<label class="detail-field"><span>Due date</span><input class="detail-input" data-metadata-field="due_date" type="date" value="'+esc(ticket.dueDate || node.dueDate || '')+'"'+(metadataOptionsReady()?'':' disabled')+'></label>'
+      + renderSelect('tracker', ticket.trackerName || node.trackerName || '', trackers, 'Tracker', trackerDisabled)
+      + renderSelect('priority', ticket.priorityName || node.priorityName || '', priorities, 'Priority', priorityDisabled)
+      + renderSelect('status', ticket.statusName || node.statusName || '', statuses, 'Status', statusDisabled)
+      + '<label class="detail-field"><span>Start date</span><input class="detail-input" data-metadata-field="start_date" type="date" value="'+esc(ticket.startDate || node.startDate || '')+'"'+(dateDisabled?' disabled':'')+'></label>'
+      + '<label class="detail-field"><span>Due date</span><input class="detail-input" data-metadata-field="due_date" type="date" value="'+esc(ticket.dueDate || node.dueDate || '')+'"'+(dateDisabled?' disabled':'')+'></label>'
       + '<div class="detail-meta"><span>Sync</span><strong>'+esc(ticket.syncState)+'</strong></div>'
       + (ticket.lastSyncedAt ? '<div class="detail-meta"><span>Last synced</span><strong>'+esc(ticket.lastSyncedAt.substring(0,19).replace('T',' '))+'</strong></div>' : '')
+      + loadingHint
+      + errorHint
+      + statusFallbackHint
       + readonlyHint
       + '</div>'
     : '';
@@ -426,8 +459,7 @@ function renderComposerPanel(panel){
   const values = panel.values || {};
   const trackerOptions = (panel.trackers || []).map(item => '<option value="'+esc(item.name)+'"'+(item.name===values.tracker?' selected':'')+'>'+esc(item.name)+'</option>').join('');
   const priorityOptions = (panel.priorities || []).map(item => '<option value="'+esc(item.name)+'"'+(item.name===values.priority?' selected':'')+'>'+esc(item.name)+'</option>').join('');
-  const statusOptions = (panel.statuses || []).map(item => '<option value="'+esc(item.name)+'"'+(item.name===values.status?' selected':'')+'>'+esc(item.name)+'</option>').join('');
-  const canCreate = values.tracker && values.priority && values.status;
+  const canCreate = values.tracker && values.priority;
   card.innerHTML =
     '<div class="work-panel-head"><div class="work-panel-title">'+title+'</div><div class="work-panel-subtitle">'+esc(panel.projectName || ('Project #'+panel.projectId))+'</div>'+parentLabel+'</div>'
     +errorHtml
@@ -435,20 +467,18 @@ function renderComposerPanel(panel){
     +'<div class="composer-grid composer-grid-detail">'
     +'<label class="detail-field composer-detail-field"><span>Tracker <span class="composer-required">*</span></span><select class="detail-select composer-select" id="work-tracker"><option value="">Select...</option>'+trackerOptions+'</select></label>'
     +'<label class="detail-field composer-detail-field"><span>Priority <span class="composer-required">*</span></span><select class="detail-select composer-select" id="work-priority"><option value="">Select...</option>'+priorityOptions+'</select></label>'
-    +'<label class="detail-field composer-detail-field"><span>Status <span class="composer-required">*</span></span><select class="detail-select composer-select" id="work-status"><option value="">Select...</option>'+statusOptions+'</select></label>'
     +'<label class="detail-field composer-detail-field"><span>Start date</span><input class="detail-input composer-input" id="work-start-date" type="date" value="'+esc(values.start_date || '')+'"></label>'
     +'<label class="detail-field composer-detail-field"><span>Due date</span><input class="detail-input composer-input" id="work-due-date" type="date" value="'+esc(values.due_date || '')+'"></label>'
     +'</div>';
 
   const trackerEl = card.querySelector('#work-tracker');
   const priorityEl = card.querySelector('#work-priority');
-  const statusEl = card.querySelector('#work-status');
   const startDateEl = card.querySelector('#work-start-date');
   const dueDateEl = card.querySelector('#work-due-date');
   const readValues = () => ({
     tracker: trackerEl?.value || '',
     priority: priorityEl?.value || '',
-    status: statusEl?.value || '',
+    status: '',
     start_date: startDateEl?.value || undefined,
     due_date: dueDateEl?.value || undefined,
   });
