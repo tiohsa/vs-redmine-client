@@ -218,16 +218,16 @@ body.vscode-high-contrast .badge,.vscode-high-contrast .unsynced-kind-label{back
   padding:6px;
   background:color-mix(in srgb, var(--vscode-panel-background, var(--surface-0)) 94%, black 6%);
   border:1px solid var(--vscode-panel-border, var(--app-card-border));
-  border-top:3px solid color-mix(in srgb, var(--app-accent) 50%, transparent);
+  border-top:2px solid color-mix(in srgb, var(--app-accent) 45%, transparent);
   border-radius:var(--mm-radius-card);
-  box-shadow:0 -4px 20px rgba(0,0,0,0.18);
+  box-shadow:var(--app-shadow);
   display:flex;
   flex-direction:column;
   gap:8px
 }
 .ticket-work-panel{}
 .work-panel-head{display:flex;flex-direction:column;gap:4px;margin-bottom:8px}
-.work-panel-title{font-size:13px;font-weight:700;color:var(--app-text)}
+.work-panel-title{font-size:13px;font-weight:600;color:var(--app-text)}
 .work-panel-subtitle{font-size:11.5px;color:var(--app-text-readable-muted)}
 .composer-grid{display:flex;flex-direction:column;gap:6px}
 .composer-grid-detail{padding-top:2px}
@@ -238,7 +238,7 @@ body.vscode-high-contrast .badge,.vscode-high-contrast .unsynced-kind-label{back
 .composer-textarea{min-height:72px;resize:vertical;line-height:1.5;padding-top:3px;padding-bottom:3px;font-size:12px}
 body.vscode-high-contrast .ticket-detail-card{border-top-color:var(--app-border)}
 .detail-head{display:flex;align-items:flex-start;gap:8px;justify-content:space-between}
-.detail-title{display:flex;align-items:center;gap:8px;font-size:12.5px;font-weight:700;line-height:1.35;min-width:0}
+.detail-title{display:flex;align-items:center;gap:8px;font-size:12.5px;font-weight:600;line-height:1.35;min-width:0}
 .detail-title span:last-child{overflow:hidden;text-overflow:ellipsis;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical}
 .detail-toggle{width:22px;height:22px;font-size:13px}
 .detail-project,.detail-parent,.detail-readonly{font-size:11.5px;color:var(--app-text-readable-muted);line-height:1.35}

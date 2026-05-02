@@ -27,15 +27,19 @@ export type OfflineCommentUpdate = {
   sourceNotesHash?: string;
 };
 
+export type OfflineNewTicket = {
+  content: string;
+  projectId?: number;
+  documentUri?: string;
+  baseDir?: string;
+  createdIssueId?: number;
+  status?: "queued" | "created_rewrite_failed";
+};
+
 export type OfflineSyncQueue = {
   tickets: Map<number, OfflineTicketUpdate>;
   comments: OfflineCommentUpdate[];
-  newTickets: Array<{
-    content: string;
-    projectId?: number;
-    documentUri?: string;
-    baseDir?: string;
-  }>;
+  newTickets: OfflineNewTicket[];
 };
 
 const STORAGE_KEY = "redmine.offlineSyncQueue";
@@ -62,12 +66,7 @@ export const onOfflineSyncQueueChanged = (
 type SerializedQueue = {
   tickets: [number, OfflineTicketUpdate][];
   comments: OfflineCommentUpdate[];
-  newTickets: Array<{
-    content: string;
-    projectId?: number;
-    documentUri?: string;
-    baseDir?: string;
-  }>;
+  newTickets: OfflineNewTicket[];
 };
 
 const queue: OfflineSyncQueue = {
@@ -169,12 +168,7 @@ export const addOfflineCommentUpdate = (update: OfflineCommentUpdate): void => {
   persist();
 };
 
-export const addOfflineNewTicket = (update: {
-  content: string;
-  projectId?: number;
-  documentUri?: string;
-  baseDir?: string;
-}): void => {
+export const addOfflineNewTicket = (update: OfflineNewTicket): void => {
   if (update.documentUri) {
     const index = queue.newTickets.findIndex(
       (item) => item.documentUri === update.documentUri,
@@ -214,6 +208,17 @@ export const replaceOfflineSyncQueue = (next: OfflineSyncQueue): void => {
 export const removeOfflineTicketUpdate = (ticketId: number): void => {
   queue.tickets.delete(ticketId);
   persist();
+};
+
+export const updateOfflineNewTicket = (
+  documentUri: string,
+  updates: Partial<Pick<OfflineNewTicket, "createdIssueId" | "status">>,
+): void => {
+  const index = queue.newTickets.findIndex((item) => item.documentUri === documentUri);
+  if (index !== -1) {
+    queue.newTickets[index] = { ...queue.newTickets[index], ...updates };
+    persist();
+  }
 };
 
 export const removeOfflineNewTicket = (documentUri: string): void => {

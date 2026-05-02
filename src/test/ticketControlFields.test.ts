@@ -77,6 +77,42 @@ suite("Ticket control fields – helper functions", () => {
     );
     assert.strictEqual(fields.draft_id, undefined);
   });
+
+  test("withRegisteredTicketControlFields adds project_id when projectId argument is provided", () => {
+    const fields = withRegisteredTicketControlFields(
+      { mode: "new-ticket", issue_id: null },
+      55,
+      99,
+    );
+    assert.strictEqual(fields.project_id, 99);
+    assert.strictEqual(fields.issue_id, 55);
+    assert.strictEqual(fields.mode, "ticket-update");
+  });
+
+  test("withRegisteredTicketControlFields overrides existing project_id with provided projectId", () => {
+    const fields = withRegisteredTicketControlFields(
+      { mode: "new-ticket", issue_id: null, project_id: 10 },
+      77,
+      20,
+    );
+    assert.strictEqual(fields.project_id, 20);
+  });
+
+  test("withRegisteredTicketControlFields preserves existing project_id when no projectId argument", () => {
+    const fields = withRegisteredTicketControlFields(
+      { mode: "new-ticket", issue_id: null, project_id: 42 },
+      100,
+    );
+    assert.strictEqual(fields.project_id, 42);
+  });
+
+  test("withRegisteredTicketControlFields with no project_id in existing and no argument omits project_id", () => {
+    const fields = withRegisteredTicketControlFields(
+      { mode: "new-ticket", issue_id: null },
+      5,
+    );
+    assert.strictEqual(fields.project_id, undefined);
+  });
 });
 
 suite("New ticket draft includes issue_id", () => {
