@@ -4,7 +4,6 @@ import {
   getBaseUrl,
   getDefaultProjectId,
   getIncludeChildProjects,
-  getOfflineSyncMode,
   getTicketListLimit,
 } from "../config/settings";
 import { getProjectSelection } from "../config/projectSelection";
@@ -26,25 +25,22 @@ import {
   applyTicketFilters,
   applyTicketSort,
   DEFAULT_TICKET_LIST_SETTINGS,
-  DueDateDisplayRule,
   formatDueDateIndicator,
   resolveDueDateWindow,
   TicketListSettings,
-  TicketSortField,
 } from "./projectListSettings";
-import { TICKET_SETTINGS_COMMANDS } from "../app/commandIds";
+import {
+  configureAssigneeFilter,
+  configureDueDateDisplay,
+  configurePriorityFilter,
+  configureSort,
+  configureStatusFilter,
+  configureTitleFilter,
+  configureTrackerFilter,
+} from "./ticketFilterConfigurator";
+import { buildTicketSettingsItems } from "./ticketSettingsItems";
 
-const TICKET_SETTINGS_ICON_IDS = {
-  titleFilter: "search",
-  offlineSyncMode: "cloud-upload",
-  priorityFilter: "symbol-number",
-  statusFilter: "check",
-  trackerFilter: "tag",
-  assigneeFilter: "account",
-  sort: "list-ordered",
-  dueDate: "calendar",
-  reset: "refresh",
-};
+export { TicketSettingsItem } from "./ticketSettingsItems";
 
 export const TICKET_RELOAD_COMMAND = "redmine-client.reloadTicket";
 
@@ -70,8 +66,6 @@ export const normalizeFilterOptions = (
   _matchingOptions: string[],
 ): string[] => allOptions;
 
-type TicketOption = { id: number; label: string };
-
 const cloneTicketListSettings = (settings: TicketListSettings): TicketListSettings => ({
   filters: { ...settings.filters },
   sort: { ...settings.sort },
@@ -80,47 +74,6 @@ const cloneTicketListSettings = (settings: TicketListSettings): TicketListSettin
 
 const getDefaultTicketListSettings = (): TicketListSettings =>
   cloneTicketListSettings(DEFAULT_TICKET_LIST_SETTINGS);
-
-const formatSelectionSummary = (selectedCount: number, totalCount: number): string => {
-  if (selectedCount === 0 || selectedCount === totalCount) {
-    return "All";
-  }
-  return `${selectedCount} selected`;
-};
-
-const formatTitleFilterSummary = (query: string): string =>
-  query.length > 0 ? query : "All";
-
-const formatSortSummary = (sort: TicketListSettings["sort"]): string => {
-  if (!sort.field) {
-    return "None";
-  }
-  const label = sort.field.charAt(0).toUpperCase() + sort.field.slice(1);
-  return `${label} (${sort.direction})`;
-};
-
-const formatDueDateSummary = (rule: DueDateDisplayRule): string => {
-  const enabled: string[] = [];
-  if (rule.showWithin1Day) {
-    enabled.push("1 day");
-  }
-  if (rule.showWithin3Days) {
-    enabled.push("3 days");
-  }
-  if (rule.showWithin7Days) {
-    enabled.push("7 days");
-  }
-  if (rule.showOverdue) {
-    enabled.push("Overdue");
-  }
-  if (enabled.length === 0) {
-    return "None";
-  }
-  if (enabled.length === 4) {
-    return "All";
-  }
-  return enabled.join(", ");
-};
 
 const buildTicketTreeSources = (tickets: Ticket[]): Array<TreeSource<Ticket>> => {
   const idSet = new Set(tickets.map((t) => t.id));
@@ -221,44 +174,6 @@ const buildTicketCycleWarnings = (
   });
 };
 
-const collectOptions = (
-  tickets: Ticket[],
-  getId: (ticket: Ticket) => number | undefined,
-  getLabel: (ticket: Ticket) => string | undefined,
-): TicketOption[] => {
-  const seen = new Map<number, string>();
-  tickets.forEach((ticket) => {
-    const id = getId(ticket);
-    if (id === undefined) {
-      return;
-    }
-    const label = getLabel(ticket) ?? `#${id}`;
-    if (!seen.has(id)) {
-      seen.set(id, label);
-    }
-  });
-  return Array.from(seen.entries())
-    .map(([id, label]) => ({ id, label }))
-    .sort((a, b) => a.label.localeCompare(b.label));
-};
-
-export class TicketSettingsItem extends vscode.TreeItem {
-  constructor(
-    label: string,
-    description: string,
-    command: vscode.Command,
-    iconId?: string,
-  ) {
-    super(label, vscode.TreeItemCollapsibleState.None);
-    this.description = description;
-    this.command = command;
-    this.contextValue = "ticketSettingsItem";
-    if (iconId) {
-      this.iconPath = new vscode.ThemeIcon(iconId);
-    }
-  }
-}
-
 const getDraftStatusIcon = (ticketId: number): vscode.ThemeIcon | undefined => {
   const draft = getTicketDraft(ticketId);
   if (!draft) { return undefined; }
@@ -297,23 +212,17 @@ export const buildTicketsViewItems = (
   itemCache?: Map<number, TicketTreeItem>,
 ): vscode.TreeItem[] => {
   if (errorMessage) {
-    if (itemCache) {
-      itemCache.clear();
-    }
+    if (itemCache) { itemCache.clear(); }
     return [createErrorStateItem(errorMessage)];
   }
 
   if (!selectedProjectId) {
-    if (itemCache) {
-      itemCache.clear();
-    }
+    if (itemCache) { itemCache.clear(); }
     return [createEmptyStateItem("Select a project to view tickets.")];
   }
 
   if (tickets.length === 0) {
-    if (itemCache) {
-      itemCache.clear();
-    }
+    if (itemCache) { itemCache.clear(); }
     return [createEmptyStateItem("No tickets for the selected project.")];
   }
 
@@ -322,17 +231,14 @@ export const buildTicketsViewItems = (
   const visibleTickets = sortedTickets.slice(0, MAX_VIEW_ITEMS);
 
   if (visibleTickets.length === 0) {
-    if (itemCache) {
-      itemCache.clear();
-    }
+    if (itemCache) { itemCache.clear(); }
     return [createEmptyStateItem("No tickets match the current filters.")];
   }
 
   const dueIndicators = new Map<number, string | undefined>();
   visibleTickets.forEach((ticket) => {
     const dueWindow = resolveDueDateWindow(ticket, settings.dueDate, now);
-    const dueIndicator = formatDueDateIndicator(dueWindow);
-    dueIndicators.set(ticket.id, dueIndicator);
+    dueIndicators.set(ticket.id, formatDueDateIndicator(dueWindow));
   });
   const treeResult = buildTree(buildTicketTreeSources(visibleTickets));
   const warningItems = buildTicketCycleWarnings(visibleTickets, treeResult.cycleIds);
@@ -581,6 +487,50 @@ export class TicketsTreeProvider implements vscode.TreeDataProvider<vscode.TreeI
     return this.selectedProjectId;
   }
 
+  async configurePriorityFilter(): Promise<void> {
+    const next = await configurePriorityFilter(this.tickets, this.settings);
+    if (next) { this.settings = next; this.emitter.fire(); }
+  }
+
+  async configureTitleFilter(): Promise<void> {
+    const next = await configureTitleFilter(this.settings);
+    if (next) { this.settings = next; this.emitter.fire(); }
+  }
+
+  async configureStatusFilter(): Promise<void> {
+    const next = await configureStatusFilter(this.tickets, this.settings);
+    if (next) { this.settings = next; this.emitter.fire(); }
+  }
+
+  async configureTrackerFilter(): Promise<void> {
+    const next = await configureTrackerFilter(this.tickets, this.settings);
+    if (next) { this.settings = next; this.emitter.fire(); }
+  }
+
+  async configureAssigneeFilter(): Promise<void> {
+    const next = await configureAssigneeFilter(this.tickets, this.settings);
+    if (next) { this.settings = next; this.emitter.fire(); }
+  }
+
+  async configureSort(): Promise<void> {
+    const next = await configureSort(this.settings);
+    if (next) { this.settings = next; this.emitter.fire(); }
+  }
+
+  async configureDueDateDisplay(): Promise<void> {
+    const next = await configureDueDateDisplay(this.settings);
+    if (next) { this.settings = next; this.emitter.fire(); }
+  }
+
+  resetTicketSettings(): void {
+    this.settings = getDefaultTicketListSettings();
+    this.emitter.fire();
+  }
+
+  getSettingsItems(): vscode.TreeItem[] {
+    return buildTicketSettingsItems(this.tickets, this.settings);
+  }
+
   private getVisibleTreeResult(preFiltered?: Ticket[]): {
     visibleTickets: Ticket[];
     treeResult: TreeBuildResult<Ticket>;
@@ -604,352 +554,6 @@ export class TicketsTreeProvider implements vscode.TreeDataProvider<vscode.TreeI
       dueIndicators.set(ticket.id, formatDueDateIndicator(dueWindow));
     });
     return dueIndicators;
-  }
-
-  async configurePriorityFilter(): Promise<void> {
-    const options = collectOptions(
-      this.tickets,
-      (ticket) => ticket.priorityId,
-      (ticket) => ticket.priorityName,
-    );
-    const selected = await this.pickMultiSelect(
-      "Filter by priority",
-      options,
-      this.settings.filters.priorityIds,
-    );
-    if (!selected) {
-      return;
-    }
-
-    this.settings = {
-      ...this.settings,
-      filters: {
-        ...this.settings.filters,
-        priorityIds: selected,
-      },
-    };
-    this.emitter.fire();
-  }
-
-  async configureTitleFilter(): Promise<void> {
-    const current = this.settings.filters.subjectQuery;
-    const next = await vscode.window.showInputBox({
-      title: "Filter by title",
-      prompt: "Enter title keyword (leave blank for all)",
-      value: current,
-    });
-
-    if (next === undefined) {
-      return;
-    }
-
-    this.settings = {
-      ...this.settings,
-      filters: {
-        ...this.settings.filters,
-        subjectQuery: next.trim(),
-      },
-    };
-    this.emitter.fire();
-  }
-
-  async configureStatusFilter(): Promise<void> {
-    const options = collectOptions(
-      this.tickets,
-      (ticket) => ticket.statusId,
-      (ticket) => ticket.statusName,
-    );
-    const selected = await this.pickMultiSelect(
-      "Filter by status",
-      options,
-      this.settings.filters.statusIds,
-    );
-    if (!selected) {
-      return;
-    }
-
-    this.settings = {
-      ...this.settings,
-      filters: {
-        ...this.settings.filters,
-        statusIds: selected,
-      },
-    };
-    this.emitter.fire();
-  }
-
-  async configureTrackerFilter(): Promise<void> {
-    const options = collectOptions(
-      this.tickets,
-      (ticket) => ticket.trackerId,
-      (ticket) => ticket.trackerName,
-    );
-    const selected = await this.pickMultiSelect(
-      "Filter by tracker",
-      options,
-      this.settings.filters.trackerIds,
-    );
-    if (!selected) {
-      return;
-    }
-
-    this.settings = {
-      ...this.settings,
-      filters: {
-        ...this.settings.filters,
-        trackerIds: selected,
-      },
-    };
-    this.emitter.fire();
-  }
-
-  async configureAssigneeFilter(): Promise<void> {
-    const options = collectOptions(
-      this.tickets,
-      (ticket) => ticket.assigneeId,
-      (ticket) => ticket.assigneeName,
-    );
-
-    const items: Array<vscode.QuickPickItem & { id?: number; unassigned?: boolean }> =
-      options.map((option) => ({
-        label: option.label,
-        picked: this.settings.filters.assigneeIds.includes(option.id),
-        id: option.id,
-      }));
-
-    items.unshift({
-      label: "Unassigned",
-      picked: this.settings.filters.includeUnassigned,
-      unassigned: true,
-    });
-
-    const picked = await vscode.window.showQuickPick(items, {
-      canPickMany: true,
-      title: "Filter by assignee",
-    });
-
-    if (!picked) {
-      return;
-    }
-
-    const assigneeIds = picked
-      .filter((item) => item.id !== undefined)
-      .map((item) => item.id as number);
-    const includeUnassigned = picked.some((item) => item.unassigned);
-
-    this.settings = {
-      ...this.settings,
-      filters: {
-        ...this.settings.filters,
-        assigneeIds,
-        includeUnassigned,
-      },
-    };
-    this.emitter.fire();
-  }
-
-  async configureSort(): Promise<void> {
-    const fieldItems: Array<vscode.QuickPickItem & { field?: TicketSortField }> = [
-      { label: "None", field: undefined },
-      { label: "Priority", field: "priority" },
-      { label: "Status", field: "status" },
-      { label: "Tracker", field: "tracker" },
-      { label: "Assignee", field: "assignee" },
-    ];
-
-    const pickedField = await vscode.window.showQuickPick(fieldItems, {
-      title: "Sort tickets by",
-    });
-
-    if (!pickedField) {
-      return;
-    }
-
-    if (!pickedField.field) {
-      this.settings = {
-        ...this.settings,
-        sort: {
-          ...this.settings.sort,
-          field: undefined,
-        },
-      };
-      this.emitter.fire();
-      return;
-    }
-
-    const directionItems: Array<vscode.QuickPickItem & { direction: "asc" | "desc" }> = [
-      { label: "Ascending", direction: "asc" },
-      { label: "Descending", direction: "desc" },
-    ];
-
-    const pickedDirection = await vscode.window.showQuickPick(directionItems, {
-      title: `Sort ${pickedField.label.toLowerCase()} by`,
-    });
-
-    if (!pickedDirection) {
-      return;
-    }
-
-    this.settings = {
-      ...this.settings,
-      sort: {
-        field: pickedField.field,
-        direction: pickedDirection.direction,
-      },
-    };
-    this.emitter.fire();
-  }
-
-  async configureDueDateDisplay(): Promise<void> {
-    const items: Array<vscode.QuickPickItem & { key: keyof DueDateDisplayRule }> = [
-      { label: "Within 1 day", picked: this.settings.dueDate.showWithin1Day, key: "showWithin1Day" },
-      { label: "Within 3 days", picked: this.settings.dueDate.showWithin3Days, key: "showWithin3Days" },
-      { label: "Within 7 days", picked: this.settings.dueDate.showWithin7Days, key: "showWithin7Days" },
-      { label: "Overdue", picked: this.settings.dueDate.showOverdue, key: "showOverdue" },
-    ];
-
-    const picked = await vscode.window.showQuickPick(items, {
-      canPickMany: true,
-      title: "Due date indicators",
-    });
-
-    if (!picked) {
-      return;
-    }
-
-    const keys = new Set(picked.map((item) => item.key));
-    this.settings = {
-      ...this.settings,
-      dueDate: {
-        showWithin1Day: keys.has("showWithin1Day"),
-        showWithin3Days: keys.has("showWithin3Days"),
-        showWithin7Days: keys.has("showWithin7Days"),
-        showOverdue: keys.has("showOverdue"),
-      },
-    };
-    this.emitter.fire();
-  }
-
-  resetTicketSettings(): void {
-    this.settings = getDefaultTicketListSettings();
-    this.emitter.fire();
-  }
-
-  getSettingsItems(): vscode.TreeItem[] {
-    const offlineMode = getOfflineSyncMode();
-    const priorityOptions = collectOptions(
-      this.tickets,
-      (ticket) => ticket.priorityId,
-      (ticket) => ticket.priorityName,
-    );
-    const statusOptions = collectOptions(
-      this.tickets,
-      (ticket) => ticket.statusId,
-      (ticket) => ticket.statusName,
-    );
-    const trackerOptions = collectOptions(
-      this.tickets,
-      (ticket) => ticket.trackerId,
-      (ticket) => ticket.trackerName,
-    );
-    const assigneeOptions = collectOptions(
-      this.tickets,
-      (ticket) => ticket.assigneeId,
-      (ticket) => ticket.assigneeName,
-    );
-
-    const assigneeTotal = assigneeOptions.length + 1;
-    const assigneeSelected =
-      this.settings.filters.assigneeIds.length +
-      (this.settings.filters.includeUnassigned ? 1 : 0);
-
-    return [
-      new TicketSettingsItem(
-        "Offline sync mode",
-        offlineMode === "manual" ? "Manual" : "Auto",
-        {
-          command: TICKET_SETTINGS_COMMANDS.offlineSyncMode,
-          title: "Offline sync mode",
-        },
-        TICKET_SETTINGS_ICON_IDS.offlineSyncMode,
-      ),
-      new TicketSettingsItem(
-        "Filter: Title",
-        formatTitleFilterSummary(this.settings.filters.subjectQuery),
-        { command: TICKET_SETTINGS_COMMANDS.titleFilter, title: "Filter by title" },
-        TICKET_SETTINGS_ICON_IDS.titleFilter,
-      ),
-      new TicketSettingsItem(
-        "Filter: Priority",
-        formatSelectionSummary(this.settings.filters.priorityIds.length, priorityOptions.length),
-        { command: TICKET_SETTINGS_COMMANDS.priorityFilter, title: "Filter by priority" },
-        TICKET_SETTINGS_ICON_IDS.priorityFilter,
-      ),
-      new TicketSettingsItem(
-        "Filter: Status",
-        formatSelectionSummary(this.settings.filters.statusIds.length, statusOptions.length),
-        { command: TICKET_SETTINGS_COMMANDS.statusFilter, title: "Filter by status" },
-        TICKET_SETTINGS_ICON_IDS.statusFilter,
-      ),
-      new TicketSettingsItem(
-        "Filter: Tracker",
-        formatSelectionSummary(this.settings.filters.trackerIds.length, trackerOptions.length),
-        { command: TICKET_SETTINGS_COMMANDS.trackerFilter, title: "Filter by tracker" },
-        TICKET_SETTINGS_ICON_IDS.trackerFilter,
-      ),
-      new TicketSettingsItem(
-        "Filter: Assignee",
-        formatSelectionSummary(assigneeSelected, assigneeTotal),
-        { command: TICKET_SETTINGS_COMMANDS.assigneeFilter, title: "Filter by assignee" },
-        TICKET_SETTINGS_ICON_IDS.assigneeFilter,
-      ),
-      new TicketSettingsItem(
-        "Sort order",
-        formatSortSummary(this.settings.sort),
-        { command: TICKET_SETTINGS_COMMANDS.sort, title: "Sort order" },
-        TICKET_SETTINGS_ICON_IDS.sort,
-      ),
-      new TicketSettingsItem(
-        "Due date indicators",
-        formatDueDateSummary(this.settings.dueDate),
-        { command: TICKET_SETTINGS_COMMANDS.dueDate, title: "Due date indicators" },
-        TICKET_SETTINGS_ICON_IDS.dueDate,
-      ),
-      new TicketSettingsItem(
-        "Reset settings",
-        "Restore defaults",
-        { command: TICKET_SETTINGS_COMMANDS.reset, title: "Reset settings" },
-        TICKET_SETTINGS_ICON_IDS.reset,
-      ),
-    ];
-  }
-
-  private async pickMultiSelect(
-    title: string,
-    options: TicketOption[],
-    selectedIds: number[],
-  ): Promise<number[] | undefined> {
-    if (options.length === 0) {
-      void vscode.window.showInformationMessage("No options available for this filter.");
-      return undefined;
-    }
-
-    const items: Array<vscode.QuickPickItem & { id: number }> = options.map((option) => ({
-      label: option.label,
-      picked: selectedIds.includes(option.id),
-      id: option.id,
-    }));
-
-    const picked = await vscode.window.showQuickPick(items, {
-      canPickMany: true,
-      title,
-    });
-
-    if (!picked) {
-      return undefined;
-    }
-
-    return picked.map((item) => item.id);
   }
 }
 
@@ -989,7 +593,7 @@ export class TicketTreeItem extends vscode.TreeItem {
         : vscode.TreeItemCollapsibleState.None;
     const status = node.data.statusName ?? "";
     if (status && dueDateIndicator) {
-      this.description = `${status} \u00b7 ${dueDateIndicator}`;
+      this.description = `${status} · ${dueDateIndicator}`;
     } else {
       this.description = status || dueDateIndicator || "";
     }
