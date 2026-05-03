@@ -25,7 +25,9 @@ import {
 export class SettingsController {
   private settings: TicketListSettings = getStoredTicketListSettings();
 
-  constructor(private readonly store: DashboardStateStore) {}
+  constructor(private readonly store: DashboardStateStore) {
+    this.pushSettings();
+  }
 
   getSettings(): TicketListSettings {
     return this.settings;

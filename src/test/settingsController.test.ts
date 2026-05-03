@@ -42,6 +42,20 @@ suite("SettingsController", () => {
     assert.deepStrictEqual(s.dueDate, DEFAULT_TICKET_LIST_SETTINGS.dueDate);
   });
 
+  test("コンストラクタで store に初期設定が即時反映される", () => {
+    const memento = makeMemento();
+    initializeTicketListSettingsStore(memento);
+    // 一度設定を保存してからリロード
+    const ctrl1 = new SettingsController(makeStore());
+    ctrl1.updateTicketList({ filters: { ...DEFAULT_TICKET_LIST_SETTINGS.filters, subjectQuery: "init-push" } });
+    initializeTicketListSettingsStore(memento);
+
+    const store = makeStore();
+    new SettingsController(store);
+    // コンストラクタ呼び出し直後にストアへ反映されているか確認
+    assert.strictEqual(store.getState().settings.filters.subjectQuery, "init-push");
+  });
+
   test("updateTicketList: filters を部分更新できる", () => {
     const ctrl = new SettingsController(makeStore());
     ctrl.updateTicketList({ filters: { ...DEFAULT_TICKET_LIST_SETTINGS.filters, subjectQuery: "bug" } });
