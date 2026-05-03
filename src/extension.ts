@@ -8,6 +8,7 @@ import { initializeDraftStore } from "./views/ticketDraftStore";
 import { createGlobalStateDraftStorage } from "./views/draftPersistence";
 import { initializeNewTicketDraftStore } from "./views/newTicketDraftStore";
 import { initializeOfflineSyncStore } from "./views/offlineSyncStore";
+import { initializeTicketListSettingsStore } from "./views/ticketListSettingsStore";
 import { isTicketEditor } from "./views/ticketEditorRegistry";
 import { setViewContext } from "./views/viewContext";
 import { registerConflictDiffProvider } from "./views/conflictDiffProvider";
@@ -27,6 +28,7 @@ export async function activate(context: vscode.ExtensionContext) {
   initializeDraftStore(createGlobalStateDraftStorage(context.globalState));
   initializeNewTicketDraftStore(context.globalState);
   initializeOfflineSyncStore(context.workspaceState);
+  initializeTicketListSettingsStore(context.workspaceState);
   await initializeApiKeyStore(context.secrets, context.subscriptions);
   registerConflictDiffProvider(context);
 

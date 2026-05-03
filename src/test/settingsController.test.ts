@@ -7,12 +7,31 @@ import {
   resetTicketEditorDefaults,
   updateTicketEditorDefaultField,
 } from "../views/ticketEditorDefaultsStore";
+import { initializeTicketListSettingsStore } from "../views/ticketListSettingsStore";
 
 const makeStore = (): DashboardStateStore => new DashboardStateStore();
+
+const makeMemento = (): import("vscode").Memento => {
+  const data = new Map<string, unknown>();
+  return {
+    keys: () => Array.from(data.keys()),
+    get: <T>(key: string, defaultValue?: T): T =>
+      (data.has(key) ? data.get(key) : defaultValue) as T,
+    update: (key: string, value: unknown) => {
+      if (value === undefined) {
+        data.delete(key);
+      } else {
+        data.set(key, value);
+      }
+      return Promise.resolve();
+    },
+  };
+};
 
 suite("SettingsController", () => {
   setup(() => {
     resetTicketEditorDefaults();
+    initializeTicketListSettingsStore(makeMemento());
   });
 
   test("初期状態は DEFAULT_TICKET_LIST_SETTINGS と一致する", () => {
@@ -104,5 +123,29 @@ suite("SettingsController", () => {
     ctrl.updateTicketList({ filters: { ...DEFAULT_TICKET_LIST_SETTINGS.filters, subjectQuery: "hello" } });
     const storeSettings = store.getState().settings;
     assert.strictEqual(storeSettings.filters.subjectQuery, "hello");
+  });
+
+  test("updateTicketList: 設定が永続化され次回起動時に復元される", () => {
+    const memento = makeMemento();
+    initializeTicketListSettingsStore(memento);
+    const ctrl = new SettingsController(makeStore());
+    ctrl.updateTicketList({ filters: { ...DEFAULT_TICKET_LIST_SETTINGS.filters, subjectQuery: "persist" } });
+
+    // 新しいストアとコントローラーでリロードをシミュレート
+    initializeTicketListSettingsStore(memento);
+    const ctrl2 = new SettingsController(makeStore());
+    assert.strictEqual(ctrl2.getSettings().filters.subjectQuery, "persist");
+  });
+
+  test("resetTicketList: リセット後は次回起動時もデフォルトになる", () => {
+    const memento = makeMemento();
+    initializeTicketListSettingsStore(memento);
+    const ctrl = new SettingsController(makeStore());
+    ctrl.updateTicketList({ filters: { ...DEFAULT_TICKET_LIST_SETTINGS.filters, subjectQuery: "persist" } });
+    ctrl.resetTicketList();
+
+    initializeTicketListSettingsStore(memento);
+    const ctrl2 = new SettingsController(makeStore());
+    assert.strictEqual(ctrl2.getSettings().filters.subjectQuery, "");
   });
 });
