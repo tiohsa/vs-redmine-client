@@ -28,9 +28,9 @@ export const buildIssuesListQuery = (input: IssuesListInput): Record<string, str
     offset: input.offset,
   };
 
-  if (input.statusIds && input.statusIds.length > 0) {
-    query.status_id = input.statusIds.join(",");
-  }
+  query.status_id = (input.statusIds && input.statusIds.length > 0)
+    ? input.statusIds.join(",")
+    : "*";
   if (input.assigneeIds && input.assigneeIds.length > 0) {
     query.assigned_to_id = input.assigneeIds.join(",");
   }
