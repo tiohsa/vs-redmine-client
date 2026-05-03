@@ -174,7 +174,7 @@ body.vscode-high-contrast .tab.active{border-color:var(--app-border);background:
 
 /* ── Ticket list ──────────────────────────────────────────────── */
 #ticket-scroll{flex:1;overflow-y:auto;min-height:0;border-bottom:1px solid var(--border-subtle)}
-.ticket-row{position:relative;display:flex;align-items:center;gap:6px;padding:5px 10px 5px 12px;min-height:32px;cursor:pointer;border-bottom:1px solid var(--border-subtle);transition:background .1s}
+.ticket-row{position:relative;display:flex;align-items:center;gap:6px;padding:3px 10px 3px 12px;min-height:26px;cursor:pointer;border-bottom:1px solid var(--border-subtle);transition:background .1s}
 .ticket-row:hover{background:var(--app-hover)}
 .ticket-row.selected{background:var(--app-selected)}
 .ticket-row.selected .ticket-subject{font-weight:600;color:var(--app-selected-fg)}
@@ -271,7 +271,7 @@ body.vscode-high-contrast .detail-input[type="date"]::-webkit-calendar-picker-in
 body.vscode-high-contrast .ticket-action-btn,body.vscode-high-contrast .ticket-action-menu{border-color:var(--app-border);box-shadow:none}
 
 /* ── Buttons ──────────────────────────────────────────────────── */
-.btn{padding:4px 10px;border-radius:var(--mm-radius-button);font-size:11px;font-weight:600;cursor:pointer;border:none;transition:background .15s;line-height:1.5}
+.btn{display:inline-flex;align-items:center;justify-content:center;padding:4px 10px;border-radius:var(--mm-radius-button);font-size:11px;font-weight:600;cursor:pointer;border:none;transition:background .15s;line-height:1.5}
 .btn:focus-visible{outline:1px solid var(--app-focus);outline-offset:1px}
 .btn-primary{background:var(--app-accent);color:var(--app-accent-fg)}
 .btn-primary:hover{background:var(--app-accent-hover)}
