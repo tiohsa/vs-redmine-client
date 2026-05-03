@@ -156,6 +156,21 @@ function matchesSearch(t){
   if(!searchQuery) return true;
   return t.subject.toLowerCase().includes(searchQuery) || String(t.id).includes(searchQuery);
 }
+function resolveDueDateBadge(dueDate, rule){
+  if(!dueDate||!rule) return null;
+  const due=new Date(dueDate);
+  if(isNaN(due.getTime())) return null;
+  const now=new Date();
+  const dayMs=86400000;
+  const startNow=Date.UTC(now.getUTCFullYear(),now.getUTCMonth(),now.getUTCDate());
+  const startDue=Date.UTC(due.getUTCFullYear(),due.getUTCMonth(),due.getUTCDate());
+  const diff=Math.floor((startDue-startNow)/dayMs);
+  if(diff<0) return rule.showOverdue?{label:'期限超過',cls:'due-overdue'}:null;
+  if(diff<=1&&rule.showWithin1Day) return {label:'1日以内',cls:'due-1day'};
+  if(diff<=3&&rule.showWithin3Days) return {label:'3日以内',cls:'due-3days'};
+  if(diff<=7&&rule.showWithin7Days) return {label:'7日以内',cls:'due-7days'};
+  return null;
+}
 function findTicketNode(nodes, ticketId){
   for(const node of nodes || []){
     if(node.id === ticketId) return node;
@@ -242,6 +257,10 @@ function buildTicketRowHtml(t){
   const statusBadge = t.statusName
     ?'<span class="badge ticket-status">'+esc(t.statusName)+'</span>'
     :'';
+  const dueBadgeData = resolveDueDateBadge(t.dueDate, state.settings?.dueDate);
+  const dueBadge = dueBadgeData
+    ?'<span class="badge '+dueBadgeData.cls+'">'+esc(dueBadgeData.label)+'</span>'
+    :'';
   const hasChildren = t.children?.length > 0;
   const isExpanded = expandedIds.has(t.id);
   const expandBtn = hasChildren
@@ -264,7 +283,7 @@ function buildTicketRowHtml(t){
     +childConnector
     +'<span class="ticket-id">#'+t.id+'</span>'
     +'<span class="ticket-subject" title="'+esc(t.subject)+'">'+esc(t.subject)+'</span>'
-    +'<span class="badges">'+statusBadge+syncBadge+'</span>'
+    +'<span class="badges">'+statusBadge+dueBadge+syncBadge+'</span>'
     +actionMenu
     +'</div>';
 }

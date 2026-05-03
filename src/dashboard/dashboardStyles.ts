@@ -207,6 +207,10 @@ body.vscode-high-contrast .expand-btn:focus-visible{outline:2px solid var(--app-
 .badge.sync-failed{background:rgba(185,28,28,0.12);color:#e05d5d;border-color:rgba(185,28,28,0.25)}
 .badge.sync-syncing{background:rgba(21,128,61,0.12);color:#4caf72;border-color:rgba(21,128,61,0.25)}
 .badge.ticket-status{background:color-mix(in srgb, var(--app-accent) 12%, var(--surface-1));color:var(--app-text);border-color:color-mix(in srgb, var(--app-accent) 38%, transparent)}
+.badge.due-overdue{background:rgba(185,28,28,0.12);color:#e05d5d;border-color:rgba(185,28,28,0.25)}
+.badge.due-1day{background:rgba(180,83,9,0.12);color:#d4874b;border-color:rgba(180,83,9,0.25)}
+.badge.due-3days{background:rgba(161,98,7,0.12);color:#ca8a04;border-color:rgba(161,98,7,0.25)}
+.badge.due-7days{background:rgba(30,64,175,0.08);color:var(--app-accent);border-color:rgba(30,64,175,0.2)}
 body.vscode-high-contrast .badge,.vscode-high-contrast .unsynced-kind-label{background:transparent;border-color:var(--app-border);color:var(--app-text)}
 .load-more-row{padding:8px 12px;text-align:center;color:var(--app-accent);font-size:11px;cursor:pointer;font-weight:500}
 .load-more-row:hover{text-decoration:underline}
