@@ -16,6 +16,7 @@ import { defaultDeps } from "./ticketSyncDeps";
 import { buildResult, mapErrorToResult } from "./ticketSyncResult";
 import type { TicketSaveResult } from "../ticketSaveTypes";
 import type { TicketSaveDependencies } from "./types";
+import type { UploadToken } from "../../redmine/types";
 import {
   getEditorContentType,
   getProjectIdForEditor,
@@ -108,23 +109,139 @@ export const queueTicketDraft = async (
   return buildResult("queued", "Saved for offline sync.");
 };
 
+type ProcessedTicketDescription =
+  | {
+      ok: true;
+      description: string;
+      uploads: UploadToken[];
+      uploadSummary: ReturnType<typeof resolveUploadSummary>;
+    }
+  | { ok: false; failure: TicketSaveResult };
+
+const processTicketDescriptionUploads = async (
+  update: OfflineTicketUpdate,
+  deps: TicketSaveDependencies,
+): Promise<ProcessedTicketDescription> => {
+  const uploadResult = await processMarkdownImageUploads({
+    content: update.description,
+    baseDir: update.baseDir,
+    uploadFile: deps.uploadFile,
+  });
+  const failure = handleTicketUploadFailure(uploadResult.summary);
+  if (failure) { return { ok: false, failure }; }
+  return {
+    ok: true,
+    description: uploadResult.content,
+    uploads: uploadResult.uploads,
+    uploadSummary: resolveUploadSummary(uploadResult.summary),
+  };
+};
+
+const detectTicketUpdatedAtConflict = async (input: {
+  deps: TicketSaveDependencies;
+  update: OfflineTicketUpdate;
+  localDescription: string;
+  ensureRemoteDetail: () => Promise<IssueDetailResult>;
+}): Promise<TicketSaveResult | undefined> => {
+  if (!input.update.lastKnownRemoteUpdatedAt) { return undefined; }
+  try {
+    const remote = await input.ensureRemoteDetail();
+    const remoteUpdatedAt = remote.ticket.updatedAt;
+    if (remoteUpdatedAt && remoteUpdatedAt !== input.update.lastKnownRemoteUpdatedAt) {
+      return buildResult("conflict", "Remote changes detected. Refresh before saving.", {
+        conflictContext: {
+          ticketId: input.update.ticketId,
+          localSubject: input.update.subject,
+          localDescription: input.localDescription,
+          remoteSubject: remote.ticket.subject,
+          remoteDescription: remote.ticket.description ?? "",
+          remoteUpdatedAt,
+        },
+      });
+    }
+  } catch (error) {
+    return mapErrorToResult(error);
+  }
+  return undefined;
+};
+
+const createQueuedChildTickets = async (input: {
+  deps: TicketSaveDependencies;
+  update: OfflineTicketUpdate;
+  uniqueChildren: string[];
+  ensureRemoteDetail: () => Promise<IssueDetailResult>;
+}): Promise<{ createdChildIds: number[]; failure?: TicketSaveResult }> => {
+  if (input.uniqueChildren.length === 0) {
+    return { createdChildIds: [] };
+  }
+
+  let remoteDetail: IssueDetailResult;
+  try {
+    remoteDetail = await input.ensureRemoteDetail();
+  } catch (error) {
+    return { createdChildIds: [], failure: mapErrorToResult(error) };
+  }
+  const projectId = remoteDetail.ticket.projectId;
+  if (!projectId) {
+    return {
+      createdChildIds: [],
+      failure: buildResult("failed", "Missing project ID for child tickets."),
+    };
+  }
+
+  let childCreateFields: TicketUpdateFields;
+  try {
+    childCreateFields = await resolveMetadataForCreate(input.update.metadata, input.deps, projectId);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Invalid metadata.";
+    return { createdChildIds: [], failure: buildResult("failed", message) };
+  }
+
+  const childCreateResult = await createChildTickets({
+    projectId,
+    parentId: input.update.ticketId,
+    subjects: input.uniqueChildren,
+    fields: childCreateFields,
+    createIssue: input.deps.createIssue,
+    deleteIssue: input.deps.deleteIssue,
+    description: "",
+  });
+  if (childCreateResult.error) {
+    await Promise.allSettled(
+      childCreateResult.createdChildIds.map((issueId) => input.deps.deleteIssue(issueId)),
+    );
+    return {
+      createdChildIds: [],
+      failure: buildResult("failed", childCreateResult.error),
+    };
+  }
+  return { createdChildIds: childCreateResult.createdChildIds };
+};
+
+const refetchUpdatedAt = async (
+  deps: TicketSaveDependencies,
+  ticketId: number,
+  fallback: string | undefined,
+): Promise<string | undefined> => {
+  try {
+    const detail = await deps.getIssueDetail(ticketId);
+    return detail.ticket.updatedAt ?? fallback;
+  } catch {
+    return fallback;
+  }
+};
+
 export const applyQueuedTicketUpdate = async (input: {
   update: OfflineTicketUpdate;
   deps?: Partial<TicketSaveDependencies>;
 }): Promise<TicketSaveResult> => {
   const deps = { ...defaultDeps, ...input.deps };
   const update = input.update;
-  const uploadResult = await processMarkdownImageUploads({
-    content: update.description,
-    baseDir: update.baseDir,
-    uploadFile: deps.uploadFile,
-  });
-  const failureResult = handleTicketUploadFailure(uploadResult.summary);
-  if (failureResult) {
-    return failureResult;
-  }
-  const uploadSummary = resolveUploadSummary(uploadResult.summary);
-  const description = uploadResult.content;
+
+  const processed = await processTicketDescriptionUploads(update, deps);
+  if (!processed.ok) { return processed.failure; }
+  const { description, uploads, uploadSummary } = processed;
+
   const contentChanges = computeChanges(
     update.baseSubject,
     update.baseDescription,
@@ -136,10 +253,16 @@ export const applyQueuedTicketUpdate = async (input: {
   const { uniqueChildren, duplicateChildren } = splitUniqueChildren(children);
 
   let remoteDetail: IssueDetailResult | undefined;
+  const ensureRemoteDetail = async (): Promise<IssueDetailResult> => {
+    if (!remoteDetail) {
+      remoteDetail = await deps.getIssueDetail(update.ticketId);
+    }
+    return remoteDetail;
+  };
 
   if (metadataChanges.tracker !== undefined) {
     try {
-      remoteDetail = await deps.getIssueDetail(update.ticketId);
+      await ensureRemoteDetail();
     } catch (error) {
       return mapErrorToResult(error);
     }
@@ -152,9 +275,9 @@ export const applyQueuedTicketUpdate = async (input: {
     const message = error instanceof Error ? error.message : "Invalid metadata.";
     return buildResult("failed", message);
   }
-  const changes = { ...contentChanges, ...metadataFields };
-  if (uploadResult.uploads.length > 0) {
-    changes.uploads = uploadResult.uploads;
+  const changes: TicketUpdateFields = { ...contentChanges, ...metadataFields };
+  if (uploads.length > 0) {
+    changes.uploads = uploads;
   }
 
   if (Object.keys(changes).length === 0 && children.length === 0) {
@@ -168,68 +291,22 @@ export const applyQueuedTicketUpdate = async (input: {
     return buildResult("no_change", "No changes to save.", { uploadSummary });
   }
 
-  if (update.lastKnownRemoteUpdatedAt) {
-    try {
-      if (!remoteDetail) {
-        remoteDetail = await deps.getIssueDetail(update.ticketId);
-      }
-      const remoteUpdatedAt = remoteDetail.ticket.updatedAt;
-      if (remoteUpdatedAt && remoteUpdatedAt !== update.lastKnownRemoteUpdatedAt) {
-        return buildResult("conflict", "Remote changes detected. Refresh before saving.", {
-          conflictContext: {
-            ticketId: update.ticketId,
-            localSubject: update.subject,
-            localDescription: description,
-            remoteSubject: remoteDetail.ticket.subject,
-            remoteDescription: remoteDetail.ticket.description ?? "",
-            remoteUpdatedAt,
-          },
-        });
-      }
-    } catch (error) {
-      return mapErrorToResult(error);
-    }
-  }
+  const conflict = await detectTicketUpdatedAtConflict({
+    deps,
+    update,
+    localDescription: description,
+    ensureRemoteDetail,
+  });
+  if (conflict) { return conflict; }
 
-  const createdChildIds: number[] = [];
-  let childCreateFields: TicketUpdateFields | undefined;
-  if (uniqueChildren.length > 0) {
-    if (!remoteDetail) {
-      try {
-        remoteDetail = await deps.getIssueDetail(update.ticketId);
-      } catch (error) {
-        return mapErrorToResult(error);
-      }
-    }
-    const projectId = remoteDetail?.ticket.projectId;
-    if (!projectId) {
-      return buildResult("failed", "Missing project ID for child tickets.");
-    }
-
-    try {
-      childCreateFields = await resolveMetadataForCreate(update.metadata, deps, projectId);
-    } catch (error) {
-      const message = error instanceof Error ? error.message : "Invalid metadata.";
-      return buildResult("failed", message);
-    }
-
-    const childCreateResult = await createChildTickets({
-      projectId,
-      parentId: update.ticketId,
-      subjects: uniqueChildren,
-      fields: childCreateFields,
-      createIssue: deps.createIssue,
-      deleteIssue: deps.deleteIssue,
-      description: "",
-    });
-    if (childCreateResult.error) {
-      await Promise.allSettled(
-        childCreateResult.createdChildIds.map((issueId) => deps.deleteIssue(issueId)),
-      );
-      return buildResult("failed", childCreateResult.error);
-    }
-    createdChildIds.push(...childCreateResult.createdChildIds);
-  }
+  const childCreate = await createQueuedChildTickets({
+    deps,
+    update,
+    uniqueChildren,
+    ensureRemoteDetail,
+  });
+  if (childCreate.failure) { return childCreate.failure; }
+  const createdChildIds = childCreate.createdChildIds;
 
   try {
     if (Object.keys(changes).length > 0) {
@@ -244,23 +321,15 @@ export const applyQueuedTicketUpdate = async (input: {
     return mapErrorToResult(error);
   }
 
-  let updatedAt = update.lastKnownRemoteUpdatedAt;
+  const updatedAt = Object.keys(changes).length > 0
+    ? await refetchUpdatedAt(deps, update.ticketId, update.lastKnownRemoteUpdatedAt)
+    : update.lastKnownRemoteUpdatedAt;
 
-  if (Object.keys(changes).length > 0) {
-    try {
-      const detail = await deps.getIssueDetail(update.ticketId);
-      updatedAt = detail.ticket.updatedAt ?? updatedAt;
-    } catch {
-      // Ignore refresh errors after successful update.
-    }
-  }
-
-  const clearedMetadata: IssueMetadata = { ...update.metadata, children: [] };
   updateDraftAfterSave(
     update.ticketId,
     update.subject,
     description,
-    clearedMetadata,
+    { ...update.metadata, children: [] },
     updatedAt,
   );
 
