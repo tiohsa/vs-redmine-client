@@ -89,14 +89,16 @@ document.getElementById('search-input').addEventListener('input',function(){
   renderTickets();
 });
 
-// ── Sync state label map ───────────────────────────────────────────────────
-const SYNC_LABEL = {
-  Dirty: '未同期',
-  Queued: 'キュー済み',
-  Conflict: '競合',
-  Failed: '失敗',
-  Syncing: '同期中',
+// ── Sync state metadata ─────────────────────────────────────────────────────
+const SYNC_META = {
+  Dirty:    { label: '未同期',     badge: 'sync-dirty' },
+  Queued:   { label: 'キュー済み', badge: 'sync-queued' },
+  Conflict: { label: '競合',       badge: 'sync-conflict' },
+  Failed:   { label: '失敗',       badge: 'sync-failed' },
+  Syncing:  { label: '同期中',     badge: 'sync-syncing' },
 };
+function syncLabel(s){ return SYNC_META[s]?.label ?? s; }
+function syncBadgeClass(s){ return SYNC_META[s]?.badge ?? ''; }
 
 // ── Ticket expand/collapse state ───────────────────────────────────────────
 const expandedIds = new Set();
@@ -153,10 +155,6 @@ document.addEventListener('keydown',e=>{
 function matchesSearch(t){
   if(!searchQuery) return true;
   return t.subject.toLowerCase().includes(searchQuery) || String(t.id).includes(searchQuery);
-}
-function syncBadgeClass(s){
-  const m={Dirty:'sync-dirty',Queued:'sync-queued',Conflict:'sync-conflict',Failed:'sync-failed',Syncing:'sync-syncing'};
-  return m[s]||'';
 }
 function findTicketNode(nodes, ticketId){
   for(const node of nodes || []){
@@ -236,6 +234,40 @@ function renderQuickFilters(){
   ).join('');
   includeUnassigned.checked = !!state.settings.filters.includeUnassigned;
 }
+function buildTicketRowHtml(t){
+  const indent = t.level*14;
+  const sel = t.id===state.selectedTicketId?' selected':'';
+  const syncBadge = (t.syncState&&t.syncState!=='Synced')
+    ?'<span class="badge '+syncBadgeClass(t.syncState)+'">'+esc(syncLabel(t.syncState))+'</span>':'';
+  const statusBadge = t.statusName
+    ?'<span class="badge ticket-status">'+esc(t.statusName)+'</span>'
+    :'';
+  const hasChildren = t.children?.length > 0;
+  const isExpanded = expandedIds.has(t.id);
+  const expandBtn = hasChildren
+    ?'<button class="expand-btn" type="button" data-expand="'+t.id+'" aria-expanded="'+isExpanded+'" title="'+(isExpanded?'折りたたむ':'展開する')+'"><span class="expand-icon '+(isExpanded?'expanded':'collapsed')+'"></span></button>'
+    :'<span class="expand-placeholder"></span>';
+  const childConnector = t.level>0?'<span class="child-connector" aria-hidden="true">↳</span>':'';
+  const actionMenuItems = [
+    ['open',    'エディタで開く'],
+    ['comment', 'コメント追加'],
+    ['browser', 'ブラウザで開く'],
+    ['child',   '子チケット作成'],
+  ].map(([action, label]) =>
+    '<button type="button" role="menuitem" data-ticket-action="'+action+'" data-ticket="'+t.id+'">'+label+'</button>'
+  ).join('');
+  const actionMenu = '<span class="ticket-actions">'
+    +'<button class="ticket-action-btn" type="button" data-ticket-action-menu="'+t.id+'" aria-haspopup="menu" aria-expanded="false" aria-controls="ticket-action-menu-'+t.id+'" aria-label="チケット操作" title="チケット操作"><span class="icon-more" aria-hidden="true"></span></button>'
+    +'<span class="ticket-action-menu hidden" id="ticket-action-menu-'+t.id+'" role="menu">'+actionMenuItems+'</span></span>';
+  return '<div class="ticket-row'+(t.level>0?' child-row':'')+sel+'" data-id="'+t.id+'" style="padding-left:'+(12+indent)+'px" tabindex="0">'
+    +expandBtn
+    +childConnector
+    +'<span class="ticket-id">#'+t.id+'</span>'
+    +'<span class="ticket-subject" title="'+esc(t.subject)+'">'+esc(t.subject)+'</span>'
+    +'<span class="badges">'+statusBadge+syncBadge+'</span>'
+    +actionMenu
+    +'</div>';
+}
 function renderTickets(){
   if(!state) return;
   const list = document.getElementById('ticket-list');
@@ -258,39 +290,7 @@ function renderTickets(){
   if(!flat.length){
     list.innerHTML='<div class="state-msg">フィルター条件に一致するチケットがありません。</div>';
   } else {
-    list.innerHTML = flat.map(t=>{
-      const indent = t.level*14;
-      const sel = t.id===state.selectedTicketId?' selected':'';
-      const syncCls = syncBadgeClass(t.syncState);
-      const syncLabel = SYNC_LABEL[t.syncState] || t.syncState;
-      const syncBadge = (t.syncState&&t.syncState!=='Synced')
-        ?'<span class="badge '+syncCls+'">'+esc(syncLabel)+'</span>':'';
-      const statusBadge = t.statusName
-        ?'<span class="badge ticket-status">'+esc(t.statusName)+'</span>'
-        :'';
-      const hasChildren = t.children?.length > 0;
-      const isExpanded = expandedIds.has(t.id);
-      const expandBtn = hasChildren
-        ?'<button class="expand-btn" type="button" data-expand="'+t.id+'" aria-expanded="'+isExpanded+'" title="'+(isExpanded?'折りたたむ':'展開する')+'"><span class="expand-icon '+(isExpanded?'expanded':'collapsed')+'"></span></button>'
-        :'<span class="expand-placeholder"></span>';
-      const childConnector = t.level>0?'<span class="child-connector" aria-hidden="true">↳</span>':'';
-      const actionMenu = '<span class="ticket-actions">'
-        +'<button class="ticket-action-btn" type="button" data-ticket-action-menu="'+t.id+'" aria-haspopup="menu" aria-expanded="false" aria-controls="ticket-action-menu-'+t.id+'" aria-label="チケット操作" title="チケット操作"><span class="icon-more" aria-hidden="true"></span></button>'
-        +'<span class="ticket-action-menu hidden" id="ticket-action-menu-'+t.id+'" role="menu">'
-        +'<button type="button" role="menuitem" data-ticket-action="open" data-ticket="'+t.id+'">エディタで開く</button>'
-        +'<button type="button" role="menuitem" data-ticket-action="comment" data-ticket="'+t.id+'">コメント追加</button>'
-        +'<button type="button" role="menuitem" data-ticket-action="browser" data-ticket="'+t.id+'">ブラウザで開く</button>'
-        +'<button type="button" role="menuitem" data-ticket-action="child" data-ticket="'+t.id+'">子チケット作成</button>'
-        +'</span></span>';
-      return '<div class="ticket-row'+(t.level>0?' child-row':'')+sel+'" data-id="'+t.id+'" style="padding-left:'+(12+indent)+'px" tabindex="0">'
-        +expandBtn
-        +childConnector
-        +'<span class="ticket-id">#'+t.id+'</span>'
-        +'<span class="ticket-subject" title="'+esc(t.subject)+'">'+esc(t.subject)+'</span>'
-        +'<span class="badges">'+statusBadge+syncBadge+'</span>'
-        +actionMenu
-        +'</div>';
-    }).join('');
+    list.innerHTML = flat.map(buildTicketRowHtml).join('');
     list.querySelectorAll('.ticket-row').forEach(row=>{
       row.addEventListener('click',e=>{
         if(isTicketActionTarget(e.target)) return;
@@ -567,16 +567,15 @@ function renderUnsynced(){
   list.querySelectorAll('[data-uri]').forEach(btn=>{
     btn.addEventListener('click',()=>req('unsynced.openLocalFile',{documentUri:btn.dataset.uri}));
   });
-  list.querySelectorAll('[data-discard-key]').forEach(btn=>{
-    btn.addEventListener('click',()=>{
-      try{ req('unsynced.discardOne',{key:JSON.parse(btn.dataset.discardKey)}); }catch{}
+  const bindUnsyncedKeyAction = (attr, type) => {
+    list.querySelectorAll('['+attr+']').forEach(btn=>{
+      btn.addEventListener('click',()=>{
+        try{ req(type,{key:JSON.parse(btn.getAttribute(attr))}); }catch{}
+      });
     });
-  });
-  list.querySelectorAll('[data-sync-key]').forEach(btn=>{
-    btn.addEventListener('click',()=>{
-      try{ req('unsynced.syncOne',{key:JSON.parse(btn.dataset.syncKey)}); }catch{}
-    });
-  });
+  };
+  bindUnsyncedKeyAction('data-discard-key', 'unsynced.discardOne');
+  bindUnsyncedKeyAction('data-sync-key',    'unsynced.syncOne');
   updateSyncButtonStates();
 }
 
@@ -630,6 +629,30 @@ function renderComments(){
 }
 
 // ── Settings ────────────────────────────────────────────────────────────────
+const SORT_FIELD_OPTIONS = [
+  ['',         'デフォルト'],
+  ['priority', '優先度'],
+  ['status',   'ステータス'],
+  ['tracker',  'トラッカー'],
+  ['assignee', '担当者'],
+];
+const DUE_DATE_TOGGLES = [
+  ['set-dd-overdue', 'showOverdue',     '期限超過'],
+  ['set-dd-1d',      'showWithin1Day',  '1日以内'],
+  ['set-dd-3d',      'showWithin3Days', '3日以内'],
+  ['set-dd-7d',      'showWithin7Days', '7日以内'],
+];
+function buildSelectOptionsHtml(options, currentValue){
+  return options.map(([value, label]) => {
+    const selected = value === currentValue || (!value && !currentValue) ? ' selected' : '';
+    return '<option value="'+esc(value)+'"'+selected+'>'+esc(label)+'</option>';
+  }).join('');
+}
+function buildDueDateTogglesHtml(rule){
+  return DUE_DATE_TOGGLES.map(([id, key, label]) =>
+    '<div class="setting-row"><span class="setting-label">'+label+'</span><input type="checkbox" id="'+id+'"'+(rule[key]?' checked':'')+' class="setting-check"></div>'
+  ).join('');
+}
 function renderSettings(){
   if(!state) return;
   const s=state.settings;
@@ -646,31 +669,16 @@ function renderSettings(){
     +'</div>'
     +'<div class="settings-section"><h3>並び替え</h3>'
     +'<div class="setting-row"><span class="setting-label">並び替えフィールド</span>'
-    +'<select class="setting-select" id="set-sort-field">'
-    +'<option value=""'+(s.sort.field?'':' selected')+'>デフォルト</option>'
-    +'<option value="priority"'+(s.sort.field==="priority"?' selected':'')+'>優先度</option>'
-    +'<option value="status"'+(s.sort.field==="status"?' selected':'')+'>ステータス</option>'
-    +'<option value="tracker"'+(s.sort.field==="tracker"?' selected':'')+'>トラッカー</option>'
-    +'<option value="assignee"'+(s.sort.field==="assignee"?' selected':'')+'>担当者</option>'
-    +'</select></div>'
+    +'<select class="setting-select" id="set-sort-field">'+buildSelectOptionsHtml(SORT_FIELD_OPTIONS, s.sort.field || '')+'</select></div>'
     +'<div class="setting-row"><span class="setting-label">並び順</span>'
-    +'<select class="setting-select" id="set-sort-dir">'
-    +'<option value="asc"'+(s.sort.direction==="asc"?' selected':'')+'>昇順</option>'
-    +'<option value="desc"'+(s.sort.direction==="desc"?' selected':'')+'>降順</option>'
-    +'</select></div>'
+    +'<select class="setting-select" id="set-sort-dir">'+buildSelectOptionsHtml([['asc','昇順'],['desc','降順']], s.sort.direction)+'</select></div>'
     +'</div>'
     +'<div class="settings-section"><h3>期日インジケーター</h3>'
-    +'<div class="setting-row"><span class="setting-label">期限超過</span><input type="checkbox" id="set-dd-overdue"'+(s.dueDate.showOverdue?' checked':'')+' class="setting-check"></div>'
-    +'<div class="setting-row"><span class="setting-label">1日以内</span><input type="checkbox" id="set-dd-1d"'+(s.dueDate.showWithin1Day?' checked':'')+' class="setting-check"></div>'
-    +'<div class="setting-row"><span class="setting-label">3日以内</span><input type="checkbox" id="set-dd-3d"'+(s.dueDate.showWithin3Days?' checked':'')+' class="setting-check"></div>'
-    +'<div class="setting-row"><span class="setting-label">7日以内</span><input type="checkbox" id="set-dd-7d"'+(s.dueDate.showWithin7Days?' checked':'')+' class="setting-check"></div>'
+    +buildDueDateTogglesHtml(s.dueDate)
     +'</div>'
     +'<div class="settings-section"><h3>同期</h3>'
     +'<div class="setting-row"><span class="setting-label">オフライン同期モード</span>'
-    +'<select class="setting-select" id="set-sync-mode">'
-    +'<option value="auto"'+(s.offlineSyncMode==="auto"?' selected':'')+'>自動</option>'
-    +'<option value="manual"'+(s.offlineSyncMode==="manual"?' selected':'')+'>手動</option>'
-    +'</select></div>'
+    +'<select class="setting-select" id="set-sync-mode">'+buildSelectOptionsHtml([['auto','自動'],['manual','手動']], s.offlineSyncMode)+'</select></div>'
     +'</div>'
     +'<div class="settings-section"><h3>一般</h3>'
     +'<div class="setting-row"><span class="setting-label">チケット取得件数</span>'
@@ -687,14 +695,10 @@ function renderSettings(){
   const sortDirEl=document.getElementById('set-sort-dir');
   sortDirEl.addEventListener('change',()=>applyTicketListPatch({sort:{field:s.sort.field,direction:sortDirEl.value}}));
 
-  const ddOverdue=document.getElementById('set-dd-overdue');
-  ddOverdue.addEventListener('change',()=>applyTicketListPatch({dueDate:{...s.dueDate,showOverdue:ddOverdue.checked}}));
-  const dd1d=document.getElementById('set-dd-1d');
-  dd1d.addEventListener('change',()=>applyTicketListPatch({dueDate:{...s.dueDate,showWithin1Day:dd1d.checked}}));
-  const dd3d=document.getElementById('set-dd-3d');
-  dd3d.addEventListener('change',()=>applyTicketListPatch({dueDate:{...s.dueDate,showWithin3Days:dd3d.checked}}));
-  const dd7d=document.getElementById('set-dd-7d');
-  dd7d.addEventListener('change',()=>applyTicketListPatch({dueDate:{...s.dueDate,showWithin7Days:dd7d.checked}}));
+  DUE_DATE_TOGGLES.forEach(([id, key]) => {
+    const checkbox=document.getElementById(id);
+    checkbox.addEventListener('change',()=>applyTicketListPatch({dueDate:{...s.dueDate,[key]:checkbox.checked}}));
+  });
 
   const syncModeEl=document.getElementById('set-sync-mode');
   syncModeEl.addEventListener('change',()=>req('settings.updateGeneral',{patch:{offlineSyncMode:syncModeEl.value}}));

@@ -133,6 +133,56 @@ const isDashboardUnsyncedKey = (value: unknown): value is DashboardUnsyncedKey =
   return candidate.kind === "ticket" || candidate.kind === "newTicket" || candidate.kind === "comment";
 };
 
+const registerStubMessage = (
+  commandId: string,
+  message: string,
+): vscode.Disposable =>
+  vscode.commands.registerCommand(commandId, () => {
+    vscode.window.showErrorMessage(message);
+  });
+
+const openEditorForUri = async (uriStr: string): Promise<vscode.TextEditor> => {
+  const document = await vscode.workspace.openTextDocument(vscode.Uri.parse(uriStr));
+  return (
+    vscode.window.visibleTextEditors.find((e: vscode.TextEditor) => e.document === document) ??
+    (await vscode.window.showTextDocument(document, { preview: false }))
+  );
+};
+
+const requireSelectedTicket = (
+  state: DashboardState,
+  errorMessage: string,
+): Ticket | undefined => {
+  const selected = toSelectedTicket(state);
+  if (!selected) {
+    vscode.window.showErrorMessage(errorMessage);
+    return undefined;
+  }
+  return selected;
+};
+
+const SETTINGS_FILTER_STUB_MESSAGE =
+  "Dashboard の Settings タブでフィルタを設定してください。";
+const SETTINGS_FILTER_STUB_COMMANDS: ReadonlyArray<readonly [string, string]> = [
+  [TICKET_SETTINGS_COMMANDS.titleFilter, SETTINGS_FILTER_STUB_MESSAGE],
+  [TICKET_SETTINGS_COMMANDS.priorityFilter, SETTINGS_FILTER_STUB_MESSAGE],
+  [TICKET_SETTINGS_COMMANDS.statusFilter, SETTINGS_FILTER_STUB_MESSAGE],
+  [TICKET_SETTINGS_COMMANDS.trackerFilter, SETTINGS_FILTER_STUB_MESSAGE],
+  [TICKET_SETTINGS_COMMANDS.assigneeFilter, SETTINGS_FILTER_STUB_MESSAGE],
+  [TICKET_SETTINGS_COMMANDS.sort, "Dashboard の Settings タブで並び順を設定してください。"],
+  [TICKET_SETTINGS_COMMANDS.dueDate, "Dashboard の Settings タブで期限表示を設定してください。"],
+  [TICKET_SETTINGS_COMMANDS.reset, "Dashboard の Settings タブから設定をリセットしてください。"],
+];
+
+const EDITOR_DEFAULT_FIELD_COMMANDS: ReadonlyArray<readonly [string, "subject" | "description" | "tracker" | "priority" | "status" | "due_date"]> = [
+  [EDITOR_DEFAULT_COMMANDS.subject, "subject"],
+  [EDITOR_DEFAULT_COMMANDS.description, "description"],
+  [EDITOR_DEFAULT_COMMANDS.tracker, "tracker"],
+  [EDITOR_DEFAULT_COMMANDS.priority, "priority"],
+  [EDITOR_DEFAULT_COMMANDS.status, "status"],
+  [EDITOR_DEFAULT_COMMANDS.dueDate, "due_date"],
+];
+
 export const registerCommands = (
   context: vscode.ExtensionContext,
   deps: CommandDeps,
@@ -158,9 +208,10 @@ export const registerCommands = (
     vscode.commands.registerCommand("redmine-client.refreshComments", () =>
       commentsPresentation.refresh(),
     ),
-    vscode.commands.registerCommand("redmine-client.loadMoreTickets", async () => {
-      vscode.window.showErrorMessage("Dashboard の「もっと読み込む」を使用してください。");
-    }),
+    registerStubMessage(
+      "redmine-client.loadMoreTickets",
+      "Dashboard の「もっと読み込む」を使用してください。",
+    ),
   );
 
   context.subscriptions.push(
@@ -203,10 +254,7 @@ export const registerCommands = (
         return undefined;
       }
 
-      const document = await vscode.workspace.openTextDocument(vscode.Uri.parse(fallbackRecord.uri));
-      const editor =
-        vscode.window.visibleTextEditors.find((e: vscode.TextEditor) => e.document === document) ??
-        (await vscode.window.showTextDocument(document, { preview: false }));
+      const editor = await openEditorForUri(fallbackRecord.uri);
       return sync.syncEditorAndNotify(editor);
     }),
     vscode.commands.registerCommand(
@@ -216,10 +264,7 @@ export const registerCommands = (
         if (!uriStr) {
           return undefined;
         }
-        const document = await vscode.workspace.openTextDocument(vscode.Uri.parse(uriStr));
-        const editor =
-          vscode.window.visibleTextEditors.find((e: vscode.TextEditor) => e.document === document) ??
-          (await vscode.window.showTextDocument(document, { preview: false }));
+        const editor = await openEditorForUri(uriStr);
         return sync.syncEditorAndNotify(editor);
       },
     ),
@@ -241,10 +286,7 @@ export const registerCommands = (
       };
       for (const record of records) {
         try {
-          const document = await vscode.workspace.openTextDocument(vscode.Uri.parse(record.uri));
-          const editor =
-            vscode.window.visibleTextEditors.find((e: vscode.TextEditor) => e.document === document) ??
-            (await vscode.window.showTextDocument(document, { preview: false }));
+          const editor = await openEditorForUri(record.uri);
           const status = await sync.syncEditorAndNotify(editor);
           counts[status]++;
         } catch {
@@ -262,9 +304,10 @@ export const registerCommands = (
   );
 
   context.subscriptions.push(
-    vscode.commands.registerCommand("redmine-client.searchTickets", async () => {
-      vscode.window.showErrorMessage("Dashboard からチケットを検索・選択してください。");
-    }),
+    registerStubMessage(
+      "redmine-client.searchTickets",
+      "Dashboard からチケットを検索・選択してください。",
+    ),
     vscode.commands.registerCommand("redmine-client.focusTicketEditor", async (input: unknown) => {
       const payload = input as { ticketId?: number; uri?: string } | number | undefined;
       const ticketId = typeof payload === "number" ? payload : payload?.ticketId;
@@ -293,9 +336,10 @@ export const registerCommands = (
     vscode.commands.registerCommand("redmine-client.reloadTicket", async () => {
       await reloadTicketFromEditor();
     }),
-    vscode.commands.registerCommand("redmine-client.toggleRelevantTickets", () => {
-      vscode.window.showErrorMessage("Dashboard のフィルタ設定を使用してください。");
-    }),
+    registerStubMessage(
+      "redmine-client.toggleRelevantTickets",
+      "Dashboard のフィルタ設定を使用してください。",
+    ),
     vscode.commands.registerCommand("redmine-client.createTicket", async () => {
       await createTicketFromEditor();
     }),
@@ -303,11 +347,8 @@ export const registerCommands = (
       await createTicketFromList();
     }),
     vscode.commands.registerCommand("redmine-client.createChildTicketFromList", async () => {
-      const selected = toSelectedTicket(getState());
-      if (!selected) {
-        vscode.window.showErrorMessage("Dashboard から親チケットを選択してください。");
-        return;
-      }
+      const selected = requireSelectedTicket(getState(), "Dashboard から親チケットを選択してください。");
+      if (!selected) { return; }
       await createChildTicketFromList(selected);
     }),
   );
@@ -352,9 +393,10 @@ export const registerCommands = (
       }
       await editComment(comment);
     }),
-    vscode.commands.registerCommand("redmine-client.addComment", async () => {
-      vscode.window.showErrorMessage("Dashboard からチケットを選択してコメントを追加してください。");
-    }),
+    registerStubMessage(
+      "redmine-client.addComment",
+      "Dashboard からチケットを選択してコメントを追加してください。",
+    ),
     vscode.commands.registerCommand("redmine-client.addCommentFromComments", async () => {
       const ticketId = getState().selectedTicketId;
       await addCommentFromList(ticketId);
@@ -363,20 +405,14 @@ export const registerCommands = (
 
   context.subscriptions.push(
     vscode.commands.registerCommand("redmine-client.openTicketPreview", async () => {
-      const selected = toSelectedTicket(getState());
-      if (!selected) {
-        vscode.window.showErrorMessage("Dashboard からチケットを選択してください。");
-        return;
-      }
+      const selected = requireSelectedTicket(getState(), "Dashboard からチケットを選択してください。");
+      if (!selected) { return; }
       await showTicketPreview(selected);
       commentsPresentation.refreshForTicket(selected.id);
     }),
     vscode.commands.registerCommand("redmine-client.openExtraTicketEditor", async () => {
-      const selected = toSelectedTicket(getState());
-      if (!selected) {
-        vscode.window.showErrorMessage("Dashboard からチケットを選択してください。");
-        return;
-      }
+      const selected = requireSelectedTicket(getState(), "Dashboard からチケットを選択してください。");
+      if (!selected) { return; }
       await showTicketPreview(selected, { kind: "extra" });
       commentsPresentation.refreshForTicket(selected.id);
     }),
@@ -393,11 +429,8 @@ export const registerCommands = (
       await openProjectInBrowser({ project });
     }),
     vscode.commands.registerCommand("redmine-client.openTicketInBrowser", async () => {
-      const selected = toSelectedTicket(getState());
-      if (!selected) {
-        vscode.window.showErrorMessage("Dashboard でチケットを選択してください。");
-        return;
-      }
+      const selected = requireSelectedTicket(getState(), "Dashboard でチケットを選択してください。");
+      if (!selected) { return; }
       await openTicketInBrowser({ ticket: selected });
     }),
     vscode.commands.registerCommand("redmine-client.openCommentInBrowser", async () => {
@@ -411,61 +444,20 @@ export const registerCommands = (
   );
 
   context.subscriptions.push(
-    vscode.commands.registerCommand(TICKET_SETTINGS_COMMANDS.titleFilter, async () => {
-      vscode.window.showErrorMessage("Dashboard の Settings タブでフィルタを設定してください。");
-    }),
-    vscode.commands.registerCommand(TICKET_SETTINGS_COMMANDS.priorityFilter, async () => {
-      vscode.window.showErrorMessage("Dashboard の Settings タブでフィルタを設定してください。");
-    }),
-    vscode.commands.registerCommand(TICKET_SETTINGS_COMMANDS.statusFilter, async () => {
-      vscode.window.showErrorMessage("Dashboard の Settings タブでフィルタを設定してください。");
-    }),
-    vscode.commands.registerCommand(TICKET_SETTINGS_COMMANDS.trackerFilter, async () => {
-      vscode.window.showErrorMessage("Dashboard の Settings タブでフィルタを設定してください。");
-    }),
-    vscode.commands.registerCommand(TICKET_SETTINGS_COMMANDS.assigneeFilter, async () => {
-      vscode.window.showErrorMessage("Dashboard の Settings タブでフィルタを設定してください。");
-    }),
-    vscode.commands.registerCommand(TICKET_SETTINGS_COMMANDS.sort, async () => {
-      vscode.window.showErrorMessage("Dashboard の Settings タブで並び順を設定してください。");
-    }),
-    vscode.commands.registerCommand(TICKET_SETTINGS_COMMANDS.dueDate, async () => {
-      vscode.window.showErrorMessage("Dashboard の Settings タブで期限表示を設定してください。");
-    }),
+    ...SETTINGS_FILTER_STUB_COMMANDS.map(([id, message]) => registerStubMessage(id, message)),
     vscode.commands.registerCommand(TICKET_SETTINGS_COMMANDS.offlineSyncMode, async () => {
       await configureOfflineSyncMode();
       settingsPresentation.refresh();
     }),
-    vscode.commands.registerCommand(TICKET_SETTINGS_COMMANDS.reset, () => {
-      vscode.window.showErrorMessage("Dashboard の Settings タブから設定をリセットしてください。");
-    }),
   );
 
   context.subscriptions.push(
-    vscode.commands.registerCommand(EDITOR_DEFAULT_COMMANDS.subject, async () => {
-      await configureEditorDefaultField("subject");
-      settingsPresentation.refresh();
-    }),
-    vscode.commands.registerCommand(EDITOR_DEFAULT_COMMANDS.description, async () => {
-      await configureEditorDefaultField("description");
-      settingsPresentation.refresh();
-    }),
-    vscode.commands.registerCommand(EDITOR_DEFAULT_COMMANDS.tracker, async () => {
-      await configureEditorDefaultField("tracker");
-      settingsPresentation.refresh();
-    }),
-    vscode.commands.registerCommand(EDITOR_DEFAULT_COMMANDS.priority, async () => {
-      await configureEditorDefaultField("priority");
-      settingsPresentation.refresh();
-    }),
-    vscode.commands.registerCommand(EDITOR_DEFAULT_COMMANDS.status, async () => {
-      await configureEditorDefaultField("status");
-      settingsPresentation.refresh();
-    }),
-    vscode.commands.registerCommand(EDITOR_DEFAULT_COMMANDS.dueDate, async () => {
-      await configureEditorDefaultField("due_date");
-      settingsPresentation.refresh();
-    }),
+    ...EDITOR_DEFAULT_FIELD_COMMANDS.map(([id, field]) =>
+      vscode.commands.registerCommand(id, async () => {
+        await configureEditorDefaultField(field);
+        settingsPresentation.refresh();
+      }),
+    ),
     vscode.commands.registerCommand(EDITOR_DEFAULT_COMMANDS.reset, async () => {
       await resetEditorDefaults();
       settingsPresentation.refresh();

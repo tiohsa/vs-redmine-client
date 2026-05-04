@@ -3,13 +3,12 @@ import { addComment, updateComment } from "../redmine/comments";
 import { getIssueDetail, updateIssue } from "../redmine/issues";
 import { computeNotesHash } from "../utils/notesHash";
 import { getCurrentUserId } from "../redmine/users";
-import { Comment } from "../redmine/types";
+import { Comment, UploadToken } from "../redmine/types";
 import { validateComment } from "../utils/commentValidation";
 import { uploadFileAttachment } from "../redmine/attachments";
 import {
   buildMarkdownImageUploadFailureMessage,
   hasMarkdownImageUploadFailure,
-  MarkdownImageUploadSummary,
   processMarkdownImageUploads,
 } from "../utils/markdownImageUpload";
 import { resolveEditorBaseDir } from "../utils/editorBaseDir";
@@ -27,7 +26,7 @@ import {
 import { ensureCommentEdit, getCommentEdit, updateCommentEdit } from "./commentEditStore";
 import { CommentSaveResult } from "./commentSaveTypes";
 import { applyEditorContent } from "./ticketPreview";
-import { UploadSummary } from "./saveUploadTypes";
+import { resolveUploadSummary } from "./ticketSync/ticketImageUploadSync";
 import { getOfflineSyncMode } from "../config/settings";
 import { addOfflineCommentUpdate, OfflineCommentUpdate } from "./offlineSyncStore";
 import { setCommentDraft } from "./commentDraftStore";
@@ -69,11 +68,6 @@ const buildResult = (
   message,
   ...extras,
 });
-
-const resolveUploadSummary = (
-  summary: MarkdownImageUploadSummary,
-): UploadSummary | undefined =>
-  summary.permissionDenied || summary.failures.length > 0 ? summary : undefined;
 
 export const shouldRefreshComments = (status: CommentSaveResult["status"]): boolean =>
   status === "created" || status === "created_unresolved" || status === "success";
@@ -132,6 +126,138 @@ const buildUnresolvedResult = (
   message: string,
   extras: Partial<CommentSaveResult> = {},
 ): CommentSaveResult => buildResult("created_unresolved", message, extras);
+
+type ProcessedCommentContent =
+  | {
+      ok: true;
+      content: string;
+      uploads: UploadToken[];
+      uploadSummary: ReturnType<typeof resolveUploadSummary>;
+    }
+  | { ok: false; failure: CommentSaveResult };
+
+const processCommentContent = async (input: {
+  content: string;
+  baseDir?: string;
+  deps: CommentSaveDependencies;
+}): Promise<ProcessedCommentContent> => {
+  const uploadResult = await processMarkdownImageUploads({
+    content: input.content,
+    baseDir: input.baseDir,
+    uploadFile: input.deps.uploadFile,
+  });
+  const uploadSummary = resolveUploadSummary(uploadResult.summary);
+  if (hasMarkdownImageUploadFailure(uploadResult.summary)) {
+    return {
+      ok: false,
+      failure: buildResult(
+        "failed",
+        buildMarkdownImageUploadFailureMessage(uploadResult.summary),
+        { uploadSummary },
+      ),
+    };
+  }
+  const nextContent = uploadResult.content;
+  const validation = validateComment(nextContent);
+  if (!validation.valid) {
+    return { ok: false, failure: buildResult("failed", validation.message ?? "Invalid comment.") };
+  }
+  return { ok: true, content: nextContent, uploads: uploadResult.uploads, uploadSummary };
+};
+
+const buildConflictResult = (input: {
+  message: string;
+  commentId: number;
+  ticketId: number;
+  localBody: string;
+  remoteComment: Comment;
+}): CommentSaveResult =>
+  buildResult("conflict", input.message, {
+    conflictContext: {
+      commentId: input.commentId,
+      ticketId: input.ticketId,
+      localBody: input.localBody,
+      remoteBody: input.remoteComment.body,
+      remoteUpdatedAt: input.remoteComment.updatedAt,
+    },
+  });
+
+const detectUpdatedAtConflict = async (input: {
+  deps: CommentSaveDependencies;
+  commentId: number;
+  ticketId: number;
+  lastKnownRemoteUpdatedAt: string;
+  localBody: string;
+}): Promise<CommentSaveResult | undefined> => {
+  try {
+    const detail = await input.deps.getIssueDetail(input.ticketId);
+    const remoteComment = detail.comments.find((c) => c.id === input.commentId);
+    if (remoteComment && remoteComment.updatedAt !== input.lastKnownRemoteUpdatedAt) {
+      return buildConflictResult({
+        message: "Remote changes detected. Refresh before saving.",
+        commentId: input.commentId,
+        ticketId: input.ticketId,
+        localBody: input.localBody,
+        remoteComment,
+      });
+    }
+  } catch {
+    // Fetch failure is non-fatal here — fall through to save attempt.
+  }
+  return undefined;
+};
+
+const enrichConflictWithRemote = async (input: {
+  deps: CommentSaveDependencies;
+  result: CommentSaveResult;
+  commentId: number;
+  ticketId: number;
+  localBody: string;
+}): Promise<CommentSaveResult> => {
+  if (input.result.status !== "conflict") {
+    return input.result;
+  }
+  try {
+    const detail = await input.deps.getIssueDetail(input.ticketId);
+    const remoteComment = detail.comments.find((c) => c.id === input.commentId);
+    if (remoteComment) {
+      return buildConflictResult({
+        message: input.result.message,
+        commentId: input.commentId,
+        ticketId: input.ticketId,
+        localBody: input.localBody,
+        remoteComment,
+      });
+    }
+  } catch {
+    // Ignore enrichment failure; return original conflict result.
+  }
+  return input.result;
+};
+
+const fetchPersistedCommentInfo = async (
+  deps: CommentSaveDependencies,
+  ticketId: number,
+  nextContent: string,
+): Promise<{ ok: true; commentId: number; projectId: number } | { ok: false; message: string }> => {
+  let currentUserId: number | undefined;
+  try {
+    currentUserId = await deps.getCurrentUserId();
+  } catch {
+    currentUserId = undefined;
+  }
+  try {
+    const detail = await deps.getIssueDetail(ticketId);
+    const commentId = resolveCreatedCommentId(detail.comments, nextContent, currentUserId);
+    if (!commentId) {
+      return { ok: false, message: "Comment added, but the comment ID could not be resolved." };
+    }
+    return { ok: true, commentId, projectId: detail.ticket.projectId };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Failed to resolve comment ID.";
+    return { ok: false, message: `Comment added, but ${message}` };
+  }
+};
 
 export const finalizeNewCommentDraftState = (input: {
   editor: vscode.TextEditor;
@@ -199,87 +325,40 @@ export const syncCommentDraft = async (input: {
   }
 
   const baseDir = resolveEditorBaseDir({ editor: input.editor, documentUri: input.documentUri });
-  const uploadResult = await processMarkdownImageUploads({
-    content: input.content,
-    baseDir,
-    uploadFile: deps.uploadFile,
-  });
-  const uploadSummary = resolveUploadSummary(uploadResult.summary);
-  if (hasMarkdownImageUploadFailure(uploadResult.summary)) {
-    return buildResult(
-      "failed",
-      buildMarkdownImageUploadFailureMessage(uploadResult.summary),
-      { uploadSummary },
-    );
-  }
-  const nextContent = uploadResult.content;
-
-  const validation = validateComment(nextContent);
-  if (!validation.valid) {
-    return buildResult("failed", validation.message ?? "Invalid comment.");
-  }
+  const processed = await processCommentContent({ content: input.content, baseDir, deps });
+  if (!processed.ok) { return processed.failure; }
+  const { content: nextContent, uploads, uploadSummary } = processed;
 
   if (nextContent === edit.baseBody) {
     return buildResult("no_change", "No changes to save.", { uploadSummary });
   }
 
-  // Pre-save conflict detection: check if remote was updated since we loaded
   if (edit.lastKnownRemoteUpdatedAt) {
-    try {
-      const detail = await deps.getIssueDetail(edit.ticketId);
-      const remoteComment = detail.comments.find((c) => c.id === input.commentId);
-      if (remoteComment && remoteComment.updatedAt !== edit.lastKnownRemoteUpdatedAt) {
-        return buildResult("conflict", "Remote changes detected. Refresh before saving.", {
-          conflictContext: {
-            commentId: input.commentId,
-            ticketId: edit.ticketId,
-            localBody: nextContent,
-            remoteBody: remoteComment.body,
-            remoteUpdatedAt: remoteComment.updatedAt,
-          },
-        });
-      }
-    } catch {
-      // If we can't fetch remote, continue with save attempt
-    }
+    const conflict = await detectUpdatedAtConflict({
+      deps,
+      commentId: input.commentId,
+      ticketId: edit.ticketId,
+      lastKnownRemoteUpdatedAt: edit.lastKnownRemoteUpdatedAt,
+      localBody: nextContent,
+    });
+    if (conflict) { return conflict; }
   }
 
   try {
     // Redmine's journal update API doesn't support uploads.
-    // We need to attach files to the issue first, then update the journal.
-    if (uploadResult.uploads.length > 0) {
-      await deps.updateIssue({
-        issueId: edit.ticketId,
-        fields: { uploads: uploadResult.uploads },
-      });
+    // Attach files to the issue first, then update the journal.
+    if (uploads.length > 0) {
+      await deps.updateIssue({ issueId: edit.ticketId, fields: { uploads } });
     }
-    await deps.updateComment(
-      input.commentId,
-      nextContent,
-    );
+    await deps.updateComment(input.commentId, nextContent);
   } catch (error) {
-    const result = mapErrorToResult(error);
-    // If conflict, try to fetch the remote comment for diff display
-    if (result.status === "conflict") {
-      try {
-        const detail = await deps.getIssueDetail(edit.ticketId);
-        const remoteComment = detail.comments.find((c) => c.id === input.commentId);
-        if (remoteComment) {
-          return buildResult("conflict", result.message, {
-            conflictContext: {
-              commentId: input.commentId,
-              ticketId: edit.ticketId,
-              localBody: nextContent,
-              remoteBody: remoteComment.body,
-              remoteUpdatedAt: remoteComment.updatedAt,
-            },
-          });
-        }
-      } catch {
-        // Ignore fetch error, return original conflict result
-      }
-    }
-    return result;
+    return enrichConflictWithRemote({
+      deps,
+      result: mapErrorToResult(error),
+      commentId: input.commentId,
+      ticketId: edit.ticketId,
+      localBody: nextContent,
+    });
   }
 
   updateCommentEdit(input.commentId, nextContent);
@@ -316,79 +395,38 @@ export const syncNewCommentDraft = async (input: {
   }
   const deps = { ...defaultDeps, ...input.deps };
   const baseDir = resolveEditorBaseDir({ editor: input.editor, documentUri: input.documentUri });
-  const uploadResult = await processMarkdownImageUploads({
-    content: input.content,
-    baseDir,
-    uploadFile: deps.uploadFile,
-  });
-  const uploadSummary = resolveUploadSummary(uploadResult.summary);
-  if (hasMarkdownImageUploadFailure(uploadResult.summary)) {
-    return buildResult(
-      "failed",
-      buildMarkdownImageUploadFailureMessage(uploadResult.summary),
-      { uploadSummary },
-    );
-  }
-  const nextContent = uploadResult.content;
-
-  const validation = validateComment(nextContent);
-  if (!validation.valid) {
-    return buildResult("failed", validation.message ?? "Invalid comment.");
-  }
+  const processed = await processCommentContent({ content: input.content, baseDir, deps });
+  if (!processed.ok) { return processed.failure; }
+  const { content: nextContent, uploads, uploadSummary } = processed;
 
   try {
-    await deps.addComment(
-      input.ticketId,
-      nextContent,
-      uploadResult.uploads.length > 0 ? uploadResult.uploads : undefined,
-    );
+    await deps.addComment(input.ticketId, nextContent, uploads.length > 0 ? uploads : undefined);
   } catch (error) {
     return mapErrorToResult(error);
   }
 
-  let currentUserId: number | undefined;
-  try {
-    currentUserId = await deps.getCurrentUserId();
-  } catch {
-    currentUserId = undefined;
+  const persisted = await fetchPersistedCommentInfo(deps, input.ticketId, nextContent);
+  if (!persisted.ok) {
+    return buildUnresolvedResult(persisted.message, { uploadSummary });
   }
 
-  try {
-    const detail = await deps.getIssueDetail(input.ticketId);
-    const commentId = resolveCreatedCommentId(
-      detail.comments,
-      nextContent,
-      currentUserId,
-    );
-    if (!commentId) {
-      return buildUnresolvedResult(
-        "Comment added, but the comment ID could not be resolved.",
-        { uploadSummary },
-      );
+  if (input.onCreated) {
+    try {
+      await input.onCreated({ commentId: persisted.commentId, projectId: persisted.projectId });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Rename failed.";
+      return buildUnresolvedResult(`Comment added, but ${message}`, { uploadSummary });
     }
-
-    const projectId = detail.ticket.projectId;
-    if (input.onCreated) {
-      try {
-        await input.onCreated({ commentId, projectId });
-      } catch (error) {
-        const message = error instanceof Error ? error.message : "Rename failed.";
-        return buildUnresolvedResult(`Comment added, but ${message}`, { uploadSummary });
-      }
-    }
-
-    if (input.editor && nextContent !== input.content) {
-      await applyEditorContent(input.editor, nextContent);
-    }
-    return buildResult("created", "Comment added.", {
-      commentId,
-      projectId,
-      uploadSummary,
-    });
-  } catch (error) {
-    const message = error instanceof Error ? error.message : "Failed to resolve comment ID.";
-    return buildUnresolvedResult(`Comment added, but ${message}`, { uploadSummary });
   }
+
+  if (input.editor && nextContent !== input.content) {
+    await applyEditorContent(input.editor, nextContent);
+  }
+  return buildResult("created", "Comment added.", {
+    commentId: persisted.commentId,
+    projectId: persisted.projectId,
+    uploadSummary,
+  });
 };
 
 export const saveCommentDraftLocally = (
@@ -433,148 +471,155 @@ export const handleCommentEditorSave = async (
   return saveCommentDraftLocally(editor);
 };
 
+const detectHashBasedConflict = async (input: {
+  deps: CommentSaveDependencies;
+  commentId: number;
+  ticketId: number;
+  sourceNotesHash: string;
+  localBody: string;
+}): Promise<CommentSaveResult | undefined> => {
+  try {
+    const detail = await input.deps.getIssueDetail(input.ticketId);
+    const remoteComment = detail.comments.find((c) => c.id === input.commentId);
+    if (!remoteComment) {
+      return buildResult("not_found", "対象コメントが見つかりません。Redmine側で削除または変更された可能性があります。");
+    }
+    const remoteHash = computeNotesHash(remoteComment.body);
+    if (remoteHash !== input.sourceNotesHash) {
+      return buildConflictResult({
+        message: "Redmine側でコメントが更新されています。同期前に差分を確認してください。",
+        commentId: input.commentId,
+        ticketId: input.ticketId,
+        localBody: input.localBody,
+        remoteComment,
+      });
+    }
+  } catch (err) {
+    const mapped = mapErrorToResult(err);
+    if (mapped.status === "not_found") { return mapped; }
+    // Other fetch errors are non-fatal — fall through to update attempt.
+  }
+  return undefined;
+};
+
+const mapHashBasedUpdateError = (mapped: CommentSaveResult): CommentSaveResult => {
+  if (mapped.status === "failed" && /405/.test(mapped.message)) {
+    return buildResult("failed", "このRedmine環境では、Webviewから既存コメントを直接更新できません。Redmine標準画面で編集してください。");
+  }
+  if (mapped.status === "forbidden") {
+    return buildResult("forbidden", "このコメントを編集する権限がありません。Redmineの権限設定を確認してください。");
+  }
+  if (mapped.status === "not_found") {
+    return buildResult("not_found", "対象コメントが見つかりません。Redmine側で削除または変更された可能性があります。");
+  }
+  return mapped;
+};
+
+const applyQueuedExistingComment = async (input: {
+  deps: CommentSaveDependencies;
+  update: OfflineCommentUpdate & { commentId: number };
+  nextContent: string;
+  uploads: UploadToken[];
+  uploadSummary: ReturnType<typeof resolveUploadSummary>;
+}): Promise<CommentSaveResult> => {
+  const { deps, update, nextContent, uploads, uploadSummary } = input;
+
+  if (update.baseBody && nextContent === update.baseBody) {
+    return buildResult("no_change", "No changes to save.", { uploadSummary });
+  }
+
+  if (update.sourceNotesHash) {
+    const conflict = await detectHashBasedConflict({
+      deps,
+      commentId: update.commentId,
+      ticketId: update.ticketId,
+      sourceNotesHash: update.sourceNotesHash,
+      localBody: nextContent,
+    });
+    if (conflict) { return conflict; }
+  } else if (update.lastKnownRemoteUpdatedAt) {
+    const conflict = await detectUpdatedAtConflict({
+      deps,
+      commentId: update.commentId,
+      ticketId: update.ticketId,
+      lastKnownRemoteUpdatedAt: update.lastKnownRemoteUpdatedAt,
+      localBody: nextContent,
+    });
+    if (conflict) { return conflict; }
+  }
+
+  try {
+    await deps.updateComment(
+      update.commentId,
+      nextContent,
+      uploads.length > 0 ? uploads : undefined,
+    );
+  } catch (error) {
+    const mapped = mapErrorToResult(error);
+    return update.sourceNotesHash ? mapHashBasedUpdateError(mapped) : mapped;
+  }
+
+  updateCommentEdit(update.commentId, nextContent, update.lastKnownRemoteUpdatedAt);
+  return buildResult("success", "Comment updated.", { uploadSummary });
+};
+
+const applyQueuedNewComment = async (input: {
+  deps: CommentSaveDependencies;
+  ticketId: number;
+  nextContent: string;
+  uploads: UploadToken[];
+  uploadSummary: ReturnType<typeof resolveUploadSummary>;
+}): Promise<CommentSaveResult> => {
+  const { deps, ticketId, nextContent, uploads, uploadSummary } = input;
+
+  try {
+    await deps.addComment(ticketId, nextContent, uploads.length > 0 ? uploads : undefined);
+  } catch (error) {
+    return mapErrorToResult(error);
+  }
+
+  const persisted = await fetchPersistedCommentInfo(deps, ticketId, nextContent);
+  if (!persisted.ok) {
+    return buildUnresolvedResult(persisted.message, { uploadSummary });
+  }
+  return buildResult("created", "Comment added.", {
+    commentId: persisted.commentId,
+    projectId: persisted.projectId,
+    uploadSummary,
+  });
+};
+
 export const applyQueuedCommentUpdate = async (input: {
   update: OfflineCommentUpdate;
   deps?: Partial<CommentSaveDependencies>;
 }): Promise<CommentSaveResult> => {
   const deps = { ...defaultDeps, ...input.deps };
   const update = input.update;
-  const uploadResult = await processMarkdownImageUploads({
+  const processed = await processCommentContent({
     content: update.body,
     baseDir: update.baseDir,
-    uploadFile: deps.uploadFile,
+    deps,
   });
-  const uploadSummary = resolveUploadSummary(uploadResult.summary);
-  if (hasMarkdownImageUploadFailure(uploadResult.summary)) {
-    return buildResult(
-      "failed",
-      buildMarkdownImageUploadFailureMessage(uploadResult.summary),
-      { uploadSummary },
-    );
-  }
-  const nextContent = uploadResult.content;
-
-  const validation = validateComment(nextContent);
-  if (!validation.valid) {
-    return buildResult("failed", validation.message ?? "Invalid comment.");
-  }
+  if (!processed.ok) { return processed.failure; }
+  const { content: nextContent, uploads, uploadSummary } = processed;
 
   if (update.commentId) {
-    if (update.baseBody && nextContent === update.baseBody) {
-      return buildResult("no_change", "No changes to save.", { uploadSummary });
-    }
-
-    if (update.sourceNotesHash) {
-      // hash ベースの競合検知: source_notes_hash と現在の Redmine 側 notes hash を比較する
-      try {
-        const detail = await deps.getIssueDetail(update.ticketId);
-        const remoteComment = detail.comments.find((c) => c.id === update.commentId);
-        if (!remoteComment) {
-          return buildResult("not_found", "対象コメントが見つかりません。Redmine側で削除または変更された可能性があります。");
-        }
-        const remoteHash = computeNotesHash(remoteComment.body);
-        if (remoteHash !== update.sourceNotesHash) {
-          return buildResult("conflict", "Redmine側でコメントが更新されています。同期前に差分を確認してください。", {
-            conflictContext: {
-              commentId: update.commentId,
-              ticketId: update.ticketId,
-              localBody: nextContent,
-              remoteBody: remoteComment.body,
-              remoteUpdatedAt: remoteComment.updatedAt,
-            },
-          });
-        }
-      } catch (err) {
-        const mapped = mapErrorToResult(err);
-        if (mapped.status === "not_found") { return mapped; }
-        // 取得エラーは無視して更新を試みる
-      }
-    } else if (update.lastKnownRemoteUpdatedAt) {
-      try {
-        const detail = await deps.getIssueDetail(update.ticketId);
-        const remoteComment = detail.comments.find((c) => c.id === update.commentId);
-        if (remoteComment && remoteComment.updatedAt !== update.lastKnownRemoteUpdatedAt) {
-          return buildResult("conflict", "Remote changes detected. Refresh before saving.", {
-            conflictContext: {
-              commentId: update.commentId,
-              ticketId: update.ticketId,
-              localBody: nextContent,
-              remoteBody: remoteComment.body,
-              remoteUpdatedAt: remoteComment.updatedAt,
-            },
-          });
-        }
-      } catch {
-        // Ignore fetch error, continue update attempt
-      }
-    }
-
-    try {
-      await deps.updateComment(
-        update.commentId,
-        nextContent,
-        uploadResult.uploads.length > 0 ? uploadResult.uploads : undefined,
-      );
-    } catch (error) {
-      const mapped = mapErrorToResult(error);
-      if (update.sourceNotesHash) {
-        // 405 は API 非対応として案内する
-        if (mapped.status === "failed" && /405/.test(mapped.message)) {
-          return buildResult("failed", "このRedmine環境では、Webviewから既存コメントを直接更新できません。Redmine標準画面で編集してください。");
-        }
-        if (mapped.status === "forbidden") {
-          return buildResult("forbidden", "このコメントを編集する権限がありません。Redmineの権限設定を確認してください。");
-        }
-        if (mapped.status === "not_found") {
-          return buildResult("not_found", "対象コメントが見つかりません。Redmine側で削除または変更された可能性があります。");
-        }
-      }
-      return mapped;
-    }
-
-    updateCommentEdit(update.commentId, nextContent, update.lastKnownRemoteUpdatedAt);
-    return buildResult("success", "Comment updated.", { uploadSummary });
-  }
-
-  try {
-    await deps.addComment(
-      update.ticketId,
+    return applyQueuedExistingComment({
+      deps,
+      update: { ...update, commentId: update.commentId },
       nextContent,
-      uploadResult.uploads.length > 0 ? uploadResult.uploads : undefined,
-    );
-  } catch (error) {
-    return mapErrorToResult(error);
-  }
-
-  let currentUserId: number | undefined;
-  try {
-    currentUserId = await deps.getCurrentUserId();
-  } catch {
-    currentUserId = undefined;
-  }
-
-  try {
-    const detail = await deps.getIssueDetail(update.ticketId);
-    const commentId = resolveCreatedCommentId(
-      detail.comments,
-      nextContent,
-      currentUserId,
-    );
-    if (!commentId) {
-      return buildUnresolvedResult(
-        "Comment added, but the comment ID could not be resolved.",
-        { uploadSummary },
-      );
-    }
-    return buildResult("created", "Comment added.", {
-      commentId,
-      projectId: detail.ticket.projectId,
+      uploads,
       uploadSummary,
     });
-  } catch (error) {
-    const message = error instanceof Error ? error.message : "Failed to resolve comment ID.";
-    return buildUnresolvedResult(`Comment added, but ${message}`, { uploadSummary });
   }
+
+  return applyQueuedNewComment({
+    deps,
+    ticketId: update.ticketId,
+    nextContent,
+    uploads,
+    uploadSummary,
+  });
 };
 
 export const reloadCommentEditor = async (input: {
