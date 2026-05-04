@@ -9,7 +9,6 @@ import { uploadFileAttachment } from "../redmine/attachments";
 import {
   buildMarkdownImageUploadFailureMessage,
   hasMarkdownImageUploadFailure,
-  MarkdownImageUploadSummary,
   processMarkdownImageUploads,
 } from "../utils/markdownImageUpload";
 import { resolveEditorBaseDir } from "../utils/editorBaseDir";
@@ -27,7 +26,7 @@ import {
 import { ensureCommentEdit, getCommentEdit, updateCommentEdit } from "./commentEditStore";
 import { CommentSaveResult } from "./commentSaveTypes";
 import { applyEditorContent } from "./ticketPreview";
-import { UploadSummary } from "./saveUploadTypes";
+import { resolveUploadSummary } from "./ticketSync/ticketImageUploadSync";
 import { getOfflineSyncMode } from "../config/settings";
 import { addOfflineCommentUpdate, OfflineCommentUpdate } from "./offlineSyncStore";
 import { setCommentDraft } from "./commentDraftStore";
@@ -69,11 +68,6 @@ const buildResult = (
   message,
   ...extras,
 });
-
-const resolveUploadSummary = (
-  summary: MarkdownImageUploadSummary,
-): UploadSummary | undefined =>
-  summary.permissionDenied || summary.failures.length > 0 ? summary : undefined;
 
 export const shouldRefreshComments = (status: CommentSaveResult["status"]): boolean =>
   status === "created" || status === "created_unresolved" || status === "success";

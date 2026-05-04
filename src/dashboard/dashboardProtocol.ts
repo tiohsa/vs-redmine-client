@@ -1,4 +1,9 @@
-import type { TicketListSettings } from "../views/projectListSettings";
+import type {
+  DueDateDisplayRule,
+  TicketFilterSelection,
+  TicketListSettings,
+  TicketSortPreference,
+} from "../views/projectListSettings";
 
 // ── ViewModel types ───────────────────────────────────────────────────────
 
@@ -111,21 +116,9 @@ export interface DashboardCommentItem {
 }
 
 export interface DashboardTicketSettingsViewModel {
-  filters: {
-    subjectQuery: string;
-    priorityIds: number[];
-    statusIds: number[];
-    trackerIds: number[];
-    assigneeIds: number[];
-    includeUnassigned: boolean;
-  };
-  sort: { field?: string; direction: "asc" | "desc" };
-  dueDate: {
-    showWithin7Days: boolean;
-    showWithin3Days: boolean;
-    showWithin1Day: boolean;
-    showOverdue: boolean;
-  };
+  filters: TicketFilterSelection;
+  sort: TicketSortPreference;
+  dueDate: DueDateDisplayRule;
   offlineSyncMode: "auto" | "manual";
   ticketListLimit: number;
 }

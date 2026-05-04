@@ -12,7 +12,6 @@ import { getCurrentUserId } from "../redmine/users";
 import { Ticket } from "../redmine/types";
 import { getTicketDraft } from "./ticketDraftStore";
 import { showError } from "../utils/notifications";
-import { MAX_VIEW_ITEMS } from "./viewLimits";
 import { setViewContext } from "./viewContext";
 import { createEmptyStateItem, createErrorStateItem } from "./viewState";
 import { buildTree, collectTreeNodeIds } from "./treeBuilder";
@@ -22,11 +21,9 @@ import { createCycleWarningItem } from "./treeWarnings";
 import { createSelectionIcon } from "./selectionHighlight";
 import { rememberTicketSummaries, setTicketSummary } from "./ticketSummaryStore";
 import {
-  applyTicketFilters,
-  applyTicketSort,
+  applyTicketViewPipeline,
+  buildDueIndicatorsMap,
   DEFAULT_TICKET_LIST_SETTINGS,
-  formatDueDateIndicator,
-  resolveDueDateWindow,
   TicketListSettings,
 } from "./projectListSettings";
 import {
@@ -226,20 +223,14 @@ export const buildTicketsViewItems = (
     return [createEmptyStateItem("No tickets for the selected project.")];
   }
 
-  const filteredTickets = applyTicketFilters(tickets, settings.filters);
-  const sortedTickets = applyTicketSort(filteredTickets, settings.sort);
-  const visibleTickets = sortedTickets.slice(0, MAX_VIEW_ITEMS);
+  const visibleTickets = applyTicketViewPipeline(tickets, settings);
 
   if (visibleTickets.length === 0) {
     if (itemCache) { itemCache.clear(); }
     return [createEmptyStateItem("No tickets match the current filters.")];
   }
 
-  const dueIndicators = new Map<number, string | undefined>();
-  visibleTickets.forEach((ticket) => {
-    const dueWindow = resolveDueDateWindow(ticket, settings.dueDate, now);
-    dueIndicators.set(ticket.id, formatDueDateIndicator(dueWindow));
-  });
+  const dueIndicators = buildDueIndicatorsMap(visibleTickets, settings.dueDate, now);
   const treeResult = buildTree(buildTicketTreeSources(visibleTickets));
   const warningItems = buildTicketCycleWarnings(visibleTickets, treeResult.cycleIds);
   const ticketItems = buildTicketTreeItems(
@@ -536,24 +527,14 @@ export class TicketsTreeProvider implements vscode.TreeDataProvider<vscode.TreeI
     treeResult: TreeBuildResult<Ticket>;
   } {
     const base = preFiltered ?? this.tickets;
-    const filteredTickets = applyTicketFilters(base, this.settings.filters);
-    const sortedTickets = applyTicketSort(filteredTickets, this.settings.sort);
-    const visibleTickets = sortedTickets.slice(0, MAX_VIEW_ITEMS);
+    const visibleTickets = applyTicketViewPipeline(base, this.settings);
     const treeResult = buildTree(buildTicketTreeSources(visibleTickets));
     return { visibleTickets, treeResult };
   }
 
   private buildDueIndicators(): Map<number, string | undefined> {
-    const dueIndicators = new Map<number, string | undefined>();
-    const now = new Date();
-    const filteredTickets = applyTicketFilters(this.tickets, this.settings.filters);
-    const sortedTickets = applyTicketSort(filteredTickets, this.settings.sort);
-    const visibleTickets = sortedTickets.slice(0, MAX_VIEW_ITEMS);
-    visibleTickets.forEach((ticket) => {
-      const dueWindow = resolveDueDateWindow(ticket, this.settings.dueDate, now);
-      dueIndicators.set(ticket.id, formatDueDateIndicator(dueWindow));
-    });
-    return dueIndicators;
+    const visibleTickets = applyTicketViewPipeline(this.tickets, this.settings);
+    return buildDueIndicatorsMap(visibleTickets, this.settings.dueDate, new Date());
   }
 }
 

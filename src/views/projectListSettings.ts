@@ -1,4 +1,5 @@
 import { Ticket } from "../redmine/types";
+import { MAX_VIEW_ITEMS } from "./viewLimits";
 
 export type TicketSortField = "priority" | "status" | "tracker" | "assignee";
 export type SortDirection = "asc" | "desc";
@@ -246,4 +247,27 @@ export const formatDueDateIndicator = (
     default:
       return undefined;
   }
+};
+
+export const applyTicketViewPipeline = (
+  tickets: Ticket[],
+  settings: TicketListSettings,
+  limit: number = MAX_VIEW_ITEMS,
+): Ticket[] => {
+  const filtered = applyTicketFilters(tickets, settings.filters);
+  const sorted = applyTicketSort(filtered, settings.sort);
+  return sorted.slice(0, limit);
+};
+
+export const buildDueIndicatorsMap = (
+  tickets: Ticket[],
+  rule: DueDateDisplayRule,
+  now: Date,
+): Map<number, string | undefined> => {
+  const map = new Map<number, string | undefined>();
+  tickets.forEach((ticket) => {
+    const window = resolveDueDateWindow(ticket, rule, now);
+    map.set(ticket.id, formatDueDateIndicator(window));
+  });
+  return map;
 };
