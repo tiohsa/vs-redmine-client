@@ -16,11 +16,18 @@ import {
 import { buildSettingsDashboardViewModel } from "./viewModels/settingsDashboardViewModel";
 import { DashboardStateStore } from "./DashboardStateStore";
 import type { DashboardGeneralSettingsPatch } from "./dashboardProtocol";
+import {
+  getStoredTicketListSettings,
+  setStoredTicketListSettings,
+  clearStoredTicketListSettings,
+} from "../views/ticketListSettingsStore";
 
 export class SettingsController {
-  private settings: TicketListSettings = { ...DEFAULT_TICKET_LIST_SETTINGS };
+  private settings: TicketListSettings = getStoredTicketListSettings();
 
-  constructor(private readonly store: DashboardStateStore) {}
+  constructor(private readonly store: DashboardStateStore) {
+    this.pushSettings();
+  }
 
   getSettings(): TicketListSettings {
     return this.settings;
@@ -36,11 +43,13 @@ export class SettingsController {
     if (patch.dueDate) {
       this.settings = { ...this.settings, dueDate: { ...this.settings.dueDate, ...patch.dueDate } };
     }
+    setStoredTicketListSettings(this.settings);
     this.pushSettings();
   }
 
   resetTicketList(): void {
     this.settings = { ...DEFAULT_TICKET_LIST_SETTINGS };
+    clearStoredTicketListSettings();
     this.pushSettings();
   }
 
