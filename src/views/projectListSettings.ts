@@ -126,7 +126,7 @@ export const applyTicketSort = (
   const getSortValue = (ticket: Ticket): string | number | undefined => {
     switch (sort.field) {
       case "priority":
-        return ticket.priorityName ?? ticket.priorityId;
+        return ticket.priorityId ?? ticket.priorityName;
       case "status":
         return ticket.statusName ?? ticket.statusId;
       case "tracker":
