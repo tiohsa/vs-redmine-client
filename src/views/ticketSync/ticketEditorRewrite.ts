@@ -43,6 +43,9 @@ export const rewriteNewTicketEditorToTicketMode = async (
   try {
     const doApply = input.applyContent ?? applyEditorContent;
     await doApply(input.editor, newContent);
+    if (input.editor.document.isDirty) {
+      await input.editor.document.save();
+    }
   } finally {
     releaseSaveSync(uriString);
   }

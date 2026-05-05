@@ -151,6 +151,33 @@ suite("syncNewTicketDraft – editor rewrite", () => {
     assert.strictEqual(parsed.controlFields?.project_id, 12);
   });
 
+  test("successful creation saves document when dirty after rewrite", async () => {
+    const text = buildNewTicketContent("My Ticket", "Body text");
+    let saveCallCount = 0;
+    const document = {
+      uri: vscode.Uri.parse("untitled:redmine-client-new-ticket.md"),
+      getText: () => text,
+      isDirty: true,
+      save: async () => { saveCallCount++; return true; },
+    } as unknown as vscode.TextDocument;
+    const editor = { document } as vscode.TextEditor;
+    registerNewTicketDraft(editor);
+    setEditorProjectId(editor, 12);
+
+    const captured: { content?: string } = {};
+    const result = await syncNewTicketDraft({
+      editor,
+      deps: {
+        ...defaultDeps,
+        createIssue: async () => 12345,
+      },
+      applyContent: makeCapturingApply(captured),
+    });
+
+    assert.strictEqual(result.status, "created");
+    assert.strictEqual(saveCallCount, 1, "document.save() should be called once");
+  });
+
   test("rewritten content removes issue_id: null placeholder", async () => {
     const text = buildNewTicketContent("T", "D");
     const { editor } = makeEditorStub(text);

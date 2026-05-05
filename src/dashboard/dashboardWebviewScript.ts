@@ -84,9 +84,26 @@ document.getElementById('project-select').addEventListener('change',function(){
 
 // ── Search ─────────────────────────────────────────────────────────────────
 let searchQuery = '';
-document.getElementById('search-input').addEventListener('input',function(){
-  searchQuery = this.value.toLowerCase();
+const searchInput = document.getElementById('search-input');
+const searchClearBtn = document.getElementById('search-clear-btn');
+function updateSearchClearBtn(){
+  searchClearBtn.classList.toggle('hidden', !searchInput.value);
+}
+function clearSearch(){
+  searchInput.value = '';
+  searchQuery = '';
+  updateSearchClearBtn();
   renderTickets();
+  searchInput.focus();
+}
+searchInput.addEventListener('input',function(){
+  searchQuery = this.value.toLowerCase();
+  updateSearchClearBtn();
+  renderTickets();
+});
+searchClearBtn.addEventListener('click', clearSearch);
+searchInput.addEventListener('keydown',function(e){
+  if(e.key === 'Escape' && this.value){ clearSearch(); e.preventDefault(); }
 });
 
 // ── Sync state metadata ─────────────────────────────────────────────────────
