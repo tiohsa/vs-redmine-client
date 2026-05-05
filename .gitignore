@@ -17,4 +17,8 @@ Thumbs.db
 .codex/
 .specify
 .vscode/
-
+spec-docs/
+memory/
+.venv/
+.claude/
+graphify-out/

@@ -150,9 +150,13 @@ body.vscode-high-contrast .tab.active{border-color:var(--app-border);background:
 /* ── Filter bar ───────────────────────────────────────────────── */
 #filter-bar{padding:8px 12px;border-bottom:1px solid var(--app-border);flex-shrink:0}
 #search-row{display:flex;gap:6px;align-items:center}
-#search-input{flex:1;height:28px;padding:0 12px;background:var(--vscode-input-background, var(--surface-1));color:var(--vscode-input-foreground, var(--app-text));border:1px solid var(--vscode-input-border, var(--app-card-border));border-radius:var(--mm-radius-pill);font:inherit;font-size:11px;outline:none;transition:border .15s}
+.search-box{position:relative;flex:1;display:flex;align-items:center}
+#search-input{width:100%;height:28px;padding:0 30px 0 12px;background:var(--vscode-input-background, var(--surface-1));color:var(--vscode-input-foreground, var(--app-text));border:1px solid var(--vscode-input-border, var(--app-card-border));border-radius:var(--mm-radius-pill);font:inherit;font-size:11px;outline:none;transition:border .15s}
 #search-input:focus{outline:1px solid var(--app-focus);outline-offset:1px;border-color:var(--app-focus)}
 #search-input::placeholder{color:var(--vscode-input-placeholderForeground, var(--app-text-readable-muted))}
+.search-clear-btn{position:absolute;right:6px;width:18px;height:18px;display:flex;align-items:center;justify-content:center;border:none;background:transparent;color:var(--app-text-readable-muted);border-radius:50%;cursor:pointer;font-size:13px;line-height:1;padding:0;transition:background .15s,color .15s;flex-shrink:0}
+.search-clear-btn:hover{background:var(--app-hover);color:var(--app-accent)}
+.search-clear-btn:focus-visible{outline:1px solid var(--app-focus);outline-offset:1px}
 #quick-filter-row{display:grid;grid-template-columns:auto minmax(120px,1fr) auto auto minmax(120px,1fr);gap:6px;align-items:center;margin-top:6px}
 .quick-filter-label{font-size:10px;color:var(--app-text-readable-muted);font-weight:600;white-space:nowrap}
 .quick-filter-select{min-height:60px;padding:3px 6px;background:var(--vscode-dropdown-background, var(--surface-1));color:var(--vscode-dropdown-foreground, var(--app-text));border:1px solid var(--vscode-input-border, var(--app-card-border));border-radius:var(--mm-radius-button);font:inherit;font-size:11px}

@@ -40,7 +40,10 @@ ${dashboardStyles}
   <div class="tab-panel active" id="panel-tickets" role="tabpanel">
     <div id="filter-bar">
       <div id="search-row">
-        <input id="search-input" type="text" placeholder="チケットを検索…" autocomplete="off">
+        <div class="search-box">
+          <input id="search-input" type="text" placeholder="チケットを検索…" autocomplete="off">
+          <button id="search-clear-btn" class="search-clear-btn hidden" type="button" title="検索をクリア" aria-label="検索をクリア">×</button>
+        </div>
       </div>
       <div id="filter-chips"></div>
     </div>
