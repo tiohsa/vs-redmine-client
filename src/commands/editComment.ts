@@ -46,23 +46,23 @@ export const editComment = async (
   deps: EditCommentDependencies = defaultDeps,
 ): Promise<void> => {
   if (!comment.editableByCurrentUser) {
-    deps.showError("You can only edit your own comments.");
+    deps.showError(vscode.l10n.t("You can only edit your own comments."));
     return;
   }
 
   const editor = deps.getActiveEditor();
   if (!editor) {
-    deps.showError("No active editor found.");
+    deps.showError(vscode.l10n.t("No active editor found."));
     return;
   }
 
   const ticketId = deps.getTicketIdForEditor(editor);
   if (!ticketId || ticketId !== comment.ticketId) {
-    deps.showError("Open the ticket editor before updating.");
+    deps.showError(vscode.l10n.t("Open the ticket editor before updating."));
     return;
   }
   if (deps.getEditorContentType(editor) !== "comment") {
-    deps.showError("Open the comment editor before updating.");
+    deps.showError(vscode.l10n.t("Open the comment editor before updating."));
     return;
   }
 
@@ -80,7 +80,7 @@ export const editComment = async (
   const nextContent = uploadResult.content;
   const validation = deps.validateComment(nextContent);
   if (!validation.valid) {
-    deps.showError(validation.message ?? "Invalid comment.");
+    deps.showError(validation.message ?? vscode.l10n.t("Invalid comment."));
     deps.showInfo(deps.getCommentLimitGuidance());
     return;
   }
@@ -91,7 +91,7 @@ export const editComment = async (
       nextContent,
       uploadResult.uploads.length > 0 ? uploadResult.uploads : undefined,
     );
-    deps.showInfo("Comment updated successfully.");
+    deps.showInfo(vscode.l10n.t("Comment updated successfully."));
     deps.clearCommentDraft(ticketId);
   } catch (error) {
     deps.showError((error as Error).message);

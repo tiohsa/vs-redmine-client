@@ -33,7 +33,7 @@ export async function activate(context: vscode.ExtensionContext) {
   registerConflictDiffProvider(context);
 
   if (getIgnoreSSLErrors()) {
-    showWarning("ignoreSSLErrors が有効です。本番環境では使用しないでください。");
+    showWarning(vscode.l10n.t("ignoreSSLErrors is enabled. Do not use in production."));
   }
 
   // ── ビュー登録 ───────────────────────────────────────────────────────────
@@ -88,7 +88,7 @@ export async function activate(context: vscode.ExtensionContext) {
       }
       if (event.affectsConfiguration("redmine-client.ignoreSSLErrors")) {
         if (getIgnoreSSLErrors()) {
-          showWarning("ignoreSSLErrors が有効です。本番環境では使用しないでください。");
+          showWarning(vscode.l10n.t("ignoreSSLErrors is enabled. Do not use in production."));
         }
       }
     }),

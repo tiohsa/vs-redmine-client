@@ -1,6 +1,7 @@
 import * as crypto from "crypto";
 import * as vscode from "vscode";
 import { buildDashboardHtml } from "./dashboardHtml";
+import { buildDashboardStrings } from "./dashboardI18n";
 import { DashboardController } from "./DashboardController";
 import { DashboardMessageRouter } from "./DashboardMessageRouter";
 import { DashboardStateStore } from "./DashboardStateStore";
@@ -68,7 +69,7 @@ export class DashboardWebviewProvider
     };
 
     const nonce = generateNonce();
-    webviewView.webview.html = buildDashboardHtml(nonce);
+    webviewView.webview.html = buildDashboardHtml(nonce, buildDashboardStrings());
 
     this.disposables.push(
       webviewView.webview.onDidReceiveMessage(async (raw: unknown) => {

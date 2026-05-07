@@ -7,18 +7,18 @@ import { showError, showInfo } from "../utils/notifications";
 
 const promptForSubject = async (): Promise<string | undefined> =>
   vscode.window.showInputBox({
-    prompt: "Enter ticket subject",
-    placeHolder: "Short summary",
+    prompt: vscode.l10n.t("Enter ticket subject"),
+    placeHolder: vscode.l10n.t("Short summary"),
   });
 
 const promptForAttachments = async (): Promise<IssueUploadInput[]> => {
   const choice = await vscode.window.showQuickPick(
     [
-      { label: "Attach files", value: "files" },
-      { label: "Attach clipboard image", value: "clipboard" },
-      { label: "Skip attachments", value: "skip" },
+      { label: vscode.l10n.t("Attach files"), value: "files" },
+      { label: vscode.l10n.t("Attach clipboard image"), value: "clipboard" },
+      { label: vscode.l10n.t("Skip attachments"), value: "skip" },
     ],
-    { placeHolder: "Choose attachment source" },
+    { placeHolder: vscode.l10n.t("Choose attachment source") },
   );
 
   if (!choice || choice.value === "skip") {
@@ -59,14 +59,14 @@ const promptForAttachments = async (): Promise<IssueUploadInput[]> => {
 export const createTicketFromEditor = async (): Promise<void> => {
   const editor = vscode.window.activeTextEditor;
   if (!editor) {
-    showError("No active editor found.");
+    showError(vscode.l10n.t("No active editor found."));
     return;
   }
 
   const projectIdRaw = getDefaultProjectId();
   const projectId = Number(projectIdRaw);
   if (!projectIdRaw || Number.isNaN(projectId)) {
-    showError("Set a default project ID before creating tickets.");
+    showError(vscode.l10n.t("Set a default project ID before creating tickets."));
     return;
   }
 
@@ -85,7 +85,7 @@ export const createTicketFromEditor = async (): Promise<void> => {
       description,
       uploads,
     });
-    showInfo("Ticket created successfully.");
+    showInfo(vscode.l10n.t("Ticket created successfully."));
   } catch (error) {
     showError((error as Error).message);
   }

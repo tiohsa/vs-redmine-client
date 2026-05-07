@@ -32,9 +32,9 @@ export type SyncUnsyncedFileResult =
 
 const normalizeNewTicketSyncFailureMessage = (message?: string): string => {
   if (message === "Ticket subject is required.") {
-    return "件名が未入力です。Markdownファイルの「# 」行に件名を入力して保存してから同期してください。";
+    return vscode.l10n.t("Subject is missing. Enter a subject in the Markdown heading line and sync again.");
   }
-  return message ?? "不明なエラー";
+  return message ?? vscode.l10n.t("Unknown error");
 };
 
 export const syncUnsyncedFile = async (
@@ -48,7 +48,7 @@ export const syncUnsyncedFile = async (
   if (syncKey.kind === "ticket") {
     const update = queue.tickets.get(syncKey.ticketId);
     if (!update) {
-      showWarning("対象のチケット更新がキューに見つかりません。");
+      showWarning(vscode.l10n.t("Queue entry for this ticket update not found."));
       return undefined;
     }
     const result = await applyQueuedTicketUpdate({ update });
@@ -57,13 +57,13 @@ export const syncUnsyncedFile = async (
       if (options.onSubjectUpdated && result.status === "success") {
         options.onSubjectUpdated(syncKey.ticketId, update.subject);
       }
-      showInfo("チケット更新を同期しました。");
+      showInfo(vscode.l10n.t("Ticket update synced."));
       return { status: result.status, kind: "ticket", id: syncKey.ticketId };
     } else if (result.status === "conflict") {
-      showWarning("リモートの変更と競合しています。ファイルを開いて確認してください。");
+      showWarning(vscode.l10n.t("Conflicts with remote changes detected. Open the file to review."));
       return { status: "conflict", kind: "ticket", id: syncKey.ticketId };
     } else {
-      showWarning(`同期に失敗しました: ${result.message ?? "不明なエラー"}`);
+      showWarning(vscode.l10n.t("Sync failed: {0}", result.message ?? vscode.l10n.t("Unknown error")));
       return { status: "failed", kind: "ticket", message: result.message };
     }
   }
@@ -73,7 +73,7 @@ export const syncUnsyncedFile = async (
       ? queue.newTickets.find((t) => t.documentUri === syncKey.documentUri)
       : queue.newTickets[0];
     if (!entry) {
-      showWarning("対象の新規チケットがキューに見つかりません。");
+      showWarning(vscode.l10n.t("Queue entry for this new ticket not found."));
       return undefined;
     }
 
@@ -88,7 +88,7 @@ export const syncUnsyncedFile = async (
       });
       if (result.status !== "created" || !createdId) {
         const message = normalizeNewTicketSyncFailureMessage(result.message);
-        showWarning(`同期に失敗しました: ${message}`);
+        showWarning(vscode.l10n.t("Sync failed: {0}", message));
         return { status: "failed", kind: "newTicket", message, reason: "api_error" };
       }
       resolvedId = createdId;
@@ -117,7 +117,7 @@ export const syncUnsyncedFile = async (
       if (rewriteSuccess) {
         removeOfflineNewTicket({ queueId: entry.queueId, documentUri: entry.documentUri });
         options.onTicketCreated?.();
-        showInfo("新規チケットを作成しました。");
+        showInfo(vscode.l10n.t("New ticket created."));
         return { status: "success", kind: "newTicket", id: resolvedId };
       } else {
         updateOfflineNewTicket(
@@ -125,19 +125,18 @@ export const syncUnsyncedFile = async (
           { status: "created_rewrite_failed" },
         );
         showWarning(
-          `Redmineチケットは作成済みです（#${resolvedId}）。` +
-          "ファイルの書き換えに失敗しました。再度同期するとローカルファイルの変換のみ再試行します。",
+          vscode.l10n.t("Redmine ticket created (#{0}). File rewrite failed. Retry sync to reattempt file conversion only.", resolvedId),
         );
         return {
           status: "failed",
           kind: "newTicket",
-          message: `ファイルの書き換えに失敗しました（チケット #${resolvedId} は作成済み）`,
+          message: vscode.l10n.t("File rewrite failed (ticket #{0} already created)", resolvedId),
           reason: "file_rewrite_failed",
         };
       }
     } else {
       options.onTicketCreated?.();
-      showInfo("新規チケットを作成しました。");
+      showInfo(vscode.l10n.t("New ticket created."));
       return { status: "success", kind: "newTicket", id: resolvedId };
     }
   }
@@ -147,7 +146,7 @@ export const syncUnsyncedFile = async (
       ? queue.comments.find((c) => c.commentId === syncKey.commentId)
       : queue.comments.find((c) => c.documentUri === syncKey.documentUri && c.commentId === undefined);
     if (!update) {
-      showWarning("対象のコメント更新がキューに見つかりません。");
+      showWarning(vscode.l10n.t("Queue entry for this comment update not found."));
       return undefined;
     }
     const result = await applyQueuedCommentUpdate({ update });
@@ -174,16 +173,16 @@ export const syncUnsyncedFile = async (
     }
     if (result.status === "success" || result.status === "no_change" || result.status === "created" || result.status === "created_unresolved") {
       removeOfflineCommentEntry({ commentId: syncKey.commentId, documentUri: syncKey.documentUri });
-      showInfo("コメントを同期しました。");
+      showInfo(vscode.l10n.t("Comment synced."));
       if (result.status === "no_change") {
         return { status: "no_change", kind: "comment" };
       }
       return { status: "success", kind: "comment", id: result.status === "created" ? result.commentId : undefined };
     } else if (result.status === "conflict") {
-      showWarning("リモートの変更と競合しています。ファイルを開いて確認してください。");
+      showWarning(vscode.l10n.t("Conflicts with remote changes detected. Open the file to review."));
       return { status: "conflict", kind: "comment" };
     } else {
-      showWarning(`同期に失敗しました: ${result.message ?? "不明なエラー"}`);
+      showWarning(vscode.l10n.t("Sync failed: {0}", result.message ?? vscode.l10n.t("Unknown error")));
       return { status: "failed", kind: "comment", message: result.message };
     }
   }

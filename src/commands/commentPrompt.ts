@@ -77,7 +77,7 @@ export const promptForComment = async (
     const nextContent = uploadResult.content;
     const validation = deps.validateComment(nextContent);
     if (!validation.valid) {
-      deps.showError(validation.message ?? "Invalid comment.");
+      deps.showError(validation.message ?? vscode.l10n.t("Invalid comment."));
       value = input;
       deps.setCommentDraft(options.issueId, input);
       continue;
@@ -89,7 +89,7 @@ export const promptForComment = async (
         nextContent,
         uploadResult.uploads.length > 0 ? uploadResult.uploads : undefined,
       );
-      deps.showInfo("Comment added.");
+      deps.showInfo(vscode.l10n.t("Comment added."));
       value = "";
       deps.clearCommentDraft(options.issueId);
       await options.onSuccess?.();

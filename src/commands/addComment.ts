@@ -51,17 +51,17 @@ export const addCommentForIssue = async (
 ): Promise<void> => {
   const editor = deps.getActiveEditor();
   if (!editor) {
-    deps.showError("No active editor found.");
+    deps.showError(vscode.l10n.t("No active editor found."));
     return;
   }
 
   const ticketId = deps.getTicketIdForEditor(editor);
   if (!ticketId || ticketId !== input.issueId) {
-    deps.showError("Open the ticket editor before adding a comment.");
+    deps.showError(vscode.l10n.t("Open the ticket editor before adding a comment."));
     return;
   }
   if (deps.getEditorContentType(editor) !== "comment") {
-    deps.showError("Open the comment editor before adding a comment.");
+    deps.showError(vscode.l10n.t("Open the comment editor before adding a comment."));
     return;
   }
 
@@ -79,7 +79,7 @@ export const addCommentForIssue = async (
   const nextContent = uploadResult.content;
   const validation = deps.validateComment(nextContent);
   if (!validation.valid) {
-    deps.showError(validation.message ?? "Invalid comment.");
+    deps.showError(validation.message ?? vscode.l10n.t("Invalid comment."));
     deps.showInfo(deps.getCommentLimitGuidance());
     return;
   }
@@ -90,7 +90,7 @@ export const addCommentForIssue = async (
       nextContent,
       uploadResult.uploads.length > 0 ? uploadResult.uploads : undefined,
     );
-    deps.showInfo("Comment added.");
+    deps.showInfo(vscode.l10n.t("Comment added."));
     deps.clearCommentDraft(ticketId);
     await input.onSuccess?.();
   } catch (error) {

@@ -21,28 +21,28 @@ export class UnsyncedFileTreeItem extends vscode.TreeItem {
     if (documentUri) {
       this.command = {
         command: "vscode.open",
-        title: "Open Local File",
+        title: vscode.l10n.t("Open Local File"),
         arguments: [vscode.Uri.parse(documentUri)],
       };
     }
     if (tooltip) {
       this.tooltip = tooltip;
     } else if (!documentUri) {
-      this.tooltip = "キューに登録済みですが、ローカルファイル URI が記録されていません。";
+      this.tooltip = vscode.l10n.t("Queued but no local file URI recorded.");
     }
   }
 }
 
 const buildTicketTooltip = (ticketId: number, documentUri?: string): string => {
   const subject = getTicketSummary(ticketId);
-  const parts: string[] = [`チケット: ${formatTicketLabel(ticketId)}`];
+  const parts: string[] = [vscode.l10n.t("Ticket: {0}", formatTicketLabel(ticketId))];
   if (subject) {
-    parts.push(`件名: ${subject}`);
+    parts.push(vscode.l10n.t("Subject: {0}", subject));
   }
   if (documentUri) {
     parts.push(`URI: ${documentUri}`);
   }
-  parts.push("状態: ローカル保存済み (未同期)");
+  parts.push(vscode.l10n.t("Status: Saved locally (unsynced)"));
   return parts.join("\n");
 };
 
@@ -51,14 +51,14 @@ const buildCommentTooltip = (
   commentId?: number,
   documentUri?: string,
 ): string => {
-  const parts: string[] = [`チケット: ${formatTicketLabel(ticketId)}`];
+  const parts: string[] = [vscode.l10n.t("Ticket: {0}", formatTicketLabel(ticketId))];
   if (commentId !== undefined) {
-    parts.push(`コメント ID: #${commentId}`);
+    parts.push(vscode.l10n.t("Comment ID: #{0}", commentId));
   }
   if (documentUri) {
     parts.push(`URI: ${documentUri}`);
   }
-  parts.push("状態: ローカル保存済み (未同期)");
+  parts.push(vscode.l10n.t("Status: Saved locally (unsynced)"));
   return parts.join("\n");
 };
 
@@ -133,14 +133,14 @@ export class UnsyncedFilesTreeProvider
     }
 
     for (const newTicket of queue.newTickets) {
-      const tooltipParts = ["種別: 新規チケット"];
+      const tooltipParts = [vscode.l10n.t("Type: New ticket")];
       if (newTicket.projectId !== undefined) {
-        tooltipParts.push(`プロジェクト ID: ${newTicket.projectId}`);
+        tooltipParts.push(vscode.l10n.t("Project ID: {0}", newTicket.projectId));
       }
       if (newTicket.documentUri) {
         tooltipParts.push(`URI: ${newTicket.documentUri}`);
       }
-      tooltipParts.push("状態: ローカル保存済み (未同期)");
+      tooltipParts.push(vscode.l10n.t("Status: Saved locally (unsynced)"));
       items.push(
         new UnsyncedFileTreeItem(
           "New ticket",

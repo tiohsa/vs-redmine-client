@@ -1,7 +1,7 @@
 {
   "name": "redmine-client",
-  "displayName": "Redmine Client",
-  "description": "Redmine ticket workflows into VS Code",
+  "displayName": "%displayName%",
+  "description": "%description%",
   "version": "0.2.2",
   "publisher": "tiohsa",
   "author": {
@@ -57,7 +57,7 @@
       "activitybar": [
         {
           "id": "redmine-clientActivity",
-          "title": "Redmine Client",
+          "title": "%viewsContainer.redmineClientActivity.title%",
           "icon": "media/redmine-client-activitybar.svg"
         }
       ]
@@ -65,172 +65,172 @@
     "commands": [
       {
         "command": "redmine-client.setApiKey",
-        "title": "Redmine: Set API Key"
+        "title": "%command.setApiKey.title%"
       },
       {
         "command": "redmine-client.clearApiKey",
-        "title": "Redmine: Clear API Key"
+        "title": "%command.clearApiKey.title%"
       },
       {
         "command": "redmine-client.showApiKeyStatus",
-        "title": "Redmine: Show API Key Status"
+        "title": "%command.showApiKeyStatus.title%"
       },
       {
         "command": "redmine-client.refreshProjects",
-        "title": "Redmine: Refresh Projects",
+        "title": "%command.refreshProjects.title%",
         "icon": "$(refresh)"
       },
       {
         "command": "redmine-client.refreshTickets",
-        "title": "Redmine: Refresh Tickets",
+        "title": "%command.refreshTickets.title%",
         "icon": "$(refresh)"
       },
       {
         "command": "redmine-client.searchTickets",
-        "title": "Redmine: Search Tickets",
+        "title": "%command.searchTickets.title%",
         "icon": "$(search)"
       },
       {
         "command": "redmine-client.refreshComments",
-        "title": "Redmine: Refresh Comments",
+        "title": "%command.refreshComments.title%",
         "icon": "$(refresh)"
       },
       {
         "command": "redmine-client.reloadProject",
-        "title": "Redmine: Reload Project",
+        "title": "%command.reloadProject.title%",
         "icon": "$(refresh)"
       },
       {
         "command": "redmine-client.reloadTicket",
-        "title": "Redmine: Reload Ticket",
+        "title": "%command.reloadTicket.title%",
         "icon": "$(refresh)"
       },
       {
         "command": "redmine-client.reloadComment",
-        "title": "Redmine: Reload Comment",
+        "title": "%command.reloadComment.title%",
         "icon": "$(refresh)"
       },
       {
         "command": "redmine-client.selectProject",
-        "title": "Redmine: Select Project"
+        "title": "%command.selectProject.title%"
       },
       {
         "command": "redmine-client.toggleChildProjects",
-        "title": "Redmine: Toggle Child Projects"
+        "title": "%command.toggleChildProjects.title%"
       },
       {
         "command": "redmine-client.openTicketPreview",
-        "title": "Redmine: Open Ticket Preview"
+        "title": "%command.openTicketPreview.title%"
       },
       {
         "command": "redmine-client.openExtraTicketEditor",
-        "title": "Redmine: Open Ticket Editor (New)"
+        "title": "%command.openExtraTicketEditor.title%"
       },
       {
         "command": "redmine-client.configureEditorDefaultSubject",
-        "title": "Redmine: Configure Editor Default Subject"
+        "title": "%command.configureEditorDefaultSubject.title%"
       },
       {
         "command": "redmine-client.configureEditorDefaultDescription",
-        "title": "Redmine: Configure Editor Default Description"
+        "title": "%command.configureEditorDefaultDescription.title%"
       },
       {
         "command": "redmine-client.configureEditorDefaultTracker",
-        "title": "Redmine: Configure Editor Default Tracker"
+        "title": "%command.configureEditorDefaultTracker.title%"
       },
       {
         "command": "redmine-client.configureEditorDefaultPriority",
-        "title": "Redmine: Configure Editor Default Priority"
+        "title": "%command.configureEditorDefaultPriority.title%"
       },
       {
         "command": "redmine-client.configureEditorDefaultStatus",
-        "title": "Redmine: Configure Editor Default Status"
+        "title": "%command.configureEditorDefaultStatus.title%"
       },
       {
         "command": "redmine-client.configureEditorDefaultDueDate",
-        "title": "Redmine: Configure Editor Default Due Date"
+        "title": "%command.configureEditorDefaultDueDate.title%"
       },
       {
         "command": "redmine-client.resetEditorDefaults",
-        "title": "Redmine: Reset Editor Defaults"
+        "title": "%command.resetEditorDefaults.title%"
       },
       {
         "command": "redmine-client.createTicket",
-        "title": "Redmine: Create Ticket from Editor"
+        "title": "%command.createTicket.title%"
       },
       {
         "command": "redmine-client.createTicketFromList",
-        "title": "Redmine: New Ticket",
+        "title": "%command.createTicketFromList.title%",
         "icon": "$(add)"
       },
       {
         "command": "redmine-client.createChildTicketFromList",
-        "title": "Redmine: Add Child Ticket",
+        "title": "%command.createChildTicketFromList.title%",
         "icon": "$(add)"
       },
       {
         "command": "redmine-client.openProjectInBrowser",
-        "title": "Redmine: Open Project in Browser",
+        "title": "%command.openProjectInBrowser.title%",
         "icon": "$(link-external)"
       },
       {
         "command": "redmine-client.openTicketInBrowser",
-        "title": "Redmine: Open Ticket in Browser",
+        "title": "%command.openTicketInBrowser.title%",
         "icon": "$(link-external)"
       },
       {
         "command": "redmine-client.openCommentInBrowser",
-        "title": "Redmine: Open Comment in Browser",
+        "title": "%command.openCommentInBrowser.title%",
         "icon": "$(link-external)"
       },
       {
         "command": "redmine-client.editComment",
-        "title": "Redmine: Edit Comment"
+        "title": "%command.editComment.title%"
       },
       {
         "command": "redmine-client.addComment",
-        "title": "Redmine: Add Comment"
+        "title": "%command.addComment.title%"
       },
       {
         "command": "redmine-client.addCommentFromComments",
-        "title": "Redmine: Add Comment",
+        "title": "%command.addCommentFromComments.title%",
         "icon": "$(add)"
       },
       {
         "command": "redmine-client.runOfflineSync",
-        "title": "Redmine: Run Offline Sync",
+        "title": "%command.runOfflineSync.title%",
         "icon": "$(cloud-upload)"
       },
       {
         "command": "redmine-client.syncUnsyncedFile",
-        "title": "Redmine: Sync This File",
+        "title": "%command.syncUnsyncedFile.title%",
         "icon": "$(cloud-upload)"
       },
       {
         "command": "redmine-client.configureOfflineSyncMode",
-        "title": "Redmine: Configure Offline Sync Mode"
+        "title": "%command.configureOfflineSyncMode.title%"
       },
       {
         "command": "redmine-client.revealActiveTicket",
-        "title": "Redmine: Focus Active Ticket"
+        "title": "%command.revealActiveTicket.title%"
       },
       {
         "command": "redmine-client.focusTicketEditor",
-        "title": "Redmine: Focus Open Ticket Editor"
+        "title": "%command.focusTicketEditor.title%"
       },
       {
         "command": "redmine-client.syncToRedmine",
-        "title": "Redmine: Sync to Redmine",
+        "title": "%command.syncToRedmine.title%",
         "icon": "$(cloud-upload)"
       },
       {
         "command": "redmine-client.syncOpenEditor",
-        "title": "Redmine: Upload Open Editor",
+        "title": "%command.syncOpenEditor.title%",
         "icon": "$(cloud-upload)"
       },
       {
         "command": "redmine-client.syncAllOpenEditors",
-        "title": "Redmine: Upload All Open Editors",
+        "title": "%command.syncAllOpenEditors.title%",
         "icon": "$(cloud-upload)"
       }
     ],
@@ -238,7 +238,7 @@
       "redmine-clientActivity": [
         {
           "id": "redmine-clientActivityDashboard",
-          "name": "Dashboard",
+          "name": "%view.dashboard.name%",
           "type": "webview"
         }
       ]
@@ -247,54 +247,54 @@
       "view/item/context": []
     },
     "configuration": {
-      "title": "Redmine Client",
+      "title": "%config.title%",
       "properties": {
         "redmine-client.baseUrl": {
           "type": "string",
           "default": "",
-          "description": "Base URL of the Redmine instance."
+          "description": "%config.baseUrl.description%"
         },
         "redmine-client.apiKey": {
           "type": "string",
           "default": "",
-          "markdownDescription": "Redmine API key for authentication. **Deprecated**: Use the `Redmine: Set API Key` command to store the key securely in VS Code SecretStorage instead."
+          "markdownDescription": "%config.apiKey.markdownDescription%"
         },
         "redmine-client.ignoreSSLErrors": {
           "type": "boolean",
           "default": false,
-          "markdownDescription": "Ignore SSL certificate errors (e.g. for self-signed certificates). **For development/testing only. Do NOT enable in production.**"
+          "markdownDescription": "%config.ignoreSSLErrors.markdownDescription%"
         },
         "redmine-client.defaultProjectId": {
           "type": "string",
           "default": "",
-          "description": "Default project identifier or ID used in ticket listing."
+          "description": "%config.defaultProjectId.description%"
         },
         "redmine-client.selectedProjectId": {
           "type": "string",
           "default": "",
           "scope": "machine",
-          "description": "Last selected project ID (used for restoring selection)."
+          "description": "%config.selectedProjectId.description%"
         },
         "redmine-client.selectedProjectName": {
           "type": "string",
           "default": "",
           "scope": "machine",
-          "description": "Last selected project name (used for restoring selection)."
+          "description": "%config.selectedProjectName.description%"
         },
         "redmine-client.includeChildProjects": {
           "type": "boolean",
           "default": false,
-          "description": "Include child projects when listing tickets."
+          "description": "%config.includeChildProjects.description%"
         },
         "redmine-client.ticketListLimit": {
           "type": "number",
           "default": 50,
-          "description": "Default number of tickets to load per request."
+          "description": "%config.ticketListLimit.description%"
         },
         "redmine-client.editorStorageDirectory": {
           "type": "string",
           "default": "",
-          "description": "Absolute path to store ticket editor files. When empty, the default workspace location is used."
+          "description": "%config.editorStorageDirectory.description%"
         },
         "redmine-client.offlineSyncMode": {
           "type": "string",
@@ -303,12 +303,12 @@
             "auto",
             "manual"
           ],
-          "description": "Sync mode for explicit sync commands. Auto sends to Redmine immediately, manual queues for batch sync. Ctrl+S always saves locally regardless of this setting."
+          "description": "%config.offlineSyncMode.description%"
         },
         "redmine-client.requestTimeoutMs": {
           "type": "number",
           "default": 30000,
-          "description": "HTTP request timeout in milliseconds (default: 30000ms = 30 seconds)."
+          "description": "%config.requestTimeoutMs.description%"
         }
       }
     }

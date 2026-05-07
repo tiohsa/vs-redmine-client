@@ -24,7 +24,7 @@ export class DashboardComposerService {
   async openNewTicketComposer(): Promise<void> {
     const project = this.deps.getResolvedProject();
     if (!project) {
-      this.deps.context.notifyToast("warning", "チケット作成前にプロジェクトを選択してください。");
+      this.deps.context.notifyToast("warning", vscode.l10n.t("Select a project before creating a ticket."));
       return;
     }
     const defaults = this.deps.context.store.getState().metadataOptions;
@@ -46,11 +46,11 @@ export class DashboardComposerService {
   async openChildTicketComposer(parentTicketId: number): Promise<void> {
     const parent = this.deps.getTickets().find((t) => t.id === parentTicketId);
     if (!parent) {
-      this.deps.context.notifyError("ticket.createChild", "親チケットが見つかりません。");
+      this.deps.context.notifyError("ticket.createChild", vscode.l10n.t("Parent ticket not found."));
       return;
     }
     if (!parent.projectId) {
-      this.deps.context.notifyError("ticket.createChild", "親チケットのプロジェクト情報が不足しています。");
+      this.deps.context.notifyError("ticket.createChild", vscode.l10n.t("Parent ticket is missing project information."));
       return;
     }
     const projectName = parent.projectName ?? String(parent.projectId);
@@ -94,7 +94,7 @@ export class DashboardComposerService {
   ): Promise<void> {
     const workPanel = this.deps.context.store.getState().workPanel;
     if (!workPanel || (workPanel.mode !== "newTicket" && workPanel.mode !== "childTicket")) {
-      this.deps.context.notifyError(requestId, "チケット作成パネルが開いていません。");
+      this.deps.context.notifyError(requestId, vscode.l10n.t("Ticket creation panel is not open."));
       return;
     }
     const validationError = this.validateComposerValues(workPanel, values);
@@ -125,7 +125,7 @@ export class DashboardComposerService {
       this.updateWorkPanelComposer({ draftUri: uri.toString() });
     } catch (err) {
       const msg = (err as Error).message;
-      this.deps.context.notifyError(requestId, `ドラフトの作成に失敗しました: ${msg}`);
+      this.deps.context.notifyError(requestId, vscode.l10n.t("Failed to create draft: {0}", msg));
     }
   }
 
@@ -143,17 +143,17 @@ export class DashboardComposerService {
   ): Promise<void> {
     const workPanel = this.deps.context.store.getState().workPanel;
     if (!workPanel || (workPanel.mode !== "newTicket" && workPanel.mode !== "childTicket")) {
-      this.deps.context.notifyError(requestId, "コンポーザーが開いていません。");
+      this.deps.context.notifyError(requestId, vscode.l10n.t("Composer is not open."));
       return;
     }
 
     const draftUri = workPanel.draftUri;
     if (!draftUri) {
-      this.deps.context.notifyError(requestId, "下書きファイルがまだ作成されていません。まずドラフトを作成してください。");
+      this.deps.context.notifyError(requestId, vscode.l10n.t("Draft file has not been created yet. Create a draft first."));
       return;
     }
 
-    this.deps.context.notifyOperationStarted(requestId, "同期中...");
+    this.deps.context.notifyOperationStarted(requestId, vscode.l10n.t("Syncing…"));
 
     const openEditorFn = hooks?.openEditorFn ??
       (async (uri: vscode.Uri): Promise<vscode.TextEditor> => {
@@ -184,18 +184,18 @@ export class DashboardComposerService {
       if (hooks?.afterCreatedFn) {
         await hooks.afterCreatedFn(createdId ?? 0);
         this.deps.context.onTicketsRefreshed();
-        this.deps.context.notifySuccess(requestId, "チケットを作成しました。");
+        this.deps.context.notifySuccess(requestId, vscode.l10n.t("Ticket created."));
       } else {
         await this.deps.loadTickets();
         this.deps.context.onTicketsRefreshed();
         if (createdId !== undefined && createdId > 0) {
           this.deps.context.store.update({ workPanel: { mode: "detail", ticketId: createdId } });
           await this.deps.selectTicket(createdId);
-          this.deps.context.notifySuccess(requestId, "チケットを作成しました。");
+          this.deps.context.notifySuccess(requestId, vscode.l10n.t("Ticket created."));
         } else {
           this.deps.context.notifySuccess(
             requestId,
-            "チケットを作成しました。ただし作成後のチケットIDを特定できなかったため、一覧を更新して確認してください。",
+            vscode.l10n.t("Ticket created. However, the new ticket ID could not be determined. Refresh the list to check."),
           );
         }
       }
@@ -203,25 +203,25 @@ export class DashboardComposerService {
     }
 
     if (result.status === "failed") {
-      const raw = result.message ?? "不明なエラー";
+      const raw = result.message ?? vscode.l10n.t("Unknown error");
       const displayMsg = raw === "Ticket subject is required."
-        ? "件名が未入力です。Markdownの「# 」見出し行に件名を入力してから同期してください。"
-        : `同期に失敗しました: ${raw}`;
+        ? vscode.l10n.t("Subject is missing. Enter a subject in the Markdown heading line and sync again.")
+        : vscode.l10n.t("Sync failed: {0}", raw);
       this.deps.context.notifyError(requestId, displayMsg);
       return;
     }
 
     if (result.status === "queued") {
-      this.deps.context.notifySuccess(requestId, "オフライン同期キューに追加しました。");
+      this.deps.context.notifySuccess(requestId, vscode.l10n.t("Added to offline sync queue."));
       return;
     }
 
     if (result.status === "no_change") {
-      this.deps.context.notifySuccess(requestId, "変更はありませんでした。");
+      this.deps.context.notifySuccess(requestId, vscode.l10n.t("No changes."));
       return;
     }
 
-    this.deps.context.notifyError(requestId, `同期に失敗しました: ${result.message ?? "不明なエラー"}`);
+    this.deps.context.notifyError(requestId, vscode.l10n.t("Sync failed: {0}", result.message ?? vscode.l10n.t("Unknown error")));
   }
 
   private findDraftEditorByUri(
@@ -311,7 +311,7 @@ export class DashboardComposerService {
     try {
       const trackers = await getProjectTrackers(projectId);
       if (trackers.length === 0) {
-        this.updateWorkPanelComposer({ loading: false, trackers: [], error: "このプロジェクトにはトラッカーが設定されていません。" });
+        this.updateWorkPanelComposer({ loading: false, trackers: [], error: vscode.l10n.t("No trackers configured for this project.") });
         return;
       }
       const defaults = this.deps.context.store.getState().metadataOptions;
@@ -332,7 +332,7 @@ export class DashboardComposerService {
       });
     } catch (err) {
       const msg = (err as Error).message;
-      this.updateWorkPanelComposer({ loading: false, trackers: [], error: `トラッカーの取得に失敗しました: ${msg}` });
+      this.updateWorkPanelComposer({ loading: false, trackers: [], error: vscode.l10n.t("Failed to load trackers: {0}", msg) });
     }
   }
 
@@ -392,27 +392,27 @@ export class DashboardComposerService {
     },
   ): string | undefined {
     if (!panel.projectId) {
-      return "プロジェクトが選択されていません。";
+      return vscode.l10n.t("No project selected.");
     }
     if (!values.tracker.trim()) {
-      return "トラッカーを選択してください。";
+      return vscode.l10n.t("Please select a tracker.");
     }
     if (!panel.trackers.some((tracker) => tracker.name === values.tracker)) {
-      return `このプロジェクトでは使用できないトラッカーです: ${values.tracker}`;
+      return vscode.l10n.t("Tracker not available for this project: {0}", values.tracker);
     }
     if (!values.priority.trim()) {
-      return "優先度を選択してください。";
+      return vscode.l10n.t("Please select a priority.");
     }
     const isValidDate = (value?: string): boolean =>
       value === undefined || value.length === 0 || /^\d{4}-\d{2}-\d{2}$/.test(value);
     if (!isValidDate(values.start_date)) {
-      return "開始日の形式が不正です（YYYY-MM-DD）。";
+      return vscode.l10n.t("Invalid start date format (YYYY-MM-DD).");
     }
     if (!isValidDate(values.due_date)) {
-      return "期日の形式が不正です（YYYY-MM-DD）。";
+      return vscode.l10n.t("Invalid due date format (YYYY-MM-DD).");
     }
     if (panel.mode === "childTicket" && !panel.parentTicketId) {
-      return "親チケット情報が不足しています。";
+      return vscode.l10n.t("Parent ticket information is missing.");
     }
     return undefined;
   }

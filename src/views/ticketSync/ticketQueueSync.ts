@@ -362,7 +362,7 @@ export const saveTicketDraftLocally = (
       content: editor.document.getText(),
       documentUri: editor.document.uri.toString(),
     });
-    return buildResult("queued", "新規チケットの下書きをローカルに保存しました。");
+    return buildResult("queued", vscode.l10n.t("New ticket draft saved locally."));
   }
 
   const content = editor.document.getText();
@@ -394,9 +394,9 @@ export const saveTicketDraftLocally = (
         metadataBlock: parsed.metadataBlock,
       });
     }
-    return buildResult("queued", "ローカルに保存しました。Redmine への反映には同期コマンドを実行してください。");
+    return buildResult("queued", vscode.l10n.t("Saved locally. Run a sync command to apply changes to Redmine."));
   } catch {
-    return buildResult("failed", "ドラフトの解析に失敗しました。");
+    return buildResult("failed", vscode.l10n.t("Failed to parse draft."));
   }
 };
 

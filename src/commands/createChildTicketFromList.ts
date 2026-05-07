@@ -1,3 +1,4 @@
+import * as vscode from "vscode";
 import {
   buildNewChildTicketDraftContent,
   buildNewTicketDraftContent,
@@ -10,14 +11,14 @@ export const createChildTicketFromList = async (
   ticket?: Ticket,
 ): Promise<void> => {
   if (!ticket) {
-    showError("Parent ticket is not available.");
+    showError(vscode.l10n.t("Parent ticket is not available."));
     return;
   }
 
   const parentId = ticket.id;
   const projectId = ticket.projectId;
   if (!parentId || !projectId) {
-    showError("Parent ticket is missing required information.");
+    showError(vscode.l10n.t("Parent ticket is missing required information."));
     return;
   }
 

@@ -22,7 +22,7 @@ export const focusTicketEditor = async (
   const uriValue = typeof input === "number" ? undefined : input.uri;
   const targetUri = uriValue ?? (ticketId ? resolveLastActiveEditorUri(ticketId) : undefined);
   if (!targetUri) {
-    void vscode.window.showErrorMessage("Ticket editor is not open.");
+    void vscode.window.showErrorMessage(vscode.l10n.t("Ticket editor is not open."));
     return;
   }
 

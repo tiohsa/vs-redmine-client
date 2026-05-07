@@ -35,7 +35,7 @@ const getFieldValue = (field: EditorDefaultField): string => {
 };
 
 const getFieldPrompt = (field: EditorDefaultField): string =>
-  `Enter default ${DEFAULT_FIELD_LABELS[field].toLowerCase()} (leave blank for none)`;
+  vscode.l10n.t("Enter default {0} (leave blank for none)", DEFAULT_FIELD_LABELS[field].toLowerCase());
 
 export const configureEditorDefaultField = async (
   field: EditorDefaultField,
@@ -77,7 +77,7 @@ export const resetEditorDefaults = async (): Promise<void> => {
 
   const picked = await vscode.window.showQuickPick(items, {
     canPickMany: true,
-    title: "Reset editor defaults",
+    title: vscode.l10n.t("Reset editor defaults"),
   });
 
   if (!picked || picked.length === 0) {
