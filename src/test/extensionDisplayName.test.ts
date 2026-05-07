@@ -20,6 +20,20 @@ const loadPackageJson = (): PackageJson => {
   return JSON.parse(raw) as PackageJson;
 };
 
+const loadNls = (): Record<string, string> => {
+  const nlsPath = path.resolve(__dirname, "../../package.nls.json");
+  const raw = fs.readFileSync(nlsPath, "utf8");
+  return JSON.parse(raw) as Record<string, string>;
+};
+
+const resolveNls = (value: string, nls: Record<string, string>): string => {
+  const match = /^%(.+)%$/.exec(value);
+  if (match) {
+    return nls[match[1]] ?? value;
+  }
+  return value;
+};
+
 const loadReadme = (filename: string): string => {
   const readmePath = path.resolve(__dirname, `../../${filename}`);
   return fs.readFileSync(readmePath, "utf8");
@@ -28,20 +42,23 @@ const loadReadme = (filename: string): string => {
 suite("Extension display name", () => {
   test("uses Redmine Client as display name", () => {
     const packageJson = loadPackageJson();
-    assert.strictEqual(packageJson.displayName, "Redmine Client");
+    const nls = loadNls();
+    assert.strictEqual(resolveNls(packageJson.displayName ?? "", nls), "Redmine Client");
   });
 
   test("uses Redmine Client in Activity Bar container", () => {
     const packageJson = loadPackageJson();
+    const nls = loadNls();
     const containers = packageJson.contributes?.viewsContainers?.activitybar ?? [];
     const container = containers.find((entry) => entry.id === "redmine-clientActivity");
     assert.ok(container, "redmine-clientActivity container must exist");
-    assert.strictEqual(container?.title, "Redmine Client");
+    assert.strictEqual(resolveNls(container?.title ?? "", nls), "Redmine Client");
   });
 
   test("uses Redmine Client for configuration title", () => {
     const packageJson = loadPackageJson();
-    assert.strictEqual(packageJson.contributes?.configuration?.title, "Redmine Client");
+    const nls = loadNls();
+    assert.strictEqual(resolveNls(packageJson.contributes?.configuration?.title ?? "", nls), "Redmine Client");
   });
 
   test("does not expose TodoEx in command titles", () => {

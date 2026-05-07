@@ -4,8 +4,12 @@ import {
   getCommands,
   getMenuItems,
   getViewTitleMenuItems,
+  loadNls,
   MenuItem,
+  resolveNls,
 } from "./helpers/packageJson";
+
+const nls = loadNls();
 
 const findCommand = (commandId: string): CommandItem | undefined =>
   getCommands().find((command) => command.command === commandId);
@@ -17,7 +21,7 @@ suite("Tickets view title actions", () => {
   test("createTicketFromList command still exists in Command Palette", () => {
     const addCommand = findCommand("redmine-client.createTicketFromList");
     assert.ok(addCommand, "redmine-client.createTicketFromList command must exist");
-    assert.strictEqual(addCommand?.title, "Redmine: New Ticket");
+    assert.strictEqual(resolveNls(addCommand?.title ?? "", nls), "Redmine: New Ticket");
   });
 
   test("createTicketFromList has no view/title entry (legacy view removed)", () => {
@@ -48,7 +52,7 @@ suite("Tickets view title actions", () => {
   test("child ticket command still exists in Command Palette (no context menu after Dashboard migration)", () => {
     const childCommand = findCommand("redmine-client.createChildTicketFromList");
     assert.ok(childCommand, "child ticket command must exist");
-    assert.strictEqual(childCommand?.title, "Redmine: Add Child Ticket");
+    assert.strictEqual(resolveNls(childCommand?.title ?? "", nls), "Redmine: Add Child Ticket");
     assert.strictEqual(childCommand?.icon, "$(add)");
 
     // Dashboard 移行により Explorer ビューのコンテキストメニューは削除済み

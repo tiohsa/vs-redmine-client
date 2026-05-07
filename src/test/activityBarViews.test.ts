@@ -8,9 +8,24 @@ const loadPackageJson = (): Record<string, unknown> => {
   return JSON.parse(raw) as Record<string, unknown>;
 };
 
+const loadNls = (): Record<string, string> => {
+  const nlsPath = path.resolve(__dirname, "../../package.nls.json");
+  const raw = fs.readFileSync(nlsPath, "utf8");
+  return JSON.parse(raw) as Record<string, string>;
+};
+
+const resolveNls = (value: string, nls: Record<string, string>): string => {
+  const match = /^%(.+)%$/.exec(value);
+  if (match) {
+    return nls[match[1]] ?? value;
+  }
+  return value;
+};
+
 suite("Activity Bar view container", () => {
   test("declares Activity Bar container metadata", () => {
     const packageJson = loadPackageJson();
+    const nls = loadNls();
     const contributes = packageJson.contributes as Record<string, unknown> | undefined;
     assert.ok(contributes, "contributes must be defined");
 
@@ -23,7 +38,7 @@ suite("Activity Bar view container", () => {
       (entry) => entry.id === "redmine-clientActivity",
     );
     assert.ok(container, "redmine-clientActivity container must exist");
-    assert.strictEqual(container?.title, "Redmine Client");
+    assert.strictEqual(resolveNls(container?.title ?? "", nls), "Redmine Client");
     assert.ok(container?.icon, "redmine-clientActivity container icon must be defined");
   });
 
