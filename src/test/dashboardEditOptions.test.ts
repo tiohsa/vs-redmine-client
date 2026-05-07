@@ -159,7 +159,7 @@ suite("DashboardMetadataService — editOptions バリデーション", () => {
 
     await service.updateTicketMetadata("req-1", 1, { tracker: "Bug" });
     assert.strictEqual(errors.length, 1);
-    assert.match(errors[0], /メタデータ選択肢が未取得/);
+    assert.match(errors[0], /Cannot update: metadata options not loaded/);
   });
 
   test("チケットが見つからない場合、更新が拒否される", async () => {
@@ -186,7 +186,7 @@ suite("DashboardMetadataService — editOptions バリデーション", () => {
 
     await service.updateTicketMetadata("req-1", 999, { priority: "Normal" });
     assert.strictEqual(errors.length, 1);
-    assert.match(errors[0], /対象チケットが見つかりません/);
+    assert.match(errors[0], /Target ticket not found/);
   });
 });
 

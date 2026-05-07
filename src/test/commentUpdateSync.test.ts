@@ -152,7 +152,7 @@ suite("commentUpdateSync – hash-based conflict detection", () => {
     });
 
     assert.strictEqual(result.status, "failed");
-    assert.ok(result.message.includes("Redmine標準画面"), `メッセージ: ${result.message}`);
+    assert.ok(result.message.includes("Webview") || result.message.includes("web interface"), `メッセージ: ${result.message}`);
   });
 
   test("PUT 403 → 権限エラーメッセージを返す", async () => {
@@ -177,7 +177,7 @@ suite("commentUpdateSync – hash-based conflict detection", () => {
     });
 
     assert.strictEqual(result.status, "forbidden");
-    assert.ok(result.message.includes("権限"), `メッセージ: ${result.message}`);
+    assert.ok(result.message.includes("permission"), `メッセージ: ${result.message}`);
   });
 
   test("PUT 404 → コメント不存在エラーメッセージを返す", async () => {
@@ -202,7 +202,7 @@ suite("commentUpdateSync – hash-based conflict detection", () => {
     });
 
     assert.strictEqual(result.status, "not_found");
-    assert.ok(result.message.includes("見つかりません"), `メッセージ: ${result.message}`);
+    assert.ok(result.message.includes("not found") || result.message.includes("deleted"), `メッセージ: ${result.message}`);
   });
 
   test("405 は成功扱いにしない", async () => {
