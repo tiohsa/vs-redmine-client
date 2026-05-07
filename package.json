@@ -309,6 +309,16 @@
           "type": "number",
           "default": 30000,
           "description": "%config.requestTimeoutMs.description%"
+        },
+        "redmine-client.ticketList.showStatus": {
+          "type": "boolean",
+          "default": true,
+          "description": "%config.ticketList.showStatus.description%"
+        },
+        "redmine-client.ticketList.showDueDate": {
+          "type": "boolean",
+          "default": true,
+          "description": "%config.ticketList.showDueDate.description%"
         }
       }
     }

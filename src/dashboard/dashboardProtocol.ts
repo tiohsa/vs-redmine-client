@@ -121,6 +121,8 @@ export interface DashboardTicketSettingsViewModel {
   dueDate: DueDateDisplayRule;
   offlineSyncMode: "auto" | "manual";
   ticketListLimit: number;
+  showStatus: boolean;
+  showDueDate: boolean;
 }
 
 export interface DashboardSelectedProject {

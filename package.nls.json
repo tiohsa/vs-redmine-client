@@ -52,5 +52,7 @@
   "config.ticketListLimit.description": "Default number of tickets to load per request.",
   "config.editorStorageDirectory.description": "Absolute path to store ticket editor files. When empty, the default workspace location is used.",
   "config.offlineSyncMode.description": "Sync mode for explicit sync commands. Auto sends to Redmine immediately, manual queues for batch sync. Ctrl+S always saves locally regardless of this setting.",
-  "config.requestTimeoutMs.description": "HTTP request timeout in milliseconds (default: 30000ms = 30 seconds)."
+  "config.requestTimeoutMs.description": "HTTP request timeout in milliseconds (default: 30000ms = 30 seconds).",
+  "config.ticketList.showStatus.description": "Show the status badge on each ticket row in the dashboard.",
+  "config.ticketList.showDueDate.description": "Show due date badges on ticket rows in the dashboard. When disabled, all due date badges are hidden regardless of the per-window display rules."
 }

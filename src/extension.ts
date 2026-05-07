@@ -91,6 +91,12 @@ export async function activate(context: vscode.ExtensionContext) {
           showWarning(vscode.l10n.t("ignoreSSLErrors is enabled. Do not use in production."));
         }
       }
+      if (
+        event.affectsConfiguration("redmine-client.ticketList.showStatus") ||
+        event.affectsConfiguration("redmine-client.ticketList.showDueDate")
+      ) {
+        views.settingsPresentation.refresh();
+      }
     }),
   );
 

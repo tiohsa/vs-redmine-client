@@ -52,5 +52,7 @@
   "config.ticketListLimit.description": "リクエストごとに読み込むチケットのデフォルト件数。",
   "config.editorStorageDirectory.description": "チケットエディタファイルを保存する絶対パス。空の場合、デフォルトのワークスペース場所が使用されます。",
   "config.offlineSyncMode.description": "同期コマンドの同期モード。auto は即座に Redmine に送信し、manual はバッチ同期のためキューに入れます。Ctrl+S はこの設定に関わらず常にローカルに保存します。",
-  "config.requestTimeoutMs.description": "HTTP リクエストタイムアウト（ミリ秒、デフォルト: 30000ms = 30秒）。"
+  "config.requestTimeoutMs.description": "HTTP リクエストタイムアウト（ミリ秒、デフォルト: 30000ms = 30秒）。",
+  "config.ticketList.showStatus.description": "ダッシュボードの各チケット行にステータスバッジを表示します。",
+  "config.ticketList.showDueDate.description": "ダッシュボードのチケット行に期日バッジを表示します。無効にすると、期日ウィンドウごとの表示設定に関わらずすべての期日バッジが非表示になります。"
 }

@@ -48,4 +48,12 @@ suite("Dashboard Webview 改善", () => {
     assert.ok(dashboardStyles.includes("border-top:2px solid"));
     assert.ok(dashboardStyles.includes("body.vscode-high-contrast .ticket-detail-card"));
   });
+
+  test("ステータスバッジは showStatus 設定のガード付きで描画される", () => {
+    assert.ok(dashboardWebviewScript.includes("showStatus !== false"));
+  });
+
+  test("期日バッジは showDueDate 設定のガード付きで描画される", () => {
+    assert.ok(dashboardWebviewScript.includes("showDueDate !== false"));
+  });
 });

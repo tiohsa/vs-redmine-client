@@ -271,10 +271,12 @@ function buildTicketRowHtml(t){
   const sel = t.id===state.selectedTicketId?' selected':'';
   const syncBadge = (t.syncState&&t.syncState!=='Synced')
     ?'<span class="badge '+syncBadgeClass(t.syncState)+'">'+esc(syncLabel(t.syncState))+'</span>':'';
-  const statusBadge = t.statusName
+  const statusBadge = (state.settings?.showStatus !== false && t.statusName)
     ?'<span class="badge ticket-status">'+esc(t.statusName)+'</span>'
     :'';
-  const dueBadgeData = resolveDueDateBadge(t.dueDate, state.settings?.dueDate);
+  const dueBadgeData = state.settings?.showDueDate !== false
+    ? resolveDueDateBadge(t.dueDate, state.settings?.dueDate)
+    : null;
   const dueBadge = dueBadgeData
     ?'<span class="badge '+dueBadgeData.cls+'">'+esc(dueBadgeData.label)+'</span>'
     :'';
