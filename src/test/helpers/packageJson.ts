@@ -4,6 +4,20 @@ import * as path from "path";
 
 type PackageJson = Record<string, unknown>;
 
+export const loadNls = (): Record<string, string> => {
+  const nlsPath = path.resolve(__dirname, "../../../package.nls.json");
+  const raw = fs.readFileSync(nlsPath, "utf8");
+  return JSON.parse(raw) as Record<string, string>;
+};
+
+export const resolveNls = (value: string, nls: Record<string, string>): string => {
+  const match = /^%(.+)%$/.exec(value);
+  if (match) {
+    return nls[match[1]] ?? value;
+  }
+  return value;
+};
+
 export type MenuItem = {
   command: string;
   when?: string;

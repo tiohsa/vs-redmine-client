@@ -3,8 +3,12 @@ import {
   CommandItem,
   getCommands,
   getViewTitleMenuItems,
+  loadNls,
   MenuItem,
+  resolveNls,
 } from "./helpers/packageJson";
+
+const nls = loadNls();
 
 const findCommand = (commandId: string): CommandItem | undefined =>
   getCommands().find((command) => command.command === commandId);
@@ -16,7 +20,7 @@ suite("Comments view title actions", () => {
   test("addCommentFromComments command still exists in Command Palette", () => {
     const addCommand = findCommand("redmine-client.addCommentFromComments");
     assert.ok(addCommand, "redmine-client.addCommentFromComments command must exist");
-    assert.strictEqual(addCommand?.title, "Redmine: Add Comment");
+    assert.strictEqual(resolveNls(addCommand?.title ?? "", nls), "Redmine: Add Comment");
   });
 
   test("addCommentFromComments has no view/title entry (legacy view removed)", () => {
