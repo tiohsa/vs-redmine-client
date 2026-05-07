@@ -132,7 +132,7 @@ export class DashboardController {
       await this.handleRequest(req);
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
-      this.opts.notifyError(req.requestId, `操作に失敗しました: ${msg}`);
+      this.opts.notifyError(req.requestId, vscode.l10n.t("Operation failed: {0}", msg));
     }
   }
 
@@ -248,7 +248,7 @@ export class DashboardController {
       case "unsynced.openLocalFile": {
         const uri = vscode.Uri.parse(req.documentUri);
         if (uri.scheme !== "file" && uri.scheme !== "vscode-userdata") {
-          this.opts.notifyError(req.requestId, "この URI は開けません。");
+          this.opts.notifyError(req.requestId, vscode.l10n.t("This URI cannot be opened."));
           return;
         }
         await vscode.commands.executeCommand("vscode.open", uri);
@@ -266,12 +266,12 @@ export class DashboardController {
       case "settings.update":
         this.settingsCtrl.updateTicketList(req.patch);
         this.pushTickets();
-        this.opts.notifySuccess(req.requestId, "設定を更新しました。");
+        this.opts.notifySuccess(req.requestId, vscode.l10n.t("Settings updated."));
         break;
       case "settings.reset":
         this.settingsCtrl.resetTicketList();
         this.pushTickets();
-        this.opts.notifySuccess(req.requestId, "設定をリセットしました。");
+        this.opts.notifySuccess(req.requestId, vscode.l10n.t("Settings reset."));
         break;
       case "settings.updateEditorDefault":
         this.settingsCtrl.updateEditorDefault(req.field, req.value);

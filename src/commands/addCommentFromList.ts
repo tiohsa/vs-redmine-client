@@ -18,7 +18,7 @@ const getOpenUntitledNames = (): Set<string> =>
 
 export const addCommentFromList = async (ticketId?: number): Promise<void> => {
   if (!ticketId) {
-    showError("Select a ticket before adding a comment.");
+    showError(vscode.l10n.t("Select a ticket before adding a comment."));
     return;
   }
 

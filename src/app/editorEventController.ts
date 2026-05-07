@@ -104,7 +104,7 @@ export const buildUpdateTicketStatus = (
       return;
     }
     statusBarItem.text = formatTicketLabel(ticketId);
-    statusBarItem.tooltip = "Redmine ticket";
+    statusBarItem.tooltip = vscode.l10n.t("Redmine ticket");
     statusBarItem.show();
   };
 };

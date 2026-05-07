@@ -1,3 +1,4 @@
+import * as vscode from "vscode";
 import { TicketUpdateFields } from "../../redmine/types";
 import { IssueMetadata } from "../ticketMetadataTypes";
 import type { TicketCreateDependencies, TicketSaveDependencies } from "./types";
@@ -91,7 +92,7 @@ export const resolveMetadataUpdates = async (
       const projectTrackers = await deps.getProjectTrackers!(projectId!);
       const match = projectTrackers.find((item) => item.name === changes.tracker);
       if (!match) {
-        throw new Error(`このプロジェクトでは使用できないトラッカーです: ${changes.tracker}`);
+        throw new Error(vscode.l10n.t("Tracker not available for this project: {0}", changes.tracker));
       }
       updateFields.trackerId = match.id;
     } else {
@@ -146,7 +147,7 @@ export const resolveMetadataForCreate = async (
     const projectTrackers = await deps.getProjectTrackers!(projectId!);
     trackerMatch = projectTrackers.find((item) => item.name === metadata.tracker);
     if (!trackerMatch) {
-      throw new Error(`このプロジェクトでは使用できないトラッカーです: ${metadata.tracker}`);
+      throw new Error(vscode.l10n.t("Tracker not available for this project: {0}", metadata.tracker));
     }
   } else {
     trackerMatch = trackers.find((item) => item.name === metadata.tracker);

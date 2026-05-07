@@ -17,13 +17,13 @@ export const refreshOfflineSyncContext = async (
 export const configureOfflineSyncMode = async (): Promise<void> => {
   const current = getOfflineSyncMode();
   const items: Array<vscode.QuickPickItem & { mode: OfflineSyncMode }> = [
-    { label: "Auto sync on save", description: "Redmineへ自動で反映", mode: "auto" },
-    { label: "Manual offline sync", description: "保存はキューに保存して手動で反映", mode: "manual" },
+    { label: vscode.l10n.t("Auto sync on save"), description: vscode.l10n.t("Auto sync on save description"), mode: "auto" },
+    { label: vscode.l10n.t("Manual offline sync"), description: vscode.l10n.t("Manual offline sync description"), mode: "manual" },
   ];
   const picked = await vscode.window.showQuickPick(items, {
-    title: "Offline sync mode",
+    title: vscode.l10n.t("Offline sync mode"),
     canPickMany: false,
-    placeHolder: current === "manual" ? "Manual offline sync" : "Auto sync on save",
+    placeHolder: current === "manual" ? vscode.l10n.t("Manual offline sync") : vscode.l10n.t("Auto sync on save"),
   });
   if (!picked) {
     return;

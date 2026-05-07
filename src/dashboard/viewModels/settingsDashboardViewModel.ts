@@ -1,5 +1,5 @@
 import { TicketListSettings } from "../../views/projectListSettings";
-import { getOfflineSyncMode, getTicketListLimit } from "../../config/settings";
+import { getOfflineSyncMode, getTicketListLimit, getTicketListShowDueDate, getTicketListShowStatus } from "../../config/settings";
 import type { DashboardTicketSettingsViewModel } from "../dashboardProtocol";
 
 export const buildSettingsDashboardViewModel = (
@@ -10,4 +10,6 @@ export const buildSettingsDashboardViewModel = (
   dueDate: { ...settings.dueDate },
   offlineSyncMode: getOfflineSyncMode(),
   ticketListLimit: getTicketListLimit(),
+  showStatus: getTicketListShowStatus(),
+  showDueDate: getTicketListShowDueDate(),
 });

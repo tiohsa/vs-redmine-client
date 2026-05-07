@@ -446,7 +446,7 @@ export const saveCommentDraftLocally = (
     body,
     documentUri: editor.document.uri.toString(),
   });
-  return buildResult("queued", "ローカルに保存しました。Redmine への反映には同期コマンドを実行してください。");
+  return buildResult("queued", vscode.l10n.t("Saved locally. Run a sync command to apply changes to Redmine."));
 };
 
 export const saveCommentDocumentLocally = (input: {
@@ -461,7 +461,7 @@ export const saveCommentDocumentLocally = (input: {
     body: input.content,
     documentUri: input.documentUri.toString(),
   });
-  return buildResult("queued", "ローカルに保存しました。Redmine への反映には同期コマンドを実行してください。");
+  return buildResult("queued", vscode.l10n.t("Saved locally. Run a sync command to apply changes to Redmine."));
 };
 
 export const handleCommentEditorSave = async (
@@ -482,12 +482,12 @@ const detectHashBasedConflict = async (input: {
     const detail = await input.deps.getIssueDetail(input.ticketId);
     const remoteComment = detail.comments.find((c) => c.id === input.commentId);
     if (!remoteComment) {
-      return buildResult("not_found", "対象コメントが見つかりません。Redmine側で削除または変更された可能性があります。");
+      return buildResult("not_found", vscode.l10n.t("Comment not found. It may have been deleted or changed in Redmine."));
     }
     const remoteHash = computeNotesHash(remoteComment.body);
     if (remoteHash !== input.sourceNotesHash) {
       return buildConflictResult({
-        message: "Redmine側でコメントが更新されています。同期前に差分を確認してください。",
+        message: vscode.l10n.t("Comment was updated in Redmine. Review the diff before syncing."),
         commentId: input.commentId,
         ticketId: input.ticketId,
         localBody: input.localBody,
@@ -504,13 +504,13 @@ const detectHashBasedConflict = async (input: {
 
 const mapHashBasedUpdateError = (mapped: CommentSaveResult): CommentSaveResult => {
   if (mapped.status === "failed" && /405/.test(mapped.message)) {
-    return buildResult("failed", "このRedmine環境では、Webviewから既存コメントを直接更新できません。Redmine標準画面で編集してください。");
+    return buildResult("failed", vscode.l10n.t("This Redmine environment does not support updating comments via the Webview. Use the Redmine web interface to edit."));
   }
   if (mapped.status === "forbidden") {
-    return buildResult("forbidden", "このコメントを編集する権限がありません。Redmineの権限設定を確認してください。");
+    return buildResult("forbidden", vscode.l10n.t("You do not have permission to edit this comment. Check Redmine permission settings."));
   }
   if (mapped.status === "not_found") {
-    return buildResult("not_found", "対象コメントが見つかりません。Redmine側で削除または変更された可能性があります。");
+    return buildResult("not_found", vscode.l10n.t("Comment not found. It may have been deleted or changed in Redmine."));
   }
   return mapped;
 };

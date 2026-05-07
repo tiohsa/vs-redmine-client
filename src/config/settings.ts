@@ -44,6 +44,12 @@ export const setOfflineSyncMode = async (mode: OfflineSyncMode): Promise<void> =
   );
 };
 
+export const getTicketListShowStatus = (): boolean =>
+  getSettings().get<boolean>("ticketList.showStatus", true);
+
+export const getTicketListShowDueDate = (): boolean =>
+  getSettings().get<boolean>("ticketList.showDueDate", true);
+
 export const EDITOR_DEFAULT_FIELDS = [
   "subject",
   "description",

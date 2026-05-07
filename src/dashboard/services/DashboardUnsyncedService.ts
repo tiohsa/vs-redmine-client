@@ -32,10 +32,10 @@ export class DashboardUnsyncedService {
 
   async handleSyncOne(requestId: string, key: DashboardUnsyncedKey): Promise<void> {
     if (key.kind === "comment" && key.ticketId === undefined) {
-      this.deps.context.notifyError(requestId, "コメント同期キーが不正です。");
+      this.deps.context.notifyError(requestId, vscode.l10n.t("Invalid comment sync key."));
       return;
     }
-    this.deps.context.notifyOperationStarted(requestId, "同期中...");
+    this.deps.context.notifyOperationStarted(requestId, vscode.l10n.t("Syncing…"));
     const result = await this.syncOne(key);
     this.notifySyncOneResult(requestId, result);
   }
@@ -47,10 +47,10 @@ export class DashboardUnsyncedService {
         .filter((record) => record.contentType === "ticket")
         .sort((a, b) => b.lastActiveAt - a.lastActiveAt)[0];
       if (!openTicketRecord) {
-        this.deps.context.notifySuccess(requestId, "同期する未同期変更はありません。");
+        this.deps.context.notifySuccess(requestId, vscode.l10n.t("No unsynced changes to sync."));
         return;
       }
-      this.deps.context.notifyOperationStarted(requestId, "同期中...");
+      this.deps.context.notifyOperationStarted(requestId, vscode.l10n.t("Syncing…"));
       const status = await vscode.commands.executeCommand<SyncStatus | undefined>(
         "redmine-client.syncOpenEditor",
         { uri: openTicketRecord.uri },
@@ -59,7 +59,7 @@ export class DashboardUnsyncedService {
       return;
     }
 
-    this.deps.context.notifyOperationStarted(requestId, "同期中...");
+    this.deps.context.notifyOperationStarted(requestId, vscode.l10n.t("Syncing…"));
     const results: Array<SyncUnsyncedFileResult | undefined> = [];
     for (const key of keys) {
       results.push(await this.syncOne(key));
@@ -71,27 +71,28 @@ export class DashboardUnsyncedService {
     if (failures.length > 0) {
       this.deps.context.notifyError(
         requestId,
-        `一部の同期に失敗しました。成功: ${results.length - failures.length}件 / 失敗: ${failures.length}件`,
+        vscode.l10n.t("Partial sync failure. Succeeded: {0} / Failed: {1}.", results.length - failures.length, failures.length),
       );
       return;
     }
 
     const synced = results.filter((result) => result?.status === "success").length;
     if (synced === 0) {
-      this.deps.context.notifySuccess(requestId, "変更はありませんでした。");
+      this.deps.context.notifySuccess(requestId, vscode.l10n.t("No changes."));
       return;
     }
     this.deps.context.onTicketsRefreshed();
-    this.deps.context.notifySuccess(requestId, `同期が完了しました。同期: ${synced}件`);
+    this.deps.context.notifySuccess(requestId, vscode.l10n.t("Sync completed. Synced: {0}.", synced));
   }
 
   async handleDiscardOne(requestId: string, key: DashboardUnsyncedKey): Promise<void> {
+    const discardLabel = vscode.l10n.t("Discard");
     const confirmed = await vscode.window.showWarningMessage(
-      "この未同期のローカル変更を破棄します。Redmineサーバ上のチケットは削除されません。",
+      vscode.l10n.t("This will discard the unsynced local changes. The ticket on the Redmine server will not be deleted."),
       { modal: true },
-      "破棄",
+      discardLabel,
     );
-    if (confirmed !== "破棄") {
+    if (confirmed !== discardLabel) {
       return;
     }
 
@@ -99,7 +100,7 @@ export class DashboardUnsyncedService {
       removeOfflineTicketUpdate(key.ticketId);
     } else if (key.kind === "newTicket") {
       if (!key.documentUri) {
-        this.deps.context.notifyError(requestId, "対象の新規チケット下書きを特定できません。");
+        this.deps.context.notifyError(requestId, vscode.l10n.t("Cannot identify the target new ticket draft."));
         return;
       }
       removeOfflineNewTicket({ documentUri: key.documentUri });
@@ -109,11 +110,11 @@ export class DashboardUnsyncedService {
 
     this.refreshUnsynced();
     this.deps.refreshTicketPresentation();
-    this.deps.context.notifySuccess(requestId, "未同期のローカル変更を破棄しました。");
+    this.deps.context.notifySuccess(requestId, vscode.l10n.t("Unsynced local changes discarded."));
   }
 
   async handleSyncAll(requestId: string): Promise<void> {
-    this.deps.context.notifyOperationStarted(requestId, "全件同期中...");
+    this.deps.context.notifyOperationStarted(requestId, vscode.l10n.t("Syncing all…"));
     const result = await runOfflineSync();
     this.deps.context.onTicketsRefreshed();
     this.refreshUnsynced();
@@ -125,17 +126,17 @@ export class DashboardUnsyncedService {
     switch (status) {
       case "uploaded":
         this.deps.context.onTicketsRefreshed();
-        this.deps.context.notifySuccess(requestId, "同期が完了しました。");
+        this.deps.context.notifySuccess(requestId, vscode.l10n.t("Sync completed."));
         break;
       case "noChange":
-        this.deps.context.notifySuccess(requestId, "変更はありませんでした。");
+        this.deps.context.notifySuccess(requestId, vscode.l10n.t("No changes."));
         break;
       case "conflict":
-        this.deps.context.notifyError(requestId, "リモートの変更と競合しています。ファイルを開いて確認してください。");
+        this.deps.context.notifyError(requestId, vscode.l10n.t("Conflicts with remote changes detected. Open the file to review."));
         break;
       case "failed":
       default:
-        this.deps.context.notifyError(requestId, "同期に失敗しました。VS Code の通知をご確認ください。");
+        this.deps.context.notifyError(requestId, vscode.l10n.t("Sync failed. Check the VS Code notifications."));
         break;
     }
   }
@@ -162,22 +163,22 @@ export class DashboardUnsyncedService {
 
   private notifySyncOneResult(requestId: string, result: SyncUnsyncedFileResult | undefined): void {
     if (!result) {
-      this.deps.context.notifyError(requestId, "同期に失敗しました。VS Code の通知をご確認ください。");
+      this.deps.context.notifyError(requestId, vscode.l10n.t("Sync failed. Check the VS Code notifications."));
       return;
     }
     switch (result.status) {
       case "success":
         this.deps.context.onTicketsRefreshed();
-        this.deps.context.notifySuccess(requestId, "同期が完了しました。");
+        this.deps.context.notifySuccess(requestId, vscode.l10n.t("Sync completed."));
         break;
       case "no_change":
-        this.deps.context.notifySuccess(requestId, "変更はありませんでした。");
+        this.deps.context.notifySuccess(requestId, vscode.l10n.t("No changes."));
         break;
       case "conflict":
-        this.deps.context.notifyError(requestId, "リモートの変更と競合しています。ファイルを開いて確認してください。");
+        this.deps.context.notifyError(requestId, vscode.l10n.t("Conflicts with remote changes detected. Open the file to review."));
         break;
       case "failed":
-        this.deps.context.notifyError(requestId, "同期に失敗しました。VS Code の通知をご確認ください。");
+        this.deps.context.notifyError(requestId, vscode.l10n.t("Sync failed. Check the VS Code notifications."));
         break;
     }
   }
@@ -185,25 +186,25 @@ export class DashboardUnsyncedService {
   private notifySyncAllResult(requestId: string, result: OfflineSyncRunResult): void {
     switch (result.status) {
       case "nothing_to_sync":
-        this.deps.context.notifySuccess(requestId, "同期するものはありません。");
+        this.deps.context.notifySuccess(requestId, vscode.l10n.t("Nothing to sync."));
         break;
       case "success":
-        this.deps.context.notifySuccess(requestId, `全件同期が完了しました。同期: ${result.synced}件`);
+        this.deps.context.notifySuccess(requestId, vscode.l10n.t("All items synced. Synced: {0}.", result.synced));
         break;
       case "partial_failure":
         this.deps.context.notifyError(
           requestId,
-          `一部の同期に失敗しました。成功: ${result.synced}件 / 失敗: ${result.failed}件 / 競合: ${result.conflicts}件`,
+          vscode.l10n.t("Partial sync failure. Succeeded: {0} / Failed: {1} / Conflicts: {2}.", result.synced, result.failed, result.conflicts),
         );
         break;
       case "cancelled":
         this.deps.context.notifyError(
           requestId,
-          `同期をキャンセルしました。成功: ${result.synced}件 / 未完了: ${result.failed}件`,
+          vscode.l10n.t("Sync cancelled. Succeeded: {0} / Incomplete: {1}.", result.synced, result.failed),
         );
         break;
       case "failed":
-        this.deps.context.notifyError(requestId, "同期に失敗しました。VS Code の通知をご確認ください。");
+        this.deps.context.notifyError(requestId, vscode.l10n.t("Sync failed. Check the VS Code notifications."));
         break;
     }
   }

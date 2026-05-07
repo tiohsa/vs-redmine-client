@@ -11,12 +11,12 @@ import { CommentSaveResult } from "../views/commentSaveTypes";
 
 const notifyReloadResult = (result: CommentSaveResult): void => {
   if (result.status === "success") {
-    showSuccess("Comment reloaded from Redmine.");
+    showSuccess(vscode.l10n.t("Comment reloaded from Redmine."));
     return;
   }
 
   if (result.status === "conflict") {
-    showWarning("Remote changes detected. Refresh before saving.");
+    showWarning(vscode.l10n.t("Remote changes detected. Refresh before saving."));
     return;
   }
 
@@ -26,19 +26,19 @@ const notifyReloadResult = (result: CommentSaveResult): void => {
 export const reloadCommentFromEditor = async (): Promise<void> => {
   const editor = vscode.window.activeTextEditor;
   if (!editor) {
-    showError("Open a comment editor before reloading.");
+    showError(vscode.l10n.t("Open a comment editor before reloading."));
     return;
   }
 
   if (getEditorContentType(editor) !== "comment") {
-    showError("Reload is only available for comment editors.");
+    showError(vscode.l10n.t("Reload is only available for comment editors."));
     return;
   }
 
   const ticketId = getTicketIdForEditor(editor);
   const commentId = getCommentIdForEditor(editor);
   if (!ticketId || !commentId) {
-    showError("Unable to resolve the comment for this editor.");
+    showError(vscode.l10n.t("Unable to resolve the comment for this editor."));
     return;
   }
 

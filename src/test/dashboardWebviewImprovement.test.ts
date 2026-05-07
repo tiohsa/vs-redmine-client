@@ -2,6 +2,7 @@ import * as assert from "assert";
 import { dashboardStyles } from "../dashboard/dashboardStyles";
 import { dashboardWebviewScript } from "../dashboard/dashboardWebviewScript";
 import { buildDashboardHtml } from "../dashboard/dashboardHtml";
+import { buildDashboardStrings } from "../dashboard/dashboardI18n";
 
 suite("Dashboard Webview 改善", () => {
   test("readable muted token と ticket ID badge style を定義する", () => {
@@ -23,8 +24,8 @@ suite("Dashboard Webview 改善", () => {
   });
 
   test("selected ticket detail card のコンテナと renderer を持つ", () => {
-    assert.ok(buildDashboardHtml("nonce").includes("ticket-detail-card"));
-    assert.ok(buildDashboardHtml("nonce").includes("ticket-work-panel"));
+    assert.ok(buildDashboardHtml("nonce", buildDashboardStrings()).includes("ticket-detail-card"));
+    assert.ok(buildDashboardHtml("nonce", buildDashboardStrings()).includes("ticket-work-panel"));
     assert.ok(dashboardWebviewScript.includes("function renderTicketDetail()"));
     assert.ok(dashboardWebviewScript.includes("function renderComposerPanel(panel)"));
     assert.ok(dashboardWebviewScript.includes("ticket.metadata.update"));
@@ -46,5 +47,13 @@ suite("Dashboard Webview 改善", () => {
     assert.ok(dashboardStyles.includes("#ticket-scroll{flex:1;overflow-y:auto;min-height:0;border-bottom:"));
     assert.ok(dashboardStyles.includes("border-top:2px solid"));
     assert.ok(dashboardStyles.includes("body.vscode-high-contrast .ticket-detail-card"));
+  });
+
+  test("ステータスバッジは showStatus 設定のガード付きで描画される", () => {
+    assert.ok(dashboardWebviewScript.includes("showStatus !== false"));
+  });
+
+  test("期日バッジは showDueDate 設定のガード付きで描画される", () => {
+    assert.ok(dashboardWebviewScript.includes("showDueDate !== false"));
   });
 });

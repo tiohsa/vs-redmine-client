@@ -108,11 +108,11 @@ searchInput.addEventListener('keydown',function(e){
 
 // ── Sync state metadata ─────────────────────────────────────────────────────
 const SYNC_META = {
-  Dirty:    { label: '未同期',     badge: 'sync-dirty' },
-  Queued:   { label: 'キュー済み', badge: 'sync-queued' },
-  Conflict: { label: '競合',       badge: 'sync-conflict' },
-  Failed:   { label: '失敗',       badge: 'sync-failed' },
-  Syncing:  { label: '同期中',     badge: 'sync-syncing' },
+  Dirty:    { label: STRINGS.syncDirty,    badge: 'sync-dirty' },
+  Queued:   { label: STRINGS.syncQueued,   badge: 'sync-queued' },
+  Conflict: { label: STRINGS.syncConflict, badge: 'sync-conflict' },
+  Failed:   { label: STRINGS.syncFailed,   badge: 'sync-failed' },
+  Syncing:  { label: STRINGS.syncSyncing,  badge: 'sync-syncing' },
 };
 function syncLabel(s){ return SYNC_META[s]?.label ?? s; }
 function syncBadgeClass(s){ return SYNC_META[s]?.badge ?? ''; }
@@ -182,10 +182,10 @@ function resolveDueDateBadge(dueDate, rule){
   const startNow=Date.UTC(now.getUTCFullYear(),now.getUTCMonth(),now.getUTCDate());
   const startDue=Date.UTC(due.getUTCFullYear(),due.getUTCMonth(),due.getUTCDate());
   const diff=Math.floor((startDue-startNow)/dayMs);
-  if(diff<0) return rule.showOverdue?{label:'期限超過',cls:'due-overdue'}:null;
-  if(diff<=1&&rule.showWithin1Day) return {label:'1日以内',cls:'due-1day'};
-  if(diff<=3&&rule.showWithin3Days) return {label:'3日以内',cls:'due-3days'};
-  if(diff<=7&&rule.showWithin7Days) return {label:'7日以内',cls:'due-7days'};
+  if(diff<0) return rule.showOverdue?{label:STRINGS.dueOverdue,cls:'due-overdue'}:null;
+  if(diff<=1&&rule.showWithin1Day) return {label:STRINGS.due1Day,cls:'due-1day'};
+  if(diff<=3&&rule.showWithin3Days) return {label:STRINGS.due3Days,cls:'due-3days'};
+  if(diff<=7&&rule.showWithin7Days) return {label:STRINGS.due7Days,cls:'due-7days'};
   return null;
 }
 function findTicketNode(nodes, ticketId){
@@ -271,29 +271,31 @@ function buildTicketRowHtml(t){
   const sel = t.id===state.selectedTicketId?' selected':'';
   const syncBadge = (t.syncState&&t.syncState!=='Synced')
     ?'<span class="badge '+syncBadgeClass(t.syncState)+'">'+esc(syncLabel(t.syncState))+'</span>':'';
-  const statusBadge = t.statusName
+  const statusBadge = (state.settings?.showStatus !== false && t.statusName)
     ?'<span class="badge ticket-status">'+esc(t.statusName)+'</span>'
     :'';
-  const dueBadgeData = resolveDueDateBadge(t.dueDate, state.settings?.dueDate);
+  const dueBadgeData = state.settings?.showDueDate !== false
+    ? resolveDueDateBadge(t.dueDate, state.settings?.dueDate)
+    : null;
   const dueBadge = dueBadgeData
     ?'<span class="badge '+dueBadgeData.cls+'">'+esc(dueBadgeData.label)+'</span>'
     :'';
   const hasChildren = t.children?.length > 0;
   const isExpanded = expandedIds.has(t.id);
   const expandBtn = hasChildren
-    ?'<button class="expand-btn" type="button" data-expand="'+t.id+'" aria-expanded="'+isExpanded+'" title="'+(isExpanded?'折りたたむ':'展開する')+'"><span class="expand-icon '+(isExpanded?'expanded':'collapsed')+'"></span></button>'
+    ?'<button class="expand-btn" type="button" data-expand="'+t.id+'" aria-expanded="'+isExpanded+'" title="'+(isExpanded?STRINGS.collapseTitle:STRINGS.expandTitle)+'"><span class="expand-icon '+(isExpanded?'expanded':'collapsed')+'"></span></button>'
     :'<span class="expand-placeholder"></span>';
   const childConnector = t.level>0?'<span class="child-connector" aria-hidden="true">↳</span>':'';
   const actionMenuItems = [
-    ['open',    'エディタで開く'],
-    ['comment', 'コメント追加'],
-    ['browser', 'ブラウザで開く'],
-    ['child',   '子チケット作成'],
+    ['open',    STRINGS.openInEditor],
+    ['comment', STRINGS.addCommentAction],
+    ['browser', STRINGS.openInBrowser],
+    ['child',   STRINGS.createChildTicket],
   ].map(([action, label]) =>
     '<button type="button" role="menuitem" data-ticket-action="'+action+'" data-ticket="'+t.id+'">'+label+'</button>'
   ).join('');
   const actionMenu = '<span class="ticket-actions">'
-    +'<button class="ticket-action-btn" type="button" data-ticket-action-menu="'+t.id+'" aria-haspopup="menu" aria-expanded="false" aria-controls="ticket-action-menu-'+t.id+'" aria-label="チケット操作" title="チケット操作"><span class="icon-more" aria-hidden="true"></span></button>'
+    +'<button class="ticket-action-btn" type="button" data-ticket-action-menu="'+t.id+'" aria-haspopup="menu" aria-expanded="false" aria-controls="ticket-action-menu-'+t.id+'" aria-label="'+STRINGS.ticketActionMenu+'" title="'+STRINGS.ticketActionMenu+'"><span class="icon-more" aria-hidden="true"></span></button>'
     +'<span class="ticket-action-menu hidden" id="ticket-action-menu-'+t.id+'" role="menu">'+actionMenuItems+'</span></span>';
   return '<div class="ticket-row'+(t.level>0?' child-row':'')+sel+'" data-id="'+t.id+'" style="padding-left:'+(12+indent)+'px" tabindex="0">'
     +expandBtn
@@ -308,23 +310,23 @@ function renderTickets(){
   if(!state) return;
   const list = document.getElementById('ticket-list');
   if(!state.selectedProject && !state.tickets.length && !state.loading.tickets){
-    list.innerHTML='<div class="state-msg"><strong>プロジェクト未選択</strong>上でプロジェクトを選択してチケットを表示します。</div>';
+    list.innerHTML='<div class="state-msg">'+STRINGS.noProjectSelected+'</div>';
     updateSyncButtonStates();
     return;
   }
   if(state.loading.tickets){
-    list.innerHTML='<div class="state-msg">チケットを読み込み中…</div>';
+    list.innerHTML='<div class="state-msg">'+STRINGS.loadingTickets+'</div>';
     updateSyncButtonStates();
     return;
   }
   if(state.errors.tickets){
-    list.innerHTML='<div class="state-msg error-msg"><strong>エラー</strong>'+esc(state.errors.tickets)+'</div>';
+    list.innerHTML='<div class="state-msg error-msg"><strong>'+STRINGS.errorLabel+'</strong>'+esc(state.errors.tickets)+'</div>';
     updateSyncButtonStates();
     return;
   }
   const flat = flattenVisible(state.tickets).filter(matchesSearch);
   if(!flat.length){
-    list.innerHTML='<div class="state-msg">フィルター条件に一致するチケットがありません。</div>';
+    list.innerHTML='<div class="state-msg">'+STRINGS.noTicketsFound+'</div>';
   } else {
     list.innerHTML = flat.map(buildTicketRowHtml).join('');
     list.querySelectorAll('.ticket-row').forEach(row=>{
@@ -372,7 +374,7 @@ function renderTickets(){
   const lm = document.getElementById('load-more-row');
   if(state.loadedTicketCount < state.totalTicketCount){
     lm.style.display='block';
-    lm.textContent='さらに読み込む… ('+state.loadedTicketCount+' / '+state.totalTicketCount+')';
+    lm.textContent=STRINGS.loadMore+' ('+state.loadedTicketCount+' / '+state.totalTicketCount+')';
     lm.onclick=()=>req('tickets.loadMore');
   } else { lm.style.display='none'; }
   updateSyncButtonStates();
@@ -408,7 +410,7 @@ function renderTicketDetailPanel(ticket){
   const node = findTicketNode(state.tickets, ticket.id) || {};
   const projectLabel = ticket.projectName
     ? esc(ticket.projectName)+' / ID: '+esc(ticket.projectId ?? '')
-    : 'Project ID: '+esc(ticket.projectId ?? '未設定');
+    : 'Project ID: '+esc(ticket.projectId ?? STRINGS.projectNone);
   const parentLabel = ticket.parentId
     ? '<div class="detail-parent">Parent: #'+ticket.parentId+(ticket.parentSubject ? ' '+esc(ticket.parentSubject) : '')+'</div>'
     : '';
@@ -423,16 +425,16 @@ function renderTicketDetailPanel(ticket){
   const statusDisabled = !eoReady && !metadataOptionsReady();
   const dateDisabled = !eoReady && !metadataOptionsReady();
   const statusFallbackHint = (eo && eo.statusFallback)
-    ? '<div class="detail-readonly">ステータス選択肢はグローバルのフォールバックを使用しています。</div>'
+    ? '<div class="detail-readonly">'+STRINGS.statusFallbackHint+'</div>'
     : '';
   const loadingHint = eoLoading
-    ? '<div class="detail-readonly">編集選択肢を読み込み中…</div>'
+    ? '<div class="detail-readonly">'+STRINGS.loadingEditOptions+'</div>'
     : '';
   const errorHint = (eo && eo.error)
     ? '<div class="detail-readonly">'+esc(eo.error)+'</div>'
     : '';
   const readonlyHint = !eoReady && !eoLoading
-    ? '<div class="detail-readonly">トラッカー選択肢を取得できないため編集できません。</div>'
+    ? '<div class="detail-readonly">'+STRINGS.trackerUnavailable+'</div>'
     : '';
   const expanded = ticketDetailExpanded
     ? '<div class="detail-expanded">'
@@ -453,14 +455,14 @@ function renderTicketDetailPanel(ticket){
   card.innerHTML =
     '<div class="detail-head">'
     + '<div class="detail-title"><span class="ticket-id">#'+ticket.id+'</span><span>'+esc(ticket.subject)+'</span></div>'
-    + '<button class="btn-icon detail-toggle" id="ticket-detail-toggle" title="'+(ticketDetailExpanded?'詳細を閉じる':'詳細を開く')+'" aria-expanded="'+ticketDetailExpanded+'">'+(ticketDetailExpanded?'⌃':'⌄')+'</button>'
+    + '<button class="btn-icon detail-toggle" id="ticket-detail-toggle" title="'+(ticketDetailExpanded?STRINGS.closeDetail:STRINGS.openDetail)+'" aria-expanded="'+ticketDetailExpanded+'">'+(ticketDetailExpanded?'⌃':'⌄')+'</button>'
     + '</div>'
     + '<div class="detail-project">'+projectLabel+'</div>'
     + parentLabel
     + '<div class="detail-actions">'
-    + '<button class="btn btn-secondary" id="detail-open-btn">開く</button>'
-    + '<button class="btn btn-secondary" id="detail-comment-btn">コメント</button>'
-    + '<button class="btn btn-primary" id="detail-sync-btn">同期</button>'
+    + '<button class="btn btn-secondary" id="detail-open-btn">'+STRINGS.openTicketAction+'</button>'
+    + '<button class="btn btn-secondary" id="detail-comment-btn">'+STRINGS.commentAction+'</button>'
+    + '<button class="btn btn-primary" id="detail-sync-btn">'+STRINGS.syncAction+'</button>'
     + '</div>'
     + expanded;
   card.querySelector('#ticket-detail-toggle')?.addEventListener('click',()=>{
@@ -481,7 +483,7 @@ function renderTicketDetailPanel(ticket){
 function renderComposerPanel(panel){
   const card = document.getElementById('ticket-detail-card');
   card.classList.remove('hidden');
-  const title = panel.mode === 'childTicket' ? '子チケット作成' : '新規チケット作成';
+  const title = panel.mode === 'childTicket' ? STRINGS.createChildTicketTitle : STRINGS.createNewTicketTitle;
   const parentLabel = panel.mode === 'childTicket'
     ? '<div class="work-panel-subtitle">Parent: #'+panel.parentTicketId+' '+esc(panel.parentSubject || '')+'</div>'
     : '';
@@ -489,7 +491,7 @@ function renderComposerPanel(panel){
   if(panel.loading){
     card.innerHTML =
       '<div class="work-panel-head"><div class="work-panel-title">'+title+'</div></div>'
-      +'<div class="composer-loading">トラッカーを読み込み中…</div>';
+      +'<div class="composer-loading">'+STRINGS.loadingTrackers+'</div>';
     return;
   }
   const values = panel.values || {};
@@ -500,7 +502,7 @@ function renderComposerPanel(panel){
   card.innerHTML =
     '<div class="work-panel-head"><div class="work-panel-title">'+title+'</div><div class="work-panel-subtitle">'+esc(panel.projectName || ('Project #'+panel.projectId))+'</div>'+parentLabel+'</div>'
     +errorHtml
-    +'<div class="composer-actions composer-actions-top"><button class="btn btn-secondary" id="work-cancel">キャンセル</button><button class="btn btn-primary" id="work-create"'+(canCreate?'':' disabled')+'>Markdownドラフト作成</button><button class="btn btn-secondary" id="work-sync-new-ticket">同期</button></div>'
+    +'<div class="composer-actions composer-actions-top"><button class="btn btn-secondary" id="work-cancel">'+STRINGS.cancelAction+'</button><button class="btn btn-primary" id="work-create"'+(canCreate?'':' disabled')+'>'+STRINGS.createDraft+'</button><button class="btn btn-secondary" id="work-sync-new-ticket">'+STRINGS.syncNewTicket+'</button></div>'
     +'<div class="composer-grid composer-grid-detail">'
     +'<label class="detail-field composer-detail-field"><span>Tracker <span class="composer-required">*</span></span><select class="detail-select composer-select" id="work-tracker"><option value="">Select...</option>'+trackerOptions+'</select></label>'
     +'<label class="detail-field composer-detail-field"><span>Priority <span class="composer-required">*</span></span><select class="detail-select composer-select" id="work-priority"><option value="">Select...</option>'+priorityOptions+'</select></label>'
@@ -561,10 +563,10 @@ function renderFilterChips(){
   if(!state) return;
   const f = state.settings.filters;
   const chips=[];
-  if(f.subjectQuery) chips.push('件名: '+f.subjectQuery);
-  if((f.assigneeIds||[]).length) chips.push('担当者: '+f.assigneeIds.length+'件');
-  if(f.includeUnassigned) chips.push('未担当を含む');
-  if((f.statusIds||[]).length) chips.push('ステータス: '+f.statusIds.length+'件');
+  if(f.subjectQuery) chips.push(STRINGS.filterSubjectPrefix+f.subjectQuery);
+  if((f.assigneeIds||[]).length) chips.push(STRINGS.filterAssigneeCount+': '+f.assigneeIds.length);
+  if(f.includeUnassigned) chips.push(STRINGS.filterIncludeUnassigned);
+  if((f.statusIds||[]).length) chips.push(STRINGS.filterStatusCount+': '+f.statusIds.length);
   const el=document.getElementById('filter-chips');
   el.innerHTML=chips.map(label=>'<span class="filter-chip">'+esc(label)+'<span class="filter-chip-x" aria-hidden="true"></span></span>').join('');
 }
@@ -582,11 +584,11 @@ function renderUnsynced(){
   syncAllBtn.onclick=()=>req('unsynced.syncAll');
 
   const list=document.getElementById('unsynced-list');
-  if(!n){ list.innerHTML='<div class="state-msg">未同期の変更はありません。</div>'; updateSyncButtonStates(); return; }
-  const kindLabelMap={ticket:'チケット',newTicket:'新規チケット',comment:'コメント'};
+  if(!n){ list.innerHTML='<div class="state-msg">'+STRINGS.noUnsyncedChanges+'</div>'; updateSyncButtonStates(); return; }
+  const kindLabelMap={ticket:STRINGS.unsyncedKindTicket,newTicket:STRINGS.unsyncedKindNewTicket,comment:STRINGS.unsyncedKindComment};
   list.innerHTML=state.unsynced.items.map(item=>{
-    const kindLabel=kindLabelMap[item.key.kind]||'ファイル';
-    const openBtn=item.documentUri?'<button class="btn btn-secondary" data-uri="'+esc(item.documentUri)+'">開く</button>':'';
+    const kindLabel=kindLabelMap[item.key.kind]||STRINGS.unsyncedKindFile;
+    const openBtn=item.documentUri?'<button class="btn btn-secondary" data-uri="'+esc(item.documentUri)+'">'+STRINGS.openFileAction+'</button>':'';
     return '<div class="unsynced-card">'
       +'<span class="unsynced-kind-label">'+esc(kindLabel)+'</span>'
       +'<div class="unsynced-body">'
@@ -595,8 +597,8 @@ function renderUnsynced(){
       +'</div>'
       +'<div class="unsynced-actions">'
       +openBtn
-      +'<button class="btn btn-secondary" data-discard-key="'+esc(JSON.stringify(item.key))+'" title="未同期のローカル変更を破棄">破棄</button>'
-      +'<button class="btn btn-primary" data-sync-key="'+esc(JSON.stringify(item.key))+'">同期</button>'
+      +'<button class="btn btn-secondary" data-discard-key="'+esc(JSON.stringify(item.key))+'" title="'+STRINGS.discardTitle+'">'+STRINGS.discardAction+'</button>'
+      +'<button class="btn btn-primary" data-sync-key="'+esc(JSON.stringify(item.key))+'">'+STRINGS.syncAction+'</button>'
       +'</div>'
       +'</div>';
   }).join('');
@@ -623,22 +625,22 @@ function renderComments(){
   const ticketId=state.selectedTicketId;
   const header=ticketId
     ?'<div class="comments-header">'
-      +'<span class="comments-header-label">チケット #'+ticketId+' のコメント</span>'
+      +'<span class="comments-header-label">'+STRINGS.commentsForTicket+' #'+ticketId+'</span>'
       +'<div class="comments-header-actions">'
-      +'<button class="btn btn-primary" id="add-comment-btn">追加</button>'
-      +'<button class="btn btn-secondary" id="reload-comments-btn">更新</button>'
+      +'<button class="btn btn-primary" id="add-comment-btn">'+STRINGS.addCommentBtn+'</button>'
+      +'<button class="btn btn-secondary" id="reload-comments-btn">'+STRINGS.reloadComments+'</button>'
       +'</div></div>'
     :'';
-  if(!ticketId){ list.innerHTML='<div class="state-msg">チケットを選択するとコメントを表示します。</div>'; return; }
-  if(c.loading){ list.innerHTML=header+'<div class="state-msg">コメントを読み込み中…</div>'; }
+  if(!ticketId){ list.innerHTML='<div class="state-msg">'+STRINGS.noTicketSelected+'</div>'; return; }
+  if(c.loading){ list.innerHTML=header+'<div class="state-msg">'+STRINGS.loadingComments+'</div>'; }
   else if(c.error){ list.innerHTML=header+'<div class="state-msg error-msg">'+esc(c.error)+'</div>'; }
-  else if(!c.items.length){ list.innerHTML=header+'<div class="state-msg">コメントはありません。</div>'; }
+  else if(!c.items.length){ list.innerHTML=header+'<div class="state-msg">'+STRINGS.noComments+'</div>'; }
   else{
     list.innerHTML=header+c.items.map(cm=>{
       const unsyncedBadge=cm.hasUnsyncedEdit
-        ?'<span class="badge sync-dirty" aria-label="未同期の修正があります">未同期の修正あり</span>':'' ;
-      const editBtn='<button class="btn btn-secondary" data-edit-comment="'+cm.id+'" data-ticket="'+ticketId+'" aria-label="コメントを編集">編集</button>';
-      const browserBtn='<button class="btn btn-secondary" data-open-comment="'+cm.id+'" data-ticket="'+ticketId+'" aria-label="Redmineで開く">Redmineで開く</button>';
+        ?'<span class="badge sync-dirty" aria-label="'+STRINGS.unsyncedEditAriaLabel+'">'+STRINGS.unsyncedEditBadge+'</span>':'' ;
+      const editBtn='<button class="btn btn-secondary" data-edit-comment="'+cm.id+'" data-ticket="'+ticketId+'" aria-label="'+STRINGS.editCommentAction+'">'+STRINGS.editCommentAction+'</button>';
+      const browserBtn='<button class="btn btn-secondary" data-open-comment="'+cm.id+'" data-ticket="'+ticketId+'" aria-label="'+STRINGS.openInRedmine+'">'+STRINGS.openInRedmine+'</button>';
       return '<div class="comment-card">'
         +'<div class="comment-header"><span class="comment-author">'+esc(cm.authorName)+'</span>'
         +(cm.updatedAt?'<span class="comment-date">'+esc(cm.updatedAt.substring(0,10))+'</span>':'')
@@ -665,18 +667,18 @@ function renderComments(){
 }
 
 // ── Settings ────────────────────────────────────────────────────────────────
-const SORT_FIELD_OPTIONS = [
-  ['',         'デフォルト'],
-  ['priority', '優先度'],
-  ['status',   'ステータス'],
-  ['tracker',  'トラッカー'],
-  ['assignee', '担当者'],
+const getSortFieldOptions = () => [
+  ['',         STRINGS.sortDefaultOption],
+  ['priority', STRINGS.sortPriority],
+  ['status',   STRINGS.sortStatus],
+  ['tracker',  STRINGS.sortTracker],
+  ['assignee', STRINGS.sortAssignee],
 ];
-const DUE_DATE_TOGGLES = [
-  ['set-dd-overdue', 'showOverdue',     '期限超過'],
-  ['set-dd-1d',      'showWithin1Day',  '1日以内'],
-  ['set-dd-3d',      'showWithin3Days', '3日以内'],
-  ['set-dd-7d',      'showWithin7Days', '7日以内'],
+const getDueDateToggles = () => [
+  ['set-dd-overdue', 'showOverdue',     STRINGS.dueOverdue],
+  ['set-dd-1d',      'showWithin1Day',  STRINGS.due1Day],
+  ['set-dd-3d',      'showWithin3Days', STRINGS.due3Days],
+  ['set-dd-7d',      'showWithin7Days', STRINGS.due7Days],
 ];
 function buildSelectOptionsHtml(options, currentValue){
   return options.map(([value, label]) => {
@@ -685,7 +687,7 @@ function buildSelectOptionsHtml(options, currentValue){
   }).join('');
 }
 function buildDueDateTogglesHtml(rule){
-  return DUE_DATE_TOGGLES.map(([id, key, label]) =>
+  return getDueDateToggles().map(([id, key, label]) =>
     '<div class="setting-row"><span class="setting-label">'+label+'</span><input type="checkbox" id="'+id+'"'+(rule[key]?' checked':'')+' class="setting-check"></div>'
   ).join('');
 }
@@ -694,30 +696,30 @@ function renderSettings(){
   const s=state.settings;
   const el=document.getElementById('settings-content');
   el.innerHTML=
-    '<div class="settings-section"><h3>チケットフィルタ</h3>'
+    '<div class="settings-section"><h3>'+STRINGS.sectionTicketFilter+'</h3>'
     +'<div id="quick-filter-row">'
-    +'<label class="quick-filter-label" for="assignee-filter-select">担当者</label>'
-    +'<select id="assignee-filter-select" class="quick-filter-select" multiple size="4" aria-label="担当者フィルター"></select>'
-    +'<label class="quick-filter-check"><input type="checkbox" id="assignee-unassigned-toggle"> 未担当を含む</label>'
-    +'<label class="quick-filter-label" for="status-filter-select">ステータス</label>'
-    +'<select id="status-filter-select" class="quick-filter-select" multiple size="4" aria-label="ステータスフィルター"></select>'
+    +'<label class="quick-filter-label" for="assignee-filter-select">'+STRINGS.filterAssigneeLabel+'</label>'
+    +'<select id="assignee-filter-select" class="quick-filter-select" multiple size="4" aria-label="'+STRINGS.filterAssigneeAria+'"></select>'
+    +'<label class="quick-filter-check"><input type="checkbox" id="assignee-unassigned-toggle"> '+STRINGS.filterIncludeUnassignedLabel+'</label>'
+    +'<label class="quick-filter-label" for="status-filter-select">'+STRINGS.filterStatusLabel+'</label>'
+    +'<select id="status-filter-select" class="quick-filter-select" multiple size="4" aria-label="'+STRINGS.filterStatusAria+'"></select>'
     +'</div>'
     +'</div>'
-    +'<div class="settings-section"><h3>並び替え</h3>'
-    +'<div class="setting-row"><span class="setting-label">並び替えフィールド</span>'
-    +'<select class="setting-select" id="set-sort-field">'+buildSelectOptionsHtml(SORT_FIELD_OPTIONS, s.sort.field || '')+'</select></div>'
-    +'<div class="setting-row"><span class="setting-label">並び順</span>'
-    +'<select class="setting-select" id="set-sort-dir">'+buildSelectOptionsHtml([['asc','昇順'],['desc','降順']], s.sort.direction)+'</select></div>'
+    +'<div class="settings-section"><h3>'+STRINGS.sectionSort+'</h3>'
+    +'<div class="setting-row"><span class="setting-label">'+STRINGS.sortFieldLabel+'</span>'
+    +'<select class="setting-select" id="set-sort-field">'+buildSelectOptionsHtml(getSortFieldOptions(), s.sort.field || '')+'</select></div>'
+    +'<div class="setting-row"><span class="setting-label">'+STRINGS.sortDirectionLabel+'</span>'
+    +'<select class="setting-select" id="set-sort-dir">'+buildSelectOptionsHtml([['asc',STRINGS.sortAsc],['desc',STRINGS.sortDesc]], s.sort.direction)+'</select></div>'
     +'</div>'
-    +'<div class="settings-section"><h3>期日インジケーター</h3>'
+    +'<div class="settings-section"><h3>'+STRINGS.sectionDueDate+'</h3>'
     +buildDueDateTogglesHtml(s.dueDate)
     +'</div>'
-    +'<div class="settings-section"><h3>同期</h3>'
-    +'<div class="setting-row"><span class="setting-label">オフライン同期モード</span>'
-    +'<select class="setting-select" id="set-sync-mode">'+buildSelectOptionsHtml([['auto','自動'],['manual','手動']], s.offlineSyncMode)+'</select></div>'
+    +'<div class="settings-section"><h3>'+STRINGS.sectionSync+'</h3>'
+    +'<div class="setting-row"><span class="setting-label">'+STRINGS.offlineSyncModeLabel+'</span>'
+    +'<select class="setting-select" id="set-sync-mode">'+buildSelectOptionsHtml([['auto',STRINGS.offlineSyncAuto],['manual',STRINGS.offlineSyncManual]], s.offlineSyncMode)+'</select></div>'
     +'</div>'
-    +'<div class="settings-section"><h3>一般</h3>'
-    +'<div class="setting-row"><span class="setting-label">チケット取得件数</span>'
+    +'<div class="settings-section"><h3>'+STRINGS.sectionGeneral+'</h3>'
+    +'<div class="setting-row"><span class="setting-label">'+STRINGS.ticketLimitLabel+'</span>'
     +'<input class="setting-input setting-input-num" id="set-ticket-limit" type="number" min="1" max="500" value="'+s.ticketListLimit+'"></div>'
     +'</div>';
 
@@ -731,7 +733,7 @@ function renderSettings(){
   const sortDirEl=document.getElementById('set-sort-dir');
   sortDirEl.addEventListener('change',()=>applyTicketListPatch({sort:{field:s.sort.field,direction:sortDirEl.value}}));
 
-  DUE_DATE_TOGGLES.forEach(([id, key]) => {
+  getDueDateToggles().forEach(([id, key]) => {
     const checkbox=document.getElementById(id);
     checkbox.addEventListener('change',()=>applyTicketListPatch({dueDate:{...s.dueDate,[key]:checkbox.checked}}));
   });

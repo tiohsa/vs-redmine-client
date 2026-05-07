@@ -7,15 +7,17 @@ export type RedmineErrorType =
   | "conflict"
   | "unexpected";
 
-const ERROR_MESSAGES: Record<RedmineErrorType, string> = {
-  auth_failure: "認証に失敗しました。APIキーを確認してください。",
-  permission_denied: "このチケットへのアクセス権がありません。",
-  validation_error: "入力値が正しくありません。内容を確認してください。",
-  network_failure: "Redmine に接続できませんでした。ネットワークを確認してください。",
-  server_error: "Redmine サーバーでエラーが発生しました。",
-  conflict: "リモートで変更が検出されました。最新情報を取得してから保存してください。",
-  unexpected: "予期しないエラーが発生しました。",
-};
+import * as vscode from "vscode";
+
+const getErrorMessages = (): Record<RedmineErrorType, string> => ({
+  auth_failure: vscode.l10n.t("Authentication failed. Check your API key."),
+  permission_denied: vscode.l10n.t("You do not have access to this ticket."),
+  validation_error: vscode.l10n.t("Invalid input. Please check the values."),
+  network_failure: vscode.l10n.t("Could not connect to Redmine. Check your network."),
+  server_error: vscode.l10n.t("Redmine server error occurred."),
+  conflict: vscode.l10n.t("Remote changes detected. Fetch the latest data before saving."),
+  unexpected: vscode.l10n.t("An unexpected error occurred."),
+});
 
 export const classifyError = (error: unknown, statusCode?: number): RedmineErrorType => {
   const code = statusCode ?? extractStatusCode(error);
@@ -33,7 +35,7 @@ export const classifyError = (error: unknown, statusCode?: number): RedmineError
 };
 
 export const getUserMessage = (type: RedmineErrorType): string =>
-  ERROR_MESSAGES[type];
+  getErrorMessages()[type];
 
 export const getTechnicalMessage = (error: unknown): string =>
   error instanceof Error ? error.message : String(error);

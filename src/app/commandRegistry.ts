@@ -105,8 +105,8 @@ const pickDashboardComment = async (state: DashboardState): Promise<Comment | un
     comment,
   }));
   const picked = await vscode.window.showQuickPick(items, {
-    title: "コメントを選択",
-    placeHolder: "編集またはブラウザ表示するコメントを選択してください",
+    title: vscode.l10n.t("Select comment"),
+    placeHolder: vscode.l10n.t("Select a comment to edit or view in browser"),
     matchOnDescription: true,
     matchOnDetail: true,
   });
@@ -161,18 +161,19 @@ const requireSelectedTicket = (
   return selected;
 };
 
-const SETTINGS_FILTER_STUB_MESSAGE =
-  "Dashboard の Settings タブでフィルタを設定してください。";
-const SETTINGS_FILTER_STUB_COMMANDS: ReadonlyArray<readonly [string, string]> = [
-  [TICKET_SETTINGS_COMMANDS.titleFilter, SETTINGS_FILTER_STUB_MESSAGE],
-  [TICKET_SETTINGS_COMMANDS.priorityFilter, SETTINGS_FILTER_STUB_MESSAGE],
-  [TICKET_SETTINGS_COMMANDS.statusFilter, SETTINGS_FILTER_STUB_MESSAGE],
-  [TICKET_SETTINGS_COMMANDS.trackerFilter, SETTINGS_FILTER_STUB_MESSAGE],
-  [TICKET_SETTINGS_COMMANDS.assigneeFilter, SETTINGS_FILTER_STUB_MESSAGE],
-  [TICKET_SETTINGS_COMMANDS.sort, "Dashboard の Settings タブで並び順を設定してください。"],
-  [TICKET_SETTINGS_COMMANDS.dueDate, "Dashboard の Settings タブで期限表示を設定してください。"],
-  [TICKET_SETTINGS_COMMANDS.reset, "Dashboard の Settings タブから設定をリセットしてください。"],
-];
+const getSettingsFilterStubCommands = (): ReadonlyArray<readonly [string, string]> => {
+  const filterMsg = vscode.l10n.t("Use the Dashboard Settings tab to configure filters.");
+  return [
+    [TICKET_SETTINGS_COMMANDS.titleFilter, filterMsg],
+    [TICKET_SETTINGS_COMMANDS.priorityFilter, filterMsg],
+    [TICKET_SETTINGS_COMMANDS.statusFilter, filterMsg],
+    [TICKET_SETTINGS_COMMANDS.trackerFilter, filterMsg],
+    [TICKET_SETTINGS_COMMANDS.assigneeFilter, filterMsg],
+    [TICKET_SETTINGS_COMMANDS.sort, vscode.l10n.t("Use the Dashboard Settings tab to configure sort order.")],
+    [TICKET_SETTINGS_COMMANDS.dueDate, vscode.l10n.t("Use the Dashboard Settings tab to configure due date display.")],
+    [TICKET_SETTINGS_COMMANDS.reset, vscode.l10n.t("Use the Dashboard Settings tab to reset settings.")],
+  ];
+};
 
 const EDITOR_DEFAULT_FIELD_COMMANDS: ReadonlyArray<readonly [string, "subject" | "description" | "tracker" | "priority" | "status" | "due_date"]> = [
   [EDITOR_DEFAULT_COMMANDS.subject, "subject"],
@@ -210,7 +211,7 @@ export const registerCommands = (
     ),
     registerStubMessage(
       "redmine-client.loadMoreTickets",
-      "Dashboard の「もっと読み込む」を使用してください。",
+      vscode.l10n.t("Use the 'Load more' button in the Dashboard."),
     ),
   );
 
@@ -224,7 +225,7 @@ export const registerCommands = (
     vscode.commands.registerCommand("redmine-client.syncUnsyncedFile", async (item: unknown) => {
       const withKey = item as { syncKey?: unknown } | undefined;
       if (!isDashboardUnsyncedKey(withKey?.syncKey)) {
-        vscode.window.showErrorMessage("Dashboard の未同期一覧から同期対象を選択してください。");
+        vscode.window.showErrorMessage(vscode.l10n.t("Select sync target from the Dashboard unsynced list."));
         return;
       }
       await syncUnsyncedFile(
@@ -306,13 +307,13 @@ export const registerCommands = (
   context.subscriptions.push(
     registerStubMessage(
       "redmine-client.searchTickets",
-      "Dashboard からチケットを検索・選択してください。",
+      vscode.l10n.t("Search and select tickets from the Dashboard."),
     ),
     vscode.commands.registerCommand("redmine-client.focusTicketEditor", async (input: unknown) => {
       const payload = input as { ticketId?: number; uri?: string } | number | undefined;
       const ticketId = typeof payload === "number" ? payload : payload?.ticketId;
       if (!payload || (!ticketId && !(payload as { uri?: string })?.uri)) {
-        showError("Select an open ticket to focus.");
+        showError(vscode.l10n.t("Select an open ticket to focus."));
         return;
       }
       await focusTicketEditor(payload);
@@ -323,15 +324,15 @@ export const registerCommands = (
     vscode.commands.registerCommand("redmine-client.revealActiveTicket", async () => {
       const editor = vscode.window.activeTextEditor;
       if (!editor || !isTicketEditor(editor)) {
-        showError("Open a ticket editor to focus its ticket.");
+        showError(vscode.l10n.t("Open a ticket editor to focus its ticket."));
         return;
       }
       const ticketId = getTicketIdForEditor(editor);
       if (!ticketId || ticketId === NEW_TICKET_DRAFT_ID) {
-        showError("New ticket drafts are not listed in the ticket tree.");
+        showError(vscode.l10n.t("New ticket drafts are not listed in the ticket tree."));
         return;
       }
-      showSuccess(`Ticket #${ticketId} is active in the editor.`);
+      showSuccess(vscode.l10n.t("Ticket #{0} is active in the editor.", ticketId));
     }),
     vscode.commands.registerCommand("redmine-client.reloadTicket", async () => {
       await reloadTicketFromEditor();
@@ -360,14 +361,14 @@ export const registerCommands = (
     vscode.commands.registerCommand("redmine-client.selectProject", async () => {
       const projectId = await vscode.window.showInputBox({
         prompt: "Enter Redmine project ID",
-        placeHolder: "e.g. 123",
+        placeHolder: vscode.l10n.t("e.g. 123"),
       });
       if (!projectId) {
         return;
       }
       const numericId = Number(projectId);
       if (Number.isNaN(numericId)) {
-        vscode.window.showErrorMessage("Project ID must be a number.");
+        vscode.window.showErrorMessage(vscode.l10n.t("Project ID must be a number."));
         return;
       }
       ticketsPresentation.setSelectedProjectId(numericId);
@@ -388,7 +389,7 @@ export const registerCommands = (
     vscode.commands.registerCommand("redmine-client.editComment", async () => {
       const comment = await pickDashboardComment(getState());
       if (!comment) {
-        vscode.window.showErrorMessage("Dashboard からコメントを選択してから実行してください。");
+        vscode.window.showErrorMessage(vscode.l10n.t("Select a comment in Dashboard before running."));
         return;
       }
       await editComment(comment);
@@ -422,7 +423,7 @@ export const registerCommands = (
     vscode.commands.registerCommand("redmine-client.openProjectInBrowser", async () => {
       const selected = getState().selectedProject;
       if (!selected?.id || !selected.name || !selected.identifier) {
-        vscode.window.showErrorMessage("Dashboard でプロジェクトを選択してください。");
+        vscode.window.showErrorMessage(vscode.l10n.t("Select a project in Dashboard."));
         return;
       }
       const project: Project = { id: selected.id, name: selected.name, identifier: selected.identifier };
@@ -436,7 +437,7 @@ export const registerCommands = (
     vscode.commands.registerCommand("redmine-client.openCommentInBrowser", async () => {
       const comment = await pickDashboardComment(getState());
       if (!comment) {
-        vscode.window.showErrorMessage("Dashboard でコメントを選択してください。");
+        vscode.window.showErrorMessage(vscode.l10n.t("Select a comment in Dashboard."));
         return;
       }
       await openCommentInBrowser({ comment });
@@ -444,7 +445,7 @@ export const registerCommands = (
   );
 
   context.subscriptions.push(
-    ...SETTINGS_FILTER_STUB_COMMANDS.map(([id, message]) => registerStubMessage(id, message)),
+    ...getSettingsFilterStubCommands().map(([id, message]) => registerStubMessage(id, message)),
     vscode.commands.registerCommand(TICKET_SETTINGS_COMMANDS.offlineSyncMode, async () => {
       await configureOfflineSyncMode();
       settingsPresentation.refresh();
@@ -467,27 +468,26 @@ export const registerCommands = (
   context.subscriptions.push(
     vscode.commands.registerCommand("redmine-client.setApiKey", async () => {
       const key = await vscode.window.showInputBox({
-        prompt: "Redmine APIキーを入力してください",
+        prompt: vscode.l10n.t("Enter Redmine API key"),
         password: true,
-        placeHolder: "Redmine API key",
+        placeHolder: vscode.l10n.t("Redmine API key"),
       });
       if (key === undefined) {
         return;
       }
       await setApiKey(key);
-      showSuccess("APIキーをセキュアストレージに保存しました。");
+      showSuccess(vscode.l10n.t("API key saved to secure storage."));
     }),
     vscode.commands.registerCommand("redmine-client.clearApiKey", async () => {
       await clearApiKey();
-      showSuccess("APIキーを削除しました。");
+      showSuccess(vscode.l10n.t("API key removed."));
     }),
     vscode.commands.registerCommand("redmine-client.showApiKeyStatus", async () => {
       const status = await getApiKeyStatus();
       const messages: Record<typeof status, string> = {
-        secret: "APIキーはセキュアストレージに保存されています。",
-        settings:
-          "APIキーは settings.json に保存されています。セキュアストレージへの移行を推奨します（Redmine: Set API Key）。",
-        none: "APIキーが設定されていません。",
+        secret: vscode.l10n.t("API key is stored in secure storage."),
+        settings: vscode.l10n.t("API key is stored in settings.json. Consider migrating to secure storage (Redmine: Set API Key)."),
+        none: vscode.l10n.t("API key is not configured."),
       };
       vscode.window.showInformationMessage(messages[status]);
     }),

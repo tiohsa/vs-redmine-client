@@ -61,7 +61,7 @@ export const runOfflineSync = async (): Promise<OfflineSyncRunResult> => {
     queue.newTickets.length + ticketUpdates.length + queue.comments.length;
 
   if (totalItems === 0) {
-    showInfo("No local changes to sync.");
+    showInfo(vscode.l10n.t("No local changes to sync."));
     return { status: "nothing_to_sync", total: 0, synced: 0, failed: 0, conflicts: 0 };
   }
 
@@ -76,7 +76,7 @@ export const runOfflineSync = async (): Promise<OfflineSyncRunResult> => {
   await vscode.window.withProgress(
     {
       location: vscode.ProgressLocation.Notification,
-      title: "Syncing local changes to Redmine…",
+      title: vscode.l10n.t("Syncing local changes to Redmine…"),
       cancellable: true,
     },
     async (progress, token) => {
@@ -189,15 +189,15 @@ export const runOfflineSync = async (): Promise<OfflineSyncRunResult> => {
       newTickets: failedNewTickets,
     });
     const parts: string[] = [];
-    if (synced > 0) { parts.push(`Synced: ${synced}`); }
-    if (conflicts > 0) { parts.push(`Conflicts: ${conflicts}`); }
-    if (failed - conflicts > 0) { parts.push(`Failed: ${failed - conflicts}`); }
+    if (synced > 0) { parts.push(vscode.l10n.t("Synced: {0}", synced)); }
+    if (conflicts > 0) { parts.push(vscode.l10n.t("Conflicts: {0}", conflicts)); }
+    if (failed - conflicts > 0) { parts.push(vscode.l10n.t("Failed: {0}", failed - conflicts)); }
     showWarning(
-      `Sync completed with issues. ${parts.join(", ")}. Remaining: ${summarizeFailures(
-        failedTickets,
-        failedComments,
-        failedNewTickets.length,
-      )}`,
+      vscode.l10n.t(
+        "Sync completed with issues. {0}. Remaining: {1}",
+        parts.join(", "),
+        summarizeFailures(failedTickets, failedComments, failedNewTickets.length),
+      ),
     );
     if (wasCancelled) {
       return { status: "cancelled", total: totalItems, synced, failed, conflicts };
@@ -209,6 +209,6 @@ export const runOfflineSync = async (): Promise<OfflineSyncRunResult> => {
   }
 
   clearOfflineSyncQueue();
-  showInfo(`Sync completed. Synced: ${synced}.`);
+  showInfo(vscode.l10n.t("Sync completed. Synced: {0}.", synced));
   return { status: "success", total: totalItems, synced, failed: 0, conflicts: 0 };
 };

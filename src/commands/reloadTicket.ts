@@ -10,12 +10,12 @@ import { TicketSaveResult } from "../views/ticketSaveTypes";
 
 const notifyReloadResult = (result: TicketSaveResult): void => {
   if (result.status === "success") {
-    showSuccess("Reloaded from Redmine.");
+    showSuccess(vscode.l10n.t("Reloaded from Redmine."));
     return;
   }
 
   if (result.status === "conflict") {
-    showWarning("Remote changes detected. Refresh before saving.");
+    showWarning(vscode.l10n.t("Remote changes detected. Refresh before saving."));
     return;
   }
 
@@ -25,18 +25,18 @@ const notifyReloadResult = (result: TicketSaveResult): void => {
 export const reloadTicketFromEditor = async (): Promise<void> => {
   const editor = vscode.window.activeTextEditor;
   if (!editor) {
-    showError("Open a ticket editor before reloading.");
+    showError(vscode.l10n.t("Open a ticket editor before reloading."));
     return;
   }
 
   if (getEditorContentType(editor) !== "ticket") {
-    showError("Reload is only available for ticket editors.");
+    showError(vscode.l10n.t("Reload is only available for ticket editors."));
     return;
   }
 
   const ticketId = getTicketIdForEditor(editor);
   if (!ticketId) {
-    showError("Unable to resolve the ticket for this editor.");
+    showError(vscode.l10n.t("Unable to resolve the ticket for this editor."));
     return;
   }
 

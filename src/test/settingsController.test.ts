@@ -139,6 +139,15 @@ suite("SettingsController", () => {
     assert.strictEqual(storeSettings.filters.subjectQuery, "hello");
   });
 
+  test("pushSettings: showStatus と showDueDate が store の settings に含まれる", () => {
+    const store = makeStore();
+    const ctrl = new SettingsController(store);
+    ctrl.pushSettings();
+    const s = store.getState().settings;
+    assert.ok(Object.prototype.hasOwnProperty.call(s, "showStatus"));
+    assert.ok(Object.prototype.hasOwnProperty.call(s, "showDueDate"));
+  });
+
   test("updateTicketList: 設定が永続化され次回起動時に復元される", () => {
     const memento = makeMemento();
     initializeTicketListSettingsStore(memento);

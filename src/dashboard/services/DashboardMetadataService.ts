@@ -55,7 +55,7 @@ export class DashboardMetadataService {
           statusFallback,
           loading: false,
           error: trackers.length === 0
-            ? "このプロジェクトにはトラッカーが設定されていません。"
+            ? vscode.l10n.t("No trackers configured for this project.")
             : undefined,
         },
       });
@@ -70,7 +70,7 @@ export class DashboardMetadataService {
           statuses: globalOptions.statuses,
           statusFallback: true,
           loading: false,
-          error: `プロジェクトのトラッカー取得に失敗しました: ${msg}`,
+          error: vscode.l10n.t("Failed to load trackers for this project: {0}", msg),
         },
       });
     }
@@ -90,7 +90,7 @@ export class DashboardMetadataService {
     const tickets = this.deps.getTickets();
     const ticket = tickets.find((candidate) => candidate.id === ticketId);
     if (!ticket) {
-      this.deps.context.notifyError(requestId, "対象チケットが見つかりません。");
+      this.deps.context.notifyError(requestId, vscode.l10n.t("Target ticket not found."));
       return;
     }
 
@@ -121,7 +121,7 @@ export class DashboardMetadataService {
     if (!updated) {
       await this.deps.openEditor(ticketId);
       if (!await this.updateRegisteredTicketEditor(ticket, patch)) {
-        this.deps.context.notifyError(requestId, "更新対象のチケットエディタを特定できません。");
+        this.deps.context.notifyError(requestId, vscode.l10n.t("Cannot identify the ticket editor to update."));
         return;
       }
     }
@@ -130,22 +130,22 @@ export class DashboardMetadataService {
     this.deps.refreshUnsynced();
     this.deps.pushTickets();
     this.deps.context.store.update({ selectedTicket: buildTicketDetail(ticket, tickets) });
-    this.deps.context.notifySuccess(requestId, "チケット情報を更新しました。同期は既存の同期コマンドで実行されます。");
+    this.deps.context.notifySuccess(requestId, vscode.l10n.t("Ticket metadata updated. Use an existing sync command to sync changes."));
   }
 
   private validateMetadataPatchAgainstOptions(patch: TicketMetadataPatch, ticketId?: number): string | undefined {
     if (!this.deps.isMetadataOptionsLoaded()) {
-      return "メタデータ選択肢が未取得のため更新できません。";
+      return vscode.l10n.t("Cannot update: metadata options not loaded.");
     }
     const state = this.deps.context.store.getState();
     const editOptions = state.editOptions?.ticketId === ticketId ? state.editOptions : undefined;
     const priorityOptions = editOptions ? editOptions.priorities : state.metadataOptions.priorities;
     const statusOptions = editOptions ? editOptions.statuses : state.metadataOptions.statuses;
     if (patch.priority !== undefined && !priorityOptions.some((item) => item.name === patch.priority)) {
-      return `未知の優先度です: ${patch.priority}`;
+      return vscode.l10n.t("Unknown priority: {0}", patch.priority);
     }
     if (patch.status !== undefined && !statusOptions.some((item) => item.name === patch.status)) {
-      return `未知のステータスです: ${patch.status}`;
+      return vscode.l10n.t("Unknown status: {0}", patch.status);
     }
     return undefined;
   }
@@ -164,11 +164,11 @@ export class DashboardMetadataService {
         this.projectTrackerCache.set(projectId, trackers);
       }
       if (!trackers.some((t) => t.name === trackerName)) {
-        return `このプロジェクトでは使用できないトラッカーです: ${trackerName}`;
+        return vscode.l10n.t("Tracker not available for this project: {0}", trackerName);
       }
       return undefined;
     } catch {
-      return "このプロジェクトのトラッカー選択肢を取得できないため更新できません。";
+      return vscode.l10n.t("Cannot update: failed to load tracker options for this project.");
     }
   }
 
