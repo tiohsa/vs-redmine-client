@@ -108,7 +108,7 @@ suite("composerSync – draftUri ルーティング", () => {
     await ctrl.handle({ type: "ticket.syncNewTicketDraftFromComposer", requestId: "r1" });
 
     assert.strictEqual(syncedEditorUri, DRAFT_URI, "draftUri がそのまま同期に使われるべき");
-    assert.ok(successMessages.some((m) => m.includes("作成")), "成功通知が届くべき");
+    assert.ok(successMessages.some((m) => m.includes("Ticket created")), "成功通知が届くべき");
   });
 
   test("コンポーザー同期は draftUri がない場合にキューを参照せずエラーを返す", async () => {
@@ -142,7 +142,7 @@ suite("composerSync – draftUri ルーティング", () => {
     assert.strictEqual(syncCalled, false, "draftUri がないとき sync は呼ばれるべきでない");
     assert.ok(errors.length > 0, "エラー通知が届くべき");
     assert.ok(
-      errors.some((e) => e.includes("下書き") || e.includes("ドラフト") || e.includes("作成")),
+      errors.some((e) => e.includes("Draft") || e.includes("draft") || e.includes("created")),
       `エラーメッセージが下書き作成を促すべき (実際: ${errors.join(", ")})`,
     );
 
@@ -342,7 +342,7 @@ suite("composerSync – 空の件名エラー", () => {
     assert.ok(errors.length > 0, "エラー通知が届くべき");
     const errorMsg = errors[0];
     assert.ok(
-      errorMsg.includes("件名") && errorMsg.includes("# "),
+      errorMsg.includes("Subject") && errorMsg.includes("Markdown"),
       `エラーメッセージに「件名」と「# 」が含まれるべき (実際: "${errorMsg}")`,
     );
   });
