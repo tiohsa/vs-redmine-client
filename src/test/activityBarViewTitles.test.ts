@@ -16,19 +16,35 @@ const loadPackageJson = (): PackageJson => {
   return JSON.parse(raw) as PackageJson;
 };
 
+const loadNls = (): Record<string, string> => {
+  const nlsPath = path.resolve(__dirname, "../../package.nls.json");
+  const raw = fs.readFileSync(nlsPath, "utf8");
+  return JSON.parse(raw) as Record<string, string>;
+};
+
+const resolveNls = (value: string, nls: Record<string, string>): string => {
+  const match = /^%(.+)%$/.exec(value);
+  if (match) {
+    return nls[match[1]] ?? value;
+  }
+  return value;
+};
+
 suite("Activity Bar view titles", () => {
   test("Dashboard view has correct title", () => {
     const packageJson = loadPackageJson();
+    const nls = loadNls();
     const views = packageJson.contributes?.views?.["redmine-clientActivity"] ?? [];
     const dashboard = views.find((v) => v.id === "redmine-clientActivityDashboard");
     assert.ok(dashboard, "Dashboard view must exist");
-    assert.strictEqual(dashboard?.name, "Dashboard");
+    assert.strictEqual(resolveNls(dashboard?.name ?? "", nls), "Dashboard");
   });
 
   test("does not use legacy Redmine view titles", () => {
     const packageJson = loadPackageJson();
+    const nls = loadNls();
     const views = packageJson.contributes?.views?.["redmine-clientActivity"] ?? [];
-    const names = views.map((view) => view.name);
+    const names = views.map((view) => resolveNls(view.name, nls));
 
     assert.ok(!names.includes("Redmine Projects"));
     assert.ok(!names.includes("Redmine Tickets"));
