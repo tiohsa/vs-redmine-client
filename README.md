@@ -124,6 +124,8 @@ A **Sync all** button uploads all queued items at once.
 | `redmine-client.editorStorageDirectory` | `""` | Absolute path for storing editor files (empty = workspace default) |
 | `redmine-client.offlineSyncMode` | `"auto"` | `auto` syncs immediately on save; `manual` queues for the Unsynced tab |
 | `redmine-client.requestTimeoutMs` | `30000` | HTTP request timeout in milliseconds |
+| `redmine-client.ticketList.showStatus` | `true` | Show the status badge on each ticket row in the Dashboard |
+| `redmine-client.ticketList.showDueDate` | `true` | Show due date badges on ticket rows; when disabled, all due date badges are hidden |
 
 ## Commands
 
@@ -142,6 +144,7 @@ A **Sync all** button uploads all queued items at once.
 | `Redmine: Sync to Redmine` | Sync the active ticket/comment editor to Redmine |
 | `Redmine: Upload Open Editor` | Sync a specific open editor |
 | `Redmine: Upload All Open Editors` | Sync all open ticket/comment editors |
+| `Redmine: Sync This File` | Upload a specific item from the Unsynced queue |
 | `Redmine: Run Offline Sync` | Upload all items in the Unsynced queue |
 | `Redmine: Configure Offline Sync Mode` | Switch between `auto` and `manual` sync |
 
@@ -151,8 +154,12 @@ A **Sync all** button uploads all queued items at once.
 |---------|-------------|
 | `Redmine: New Ticket` | Open the new-ticket composer in the Dashboard |
 | `Redmine: Create Ticket from Editor` | Create a ticket from the active editor content |
+| `Redmine: Add Child Ticket` | Create a child ticket for the selected ticket |
+| `Redmine: Open Ticket Preview` | Open a read-only ticket preview in an editor |
+| `Redmine: Open Ticket Editor (New)` | Open an additional ticket editor |
 | `Redmine: Reload Ticket` | Reload the active ticket editor from Redmine |
 | `Redmine: Search Tickets` | Search tickets by keyword |
+| `Redmine: Focus Active Ticket` | Reveal the active ticket editor's ticket in the Dashboard |
 | `Redmine: Focus Open Ticket Editor` | Focus the open editor for the selected ticket |
 | `Redmine: Open Ticket in Browser` | Open the selected ticket in a browser |
 
@@ -165,18 +172,12 @@ A **Sync all** button uploads all queued items at once.
 | `Redmine: Reload Comment` | Reload the active comment editor from Redmine |
 | `Redmine: Open Comment in Browser` | Open the selected comment in a browser |
 
-### Settings Commands
+### Editor Default Commands
+
+Ticket filters, sort order, and due-date display rules are configured in the **Settings** tab of the Dashboard.
 
 | Command | Description |
 |---------|-------------|
-| `Redmine: Configure Ticket Title Filter` | Filter tickets by keyword in the subject |
-| `Redmine: Configure Ticket Priority Filter` | Filter by priority |
-| `Redmine: Configure Ticket Status Filter` | Filter by status |
-| `Redmine: Configure Ticket Tracker Filter` | Filter by tracker |
-| `Redmine: Configure Ticket Assignee Filter` | Filter by assignee |
-| `Redmine: Configure Ticket Sort` | Set the sort order |
-| `Redmine: Configure Ticket Due Date Display` | Configure due-date display rules |
-| `Redmine: Reset Ticket Settings` | Reset all ticket list settings to defaults |
 | `Redmine: Configure Editor Default Subject` | Set the default subject for new tickets |
 | `Redmine: Configure Editor Default Description` | Set the default description |
 | `Redmine: Configure Editor Default Tracker` | Set the default tracker |

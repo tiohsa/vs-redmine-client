@@ -1,178 +1,212 @@
 # Redmine Client
 
-Redmine Client は Redmine 6.1 のチケット運用を VS Code に統合します。プロジェクトの参照、チケットの検索・確認・作成、コメントの編集、変更の同期まで、エディタ内で完結できます。
+Redmine Client は Redmine 6.1 のチケット運用を VS Code に統合します。Activity Bar のダッシュボード Webview から、チケットの閲覧・作成・コメント管理・変更の同期をエディタ内で完結できます。
 
 English README: `README.md`
 
 ## 特長
 
-- Activity Bar に 5 つの専用ビュー: Ticket Settings / Open Editors / Projects / Tickets / Comments
+- Activity Bar に単一の**ダッシュボード Webview**（Tickets / Unsynced / Comments / Settings タブ）
 - ステータス・優先度・トラッカー・担当者・タイトルによるチケット絞り込み
-- ワンクリックでチケット・コメントをエディタでプレビュー
-- アクティブエディタまたはチケット一覧から新規チケット作成（子チケット作成にも対応）
-- エディタタイトルバーの同期ボタン（`Redmine: Sync to Redmine`）で明示的に保存
-- チケットエディタのフォーカス中はステータスバーにチケット番号を表示
-- **Markdown画像の自動アップロード**: エディタに貼り付けた画像は保存時に自動アップロード
-- Mermaid ブロックを redmica_ui_extension 形式（`{{mermaid ... }}`）に変換
-- 自分のコメントのみ安全に編集
+- ダッシュボードの作成フォームから直接チケット・子チケットを作成
+- チケットを編集可能な Markdown ファイルとして開き、ローカル保存または即時同期
+- 新規チケット作成後、同じ Markdown ファイルが引き続き開かれ、そのチケットの更新ファイルとして機能
+- **未同期キュー**: チケット保存・コメントドラフト・新規チケットドラフトをキューに貯め、まとめて同期
 - **競合検出と差分表示**: リモートの変更を保存前に検出し、差分エディタで競合解決
-- **オフライン同期モード**: 保存をキューに貯めて手動で反映
+- **Markdown 画像の自動アップロード**: エディタに貼り付けた画像は保存時に自動アップロード
+- Mermaid ブロックを redmica_ui_extension 形式（`{{mermaid ... }}`）に変換
 - **ドラフト永続化**: チケット・コメントのドラフトは VS Code 再起動後も保持
+- API キーは VS Code SecretStorage に安全に保存
 
 ## 必要要件
 
 - Redmine 6.1 サーバー
 - 対象プロジェクトにアクセス可能な API キー
 
+## セキュリティ
+
+- `Redmine: API キーを設定` コマンドで API キーを **VS Code SecretStorage** に保存してください。
+- `redmine-client.apiKey` 設定は **非推奨** です。可能な限り SecretStorage に移行してください。
+- `ignoreSSLErrors` は開発・テスト用のみです。**本番環境では有効にしないでください。**
+
 ## クイックスタート
 
-1. VS Code の設定で `redmine-client.baseUrl` と `redmine-client.apiKey` を設定する。
-2. `redmine-client.defaultProjectId` を設定するか、**Projects** ビューでプロジェクトを選択する。
-3. Activity Bar の **Projects** ビューでプロジェクトをクリックして選択する。
-4. **Tickets** ビューでチケットをクリックするとエディタが開く。
-5. 編集して保存すれば自動同期される（オフラインモードの場合はキューに追加）。
+1. VS Code の設定で `redmine-client.baseUrl` を設定する。
+2. コマンドパレットから `Redmine: API キーを設定` を実行して API キーを安全に保存する。
+3. Activity Bar の Redmine Client アイコンをクリックしてダッシュボードを開く。
+4. プロジェクトのドロップダウンからプロジェクトを選択する。
+5. チケットをクリックして選択、ダブルクリックで Markdown エディタとして開く。
+6. 編集して保存 — `auto` モードでは即座に同期、`manual` モードでは未同期キューに追加。
 
-## Activity Bar ビュー
+## ダッシュボード
 
-| ビュー | 説明 |
-|--------|------|
-| **Ticket Settings** | フィルタ・ソート・期日表示・エディタデフォルト値・オフライン同期モードを設定 |
-| **Open Editors** | 現在開いているチケット・コメントエディタ一覧。クリックでフォーカス |
-| **Projects** | プロジェクト選択。オフライン同期キューがある場合は同期アイコンを表示 |
-| **Tickets** | チケットの一覧・絞り込み・検索・新規作成 |
+拡張機能は Activity Bar に単一のダッシュボード Webview を提供し、4 つのタブで構成されます。
+
+| タブ | 説明 |
+|------|------|
+| **Tickets** | プロジェクトのチケットを一覧・絞り込み。クリックで詳細パネルを表示 |
+| **Unsynced** | 保留中のチケット更新・新規チケットドラフト・コメントドラフトを管理 |
 | **Comments** | 選択中チケットのコメント一覧と編集 |
+| **Settings** | フィルタ・ソート順・期日表示・オフライン同期モード・エディタデフォルト値を設定 |
 
-![Activity Bar ビュー](./images/view.png)
+### チケットタブ
+
+Tickets タブには選択中プロジェクトのチケット一覧が表示されます。
+
+**チケット行の操作:**
+- **シングルクリック** — チケットを選択して詳細パネルを表示
+- **ダブルクリック** — Markdown エディタとして開く
+- **⋮ メニュー** — エディタを開く / コメントを追加 / ブラウザで開く / 子チケットを作成
+
+**詳細パネル**にはチケットのメタデータ（ID・件名・プロジェクト・トラッカー・ステータス・優先度・日付・親チケット）が表示され、インラインでメタデータを編集して同期できます。
+
+### 未同期タブ
+
+Unsynced タブには保留中のアイテムが一覧表示されます。
+
+- 既存チケットの更新
+- 新規チケットドラフト
+- コメントドラフト
+- コメント更新
+
+各アイテムで利用可能な操作:
+
+| 操作 | 説明 |
+|------|------|
+| ファイルを開く | ローカルの Markdown ドラフトを開く |
+| 1件同期 | このアイテムを Redmine にアップロード |
+| 破棄 | 未同期キューから削除 |
+
+**すべて同期** ボタンでキューのアイテムを一括アップロードできます。
+
+## ワークフロー
+
+### 基本的なチケット編集
+
+1. ダッシュボードでプロジェクトを選択する。
+2. チケット一覧からチケットを選択する。
+3. ダブルクリックまたは ⋮ メニューから **エディタを開く** を選択する。
+4. Markdown ファイルを編集する（YAML フロントマターに件名、本文に説明）。
+5. Ctrl+S で保存する。
+6. **auto** 同期モードでは即座に Redmine に送信される。
+7. **manual** 同期モードでは Unsynced タブにキューされる。後で Unsynced タブから同期できる。
+
+### 新規チケット
+
+1. ダッシュボードの **New Ticket** をクリック（または `Redmine: 新規チケット` を実行）。
+2. 作成フォームでトラッカー・優先度・ステータス・開始日・期日を設定する。
+   - 選択中プロジェクトで有効なトラッカーのみ表示される。
+3. **Create Draft** をクリックして Markdown エディタを開く。
+4. 件名と説明を編集する。
+5. 保存 — ドラフトが Unsynced タブにキューされる。
+6. Unsynced タブまたは `Redmine: Redmine に同期` で同期する。
+7. Redmine への作成が完了すると、**同じ Markdown ファイルが引き続き開かれ**、作成されたチケットの更新ファイルとして機能する。
+
+### 子チケット
+
+1. チケット一覧で親チケットを選択する。
+2. ⋮ メニューから **子チケットを作成** を選択する。
+3. 作成フォームを設定する（親チケット情報はあらかじめ入力されている）。
+4. **Create Draft** をクリックして Markdown エディタを開く。
+5. 編集して同期する。
+6. 作成後、Markdown ファイルは子チケットの更新ファイルとして機能する。
 
 ## 設定項目
 
 | 設定キー | デフォルト | 説明 |
 |---------|----------|------|
-| `redmine-client.baseUrl` | `""` | Redmine のベースURL（`http://` または `https://` を含める） |
-| `redmine-client.apiKey` | `""` | Redmine API キー |
-| `redmine-client.ignoreSSLErrors` | `false` | SSL証明書エラーを無視する（自己署名証明書など） |
-| `redmine-client.defaultProjectId` | `""` | デフォルトのプロジェクトID/識別子 |
-| `redmine-client.includeChildProjects` | `false` | 子プロジェクトを一覧に含めるか |
-| `redmine-client.ticketListLimit` | `50` | 取得するチケット件数 |
+| `redmine-client.baseUrl` | `""` | Redmine のベース URL（`http://` または `https://` を含める） |
+| `redmine-client.apiKey` | `""` | **非推奨** — `Redmine: API キーを設定` を使用してください |
+| `redmine-client.ignoreSSLErrors` | `false` | SSL 証明書エラーを無視する（開発・テスト用のみ） |
+| `redmine-client.defaultProjectId` | `""` | デフォルトのプロジェクト ID / 識別子 |
+| `redmine-client.includeChildProjects` | `false` | チケット一覧に子プロジェクトを含める |
+| `redmine-client.ticketListLimit` | `50` | リクエストごとに読み込むチケット件数（1〜500） |
 | `redmine-client.editorStorageDirectory` | `""` | エディタファイルの保存先（空の場合はワークスペース既定値） |
-| `redmine-client.offlineSyncMode` | `"auto"` | 同期モード: `auto`（即時送信）/ `manual`（キューに追加） |
-
-## チケット一覧設定
-
-**Ticket Settings** ビューまたはコマンドからチケット一覧の表示をカスタマイズできます。
-
-### フィルタ
-
-- **タイトル**: 件名のキーワードで絞り込み
-- **ステータス**: 特定のステータスのチケットのみ表示
-- **優先度**: 特定の優先度のチケットのみ表示
-- **トラッカー**: 特定のトラッカーのチケットのみ表示
-- **担当者**: 特定の担当者のチケットのみ表示
-
-### 並び替え
-
-- **ソート**: 優先度・ステータス・期日などで並び替え
-- **期日表示**: チケット一覧に期日を表示
-
-### 関連チケット絞り込み
-
-Tickets ビューのタイトルバーにある絞り込みアイコン（`Redmine: 絞り込み表示切替`）をクリックすると、現在開いているエディタに関連するチケットのみ表示するモードに切り替わります。
-
-### エディタのデフォルト値
-
-新規チケット作成時に適用されるデフォルト値を設定できます:
-
-- **件名 (Subject)**、**説明 (Description)**、**トラッカー (Tracker)**、**優先度 (Priority)**、**ステータス (Status)**、**期日 (Due date)**
+| `redmine-client.offlineSyncMode` | `"auto"` | `auto`（保存時即時送信）/ `manual`（未同期キューに追加） |
+| `redmine-client.requestTimeoutMs` | `30000` | HTTP リクエストタイムアウト（ミリ秒） |
+| `redmine-client.ticketList.showStatus` | `true` | ダッシュボードのチケット行にステータスバッジを表示 |
+| `redmine-client.ticketList.showDueDate` | `true` | ダッシュボードのチケット行に期日バッジを表示 |
 
 ## コマンド
 
-### ビュー操作
+### API キー
 
 | コマンド | 説明 |
 |---------|------|
-| `Redmine: Refresh Projects` | プロジェクト一覧を再読み込み |
-| `Redmine: Refresh Tickets` | チケット一覧を再読み込み |
-| `Redmine: Refresh Comments` | コメント一覧を再読み込み |
-| `Redmine: Reload Project` | 選択中プロジェクトを再読み込み |
-| `Redmine: Reload Ticket` | アクティブなチケットエディタを Redmine から再読み込み |
-| `Redmine: Reload Comment` | アクティブなコメントエディタを Redmine から再読み込み |
-| `Redmine: Collapse All Projects` | プロジェクトツリーをすべて折りたたむ |
-| `Redmine: Collapse All Tickets` | チケットツリーをすべて折りたたむ |
-| `Redmine: Select Project` | プロジェクトIDを入力してアクティブプロジェクトを切り替え |
-| `Redmine: Toggle Child Projects` | 子プロジェクトをチケット一覧に含める/除外する |
-| `Redmine: Search Tickets` | キーワードでチケットを検索 |
-| `Redmine: 絞り込み表示切替` | 関連チケット絞り込みの ON/OFF を切り替え |
+| `Redmine: API キーを設定` | API キーを VS Code SecretStorage に保存 |
+| `Redmine: API キーを削除` | 保存済みの API キーを削除 |
+| `Redmine: API キーの状態を表示` | API キーの保存場所を確認 |
 
-### チケット操作
+### 同期コマンド
 
 | コマンド | 説明 |
 |---------|------|
-| `Redmine: Open Ticket Preview` | 読み取り専用のチケットプレビューをエディタで開く |
-| `Redmine: Open Ticket Editor (New)` | 追加のチケットエディタを開く |
-| `Redmine: Create Ticket from Editor` | アクティブエディタの内容から新規チケットを作成 |
-| `Redmine: New Ticket` | 選択中プロジェクトに空の新規チケットエディタを開く |
-| `Redmine: Add Child Ticket` | 選択中チケットの子チケットを作成 |
-| `Redmine: Sync to Redmine` | アクティブなチケット/コメントエディタを明示的に Redmine へ同期 |
-| `Redmine: Focus Active Ticket in Tree` | アクティブなチケットエディタのチケットをツリーで表示 |
-| `Redmine: Focus Open Ticket Editor` | 選択チケットの開いているエディタをフォーカス |
+| `Redmine: Redmine に同期` | アクティブなチケット/コメントエディタを Redmine へ同期 |
+| `Redmine: 開いているエディタをアップロード` | 特定の開いているエディタを同期 |
+| `Redmine: すべての開いているエディタをアップロード` | 開いているチケット/コメントエディタをすべて同期 |
+| `Redmine: このファイルを同期` | 未同期キューの特定アイテムをアップロード |
+| `Redmine: オフライン同期を実行` | 未同期キューのアイテムをすべてアップロード |
+| `Redmine: オフライン同期モードを設定` | `auto` / `manual` を切り替え |
 
-### コメント操作
+### チケットコマンド
 
 | コマンド | 説明 |
 |---------|------|
-| `Redmine: Edit Comment` | 選択中のコメントをエディタで開く |
-| `Redmine: Add Comment` | 選択中チケットに新規コメントを追加 |
+| `Redmine: 新規チケット` | ダッシュボードの新規チケット作成フォームを開く |
+| `Redmine: エディタからチケットを作成` | アクティブエディタの内容から新規チケットを作成 |
+| `Redmine: 子チケットを追加` | 選択中チケットの子チケットを作成 |
+| `Redmine: チケットプレビューを開く` | 読み取り専用のチケットプレビューをエディタで開く |
+| `Redmine: チケットエディタを開く（新規）` | 追加のチケットエディタを開く |
+| `Redmine: チケットをリロード` | アクティブなチケットエディタを Redmine から再読み込み |
+| `Redmine: チケットを検索` | キーワードでチケットを検索 |
+| `Redmine: アクティブチケットにフォーカス` | アクティブなチケットエディタのチケットをダッシュボードで表示 |
+| `Redmine: 開いているチケットエディタにフォーカス` | 選択チケットの開いているエディタをフォーカス |
+| `Redmine: チケットをブラウザで開く` | 選択中チケットをブラウザで開く |
 
-### ブラウザで開く
+### コメントコマンド
 
 | コマンド | 説明 |
 |---------|------|
-| `Redmine: Open Project in Browser` | 選択中プロジェクトをブラウザで開く |
-| `Redmine: Open Ticket in Browser` | 選択中チケットをブラウザで開く |
-| `Redmine: Open Comment in Browser` | 選択中コメントをブラウザで開く |
-
-### チケット一覧設定
-
-| コマンド | 説明 |
-|---------|------|
-| `Redmine: Configure Ticket Title Filter` | タイトル（件名）によるキーワード絞り込みを設定 |
-| `Redmine: Configure Ticket Priority Filter` | 優先度フィルタを設定 |
-| `Redmine: Configure Ticket Status Filter` | ステータスフィルタを設定 |
-| `Redmine: Configure Ticket Tracker Filter` | トラッカーフィルタを設定 |
-| `Redmine: Configure Ticket Assignee Filter` | 担当者フィルタを設定 |
-| `Redmine: Configure Ticket Sort` | ソート順を設定 |
-| `Redmine: Configure Ticket Due Date Display` | 期日表示ルールを設定 |
-| `Redmine: Reset Ticket Settings` | チケット一覧設定をすべてリセット |
+| `Redmine: コメントを追加` | 選択中チケットに新規コメントを追加 |
+| `Redmine: コメントを編集` | 選択中のコメントをエディタで開く |
+| `Redmine: コメントをリロード` | アクティブなコメントエディタを Redmine から再読み込み |
+| `Redmine: コメントをブラウザで開く` | 選択中コメントをブラウザで開く |
 
 ### エディタデフォルト値設定
 
-| コマンド | 説明 |
-|---------|------|
-| `Redmine: Configure Editor Default Subject` | デフォルトの件名を設定 |
-| `Redmine: Configure Editor Default Description` | デフォルトの説明文を設定 |
-| `Redmine: Configure Editor Default Tracker` | デフォルトのトラッカーを設定 |
-| `Redmine: Configure Editor Default Priority` | デフォルトの優先度を設定 |
-| `Redmine: Configure Editor Default Status` | デフォルトのステータスを設定 |
-| `Redmine: Configure Editor Default Due Date` | デフォルトの期日を設定 |
-| `Redmine: Reset Editor Defaults` | エディタデフォルト値をすべてクリア |
-
-### オフライン同期
+チケットのフィルタ・ソート順・期日表示ルールはダッシュボードの **Settings** タブで設定します。
 
 | コマンド | 説明 |
 |---------|------|
-| `Redmine: Run Offline Sync` | キューに貯まった保存をすべてアップロード |
-| `Redmine: Configure Offline Sync Mode` | `auto` / `manual` を切り替え |
+| `Redmine: エディタデフォルト件名を設定` | デフォルトの件名を設定 |
+| `Redmine: エディタデフォルト説明を設定` | デフォルトの説明文を設定 |
+| `Redmine: エディタデフォルトトラッカーを設定` | デフォルトのトラッカーを設定 |
+| `Redmine: エディタデフォルト優先度を設定` | デフォルトの優先度を設定 |
+| `Redmine: エディタデフォルトステータスを設定` | デフォルトのステータスを設定 |
+| `Redmine: エディタデフォルト期日を設定` | デフォルトの期日を設定 |
+| `Redmine: エディタデフォルトをリセット` | エディタデフォルト値をすべてクリア |
+
+### その他のコマンド
+
+| コマンド | 説明 |
+|---------|------|
+| `Redmine: プロジェクトを更新` | プロジェクト一覧を再読み込み |
+| `Redmine: チケットを更新` | チケット一覧を再読み込み |
+| `Redmine: コメントを更新` | コメント一覧を再読み込み |
+| `Redmine: プロジェクトをリロード` | 選択中プロジェクトを再読み込み |
+| `Redmine: プロジェクトを選択` | プロジェクト ID を入力してアクティブプロジェクトを切り替え |
+| `Redmine: 子プロジェクトの表示切替` | 子プロジェクトをチケット一覧に含める/除外する |
+| `Redmine: プロジェクトをブラウザで開く` | 選択中プロジェクトをブラウザで開く |
 
 ## ヒント
 
-- **同期ボタン**: エディタタイトルバーの `$(cloud-upload)` アイコンから `Redmine: Sync to Redmine` を実行できます。オートセーブ有効時に便利です。
+- **同期ボタン**: エディタタイトルバーの `$(cloud-upload)` アイコンから `Redmine: Redmine に同期` を実行できます。オートセーブ有効時に便利です。
 - **ドラフト永続化**: チケット・コメントのドラフトは VS Code のグローバルストレージに保存され、再起動後も保持されます。
 - **画像ペースト**: ファイルベースのエディタに画像を直接貼り付けると、保存時に自動アップロードされます。Untitled エディタの場合は先にファイル保存してください。
 - **競合解決**: リモートで変更が検出された場合、「ローカル優先」「リモート優先」「差分を確認」から選択できます。
-- **オフライン同期**: モードを `manual` にすると保存がキューされ、`Redmine: Run Offline Sync` または Projects ビューのアイコンで反映できます。
 - **Mermaid**: `mermaid` コードブロックは `{{mermaid ... }}` に変換して投稿されます。
-- **ブラウザで開く**: ツリー上のプロジェクト・チケット・コメントを右クリックして「Open in Browser」を選択できます。
 - **ステータスバー**: チケットエディタがアクティブなとき、ステータスバーにチケット番号が表示されます。
+- **プロジェクト固有トラッカー**: 新規チケット作成フォームとメタデータエディタには、選択中プロジェクトで有効なトラッカーのみ表示されます。
 
 ## デバッグ
 
@@ -190,8 +224,8 @@ pnpm run test:unsafe   # サンドボックス制限環境向けのテスト
 
 ## 既知の問題
 
+- 画像ペーストはファイルベースのエディタでのみ利用可能。新規チケット/コメントドラフト（Untitled エディタ）では、一度ファイル保存してから画像をペーストしてください。
 - クリップボード添付は data URI 形式が必要。
-- 画像ペーストはファイルベースのエディタでのみ利用可能。Untitled エディタ（新規チケット/コメントドラフト）では、一度ファイル保存してから画像をペーストしてください。
 
 ## ライセンス
 
