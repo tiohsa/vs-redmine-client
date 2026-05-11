@@ -56,6 +56,7 @@ export interface DashboardStrings {
   cancelAction: string;
   createDraft: string;
   syncNewTicket: string;
+  assigneeUnassigned: string;
   // Filter chips
   filterSubjectPrefix: string;
   filterAssigneeCount: string;
@@ -173,6 +174,7 @@ export const buildDashboardStrings = (): DashboardStrings => ({
   cancelAction: vscode.l10n.t("Cancel"),
   createDraft: vscode.l10n.t("Create Markdown draft"),
   syncNewTicket: vscode.l10n.t("Sync"),
+  assigneeUnassigned: vscode.l10n.t("Unassigned"),
   // Filter chips
   filterSubjectPrefix: vscode.l10n.t("Subject: "),
   filterAssigneeCount: vscode.l10n.t("Assignee"),

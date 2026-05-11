@@ -84,7 +84,7 @@ export const syncTicketDraft = async (
 
   let remoteDetail: IssueDetailResult | undefined;
 
-  if (metadataChanges.tracker !== undefined) {
+  if (metadataChanges.tracker !== undefined || metadataChanges.assignee !== undefined) {
     try {
       remoteDetail = await deps.getIssueDetail(input.ticketId);
     } catch (error) {

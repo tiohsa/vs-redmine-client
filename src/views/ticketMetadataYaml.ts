@@ -244,6 +244,27 @@ export const parseIssueMetadataYaml = (text: string): IssueMetadata => {
       return;
     }
 
+    if (key === "assignee_id") {
+      readingChildren = false;
+      if (value.length === 0) {
+        return;
+      }
+      const id = Number(value);
+      if (Number.isNaN(id) || !Number.isInteger(id) || id <= 0) {
+        throw new Error("assignee_id must be a positive integer.");
+      }
+      values.assignee_id = id;
+      return;
+    }
+
+    if (key === "assignee") {
+      readingChildren = false;
+      if (value.length > 0) {
+        values.assignee = value;
+      }
+      return;
+    }
+
     readingChildren = false;
     requireValue(key, value);
     values[key] = value;
@@ -275,6 +296,8 @@ export const serializeIssueMetadataYaml = (metadata: IssueMetadata): string => {
     "tracker",
     "priority",
     "status",
+    "assignee",
+    "assignee_id",
     "start_date",
     "due_date",
     "done_ratio",
@@ -331,7 +354,8 @@ export const serializeIssueMetadataYaml = (metadata: IssueMetadata): string => {
 
 const serializeField = (lines: string[], key: IssueMetadataKey, metadata: IssueMetadata): void => {
   const value = metadata[key];
-  if (value === undefined && key !== "start_date" && key !== "due_date") {
+  const alwaysShow = key === "start_date" || key === "due_date" || key === "assignee" || key === "assignee_id";
+  if (value === undefined && !alwaysShow) {
     return;
   }
 
@@ -367,6 +391,12 @@ const serializeField = (lines: string[], key: IssueMetadataKey, metadata: IssueM
           lines.push(`    - ${child}`);
         });
       }
+      break;
+    case "assignee":
+      lines.push(`  assignee:  ${value ?? ""}`);
+      break;
+    case "assignee_id":
+      lines.push(`  assignee_id: ${value ?? ""}`);
       break;
   }
 };

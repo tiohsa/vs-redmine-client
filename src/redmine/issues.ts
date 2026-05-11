@@ -104,7 +104,7 @@ export interface IssueCreateInput {
   startDate?: string;
   doneRatio?: number;
   estimatedHours?: number;
-  // authorId?: number; // Removed
+  assigneeId?: number;
 }
 
 export const buildIssueCreatePayload = (input: IssueCreateInput): Record<string, unknown> => ({
@@ -121,6 +121,7 @@ export const buildIssueCreatePayload = (input: IssueCreateInput): Record<string,
     ...(input.startDate !== undefined ? { start_date: input.startDate } : {}),
     ...(input.doneRatio !== undefined ? { done_ratio: input.doneRatio } : {}),
     ...(input.estimatedHours !== undefined ? { estimated_hours: input.estimatedHours } : {}),
+    ...(input.assigneeId !== undefined ? { assigned_to_id: input.assigneeId } : {}),
   },
 });
 
@@ -159,7 +160,8 @@ export const buildIssueUpdatePayload = (
     payload.status_id = fields.statusId;
   }
   if (fields.assigneeId !== undefined) {
-    payload.assigned_to_id = fields.assigneeId;
+    // Redmine では 0 を送ると "not found" エラーになるため、クリア時は空文字を送る
+    payload.assigned_to_id = fields.assigneeId === 0 ? "" : fields.assigneeId;
   }
   if (fields.trackerId !== undefined) {
     payload.tracker_id = fields.trackerId;

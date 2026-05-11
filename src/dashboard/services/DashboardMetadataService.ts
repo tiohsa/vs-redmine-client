@@ -1,6 +1,6 @@
 import type { DashboardServiceContext } from "./DashboardServiceContext";
 import * as vscode from "vscode";
-import { getProjectTrackers } from "../../redmine/projects";
+import { getProjectTrackers, listProjectMembers } from "../../redmine/projects";
 import { getIssueAllowedStatuses } from "../../redmine/issues";
 import { ensureTicketDraft, markDraftStatus, setTicketDraftContent } from "../../views/ticketDraftStore";
 import { getOfflineSyncQueue, addOfflineTicketUpdate } from "../../views/offlineSyncStore";
@@ -32,15 +32,17 @@ export class DashboardMetadataService {
         trackers: [],
         priorities: [],
         statuses: [],
+        assignees: [],
         statusFallback: false,
         loading: true,
       },
     });
     const globalOptions = store.getState().metadataOptions;
     try {
-      const [trackers, allowedStatuses] = await Promise.all([
+      const [trackers, allowedStatuses, members] = await Promise.all([
         getProjectTrackers(projectId),
         getIssueAllowedStatuses(ticketId).catch(() => null),
+        listProjectMembers(projectId).catch(() => [] as Array<{ id: number; name: string }>),
       ]);
       this.projectTrackerCache.set(projectId, trackers);
       const statusFallback = allowedStatuses === null || allowedStatuses.length === 0;
@@ -52,6 +54,7 @@ export class DashboardMetadataService {
           trackers,
           priorities: globalOptions.priorities,
           statuses,
+          assignees: members,
           statusFallback,
           loading: false,
           error: trackers.length === 0
@@ -68,6 +71,7 @@ export class DashboardMetadataService {
           trackers: [],
           priorities: globalOptions.priorities,
           statuses: globalOptions.statuses,
+          assignees: [],
           statusFallback: true,
           loading: false,
           error: vscode.l10n.t("Failed to load trackers for this project: {0}", msg),
@@ -112,6 +116,8 @@ export class DashboardMetadataService {
         status: ticket.statusName ?? "",
         due_date: ticket.dueDate ?? "",
         start_date: ticket.startDate ?? "",
+        assignee: ticket.assigneeName,
+        assignee_id: ticket.assigneeId,
       },
       ticket.updatedAt,
     );
@@ -182,6 +188,12 @@ export class DashboardMetadataService {
         ...(patch.status !== undefined ? { status: patch.status } : {}),
         ...(patch.due_date !== undefined ? { due_date: patch.due_date } : {}),
         ...(patch.start_date !== undefined ? { start_date: patch.start_date } : {}),
+        ...(patch.assignee !== undefined ? {
+          assignee: patch.assignee.length > 0 ? patch.assignee : undefined,
+          assignee_id: patch.assignee.length > 0
+            ? this.deps.context.store.getState().editOptions?.assignees.find((a) => a.name === patch.assignee)?.id
+            : undefined,
+        } : {}),
       },
     };
   }
@@ -209,6 +221,12 @@ export class DashboardMetadataService {
     if (patch.start_date !== undefined) {
       ticket.startDate = patch.start_date.length > 0 ? patch.start_date : undefined;
     }
+    if (patch.assignee !== undefined) {
+      const state = this.deps.context.store.getState();
+      const resolvedId = state.editOptions?.assignees.find((a) => a.name === patch.assignee)?.id;
+      ticket.assigneeName = patch.assignee.length > 0 ? patch.assignee : undefined;
+      ticket.assigneeId = resolvedId;
+    }
   }
 
   private async updateRegisteredTicketEditor(ticket: Ticket, patch: TicketMetadataPatch): Promise<boolean> {
@@ -231,6 +249,8 @@ export class DashboardMetadataService {
         status: ticket.statusName ?? "",
         due_date: ticket.dueDate ?? "",
         start_date: ticket.startDate ?? "",
+        assignee: ticket.assigneeName,
+        assignee_id: ticket.assigneeId,
       },
     });
     const next = this.patchEditorContent(parsed, patch);
@@ -262,6 +282,8 @@ export class DashboardMetadataService {
         status: ticket.statusName ?? "",
         due_date: ticket.dueDate ?? "",
         start_date: ticket.startDate ?? "",
+        assignee: ticket.assigneeName,
+        assignee_id: ticket.assigneeId,
       },
       lastKnownRemoteUpdatedAt: ticket.updatedAt,
       subject: next.subject,
@@ -285,6 +307,12 @@ export class DashboardMetadataService {
       ...(patch.status !== undefined ? { status: patch.status } : {}),
       ...(patch.due_date !== undefined ? { due_date: patch.due_date } : {}),
       ...(patch.start_date !== undefined ? { start_date: patch.start_date } : {}),
+      ...(patch.assignee !== undefined ? {
+        assignee: patch.assignee.length > 0 ? patch.assignee : undefined,
+        assignee_id: patch.assignee.length > 0
+          ? this.deps.context.store.getState().editOptions?.assignees.find((a) => a.name === patch.assignee)?.id
+          : undefined,
+      } : {}),
     };
     const nextContent: TicketEditorContent = {
       subject: queued.subject,

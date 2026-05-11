@@ -8,7 +8,7 @@ import {
   listTrackers,
   updateIssue,
 } from "../../redmine/issues";
-import { getProjectTrackers } from "../../redmine/projects";
+import { getProjectTrackers, listProjectMembers } from "../../redmine/projects";
 import { searchUsers } from "../../redmine/users";
 import { applyEditorContent } from "../ticketPreview";
 import type { TicketCreateDependencies, TicketReloadDependencies, TicketSaveDependencies } from "./types";
@@ -24,6 +24,7 @@ export const defaultDeps: TicketSaveDependencies = {
   searchUsers,
   uploadFile: uploadFileAttachment,
   getProjectTrackers,
+  listProjectMembers,
 };
 
 export const defaultCreateDeps: TicketCreateDependencies = {
@@ -35,6 +36,7 @@ export const defaultCreateDeps: TicketCreateDependencies = {
   searchUsers,
   uploadFile: uploadFileAttachment,
   getProjectTrackers,
+  listProjectMembers,
 };
 
 export const defaultReloadDeps: TicketReloadDependencies = {

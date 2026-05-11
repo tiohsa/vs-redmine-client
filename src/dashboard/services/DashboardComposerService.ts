@@ -1,7 +1,7 @@
 import type { DashboardServiceContext } from "./DashboardServiceContext";
 import * as vscode from "vscode";
 import * as fs from "fs";
-import { getProjectTrackers } from "../../redmine/projects";
+import { getProjectTrackers, listProjectMembers } from "../../redmine/projects";
 import { buildNewTicketDraftContent } from "../../views/ticketDraftStore";
 import { openNewTicketDraft } from "../../commands/createTicketFromList";
 import { syncNewTicketDraft } from "../../views/ticketSaveSync";
@@ -37,10 +37,11 @@ export class DashboardComposerService {
         trackers: [],
         priorities: defaults.priorities,
         statuses: defaults.statuses,
+        assignees: [],
         values: this.buildComposerValues({}),
       },
     });
-    await this.loadComposerTrackers(project.id);
+    await this.loadComposerOptions(project.id);
   }
 
   async openChildTicketComposer(parentTicketId: number): Promise<void> {
@@ -66,10 +67,11 @@ export class DashboardComposerService {
         trackers: [],
         priorities: defaults.priorities,
         statuses: defaults.statuses,
+        assignees: [],
         values: this.buildComposerValues({}),
       },
     });
-    await this.loadComposerTrackers(parent.projectId, parent);
+    await this.loadComposerOptions(parent.projectId, parent);
   }
 
   cancelComposer(): void {
@@ -87,6 +89,7 @@ export class DashboardComposerService {
       tracker: string;
       priority: string;
       status: string;
+      assigned_to?: string;
       start_date?: string;
       due_date?: string;
       description?: string;
@@ -113,6 +116,10 @@ export class DashboardComposerService {
               tracker: values.tracker,
               priority: values.priority,
               status: values.status,
+              assignee: values.assigned_to && values.assigned_to.length > 0 ? values.assigned_to : undefined,
+              assignee_id: values.assigned_to && values.assigned_to.length > 0
+                ? workPanel.assignees.find((a) => a.name === values.assigned_to)?.id
+                : undefined,
               start_date: values.start_date ?? "",
               due_date: values.due_date ?? "",
               parent: workPanel.mode === "childTicket" ? workPanel.parentTicketId : undefined,
@@ -288,6 +295,7 @@ export class DashboardComposerService {
     tracker?: string;
     priority?: string;
     status?: string;
+    assigned_to?: string;
     start_date?: string;
     due_date?: string;
     subject?: string;
@@ -298,20 +306,24 @@ export class DashboardComposerService {
       tracker: input.tracker,
       priority: input.priority,
       status: input.status,
+      assigned_to: input.assigned_to,
       start_date: input.start_date ?? "",
       due_date: input.due_date ?? "",
       description: input.description ?? "",
     };
   }
 
-  private async loadComposerTrackers(
+  private async loadComposerOptions(
     projectId: number,
     parentTicket?: Ticket,
   ): Promise<void> {
     try {
-      const trackers = await getProjectTrackers(projectId);
+      const [trackers, members] = await Promise.all([
+        getProjectTrackers(projectId),
+        listProjectMembers(projectId).catch(() => [] as Array<{ id: number; name: string }>),
+      ]);
       if (trackers.length === 0) {
-        this.updateWorkPanelComposer({ loading: false, trackers: [], error: vscode.l10n.t("No trackers configured for this project.") });
+        this.updateWorkPanelComposer({ loading: false, trackers: [], assignees: members, error: vscode.l10n.t("No trackers configured for this project.") });
         return;
       }
       const defaults = this.deps.context.store.getState().metadataOptions;
@@ -322,6 +334,7 @@ export class DashboardComposerService {
       this.updateWorkPanelComposer({
         loading: false,
         trackers,
+        assignees: members,
         error: undefined,
         values: this.buildComposerValues({
           tracker: defaultTracker,
@@ -332,7 +345,7 @@ export class DashboardComposerService {
       });
     } catch (err) {
       const msg = (err as Error).message;
-      this.updateWorkPanelComposer({ loading: false, trackers: [], error: vscode.l10n.t("Failed to load trackers: {0}", msg) });
+      this.updateWorkPanelComposer({ loading: false, trackers: [], assignees: [], error: vscode.l10n.t("Failed to load trackers: {0}", msg) });
     }
   }
 
@@ -364,6 +377,7 @@ export class DashboardComposerService {
       trackers?: Array<{ id: number; name: string }>;
       priorities?: Array<{ id: number; name: string }>;
       statuses?: Array<{ id: number; name: string }>;
+      assignees?: Array<{ id: number; name: string }>;
       values?: NewTicketComposerValues;
       draftUri?: string;
       error?: string;

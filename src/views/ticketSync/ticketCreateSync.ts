@@ -191,6 +191,7 @@ export const createTicketFromContent = async (input: {
       startDate: metadataFields.startDate as string | undefined,
       doneRatio: metadataFields.doneRatio,
       estimatedHours: metadataFields.estimatedHours,
+      assigneeId: metadataFields.assigneeId,
     });
   } catch (error) {
     return { result: mapErrorToResult(error) };

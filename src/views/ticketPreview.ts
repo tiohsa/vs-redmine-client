@@ -29,7 +29,7 @@ import { showError } from "../utils/notifications";
 import { rememberTicketSummary } from "./ticketSummaryStore";
 
 export const buildTicketPreviewContent = (
-  ticket: Pick<Ticket, "subject" | "description" | "trackerName" | "priorityName" | "statusName" | "dueDate" | "startDate">,
+  ticket: Pick<Ticket, "subject" | "description" | "trackerName" | "priorityName" | "statusName" | "dueDate" | "startDate" | "assigneeName" | "assigneeId">,
 ): string => {
   const metadata: IssueMetadata = {
     tracker: ticket.trackerName ?? "",
@@ -37,6 +37,8 @@ export const buildTicketPreviewContent = (
     status: ticket.statusName ?? "",
     due_date: ticket.dueDate ?? "",
     start_date: ticket.startDate ?? "",
+    assignee: ticket.assigneeName,
+    assignee_id: ticket.assigneeId,
   };
   return buildTicketEditorContent({
     subject: ticket.subject,
@@ -229,6 +231,8 @@ export const showTicketPreview = async (
       status: ticket.statusName ?? "",
       due_date: ticket.dueDate ?? "",
       start_date: ticket.startDate ?? "",
+      assignee: ticket.assigneeName,
+      assignee_id: ticket.assigneeId,
     },
     controlFields,
   };

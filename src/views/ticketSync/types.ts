@@ -1,5 +1,5 @@
 import { createIssue, deleteIssue, getIssueDetail, listIssuePriorities, listIssueStatuses, listTrackers } from "../../redmine/issues";
-import { getProjectTrackers } from "../../redmine/projects";
+import { getProjectTrackers, listProjectMembers } from "../../redmine/projects";
 import { uploadFileAttachment } from "../../redmine/attachments";
 import { searchUsers } from "../../redmine/users";
 import { applyEditorContent } from "../ticketPreview";
@@ -15,6 +15,7 @@ export interface TicketSaveDependencies {
   searchUsers: typeof searchUsers;
   uploadFile: typeof uploadFileAttachment;
   getProjectTrackers?: typeof getProjectTrackers;
+  listProjectMembers?: typeof listProjectMembers;
 }
 
 export interface TicketCreateDependencies {
@@ -26,6 +27,7 @@ export interface TicketCreateDependencies {
   searchUsers: typeof searchUsers;
   uploadFile: typeof uploadFileAttachment;
   getProjectTrackers?: typeof getProjectTrackers;
+  listProjectMembers?: typeof listProjectMembers;
 }
 
 export interface TicketReloadDependencies {

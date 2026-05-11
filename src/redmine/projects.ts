@@ -72,3 +72,18 @@ export const getProjectTrackers = async (
   });
   return response.project.trackers ?? [];
 };
+
+export const listProjectMembers = async (
+  projectId: number,
+): Promise<Array<{ id: number; name: string }>> => {
+  const response = await requestJson<{
+    memberships: Array<{ user?: { id: number; name: string } }>;
+  }>({
+    method: "GET",
+    path: `/projects/${projectId}/memberships.json`,
+    query: { limit: 100 },
+  });
+  return response.memberships
+    .filter((m) => m.user !== undefined)
+    .map((m) => m.user!);
+};
