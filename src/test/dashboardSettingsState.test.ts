@@ -77,4 +77,16 @@ suite("dashboardSettingsState — 初期設定状態", () => {
     assert.strictEqual(typeof vm.showStatus, "boolean");
     assert.strictEqual(typeof vm.showDueDate, "boolean");
   });
+
+  test("buildSettingsDashboardViewModel に apiKeyStatus が含まれる", () => {
+    const vm = buildSettingsDashboardViewModel(DEFAULT_TICKET_LIST_SETTINGS);
+    assert.ok(vm.apiKeyStatus === "set" || vm.apiKeyStatus === "notSet");
+  });
+
+  test("DEFAULT_STATE の settings に apiKeyStatus が含まれる", () => {
+    const fresh = new DashboardStateStore();
+    const s = fresh.getState().settings;
+    assert.ok(Object.prototype.hasOwnProperty.call(s, "apiKeyStatus"));
+    assert.strictEqual(s.apiKeyStatus, "notSet");
+  });
 });

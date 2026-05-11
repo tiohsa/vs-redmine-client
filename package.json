@@ -254,11 +254,6 @@
           "default": "",
           "description": "%config.baseUrl.description%"
         },
-        "redmine-client.apiKey": {
-          "type": "string",
-          "default": "",
-          "markdownDescription": "%config.apiKey.markdownDescription%"
-        },
         "redmine-client.ignoreSSLErrors": {
           "type": "boolean",
           "default": false,

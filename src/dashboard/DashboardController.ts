@@ -283,6 +283,14 @@ export class DashboardController {
         await this.settingsCtrl.updateGeneral(req.patch);
         await this.loadTickets();
         break;
+      case "apiKey.set":
+        await vscode.commands.executeCommand("redmine-client.setApiKey");
+        this.settingsCtrl.pushSettings();
+        break;
+      case "apiKey.clear":
+        await vscode.commands.executeCommand("redmine-client.clearApiKey");
+        this.settingsCtrl.pushSettings();
+        break;
     }
   }
 

@@ -26,7 +26,6 @@ Japanese README: `README.ja.md`
 ## Security
 
 - Use `Redmine: Set API Key` to store the API key in **VS Code SecretStorage**.
-- The `redmine-client.apiKey` setting is **deprecated**; move to SecretStorage when possible.
 - `ignoreSSLErrors` is for development/testing only. **Do not enable in production.**
 
 ## Quick Start
@@ -116,7 +115,6 @@ A **Sync all** button uploads all queued items at once.
 | Setting | Default | Description |
 |---------|---------|-------------|
 | `redmine-client.baseUrl` | `""` | Base URL of the Redmine instance (include `http://` or `https://`) |
-| `redmine-client.apiKey` | `""` | **Deprecated** — use `Redmine: Set API Key` instead |
 | `redmine-client.ignoreSSLErrors` | `false` | Ignore SSL certificate errors (development/testing only) |
 | `redmine-client.defaultProjectId` | `""` | Default project identifier or numeric ID |
 | `redmine-client.includeChildProjects` | `false` | Include child projects when listing tickets |
@@ -125,7 +123,7 @@ A **Sync all** button uploads all queued items at once.
 | `redmine-client.offlineSyncMode` | `"auto"` | `auto` syncs immediately on save; `manual` queues for the Unsynced tab |
 | `redmine-client.requestTimeoutMs` | `30000` | HTTP request timeout in milliseconds |
 | `redmine-client.ticketList.showStatus` | `true` | Show the status badge on each ticket row in the Dashboard |
-| `redmine-client.ticketList.showDueDate` | `true` | Show due date badges on ticket rows; when disabled, all due date badges are hidden |
+| `redmine-client.ticketList.showDueDate` | `true` | Show due date badges on ticket rows |
 
 ## Commands
 
@@ -174,8 +172,6 @@ A **Sync all** button uploads all queued items at once.
 
 ### Editor Default Commands
 
-Ticket filters, sort order, and due-date display rules are configured in the **Settings** tab of the Dashboard.
-
 | Command | Description |
 |---------|-------------|
 | `Redmine: Configure Editor Default Subject` | Set the default subject for new tickets |
@@ -186,34 +182,36 @@ Ticket filters, sort order, and due-date display rules are configured in the **S
 | `Redmine: Configure Editor Default Due Date` | Set the default due date |
 | `Redmine: Reset Editor Defaults` | Clear all editor default values |
 
+### Other Commands
+
+| Command | Description |
+|---------|-------------|
+| `Redmine: Refresh Projects` | Reload the project list |
+| `Redmine: Refresh Tickets` | Reload the ticket list |
+| `Redmine: Refresh Comments` | Reload the comment list |
+| `Redmine: Reload Project` | Reload the selected project |
+| `Redmine: Select Project` | Switch the active project by ID |
+| `Redmine: Toggle Child Projects` | Include or exclude child projects in the ticket list |
+| `Redmine: Open Project in Browser` | Open the selected project in a browser |
+
 ## Tips
 
 - **Sync button**: the `$(cloud-upload)` icon in the editor title bar runs `Redmine: Sync to Redmine` — useful when auto-save is on.
 - **Draft persistence**: ticket/comment drafts are saved in VS Code global state and survive restarts.
-- **Image paste**: paste images directly into a file-based editor; they are uploaded on save.
+- **Image paste**: paste images directly into a file-based editor; they are uploaded on save. For new ticket/comment drafts (untitled editors), save the file first before pasting images.
 - **Conflict resolution**: when remote changes are detected, choose **Local Priority**, **Remote Priority**, or **View Diff**.
 - **Mermaid**: blocks are converted to `{{mermaid ... }}` on submission to Redmine.
 - **Status bar**: the current ticket ID is shown in the status bar when a ticket editor is active.
 - **Project-specific trackers**: the new-ticket composer and metadata editor show only trackers enabled for the selected project.
 
-## Debug
-
-1. Open this repo in VS Code.
-2. Run the **Run Extension** debug configuration (F5).
-3. Configure extension settings in the Extension Host window.
-4. Verify behavior using the commands above.
-
-## Tests
+## Development
 
 ```bash
 pnpm test              # compile + lint + VS Code integration tests
 pnpm run test:unsafe   # no-sandbox variant for restricted environments
 ```
 
-## Known Issues
-
-- Image paste is only available in file-based editors. For new ticket/comment drafts (untitled editors), save the file first before pasting images.
-- Clipboard attachments require a data URI format.
+To debug locally, open this repo in VS Code and run the **Run Extension** debug configuration (F5). Configure extension settings in the Extension Host window.
 
 ## License
 

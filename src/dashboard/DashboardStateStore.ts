@@ -39,6 +39,7 @@ const DEFAULT_STATE: DashboardState = {
     ticketListLimit: 50,
     showStatus: true,
     showDueDate: true,
+    apiKeyStatus: "notSet",
   },
   loading: { tickets: false, comments: false },
   errors: {},

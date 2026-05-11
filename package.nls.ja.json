@@ -43,7 +43,6 @@
   "viewsContainer.redmineClientActivity.title": "Redmine Client",
   "config.title": "Redmine Client",
   "config.baseUrl.description": "Redmine インスタンスのベース URL。",
-  "config.apiKey.markdownDescription": "認証用 Redmine API キー。**非推奨**: `Redmine: Set API Key` コマンドを使用して VS Code SecretStorage に安全に保存してください。",
   "config.ignoreSSLErrors.markdownDescription": "SSL 証明書エラーを無視します（自己署名証明書など）。**開発・テスト用のみ。本番環境では有効にしないでください。**",
   "config.defaultProjectId.description": "チケット一覧で使用するデフォルトのプロジェクト識別子または ID。",
   "config.selectedProjectId.description": "最後に選択したプロジェクト ID（選択状態の復元に使用）。",

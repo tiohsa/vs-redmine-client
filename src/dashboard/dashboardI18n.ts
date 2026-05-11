@@ -82,6 +82,12 @@ export interface DashboardStrings {
   unsyncedEditAriaLabel: string;
   editCommentAction: string;
   openInRedmine: string;
+  // Settings tab — API key
+  sectionApiKey: string;
+  apiKeyStatusSet: string;
+  apiKeyStatusNotSet: string;
+  setApiKeyBtn: string;
+  clearApiKeyBtn: string;
   // Settings tab
   sectionTicketFilter: string;
   filterAssigneeLabel: string;
@@ -193,6 +199,12 @@ export const buildDashboardStrings = (): DashboardStrings => ({
   unsyncedEditAriaLabel: vscode.l10n.t("Has unsynced edits"),
   editCommentAction: vscode.l10n.t("Edit"),
   openInRedmine: vscode.l10n.t("Open in Redmine"),
+  // Settings tab — API key
+  sectionApiKey: vscode.l10n.t("API Key"),
+  apiKeyStatusSet: vscode.l10n.t("Configured"),
+  apiKeyStatusNotSet: vscode.l10n.t("Not configured"),
+  setApiKeyBtn: vscode.l10n.t("Set API Key"),
+  clearApiKeyBtn: vscode.l10n.t("Clear API Key"),
   // Settings tab
   sectionTicketFilter: vscode.l10n.t("Ticket filters"),
   filterAssigneeLabel: vscode.l10n.t("Assignee"),

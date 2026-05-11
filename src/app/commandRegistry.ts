@@ -486,7 +486,6 @@ export const registerCommands = (
       const status = await getApiKeyStatus();
       const messages: Record<typeof status, string> = {
         secret: vscode.l10n.t("API key is stored in secure storage."),
-        settings: vscode.l10n.t("API key is stored in settings.json. Consider migrating to secure storage (Redmine: Set API Key)."),
         none: vscode.l10n.t("API key is not configured."),
       };
       vscode.window.showInformationMessage(messages[status]);

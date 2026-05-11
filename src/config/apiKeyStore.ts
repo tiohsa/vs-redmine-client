@@ -1,5 +1,4 @@
 import * as vscode from "vscode";
-import { getApiKey } from "./settings";
 
 const SECRET_KEY = "redmine-client.apiKey";
 
@@ -42,7 +41,7 @@ export const clearApiKey = async (): Promise<void> => {
   _cachedKey = undefined;
 };
 
-export type ApiKeyStatus = "secret" | "settings" | "none";
+export type ApiKeyStatus = "secret" | "none";
 
 export const getApiKeyStatus = async (): Promise<ApiKeyStatus> => {
   if (_secrets) {
@@ -51,10 +50,11 @@ export const getApiKeyStatus = async (): Promise<ApiKeyStatus> => {
       return "secret";
     }
   }
-  return getApiKey() ? "settings" : "none";
+  return "none";
 };
 
-/** SecretStorage キーを優先し、なければ設定値にフォールバック */
+export const isApiKeyConfigured = (): boolean => Boolean(_cachedKey);
+
 export const resolveApiKey = (): string => {
-  return _cachedKey ?? getApiKey();
+  return _cachedKey ?? "";
 };

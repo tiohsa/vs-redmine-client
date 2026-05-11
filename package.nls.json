@@ -43,7 +43,6 @@
   "viewsContainer.redmineClientActivity.title": "Redmine Client",
   "config.title": "Redmine Client",
   "config.baseUrl.description": "Base URL of the Redmine instance.",
-  "config.apiKey.markdownDescription": "Redmine API key for authentication. **Deprecated**: Use the `Redmine: Set API Key` command to store the key securely in VS Code SecretStorage instead.",
   "config.ignoreSSLErrors.markdownDescription": "Ignore SSL certificate errors (e.g. for self-signed certificates). **For development/testing only. Do NOT enable in production.**",
   "config.defaultProjectId.description": "Default project identifier or ID used in ticket listing.",
   "config.selectedProjectId.description": "Last selected project ID (used for restoring selection).",

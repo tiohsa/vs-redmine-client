@@ -322,6 +322,11 @@ body.vscode-high-contrast .btn-primary{border:1px solid var(--app-border)}
 .settings-reset-btn{width:100%;margin-top:12px;padding:5px;border:1px solid var(--app-card-border);border-radius:var(--mm-radius-button);background:transparent;color:var(--app-text-readable-muted);font:inherit;font-size:11px;cursor:pointer;transition:background .15s}
 .settings-reset-btn:hover{background:var(--app-hover);color:#ef4444}
 .settings-reset-btn:focus-visible{outline:1px solid var(--app-focus);outline-offset:1px}
+.apikey-status{font-size:10px;font-weight:600}
+.apikey-status-set{color:var(--vscode-notificationsInfoIcon-foreground,#3b82f6)}
+.apikey-status-notset{color:var(--vscode-notificationsWarningIcon-foreground,#f59e0b)}
+.apikey-actions{display:flex;gap:6px;padding-top:8px}
+.apikey-btn{font-size:11px;padding:3px 10px;height:auto}
 
 /* ── Misc ─────────────────────────────────────────────────────── */
 .state-msg{padding:20px 16px;text-align:center;color:var(--app-text-readable-muted);font-size:11px;line-height:1.6}

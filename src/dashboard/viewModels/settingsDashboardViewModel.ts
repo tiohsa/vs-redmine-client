@@ -1,5 +1,6 @@
 import { TicketListSettings } from "../../views/projectListSettings";
 import { getOfflineSyncMode, getTicketListLimit, getTicketListShowDueDate, getTicketListShowStatus } from "../../config/settings";
+import { isApiKeyConfigured } from "../../config/apiKeyStore";
 import type { DashboardTicketSettingsViewModel } from "../dashboardProtocol";
 
 export const buildSettingsDashboardViewModel = (
@@ -12,4 +13,5 @@ export const buildSettingsDashboardViewModel = (
   ticketListLimit: getTicketListLimit(),
   showStatus: getTicketListShowStatus(),
   showDueDate: getTicketListShowDueDate(),
+  apiKeyStatus: isApiKeyConfigured() ? "set" : "notSet",
 });
