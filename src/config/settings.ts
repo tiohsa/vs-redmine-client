@@ -8,9 +8,6 @@ export const getSettings = (): vscode.WorkspaceConfiguration =>
 export const getBaseUrl = (): string =>
   getSettings().get<string>("baseUrl", "").trim();
 
-export const getApiKey = (): string =>
-  getSettings().get<string>("apiKey", "").trim();
-
 export const getIgnoreSSLErrors = (): boolean =>
   getSettings().get<boolean>("ignoreSSLErrors", false);
 

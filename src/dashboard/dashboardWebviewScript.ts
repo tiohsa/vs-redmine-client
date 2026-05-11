@@ -721,6 +721,16 @@ function renderSettings(){
     +'<div class="settings-section"><h3>'+STRINGS.sectionGeneral+'</h3>'
     +'<div class="setting-row"><span class="setting-label">'+STRINGS.ticketLimitLabel+'</span>'
     +'<input class="setting-input setting-input-num" id="set-ticket-limit" type="number" min="1" max="500" value="'+s.ticketListLimit+'"></div>'
+    +'</div>'
+    +'<div class="settings-section"><h3>'+STRINGS.sectionApiKey+'</h3>'
+    +'<div class="setting-row"><span class="setting-label">'+STRINGS.sectionApiKey+'</span>'
+    +'<span class="setting-value apikey-status apikey-status-'+(s.apiKeyStatus==='set'?'set':'notset')+'">'
+    +(s.apiKeyStatus==='set'?STRINGS.apiKeyStatusSet:STRINGS.apiKeyStatusNotSet)
+    +'</span></div>'
+    +'<div class="apikey-actions">'
+    +'<button class="btn btn-secondary apikey-btn" id="set-apikey-btn">'+STRINGS.setApiKeyBtn+'</button>'
+    +(s.apiKeyStatus==='set'?'<button class="btn btn-secondary apikey-btn" id="clear-apikey-btn">'+STRINGS.clearApiKeyBtn+'</button>':'')
+    +'</div>'
     +'</div>';
 
   const applyTicketListPatch=(patch)=>req('settings.update',{patch});
@@ -746,6 +756,10 @@ function renderSettings(){
     const v=Number(ticketLimitEl.value);
     if(v>=1&&v<=500) req('settings.updateGeneral',{patch:{ticketListLimit:v}});
   });
+
+  document.getElementById('set-apikey-btn').onclick=()=>req('apiKey.set');
+  const clearApiKeyBtn=document.getElementById('clear-apikey-btn');
+  if(clearApiKeyBtn) clearApiKeyBtn.onclick=()=>req('apiKey.clear');
 
   document.getElementById('settings-reset-btn').onclick=()=>req('settings.reset');
 }

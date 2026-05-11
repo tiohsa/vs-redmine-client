@@ -1,5 +1,6 @@
 import * as vscode from "vscode";
-import { getApiKey, getBaseUrl } from "../config/settings";
+import { getBaseUrl } from "../config/settings";
+import { resolveApiKey } from "../config/apiKeyStore";
 import { listComments } from "../redmine/comments";
 import { getCurrentUserId } from "../redmine/users";
 import { Comment } from "../redmine/types";
@@ -21,7 +22,7 @@ export const evaluateAddCommentPermission = (
 export const refreshAddCommentContext = (
   ticketId: number | undefined,
   baseUrl = getBaseUrl(),
-  apiKey = getApiKey(),
+  apiKey = resolveApiKey(),
 ): boolean => {
   const canAdd = evaluateAddCommentPermission(ticketId, baseUrl, apiKey);
   void setCommentAddContext(canAdd);

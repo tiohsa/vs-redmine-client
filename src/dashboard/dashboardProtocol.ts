@@ -123,6 +123,7 @@ export interface DashboardTicketSettingsViewModel {
   ticketListLimit: number;
   showStatus: boolean;
   showDueDate: boolean;
+  apiKeyStatus: "set" | "notSet";
 }
 
 export interface DashboardSelectedProject {
@@ -266,7 +267,9 @@ export type DashboardRequest =
   | { type: "settings.reset"; requestId: string }
   | { type: "settings.updateEditorDefault"; requestId: string; field: string; value: string }
   | { type: "settings.resetEditorDefaults"; requestId: string; fields: string[] }
-  | { type: "settings.updateGeneral"; requestId: string; patch: DashboardGeneralSettingsPatch };
+  | { type: "settings.updateGeneral"; requestId: string; patch: DashboardGeneralSettingsPatch }
+  | { type: "apiKey.set"; requestId: string }
+  | { type: "apiKey.clear"; requestId: string };
 
 export type DashboardEvent =
   | { type: "dashboard.state"; state: DashboardState }

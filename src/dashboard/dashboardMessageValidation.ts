@@ -348,6 +348,10 @@ export const validateDashboardMessage = (raw: unknown): ValidationResult => {
       return { ok: true, request: { type, requestId, patch: patch as import("./dashboardProtocol").DashboardGeneralSettingsPatch } };
     }
 
+    case "apiKey.set":
+    case "apiKey.clear":
+      return { ok: true, request: { type, requestId } };
+
     default:
       return { ok: false, reason: `unknown message type: ${String(type)}` };
   }
