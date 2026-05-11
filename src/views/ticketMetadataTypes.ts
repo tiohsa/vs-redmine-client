@@ -9,6 +9,8 @@ export type IssueMetadata = {
   start_date?: string;
   done_ratio?: number;
   estimated_hours?: number;
+  assignee?: string;
+  assignee_id?: number;
 };
 
 export const ISSUE_METADATA_REQUIRED_KEYS = [
@@ -24,6 +26,8 @@ export const ISSUE_METADATA_OPTIONAL_KEYS = [
   "start_date",
   "done_ratio",
   "estimated_hours",
+  "assignee",
+  "assignee_id",
 ] as const;
 
 export const ISSUE_METADATA_KEYS = [
@@ -62,4 +66,6 @@ export const isIssueMetadataEqual = (
   left.estimated_hours === right.estimated_hours &&
 
   areChildrenEqual(left.children, right.children) &&
-  left.parent === right.parent;
+  left.parent === right.parent &&
+  normalizeOptionalText(left.assignee) === normalizeOptionalText(right.assignee) &&
+  left.assignee_id === right.assignee_id;

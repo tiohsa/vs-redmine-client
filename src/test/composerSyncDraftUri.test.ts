@@ -48,6 +48,7 @@ const makeComposerWorkPanel = (draftUri?: string): DashboardWorkPanel => ({
   trackers: [{ id: 1, name: "バグ" }],
   priorities: [{ id: 2, name: "通常" }],
   statuses: [{ id: 3, name: "新規" }],
+  assignees: [],
   values: { subject: "", tracker: "バグ", priority: "通常", status: "新規", start_date: "", due_date: "", description: "" },
   draftUri,
 });

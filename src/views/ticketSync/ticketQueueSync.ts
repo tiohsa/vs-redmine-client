@@ -260,7 +260,7 @@ export const applyQueuedTicketUpdate = async (input: {
     return remoteDetail;
   };
 
-  if (metadataChanges.tracker !== undefined) {
+  if (metadataChanges.tracker !== undefined || metadataChanges.assignee !== undefined) {
     try {
       await ensureRemoteDetail();
     } catch (error) {

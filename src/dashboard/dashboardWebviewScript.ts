@@ -394,6 +394,15 @@ function editOptionsReady(ticketId){
   if(!eo) return false;
   return !eo.loading;
 }
+function renderSelectWithBlank(name, value, options, label, disabled){
+  const disabledAttr = disabled ? ' disabled' : '';
+  const optionList = options || [];
+  const blankOption = '<option value=""'+(value===''?' selected':'')+'>'+STRINGS.assigneeUnassigned+'</option>';
+  const opts = blankOption + optionList.map(option =>
+    '<option value="'+esc(option.name)+'"'+(option.name===value?' selected':'')+'>'+esc(option.name)+'</option>'
+  ).join('');
+  return '<label class="detail-field"><span>'+label+'</span><select class="detail-select" data-metadata-field="'+name+'"'+disabledAttr+'>'+opts+'</select></label>';
+}
 function renderSelect(name, value, options, label, disabled){
   const disabledAttr = disabled ? ' disabled' : '';
   const optionList = options || [];
@@ -420,9 +429,11 @@ function renderTicketDetailPanel(ticket){
   const trackers = eo ? eo.trackers : [];
   const priorities = eo ? eo.priorities : (state.metadataOptions?.priorities || []);
   const statuses = eo ? eo.statuses : (state.metadataOptions?.statuses || []);
+  const assignees = eo ? (eo.assignees || []) : [];
   const trackerDisabled = !eoReady || trackers.length === 0;
   const priorityDisabled = !eoReady && !metadataOptionsReady();
   const statusDisabled = !eoReady && !metadataOptionsReady();
+  const assigneeDisabled = !eoReady;
   const dateDisabled = !eoReady && !metadataOptionsReady();
   const statusFallbackHint = (eo && eo.statusFallback)
     ? '<div class="detail-readonly">'+STRINGS.statusFallbackHint+'</div>'
@@ -440,6 +451,7 @@ function renderTicketDetailPanel(ticket){
     ? '<div class="detail-expanded">'
       + renderSelect('tracker', ticket.trackerName || node.trackerName || '', trackers, 'Tracker', trackerDisabled)
       + renderSelect('priority', ticket.priorityName || node.priorityName || '', priorities, 'Priority', priorityDisabled)
+      + renderSelectWithBlank('assignee', ticket.assigneeName || '', assignees, 'Assignee', assigneeDisabled)
       + renderSelect('status', ticket.statusName || node.statusName || '', statuses, 'Status', statusDisabled)
       + '<label class="detail-field"><span>Start date</span><input class="detail-input" data-metadata-field="start_date" type="date" value="'+esc(ticket.startDate || node.startDate || '')+'"'+(dateDisabled?' disabled':'')+'></label>'
       + '<label class="detail-field"><span>Due date</span><input class="detail-input" data-metadata-field="due_date" type="date" value="'+esc(ticket.dueDate || node.dueDate || '')+'"'+(dateDisabled?' disabled':'')+'></label>'
@@ -497,6 +509,7 @@ function renderComposerPanel(panel){
   const values = panel.values || {};
   const trackerOptions = (panel.trackers || []).map(item => '<option value="'+esc(item.name)+'"'+(item.name===values.tracker?' selected':'')+'>'+esc(item.name)+'</option>').join('');
   const priorityOptions = (panel.priorities || []).map(item => '<option value="'+esc(item.name)+'"'+(item.name===values.priority?' selected':'')+'>'+esc(item.name)+'</option>').join('');
+  const assigneeOptions = (panel.assignees || []).map(item => '<option value="'+esc(item.name)+'"'+(item.name===values.assigned_to?' selected':'')+'>'+esc(item.name)+'</option>').join('');
   const statusOptions = (panel.statuses || []).map(item => '<option value="'+esc(item.name)+'"'+(item.name===values.status?' selected':'')+'>'+esc(item.name)+'</option>').join('');
   const canCreate = values.tracker && values.priority;
   card.innerHTML =
@@ -506,6 +519,7 @@ function renderComposerPanel(panel){
     +'<div class="composer-grid composer-grid-detail">'
     +'<label class="detail-field composer-detail-field"><span>Tracker <span class="composer-required">*</span></span><select class="detail-select composer-select" id="work-tracker"><option value="">Select...</option>'+trackerOptions+'</select></label>'
     +'<label class="detail-field composer-detail-field"><span>Priority <span class="composer-required">*</span></span><select class="detail-select composer-select" id="work-priority"><option value="">Select...</option>'+priorityOptions+'</select></label>'
+    +'<label class="detail-field composer-detail-field"><span>Assignee</span><select class="detail-select composer-select" id="work-assignee"><option value="">'+STRINGS.assigneeUnassigned+'</option>'+assigneeOptions+'</select></label>'
     +'<label class="detail-field composer-detail-field"><span>Status</span><select class="detail-select composer-select" id="work-status"><option value="">Select...</option>'+statusOptions+'</select></label>'
     +'<label class="detail-field composer-detail-field"><span>Start date</span><input class="detail-input composer-input" id="work-start-date" type="date" value="'+esc(values.start_date || '')+'"></label>'
     +'<label class="detail-field composer-detail-field"><span>Due date</span><input class="detail-input composer-input" id="work-due-date" type="date" value="'+esc(values.due_date || '')+'"></label>'
@@ -513,12 +527,14 @@ function renderComposerPanel(panel){
 
   const trackerEl = card.querySelector('#work-tracker');
   const priorityEl = card.querySelector('#work-priority');
+  const assigneeEl = card.querySelector('#work-assignee');
   const statusEl = card.querySelector('#work-status');
   const startDateEl = card.querySelector('#work-start-date');
   const dueDateEl = card.querySelector('#work-due-date');
   const readValues = () => ({
     tracker: trackerEl?.value || '',
     priority: priorityEl?.value || '',
+    assigned_to: assigneeEl?.value || undefined,
     status: statusEl?.value || '',
     start_date: startDateEl?.value || undefined,
     due_date: dueDateEl?.value || undefined,

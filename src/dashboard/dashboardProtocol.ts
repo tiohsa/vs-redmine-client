@@ -81,6 +81,7 @@ export interface DashboardEditOptions {
   trackers: DashboardMetadataOption[];
   priorities: DashboardMetadataOption[];
   statuses: DashboardMetadataOption[];
+  assignees: DashboardMetadataOption[];
   statusFallback: boolean;
   loading: boolean;
   error?: string;
@@ -137,6 +138,7 @@ export interface NewTicketComposerValues {
   tracker?: string;
   priority?: string;
   status?: string;
+  assigned_to?: string;
   start_date: string;
   due_date: string;
   description: string;
@@ -155,6 +157,7 @@ export type DashboardWorkPanel =
     trackers: DashboardMetadataOption[];
     priorities: DashboardMetadataOption[];
     statuses: DashboardMetadataOption[];
+    assignees: DashboardMetadataOption[];
     values: NewTicketComposerValues;
     draftUri?: string;
     error?: string;
@@ -169,6 +172,7 @@ export type DashboardWorkPanel =
     trackers: DashboardMetadataOption[];
     priorities: DashboardMetadataOption[];
     statuses: DashboardMetadataOption[];
+    assignees: DashboardMetadataOption[];
     values: NewTicketComposerValues;
     draftUri?: string;
     error?: string;
@@ -219,6 +223,7 @@ export type TicketMetadataPatch = {
   status?: string;
   due_date?: string;
   start_date?: string;
+  assignee?: string;
 };
 
 export interface DashboardGeneralSettingsPatch {
@@ -248,6 +253,7 @@ export type DashboardRequest =
         tracker: string;
         priority: string;
         status: string;
+        assigned_to?: string;
         start_date?: string;
         due_date?: string;
         description?: string;

@@ -21,7 +21,7 @@ const UNSYNCED_KINDS = new Set(["ticket", "newTicket", "comment"]);
 const OFFLINE_SYNC_MODES = new Set(["auto", "manual"]);
 const SORT_DIRECTIONS = new Set(["asc", "desc"]);
 const SORT_FIELDS = new Set(["priority", "status", "tracker", "assignee"]);
-const METADATA_PATCH_FIELDS = new Set(["tracker", "priority", "status", "due_date", "start_date"]);
+const METADATA_PATCH_FIELDS = new Set(["tracker", "priority", "status", "due_date", "start_date", "assignee"]);
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 
 const validateUnsyncedKey = (v: unknown): v is DashboardUnsyncedKey => {
@@ -98,6 +98,7 @@ const validateMetadataPatch = (v: unknown): boolean => {
     if (!isString(startDate)) { return false; }
     if (startDate.length > 0 && !DATE_RE.test(startDate)) { return false; }
   }
+  if ("assignee" in v && !isString(v["assignee"])) { return false; }
   return true;
 };
 
@@ -206,6 +207,9 @@ export const validateDashboardMessage = (raw: unknown): ValidationResult => {
           return { ok: false, reason: "ticket.createDraftFromComposer: values.due_date must be YYYY-MM-DD or empty" };
         }
       }
+      if ("assigned_to" in values && values["assigned_to"] !== undefined && !isString(values["assigned_to"])) {
+        return { ok: false, reason: "ticket.createDraftFromComposer: values.assigned_to must be a string" };
+      }
       return {
         ok: true,
         request: {
@@ -215,6 +219,7 @@ export const validateDashboardMessage = (raw: unknown): ValidationResult => {
             tracker: values["tracker"] as string,
             priority: values["priority"] as string,
             status: (values["status"] as string | undefined) ?? "",
+            assigned_to: (values["assigned_to"] as string | undefined) ?? undefined,
             start_date: (values["start_date"] as string | undefined) ?? undefined,
             due_date: (values["due_date"] as string | undefined) ?? undefined,
             description: (values["description"] as string | undefined) ?? undefined,

@@ -47,7 +47,36 @@ export const computeMetadataChanges = (
   if (baseMetadata.estimated_hours !== nextMetadata.estimated_hours) {
     changes.estimated_hours = nextMetadata.estimated_hours;
   }
+  if ((baseMetadata.assignee ?? "") !== (nextMetadata.assignee ?? "")) {
+    changes.assignee = nextMetadata.assignee ?? "";
+  }
+  if (baseMetadata.assignee_id !== nextMetadata.assignee_id) {
+    changes.assignee_id = nextMetadata.assignee_id;
+  }
   return changes;
+};
+
+const resolveAssigneeId = async (
+  assigneeName: string,
+  deps: Pick<TicketSaveDependencies, "searchUsers" | "listProjectMembers">,
+  projectId?: number,
+): Promise<number> => {
+  // listProjectMembers は管理者権限不要なため優先して使用
+  if (deps.listProjectMembers !== undefined && projectId !== undefined) {
+    const members = await deps.listProjectMembers(projectId);
+    const match = members.find((m) => m.name === assigneeName);
+    if (match) {
+      return match.id;
+    }
+    throw new Error(`Unknown assignee: ${assigneeName}`);
+  }
+  // フォールバック: searchUsers（管理者権限が必要な環境向け）
+  const results = await deps.searchUsers(assigneeName);
+  const match = results.find((u) => u.name === assigneeName);
+  if (!match) {
+    throw new Error(`Unknown assignee: ${assigneeName}`);
+  }
+  return match.id;
 };
 
 export const resolveMetadataUpdates = async (
@@ -63,7 +92,9 @@ export const resolveMetadataUpdates = async (
     changes.due_date === undefined &&
     changes.start_date === undefined &&
     changes.done_ratio === undefined &&
-    changes.estimated_hours === undefined
+    changes.estimated_hours === undefined &&
+    changes.assignee === undefined &&
+    changes.assignee_id === undefined
   ) {
     return updateFields;
   }
@@ -126,6 +157,16 @@ export const resolveMetadataUpdates = async (
     updateFields.estimatedHours = changes.estimated_hours;
   }
 
+  if (changes.assignee_id !== undefined) {
+    updateFields.assigneeId = changes.assignee_id === 0 ? 0 : changes.assignee_id;
+  } else if (changes.assignee !== undefined) {
+    if (changes.assignee.length === 0) {
+      updateFields.assigneeId = 0;
+    } else {
+      updateFields.assigneeId = await resolveAssigneeId(changes.assignee, deps, projectId);
+    }
+  }
+
   return updateFields;
 };
 
@@ -186,6 +227,12 @@ export const resolveMetadataForCreate = async (
   }
   if (metadata.estimated_hours !== undefined) {
     fields.estimatedHours = metadata.estimated_hours;
+  }
+
+  if (metadata.assignee_id !== undefined && metadata.assignee_id > 0) {
+    fields.assigneeId = metadata.assignee_id;
+  } else if (metadata.assignee && metadata.assignee.length > 0) {
+    fields.assigneeId = await resolveAssigneeId(metadata.assignee, deps, projectId);
   }
 
   return fields;
