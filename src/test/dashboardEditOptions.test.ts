@@ -227,3 +227,47 @@ suite("getIssueAllowedStatuses — 関数シグネチャ確認", () => {
     assert.strictEqual(typeof getIssueAllowedStatuses, "function");
   });
 });
+
+// ── Composer Priority デフォルト値テスト ─────────────────────────────────
+
+suite("Composer — Priority デフォルト値", () => {
+  function pickOptionName(options: Array<{ name: string }>, candidate?: string): string | undefined {
+    if (!candidate) { return undefined; }
+    return options.some((o) => o.name === candidate) ? candidate : undefined;
+  }
+
+  function resolveDefaultPriority(
+    priorities: Array<{ name: string }>,
+    parentPriorityName?: string,
+  ): string | undefined {
+    return pickOptionName(priorities, parentPriorityName) ?? pickOptionName(priorities, "Normal") ?? priorities[0]?.name;
+  }
+
+  const standardPriorities = [
+    { name: "Low" },
+    { name: "Normal" },
+    { name: "High" },
+    { name: "Urgent" },
+  ];
+
+  test("親チケットなし・Normal が存在する場合は Normal を返す", () => {
+    assert.strictEqual(resolveDefaultPriority(standardPriorities), "Normal");
+  });
+
+  test("親チケットの優先度が一覧に含まれる場合はそれを使う", () => {
+    assert.strictEqual(resolveDefaultPriority(standardPriorities, "High"), "High");
+  });
+
+  test("親チケットの優先度が一覧にない場合は Normal にフォールバック", () => {
+    assert.strictEqual(resolveDefaultPriority(standardPriorities, "CustomPriority"), "Normal");
+  });
+
+  test("Normal が存在しない場合は先頭要素を返す", () => {
+    const priorities = [{ name: "Low" }, { name: "High" }];
+    assert.strictEqual(resolveDefaultPriority(priorities), "Low");
+  });
+
+  test("一覧が空の場合は undefined を返す", () => {
+    assert.strictEqual(resolveDefaultPriority([]), undefined);
+  });
+});

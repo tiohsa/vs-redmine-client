@@ -317,7 +317,7 @@ export class DashboardComposerService {
       const defaults = this.deps.context.store.getState().metadataOptions;
       const firstTracker = trackers[0]?.name;
       const defaultTracker = this.suggestDefaultTracker(trackers, parentTicket?.trackerName) ?? firstTracker;
-      const defaultPriority = this.pickOptionName(defaults.priorities, parentTicket?.priorityName) ?? defaults.priorities[0]?.name;
+      const defaultPriority = this.pickOptionName(defaults.priorities, parentTicket?.priorityName) ?? this.pickOptionName(defaults.priorities, "Normal") ?? defaults.priorities[0]?.name;
       const defaultStatus = this.pickOptionName(defaults.statuses, "New") ?? defaults.statuses[0]?.name;
       this.updateWorkPanelComposer({
         loading: false,
