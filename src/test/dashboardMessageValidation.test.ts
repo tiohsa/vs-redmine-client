@@ -37,6 +37,20 @@ suite("Dashboard メッセージバリデーション", () => {
     assert.strictEqual(r.ok, true);
   });
 
+  test("tickets.searchAllProjects: query が文字列でないと拒否される", () => {
+    const r = validateDashboardMessage({ type: "tickets.searchAllProjects", requestId: "r", query: 123 });
+    assert.strictEqual(r.ok, false);
+  });
+
+  test("tickets.searchAllProjects: 正常", () => {
+    const r = validateDashboardMessage({ type: "tickets.searchAllProjects", requestId: "r", query: "123" });
+    assert.strictEqual(r.ok, true);
+    if (r.ok) {
+      assert.strictEqual(r.request.type, "tickets.searchAllProjects");
+      assert.strictEqual(r.request.query, "123");
+    }
+  });
+
   test("project.select: projectId が数値でないと拒否される", () => {
     const r = validateDashboardMessage({ type: "project.select", requestId: "r", projectId: "abc" });
     assert.strictEqual(r.ok, false);

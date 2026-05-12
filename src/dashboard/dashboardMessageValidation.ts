@@ -139,6 +139,16 @@ export const validateDashboardMessage = (raw: unknown): ValidationResult => {
     }
 
     case "tickets.refresh":
+      return { ok: true, request: { type, requestId } };
+
+    case "tickets.searchAllProjects": {
+      const query = raw["query"];
+      if (!isString(query)) {
+        return { ok: false, reason: "tickets.searchAllProjects: query must be a string" };
+      }
+      return { ok: true, request: { type, requestId, query } };
+    }
+
     case "tickets.loadMore":
       return { ok: true, request: { type, requestId } };
 

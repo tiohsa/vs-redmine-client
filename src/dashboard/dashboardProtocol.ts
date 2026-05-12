@@ -240,6 +240,7 @@ export type DashboardRequest =
   | { type: "project.select"; requestId: string; projectId: number }
   | { type: "project.toggleChildren"; requestId: string; includeChildProjects: boolean }
   | { type: "tickets.refresh"; requestId: string }
+  | { type: "tickets.searchAllProjects"; requestId: string; query: string }
   | { type: "tickets.loadMore"; requestId: string }
   | { type: "ticket.select"; requestId: string; ticketId: number }
   | { type: "ticket.openEditor"; requestId: string; ticketId: number }
