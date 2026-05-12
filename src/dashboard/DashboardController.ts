@@ -98,6 +98,7 @@ export class DashboardController {
     this.unsyncedService = new DashboardUnsyncedService({
       context,
       refreshTicketPresentation: () => this.refreshTicketPresentation(),
+      loadComments: (ticketId) => this.loadComments(ticketId),
     });
     this.metadataService = new DashboardMetadataService({
       context,

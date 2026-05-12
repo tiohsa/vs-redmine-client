@@ -143,7 +143,7 @@ export const syncUnsyncedFile = async (
 
   if (syncKey.kind === "comment") {
     const update = syncKey.commentId !== undefined
-      ? queue.comments.find((c) => c.commentId === syncKey.commentId)
+      ? queue.comments.find((c) => c.ticketId === syncKey.ticketId && c.commentId === syncKey.commentId)
       : queue.comments.find((c) => c.documentUri === syncKey.documentUri && c.commentId === undefined);
     if (!update) {
       showWarning(vscode.l10n.t("Queue entry for this comment update not found."));

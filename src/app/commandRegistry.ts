@@ -38,7 +38,7 @@ import type {
 } from "./presentationPorts";
 import type { SyncController, SyncStatus } from "./syncController";
 import type { DashboardWebviewProvider } from "../dashboard/DashboardWebviewProvider";
-import type { DashboardState, DashboardUnsyncedKey } from "../dashboard/dashboardProtocol";
+import type { DashboardCommentItem, DashboardState, DashboardUnsyncedKey } from "../dashboard/dashboardProtocol";
 
 export interface CommandDeps {
   ticketsPresentation: TicketPresentationPort;
@@ -98,7 +98,10 @@ const pickDashboardComment = async (state: DashboardState): Promise<Comment | un
   if (!ticketId || state.comments.items.length === 0) {
     return undefined;
   }
-  const items = state.comments.items.map((comment) => ({
+  const hasCommentId = (
+    comment: DashboardCommentItem,
+  ): comment is DashboardCommentItem & { id: number } => comment.id !== undefined;
+  const items = state.comments.items.filter(hasCommentId).map((comment) => ({
     label: `#${comment.id} ${comment.authorName}`,
     description: comment.updatedAt ?? comment.createdAt ?? "",
     detail: comment.body.slice(0, 80),

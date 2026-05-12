@@ -1,11 +1,14 @@
 import * as assert from "assert";
 import * as vscode from "vscode";
+import { performSyncOnSave } from "../app/saveSyncExecutor";
 import { createSyncController } from "../app/syncController";
 import { clearTicketDrafts } from "../views/ticketDraftStore";
 import { clearNewTicketDrafts } from "../views/newTicketDraftStore";
 import { suppressSaveSync, releaseSaveSync } from "../views/saveSyncSuppression";
 import { clearOfflineSyncQueue, getOfflineSyncQueue } from "../views/offlineSyncStore";
 import { buildCommentUpdateFileContent } from "../views/commentUpdateFile";
+import { clearRegistry, registerNewCommentDraft } from "../views/ticketEditorRegistry";
+import { createEditorStub } from "./helpers/editorStubs";
 
 const makeNoopProvider = (): {
   refresh: () => void;
@@ -34,6 +37,7 @@ suite("0.1.3 安定化: 保存トリガー同期のシリアライゼーショ�
     clearTicketDrafts();
     clearNewTicketDrafts();
     clearOfflineSyncQueue();
+    clearRegistry();
   });
 
   test("suppressSaveSync 有効時は syncOnSave が即座にスキップされる", (done) => {
@@ -72,10 +76,14 @@ suite("0.1.3 安定化: 保存トリガー同期のシリアライゼーショ�
     // コメント更新ファイル URI（performSyncOnSave の comment-update パスを経由する）
     const uri = vscode.Uri.parse("file:///tmp/redmine-client-comment-update-50-888.md");
     const refreshCount = { count: 0 };
+    const refreshedCommentTickets: number[] = [];
 
     const ctrl = createSyncController({
       ticketsPresentation: makeNoopProvider(),
-      commentsPresentation: makeNoopProvider(),
+      commentsPresentation: {
+        ...makeNoopProvider(),
+        refreshForTicket: (id) => { refreshedCommentTickets.push(id); },
+      },
       unsyncedPresentation: {
         ...makeNoopProvider(),
         refresh: () => { refreshCount.count++; },
@@ -101,6 +109,11 @@ suite("0.1.3 安定化: 保存トリガー同期のシリアライゼーショ�
     setTimeout(() => {
       // debounce により 3 回の syncOnSave が 1 回の処理に集約されるべき
       assert.strictEqual(refreshCount.count, 1, "debounce により refresh は 1 回のみ呼ばれるべき");
+      assert.deepStrictEqual(
+        refreshedCommentTickets,
+        [50],
+        "コメント更新ファイル保存後に対象チケットのコメント一覧が refresh されるべき",
+      );
 
       // 最後のコンテンツ "Save 3" がキューに追加されているべき
       const queue = getOfflineSyncQueue();
@@ -123,10 +136,14 @@ suite("0.1.3 安定化: 保存トリガー同期のシリアライゼーショ�
       );
 
     const refreshCount = { count: 0 };
+    const refreshedCommentTickets: number[] = [];
 
     const ctrl = createSyncController({
       ticketsPresentation: makeNoopProvider(),
-      commentsPresentation: makeNoopProvider(),
+      commentsPresentation: {
+        ...makeNoopProvider(),
+        refreshForTicket: (id) => { refreshedCommentTickets.push(id); },
+      },
       unsyncedPresentation: {
         ...makeNoopProvider(),
         refresh: () => { refreshCount.count++; },
@@ -148,6 +165,11 @@ suite("0.1.3 安定化: 保存トリガー同期のシリアライゼーショ�
     // debounce 後、両方のドキュメントが独立して処理されることを確認
     setTimeout(() => {
       assert.strictEqual(refreshCount.count, 2, "異なる URI はそれぞれ独立して処理され、refresh が 2 回呼ばれるべき");
+      assert.deepStrictEqual(
+        refreshedCommentTickets.sort((a, b) => a - b),
+        [51, 52],
+        "各コメント更新ファイルの対象チケットごとにコメント一覧が refresh されるべき",
+      );
 
       const queue = getOfflineSyncQueue();
       const entry1 = queue.comments.find((c) => c.commentId === 901);
@@ -159,5 +181,90 @@ suite("0.1.3 安定化: 保存トリガー同期のシリアライゼーショ�
 
       done();
     }, 400);
+  });
+
+  test("新規コメント保存後に未同期一覧と対象コメント一覧を更新する", (done) => {
+    const uri = vscode.Uri.parse("file:///tmp/redmine-client-new-comment-50.md");
+    const unsyncedRefreshCount = { count: 0 };
+    const refreshedCommentTickets: number[] = [];
+
+    const ctrl = createSyncController({
+      ticketsPresentation: makeNoopProvider(),
+      commentsPresentation: {
+        ...makeNoopProvider(),
+        refreshForTicket: (id) => { refreshedCommentTickets.push(id); },
+      },
+      unsyncedPresentation: {
+        ...makeNoopProvider(),
+        refresh: () => { unsyncedRefreshCount.count++; },
+      },
+      notifications: {
+        notifyTicketSaveResult: () => undefined,
+        notifyCommentSaveResult: () => undefined,
+      } as unknown as import("../app/notificationController").NotificationController,
+      registerEditorDocument: () => undefined,
+    });
+
+    const doc = {
+      uri,
+      getText: () => "Queued new comment",
+    } as vscode.TextDocument;
+
+    ctrl.syncOnSave(doc);
+
+    setTimeout(() => {
+      assert.strictEqual(unsyncedRefreshCount.count, 1, "新規コメント保存後に未同期一覧が refresh されるべき");
+      assert.deepStrictEqual(
+        refreshedCommentTickets,
+        [50],
+        "新規コメント保存後に対象チケットのコメント一覧が refresh されるべき",
+      );
+
+      const queue = getOfflineSyncQueue();
+      const entry = queue.comments.find((c) => c.ticketId === 50 && c.commentId === undefined);
+      assert.ok(entry, "新規コメント更新エントリがキューに存在すること");
+      assert.strictEqual(entry?.body, "Queued new comment");
+      assert.strictEqual(entry?.documentUri, uri.toString());
+
+      done();
+    }, 400);
+  });
+
+  test("開いている新規コメントエディタ保存後も未同期一覧と対象コメント一覧を更新する", async () => {
+    const uri = vscode.Uri.parse("untitled:redmine-client-new-comment-60.md");
+    const editor = createEditorStub(uri, "Queued new comment from editor");
+    registerNewCommentDraft(60, editor);
+    const unsyncedRefreshCount = { count: 0 };
+    const refreshedCommentTickets: number[] = [];
+
+    await performSyncOnSave(editor.document, editor, {
+      ticketsPresentation: makeNoopProvider(),
+      commentsPresentation: {
+        ...makeNoopProvider(),
+        refreshForTicket: (id) => { refreshedCommentTickets.push(id); },
+      },
+      unsyncedPresentation: {
+        ...makeNoopProvider(),
+        refresh: () => { unsyncedRefreshCount.count++; },
+      },
+      notifications: {
+        notifyTicketSaveResult: () => undefined,
+        notifyCommentSaveResult: () => undefined,
+      } as unknown as import("../app/notificationController").NotificationController,
+      updateTicketListSubject: () => undefined,
+    });
+
+    assert.strictEqual(unsyncedRefreshCount.count, 1, "開いている新規コメント保存後に未同期一覧が refresh されるべき");
+    assert.deepStrictEqual(
+      refreshedCommentTickets,
+      [60],
+      "開いている新規コメント保存後に対象チケットのコメント一覧が refresh されるべき",
+    );
+
+    const queue = getOfflineSyncQueue();
+    const entry = queue.comments.find((c) => c.ticketId === 60 && c.commentId === undefined);
+    assert.ok(entry, "開いている新規コメントのキューが存在すること");
+    assert.strictEqual(entry?.body, "Queued new comment from editor");
+    assert.strictEqual(entry?.documentUri, uri.toString());
   });
 });

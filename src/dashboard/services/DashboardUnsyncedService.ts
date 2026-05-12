@@ -20,6 +20,7 @@ export class DashboardUnsyncedService {
   constructor(private readonly deps: {
     context: DashboardServiceContext;
     refreshTicketPresentation: () => void;
+    loadComments: (ticketId: number) => Promise<void>;
   }) {}
 
   refreshUnsynced(): void {
@@ -235,6 +236,21 @@ export class DashboardUnsyncedService {
     );
     this.refreshUnsynced();
     this.deps.refreshTicketPresentation();
+    await this.refreshSyncedComments(key, result);
     return result;
+  }
+
+  private async refreshSyncedComments(
+    key: DashboardUnsyncedKey,
+    result: SyncUnsyncedFileResult | undefined,
+  ): Promise<void> {
+    if (
+      key.kind !== "comment" ||
+      !result ||
+      (result.status !== "success" && result.status !== "no_change")
+    ) {
+      return;
+    }
+    await this.deps.loadComments(key.ticketId);
   }
 }

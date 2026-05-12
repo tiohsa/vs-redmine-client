@@ -1,5 +1,7 @@
 import type { DashboardServiceContext } from "./DashboardServiceContext";
 import { getIssueDetail } from "../../redmine/issues";
+import { listComments } from "../../redmine/comments";
+import { getCurrentUserId } from "../../redmine/users";
 import { buildCommentDashboardItems } from "../viewModels/commentsDashboardViewModel";
 import { openCommentInBrowser } from "../../commands/openInBrowser";
 import { openCommentUpdateDraft } from "../../commands/openCommentUpdateDraft";
@@ -17,10 +19,11 @@ export class DashboardCommentService {
     const { store } = this.context;
     store.updateNested("comments", { ticketId, loading: true, error: undefined });
     try {
-      const detail = await getIssueDetail(ticketId);
+      const currentUserId = await getCurrentUserId();
+      const comments = await listComments(ticketId, currentUserId);
       store.updateNested("comments", {
         loading: false,
-        items: buildCommentDashboardItems(detail.comments),
+        items: buildCommentDashboardItems(comments, ticketId),
       });
     } catch (err) {
       const msg = (err as Error).message;
