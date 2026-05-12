@@ -36,6 +36,10 @@ export const performSyncOnSave = async (
   deps: SaveSyncExecutorDeps,
 ): Promise<void> => {
   const { ticketsPresentation, commentsPresentation, unsyncedPresentation, notifications } = deps;
+  const refreshQueuedComment = (ticketId: number): void => {
+    unsyncedPresentation.refresh();
+    commentsPresentation.refreshForTicket(ticketId);
+  };
 
   if (editor) {
     let ticketResult = await handleTicketEditorSave(editor, {
@@ -58,11 +62,13 @@ export const performSyncOnSave = async (
         commentResult = await handleCommentConflict(commentResult, editor);
       }
       notifications.notifyCommentSaveResult(commentResult);
-      if (shouldRefreshComments(commentResult.status)) {
-        const ticketId =
-          getTicketIdForDocument(editor.document) ??
-          getTicketIdForUri(editor.document.uri);
-        if (ticketId) {
+      const ticketId =
+        getTicketIdForDocument(editor.document) ??
+        getTicketIdForUri(editor.document.uri);
+      if (ticketId) {
+        if (commentResult.status === "queued") {
+          refreshQueuedComment(ticketId);
+        } else if (shouldRefreshComments(commentResult.status)) {
           commentsPresentation.refreshForTicket(ticketId);
         }
       }
@@ -90,6 +96,7 @@ export const performSyncOnSave = async (
         });
       }
       unsyncedPresentation.refresh();
+      commentsPresentation.refreshForTicket(classification.parsed.fields.issueId);
       return;
     }
 
@@ -101,6 +108,7 @@ export const performSyncOnSave = async (
         documentUri: document.uri,
       });
       notifications.notifyCommentSaveResult(commentResult);
+      refreshQueuedComment(classification.ticketId);
       return;
     }
 
@@ -152,6 +160,7 @@ export const performSyncOnSave = async (
         documentUri: document.uri,
       });
       notifications.notifyCommentSaveResult(commentResult);
+      refreshQueuedComment(classification.ticketId);
       return;
     }
 
@@ -162,6 +171,7 @@ export const performSyncOnSave = async (
         documentUri: document.uri,
       });
       notifications.notifyCommentSaveResult(commentResult);
+      refreshQueuedComment(classification.ticketId);
       return;
     }
 
@@ -173,7 +183,7 @@ export const performSyncOnSave = async (
         documentUri: document.uri,
       });
       notifications.notifyCommentSaveResult(commentResult);
-      unsyncedPresentation.refresh();
+      refreshQueuedComment(classification.ticketId);
       return;
     }
 

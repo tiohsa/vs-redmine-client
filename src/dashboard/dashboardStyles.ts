@@ -303,10 +303,12 @@ body.vscode-high-contrast .btn-primary{border:1px solid var(--app-border)}
 /* ── Comments panel ───────────────────────────────────────────── */
 #comments-panel{padding:8px 12px;overflow-y:auto;display:flex;flex-direction:column;gap:8px}
 .comment-card{padding:10px 12px;background:var(--surface-1);border:1px solid var(--app-card-border);border-radius:var(--mm-radius-card);box-shadow:var(--app-shadow)}
-.comment-header{display:flex;justify-content:space-between;margin-bottom:6px}
+.comment-header{display:flex;justify-content:space-between;align-items:flex-start;gap:8px;margin-bottom:6px}
+.comment-meta{display:flex;align-items:center;gap:6px;min-width:0;flex-wrap:wrap}
+.comment-status{display:flex;align-items:center;gap:4px;flex-shrink:0}
 .comment-author{font-size:11px;font-weight:600;color:var(--app-text)}
-.comment-date{font-size:10px;color:var(--app-text-readable-muted)}
-.comment-body{font-size:11px;color:var(--app-text-secondary);white-space:pre-wrap;word-break:break-word}
+.comment-date,.comment-id{font-size:10px;color:var(--app-text-readable-muted)}
+.comment-body{font-size:11px;color:var(--app-text-secondary);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .comment-actions{margin-top:6px;display:flex;gap:4px}
 
 /* ── Settings panel ───────────────────────────────────────────── */

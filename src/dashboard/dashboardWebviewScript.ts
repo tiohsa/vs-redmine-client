@@ -41,7 +41,7 @@ function endOperation(requestId){
 
 function updateSyncButtonStates(){
   const busy = activeSyncRequests.size > 0;
-  document.querySelectorAll('[data-sync-key],[data-discard-key]').forEach(btn => { btn.disabled = busy; });
+  document.querySelectorAll('[data-sync-key],[data-discard-key],[data-sync-comment-key]').forEach(btn => { btn.disabled = busy; });
   const syncAll = document.getElementById('sync-all-btn');
   if (syncAll) syncAll.disabled = busy;
 }
@@ -639,6 +639,7 @@ function renderComments(){
   const c=state.comments;
   const list=document.getElementById('comments-list');
   const ticketId=state.selectedTicketId;
+  const firstLine=s=>String(s||'').split(/\r?\n/)[0];
   const header=ticketId
     ?'<div class="comments-header">'
       +'<span class="comments-header-label">'+STRINGS.commentsForTicket+' #'+ticketId+'</span>'
@@ -655,16 +656,20 @@ function renderComments(){
     list.innerHTML=header+c.items.map(cm=>{
       const unsyncedBadge=cm.hasUnsyncedEdit
         ?'<span class="badge sync-dirty" aria-label="'+STRINGS.unsyncedEditAriaLabel+'">'+STRINGS.unsyncedEditBadge+'</span>':'' ;
-      const editBtn='<button class="btn btn-secondary" data-edit-comment="'+cm.id+'" data-ticket="'+ticketId+'" aria-label="'+STRINGS.editCommentAction+'">'+STRINGS.editCommentAction+'</button>';
-      const browserBtn='<button class="btn btn-secondary" data-open-comment="'+cm.id+'" data-ticket="'+ticketId+'" aria-label="'+STRINGS.openInRedmine+'">'+STRINGS.openInRedmine+'</button>';
+      const syncBtn=cm.syncKey
+        ?'<button class="btn btn-primary" data-sync-comment-key="'+esc(JSON.stringify(cm.syncKey))+'">'+STRINGS.syncAction+'</button>':'';
+      const editBtn=cm.id?'<button class="btn btn-secondary" data-edit-comment="'+cm.id+'" data-ticket="'+ticketId+'" aria-label="'+STRINGS.editCommentAction+'">'+STRINGS.editCommentAction+'</button>':'';
+      const browserBtn=cm.id?'<button class="btn btn-secondary" data-open-comment="'+cm.id+'" data-ticket="'+ticketId+'" aria-label="'+STRINGS.openInRedmine+'">'+STRINGS.openInRedmine+'</button>':'';
+      const journalId=cm.id?'<span class="comment-id">journal #'+cm.id+'</span>':'';
       return '<div class="comment-card">'
-        +'<div class="comment-header"><span class="comment-author">'+esc(cm.authorName)+'</span>'
+        +'<div class="comment-header"><div class="comment-meta"><span class="comment-author">'+esc(cm.authorName)+'</span>'
         +(cm.updatedAt?'<span class="comment-date">'+esc(cm.updatedAt.substring(0,10))+'</span>':'')
-        +'<span class="comment-id">journal #'+cm.id+'</span>'
+        +journalId
+        +'</div><div class="comment-status">'
         +unsyncedBadge
-        +'</div>'
-        +'<div class="comment-body">'+esc(cm.body)+'</div>'
-        +'<div class="comment-actions">'+browserBtn+(editBtn||'')+'</div>'
+        +'</div></div>'
+        +'<div class="comment-body">'+esc(firstLine(cm.body))+'</div>'
+        +'<div class="comment-actions">'+browserBtn+(editBtn||'')+syncBtn+'</div>'
         +'</div>';
     }).join('');
   }
@@ -680,6 +685,12 @@ function renderComments(){
       req('comment.openBrowser',{ticketId:Number(btn.dataset.ticket),commentId:Number(btn.dataset.openComment)});
     });
   });
+  list.querySelectorAll('[data-sync-comment-key]').forEach(btn=>{
+    btn.addEventListener('click',()=>{
+      try{ req('unsynced.syncOne',{key:JSON.parse(btn.getAttribute('data-sync-comment-key'))}); }catch{}
+    });
+  });
+  updateSyncButtonStates();
 }
 
 // ── Settings ────────────────────────────────────────────────────────────────

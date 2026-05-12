@@ -107,13 +107,15 @@ export interface DashboardUnsyncedItem {
 }
 
 export interface DashboardCommentItem {
-  id: number;
+  id?: number;
   authorName: string;
   body: string;
   createdAt?: string;
   updatedAt?: string;
   editableByCurrentUser: boolean;
   hasUnsyncedEdit: boolean;
+  syncKey?: DashboardUnsyncedKey;
+  isLocalUnsynced?: boolean;
 }
 
 export interface DashboardTicketSettingsViewModel {
