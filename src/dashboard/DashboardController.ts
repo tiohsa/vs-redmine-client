@@ -197,6 +197,9 @@ export class DashboardController {
       case "tickets.refresh":
         await this.loadTickets();
         break;
+      case "tickets.searchAllProjects":
+        await this.ticketService.searchAllProjects(req.query);
+        break;
       case "tickets.loadMore":
         await this.loadMoreTickets();
         break;

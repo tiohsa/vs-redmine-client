@@ -1,6 +1,6 @@
 import type { DashboardServiceContext } from "./DashboardServiceContext";
 import { getIncludeChildProjects, getTicketListLimit } from "../../config/settings";
-import { listIssues } from "../../redmine/issues";
+import { getIssueDetail as fetchIssueDetail, listIssues as fetchIssues } from "../../redmine/issues";
 import { rememberTicketSummaries } from "../../views/ticketSummaryStore";
 import type { Ticket } from "../../redmine/types";
 import { applyTicketFilters, applyTicketSort, type TicketListSettings } from "../../views/projectListSettings";
@@ -10,6 +10,10 @@ import { openTicketInBrowser } from "../../commands/openInBrowser";
 import type { ResolvedProject } from "../resolveProject";
 
 export class DashboardTicketService {
+  private allProjectsSearchQuery = "";
+  private allProjectsSearchIssueOffset = 0;
+  private allProjectsSearchExtraCount = 0;
+
   constructor(private readonly deps: {
     context: DashboardServiceContext;
     getResolvedProject: () => ResolvedProject | undefined;
@@ -20,9 +24,14 @@ export class DashboardTicketService {
     getSettings: () => TicketListSettings;
     loadComments: (ticketId: number) => Promise<void>;
     refreshUnsynced: () => void;
+    listIssues?: typeof fetchIssues;
+    getIssueDetail?: typeof fetchIssueDetail;
   }) {}
 
   async loadTickets(): Promise<void> {
+    this.allProjectsSearchQuery = "";
+    this.allProjectsSearchIssueOffset = 0;
+    this.allProjectsSearchExtraCount = 0;
     const { store } = this.deps.context;
     const project = this.deps.getResolvedProject();
 
@@ -42,7 +51,7 @@ export class DashboardTicketService {
     }
 
     try {
-      const result = await listIssues({
+      const result = await this.listIssues({
         projectId: project.id,
         includeChildProjects: getIncludeChildProjects(),
         limit: getTicketListLimit(),
@@ -69,12 +78,31 @@ export class DashboardTicketService {
       return;
     }
     const { store } = this.deps.context;
+    if (this.allProjectsSearchQuery) {
+      try {
+        const result = await this.listIssues({
+          includeChildProjects: false,
+          limit: getTicketListLimit(),
+          offset: this.allProjectsSearchIssueOffset,
+          subjectQuery: this.allProjectsSearchQuery,
+        });
+        this.allProjectsSearchIssueOffset += result.tickets.length;
+        this.deps.setTickets(mergeTicketsById(tickets, result.tickets));
+        this.deps.setTotalCount(result.totalCount + this.allProjectsSearchExtraCount);
+        rememberTicketSummaries(result.tickets);
+        this.pushTickets();
+      } catch (err) {
+        const msg = (err as Error).message;
+        store.updateNested("errors", { tickets: `Failed to load more: ${msg}` });
+      }
+      return;
+    }
     const project = this.deps.getResolvedProject();
     if (!project) {
       return;
     }
     try {
-      const result = await listIssues({
+      const result = await this.listIssues({
         projectId: project.id,
         includeChildProjects: getIncludeChildProjects(),
         limit: getTicketListLimit(),
@@ -87,6 +115,56 @@ export class DashboardTicketService {
     } catch (err) {
       const msg = (err as Error).message;
       store.updateNested("errors", { tickets: `Failed to load more: ${msg}` });
+    }
+  }
+
+  async searchAllProjects(rawQuery: string): Promise<void> {
+    const { store } = this.deps.context;
+    const query = rawQuery.trim();
+    this.allProjectsSearchQuery = query;
+    this.allProjectsSearchIssueOffset = 0;
+    this.allProjectsSearchExtraCount = 0;
+
+    store.update({
+      selectedProject: undefined,
+      loading: { ...store.getState().loading, tickets: query.length > 0 },
+      errors: { ...store.getState().errors, tickets: undefined },
+      selectedTicketId: undefined,
+      selectedTicket: undefined,
+      workPanel: undefined,
+    });
+
+    if (!query) {
+      this.deps.setTickets([]);
+      this.deps.setTotalCount(0);
+      this.pushTickets();
+      store.updateNested("loading", { tickets: false });
+      return;
+    }
+
+    try {
+      const result = await this.listIssues({
+        includeChildProjects: false,
+        limit: getTicketListLimit(),
+        offset: 0,
+        subjectQuery: query,
+      });
+      this.allProjectsSearchIssueOffset = result.tickets.length;
+      const idTicket = await this.searchTicketById(query);
+      const tickets = idTicket ? mergeTicketsById([idTicket], result.tickets) : result.tickets;
+      this.allProjectsSearchExtraCount = idTicket && !result.tickets.some((ticket) => ticket.id === idTicket.id) ? 1 : 0;
+      this.deps.setTickets(tickets);
+      this.deps.setTotalCount(result.totalCount + this.allProjectsSearchExtraCount);
+      rememberTicketSummaries(tickets);
+      this.deps.refreshUnsynced();
+      this.pushTickets();
+      store.updateNested("loading", { tickets: false });
+    } catch (err) {
+      const msg = (err as Error).message;
+      store.update({
+        loading: { ...store.getState().loading, tickets: false },
+        errors: { ...store.getState().errors, tickets: `Failed to search tickets: ${msg}` },
+      });
     }
   }
 
@@ -147,4 +225,40 @@ export class DashboardTicketService {
       },
     });
   }
+
+  private async searchTicketById(query: string): Promise<Ticket | undefined> {
+    if (!/^\d+$/.test(query)) {
+      return undefined;
+    }
+    const issueId = Number(query);
+    if (!Number.isSafeInteger(issueId) || issueId <= 0) {
+      return undefined;
+    }
+    try {
+      return (await this.getIssueDetail(issueId)).ticket;
+    } catch {
+      return undefined;
+    }
+  }
+
+  private get listIssues(): typeof fetchIssues {
+    return this.deps.listIssues ?? fetchIssues;
+  }
+
+  private get getIssueDetail(): typeof fetchIssueDetail {
+    return this.deps.getIssueDetail ?? fetchIssueDetail;
+  }
 }
+
+const mergeTicketsById = (base: Ticket[], additions: Ticket[]): Ticket[] => {
+  const seen = new Set<number>();
+  const merged: Ticket[] = [];
+  for (const ticket of [...base, ...additions]) {
+    if (seen.has(ticket.id)) {
+      continue;
+    }
+    seen.add(ticket.id);
+    merged.push(ticket);
+  }
+  return merged;
+};

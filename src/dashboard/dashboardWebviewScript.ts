@@ -84,22 +84,43 @@ document.getElementById('project-select').addEventListener('change',function(){
 
 // ── Search ─────────────────────────────────────────────────────────────────
 let searchQuery = '';
+let allProjectsSearchTimer = null;
 const searchInput = document.getElementById('search-input');
 const searchClearBtn = document.getElementById('search-clear-btn');
 function updateSearchClearBtn(){
   searchClearBtn.classList.toggle('hidden', !searchInput.value);
 }
+function searchAllProjectsDebounced(query){
+  if(allProjectsSearchTimer) clearTimeout(allProjectsSearchTimer);
+  allProjectsSearchTimer = setTimeout(()=>{
+    allProjectsSearchTimer = null;
+    req('tickets.searchAllProjects',{query});
+  }, 300);
+}
 function clearSearch(){
   searchInput.value = '';
   searchQuery = '';
+  if(allProjectsSearchTimer){
+    clearTimeout(allProjectsSearchTimer);
+    allProjectsSearchTimer = null;
+  }
   updateSearchClearBtn();
-  renderTickets();
+  if(!state?.selectedProject){
+    req('tickets.searchAllProjects',{query:''});
+  } else {
+    renderTickets();
+  }
   searchInput.focus();
 }
 searchInput.addEventListener('input',function(){
-  searchQuery = this.value.toLowerCase();
+  const value = this.value;
+  searchQuery = value.toLowerCase();
   updateSearchClearBtn();
-  renderTickets();
+  if(!state?.selectedProject){
+    searchAllProjectsDebounced(value);
+  } else {
+    renderTickets();
+  }
 });
 searchClearBtn.addEventListener('click', clearSearch);
 searchInput.addEventListener('keydown',function(e){
@@ -309,8 +330,9 @@ function buildTicketRowHtml(t){
 function renderTickets(){
   if(!state) return;
   const list = document.getElementById('ticket-list');
-  if(!state.selectedProject && !state.tickets.length && !state.loading.tickets){
+  if(!state.selectedProject && !state.tickets.length && !state.loading.tickets && !searchQuery){
     list.innerHTML='<div class="state-msg">'+STRINGS.noProjectSelected+'</div>';
+    document.getElementById('load-more-row').style.display='none';
     updateSyncButtonStates();
     return;
   }

@@ -12,21 +12,33 @@ import {
 } from "./types";
 
 export interface IssuesListInput {
-  projectId: number;
+  projectId?: number;
   includeChildProjects: boolean;
   limit: number;
   offset: number;
+  subjectQuery?: string;
   statusIds?: string[];
   assigneeIds?: string[];
 }
 
 export const buildIssuesListQuery = (input: IssuesListInput): Record<string, string | number | boolean> => {
   const query: Record<string, string | number | boolean> = {
-    project_id: input.projectId,
-    include_children: input.includeChildProjects,
     limit: input.limit,
     offset: input.offset,
   };
+
+  if (input.projectId !== undefined) {
+    query.project_id = input.projectId;
+    query.include_children = input.includeChildProjects;
+  }
+
+  const subjectQuery = input.subjectQuery?.trim();
+  if (subjectQuery) {
+    query.set_filter = 1;
+    query["f[]"] = "subject";
+    query["op[subject]"] = "~";
+    query["v[subject][]"] = subjectQuery;
+  }
 
   query.status_id = (input.statusIds && input.statusIds.length > 0)
     ? input.statusIds.join(",")
