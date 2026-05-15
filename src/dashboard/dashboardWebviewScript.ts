@@ -316,7 +316,7 @@ function buildTicketRowHtml(t){
     '<button type="button" role="menuitem" data-ticket-action="'+action+'" data-ticket="'+t.id+'">'+label+'</button>'
   ).join('');
   const actionMenu = '<span class="ticket-actions">'
-    +'<button class="ticket-action-btn" type="button" data-ticket-action-menu="'+t.id+'" aria-haspopup="menu" aria-expanded="false" aria-controls="ticket-action-menu-'+t.id+'" aria-label="'+STRINGS.ticketActionMenu+'" title="'+STRINGS.ticketActionMenu+'"><span class="icon-more" aria-hidden="true"></span></button>'
+    +'<button class="ticket-action-btn" type="button" data-ticket-action-menu="'+t.id+'" aria-haspopup="menu" aria-expanded="false" aria-controls="ticket-action-menu-'+t.id+'" aria-label="'+STRINGS.ticketActionMenu+'" title="'+STRINGS.ticketActionMenu+'"><span class="icon-more" aria-hidden="true"></span><span>'+STRINGS.ticketActionMenuShort+'</span></button>'
     +'<span class="ticket-action-menu hidden" id="ticket-action-menu-'+t.id+'" role="menu">'+actionMenuItems+'</span></span>';
   return '<div class="ticket-row'+(t.level>0?' child-row':'')+sel+'" data-id="'+t.id+'" style="padding-left:'+(12+indent)+'px" tabindex="0">'
     +expandBtn
@@ -494,9 +494,9 @@ function renderTicketDetailPanel(ticket){
     + '<div class="detail-project">'+projectLabel+'</div>'
     + parentLabel
     + '<div class="detail-actions">'
-    + '<button class="btn btn-secondary" id="detail-open-btn">'+STRINGS.openTicketAction+'</button>'
-    + '<button class="btn btn-secondary" id="detail-comment-btn">'+STRINGS.commentAction+'</button>'
-    + '<button class="btn btn-primary" id="detail-sync-btn">'+STRINGS.syncAction+'</button>'
+    + '<button class="btn btn-secondary" id="detail-open-btn" title="'+STRINGS.openTicketAction+'"><span class="btn-icon-glyph" aria-hidden="true">✎</span>'+STRINGS.openTicketAction+'</button>'
+    + '<button class="btn btn-secondary" id="detail-comment-btn" title="'+STRINGS.commentAction+'"><span class="btn-icon-glyph" aria-hidden="true">✉</span>'+STRINGS.commentAction+'</button>'
+    + '<button class="btn btn-primary" id="detail-sync-btn" title="'+STRINGS.syncAction+'"><span class="btn-icon-glyph" aria-hidden="true">⇅</span>'+STRINGS.syncAction+'</button>'
     + '</div>'
     + expanded;
   card.querySelector('#ticket-detail-toggle')?.addEventListener('click',()=>{

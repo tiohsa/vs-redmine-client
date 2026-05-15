@@ -23,8 +23,8 @@ ${dashboardStyles}
     <label class="toggle-children">
       <input type="checkbox" id="include-children"> ${strings.includeChildren}
     </label>
-    <button class="btn-icon" id="refresh-btn" title="${strings.refresh}" aria-label="${strings.refresh}"><span class="icon-refresh" aria-hidden="true"></span></button>
-    <button class="btn btn-primary btn-primary-new" id="new-ticket-btn" title="${strings.newTicket}">${strings.newTicket}</button>
+    <button class="btn btn-ghost-sm" id="refresh-btn" title="${strings.refresh}" aria-label="${strings.refresh}"><span class="icon-refresh" aria-hidden="true"></span><span class="btn-label-sm">${strings.refresh}</span></button>
+    <button class="btn btn-primary btn-primary-new" id="new-ticket-btn" title="${strings.newTicket}"><span class="icon-plus" aria-hidden="true"></span><span>${strings.newTicket}</span></button>
   </div>
 </div>
 

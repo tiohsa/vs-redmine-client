@@ -30,6 +30,7 @@ export interface DashboardStrings {
   expandTitle: string;
   collapseTitle: string;
   ticketActionMenu: string;
+  ticketActionMenuShort: string;
   openInEditor: string;
   addCommentAction: string;
   openInBrowser: string;
@@ -148,6 +149,7 @@ export const buildDashboardStrings = (): DashboardStrings => ({
   expandTitle: vscode.l10n.t("Expand"),
   collapseTitle: vscode.l10n.t("Collapse"),
   ticketActionMenu: vscode.l10n.t("Ticket actions"),
+  ticketActionMenuShort: vscode.l10n.t("Actions"),
   openInEditor: vscode.l10n.t("Open in editor"),
   addCommentAction: vscode.l10n.t("Add comment"),
   openInBrowser: vscode.l10n.t("Open in browser"),

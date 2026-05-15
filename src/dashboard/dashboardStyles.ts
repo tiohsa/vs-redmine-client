@@ -130,6 +130,10 @@ body{
 .btn-icon{width:28px;height:28px;display:flex;align-items:center;justify-content:center;border:none;background:transparent;color:var(--app-text-readable-muted);border-radius:var(--mm-radius-button);cursor:pointer;font-size:13px;flex-shrink:0;transition:background .15s,color .15s}
 .btn-icon:hover{background:var(--app-hover);color:var(--app-accent)}
 .btn-icon:focus-visible{outline:1px solid var(--app-focus);outline-offset:1px}
+.btn-ghost-sm{height:26px;padding:0 8px;display:inline-flex;align-items:center;gap:5px;border:1px solid var(--border-subtle);background:transparent;color:var(--app-text-readable-muted);border-radius:var(--mm-radius-button);cursor:pointer;font:inherit;font-size:10px;font-weight:500;flex-shrink:0;transition:background .15s,color .15s,border-color .15s}
+.btn-ghost-sm:hover{background:var(--app-hover);color:var(--app-accent);border-color:color-mix(in srgb,var(--app-accent) 35%,transparent)}
+.btn-ghost-sm:focus-visible{outline:1px solid var(--app-focus);outline-offset:1px}
+.btn-label-sm{font-size:10px;font-weight:500;white-space:nowrap}
 
 /* ── Tabs ─────────────────────────────────────────────────────── */
 #tabs{display:flex;gap:6px;padding:8px 12px;border-bottom:1px solid var(--app-border);flex-shrink:0;overflow-x:auto;scrollbar-width:none}
@@ -251,6 +255,7 @@ body.vscode-high-contrast .ticket-detail-card{border-top-color:var(--app-border)
 .detail-toggle{width:20px;height:20px;font-size:11px}
 .detail-project,.detail-parent,.detail-readonly{font-size:10px;color:var(--app-text-readable-muted);line-height:1.35}
 .detail-actions{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:6px}
+.btn-icon-glyph{font-size:12px;line-height:1;flex-shrink:0;margin-right:3px}
 .detail-actions .btn{padding:4px 6px;min-width:0;font-size:11px}
 .detail-expanded{display:flex;flex-direction:column;gap:6px;padding-top:8px;border-top:1px solid var(--border-subtle)}
 .detail-field,.detail-meta{display:grid;grid-template-columns:70px minmax(0,1fr);align-items:center;gap:6px;font-size:10px}
@@ -268,9 +273,9 @@ body.vscode-high-contrast .detail-input[type="date"]::-webkit-calendar-picker-in
 
 /* ── Ticket action menu (三点メニュー) ────────────────────────── */
 .ticket-actions{position:relative;display:inline-flex;align-items:center;flex-shrink:0;margin-left:2px}
-.ticket-action-btn{opacity:.45;pointer-events:auto;width:28px;height:28px;display:inline-flex;align-items:center;justify-content:center;border:none;background:transparent;color:var(--app-text-readable-muted);border-radius:var(--mm-radius-pill);cursor:pointer;flex-shrink:0;transition:opacity .12s,background .12s,color .12s}
-.ticket-row:hover .ticket-action-btn,.ticket-row:focus-within .ticket-action-btn,.ticket-row.selected .ticket-action-btn,.ticket-action-btn[aria-expanded="true"]{opacity:1}
-.ticket-action-btn:hover,.ticket-action-btn[aria-expanded="true"]{background:var(--app-hover);color:var(--app-accent)}
+.ticket-action-btn{opacity:0;pointer-events:none;height:22px;padding:0 6px;display:inline-flex;align-items:center;gap:4px;border:1px solid transparent;background:transparent;color:var(--app-text-readable-muted);border-radius:var(--mm-radius-pill);cursor:pointer;flex-shrink:0;font:inherit;font-size:9px;font-weight:500;white-space:nowrap;transition:opacity .12s,background .12s,color .12s,border-color .12s}
+.ticket-row:hover .ticket-action-btn,.ticket-row:focus-within .ticket-action-btn,.ticket-row.selected .ticket-action-btn,.ticket-action-btn[aria-expanded="true"]{opacity:1;pointer-events:auto}
+.ticket-action-btn:hover,.ticket-action-btn[aria-expanded="true"]{background:var(--app-hover);color:var(--app-accent);border-color:color-mix(in srgb,var(--app-accent) 30%,transparent)}
 .ticket-action-btn:focus-visible{outline:1px solid var(--app-focus);outline-offset:1px;opacity:1;pointer-events:auto}
 .icon-more{display:inline-block;width:3px;height:3px;border-radius:50%;background:currentColor;box-shadow:-5px 0 0 currentColor,5px 0 0 currentColor;flex-shrink:0}
 .ticket-action-menu{position:absolute;right:0;top:calc(100% + 4px);z-index:30;min-width:138px;padding:5px;background:var(--surface-1);border:1px solid var(--app-card-border);border-radius:var(--mm-radius-control);box-shadow:0 4px 20px rgba(0,0,0,0.24);display:flex;flex-direction:column;gap:2px}
@@ -285,7 +290,7 @@ body.vscode-high-contrast .ticket-action-btn,body.vscode-high-contrast .ticket-a
 .btn-primary:hover{background:var(--app-accent-hover)}
 .btn-secondary{background:var(--surface-1);color:var(--app-text);border:1px solid var(--border-subtle)}
 .btn-secondary:hover{background:var(--app-hover);color:var(--app-accent);border-color:color-mix(in srgb, var(--app-accent) 35%, transparent)}
-.btn.btn-primary-new{height:28px;padding:0 12px}
+.btn.btn-primary-new{height:28px;padding:0 12px;gap:5px}
 body.vscode-high-contrast .btn-primary{border:1px solid var(--app-border)}
 
 /* ── Unsynced panel ───────────────────────────────────────────── */
@@ -336,7 +341,11 @@ body.vscode-high-contrast .btn-primary{border:1px solid var(--app-border)}
 .error-msg{color:#ef4444}
 .hidden{display:none!important}
 
-.icon-refresh{display:inline-block;width:12px;height:12px;border:2px solid currentColor;border-top-color:transparent;border-radius:50%}
+.icon-refresh{display:inline-block;width:11px;height:11px;border:1.5px solid currentColor;border-top-color:transparent;border-radius:50%}
+.icon-plus{display:inline-block;width:11px;height:11px;position:relative;flex-shrink:0}
+.icon-plus::before,.icon-plus::after{content:'';position:absolute;background:currentColor;border-radius:1px}
+.icon-plus::before{width:11px;height:1.5px;top:50%;left:0;transform:translateY(-50%)}
+.icon-plus::after{width:1.5px;height:11px;left:50%;top:0;transform:translateX(-50%)}
 .expand-icon{display:inline-block;width:0;height:0;border-style:solid}
 .expand-icon.collapsed{border-width:4px 0 4px 6px;border-color:transparent transparent transparent currentColor}
 .expand-icon.expanded{border-width:6px 4px 0 4px;border-color:currentColor transparent transparent transparent}
