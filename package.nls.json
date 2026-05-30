@@ -23,6 +23,8 @@
   "command.configureEditorDefaultDueDate.title": "Redmine: Configure Editor Default Due Date",
   "command.resetEditorDefaults.title": "Redmine: Reset Editor Defaults",
   "command.createTicket.title": "Redmine: Create Ticket from Editor",
+  "command.createTicketFromMarkdownHeader.title": "Redmine: Create Ticket from Markdown Header",
+  "command.insertRedmineTicketFrontmatter.title": "Redmine: Insert Ticket Frontmatter",
   "command.createTicketFromList.title": "Redmine: New Ticket",
   "command.createChildTicketFromList.title": "Redmine: Add Child Ticket",
   "command.openProjectInBrowser.title": "Redmine: Open Project in Browser",

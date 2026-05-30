@@ -2,7 +2,7 @@
   "name": "redmine-client",
   "displayName": "%displayName%",
   "description": "%description%",
-  "version": "0.4.1",
+  "version": "0.5.0",
   "publisher": "tiohsa",
   "author": {
     "name": "tiohsa",
@@ -18,40 +18,13 @@
   "categories": [
     "Other"
   ],
-  "activationEvents": [
-    "onView:redmine-clientActivityDashboard",
-    "onCommand:redmine-client.refreshTickets",
-    "onCommand:redmine-client.refreshProjects",
-    "onCommand:redmine-client.selectProject",
-    "onCommand:redmine-client.toggleChildProjects",
-    "onCommand:redmine-client.openTicketPreview",
-    "onCommand:redmine-client.openExtraTicketEditor",
-    "onCommand:redmine-client.reloadTicket",
-    "onCommand:redmine-client.reloadComment",
-    "onCommand:redmine-client.configureEditorDefaultSubject",
-    "onCommand:redmine-client.configureEditorDefaultDescription",
-    "onCommand:redmine-client.configureEditorDefaultTracker",
-    "onCommand:redmine-client.configureEditorDefaultPriority",
-    "onCommand:redmine-client.configureEditorDefaultStatus",
-    "onCommand:redmine-client.configureEditorDefaultDueDate",
-    "onCommand:redmine-client.resetEditorDefaults",
-    "onCommand:redmine-client.createTicket",
-    "onCommand:redmine-client.createTicketFromList",
-    "onCommand:redmine-client.createChildTicketFromList",
-    "onCommand:redmine-client.addCommentFromComments",
-    "onCommand:redmine-client.editComment",
-    "onCommand:redmine-client.addComment",
-    "onCommand:redmine-client.runOfflineSync",
-    "onCommand:redmine-client.configureOfflineSyncMode",
-    "onCommand:redmine-client.searchTickets",
-    "onCommand:redmine-client.revealActiveTicket",
-    "onCommand:redmine-client.focusTicketEditor",
-    "onCommand:redmine-client.setApiKey",
-    "onCommand:redmine-client.clearApiKey",
-    "onCommand:redmine-client.showApiKeyStatus"
-  ],
   "main": "./dist/extension.js",
   "l10n": "./l10n",
+  "activationEvents": [
+    "onView:redmine-clientActivityDashboard",
+    "onCommand:redmine-client.createTicketFromMarkdownHeader",
+    "onCommand:redmine-client.insertRedmineTicketFrontmatter"
+  ],
   "contributes": {
     "viewsContainers": {
       "activitybar": [
@@ -157,6 +130,16 @@
       {
         "command": "redmine-client.createTicket",
         "title": "%command.createTicket.title%"
+      },
+      {
+        "command": "redmine-client.createTicketFromMarkdownHeader",
+        "title": "%command.createTicketFromMarkdownHeader.title%",
+        "icon": "$(add)"
+      },
+      {
+        "command": "redmine-client.insertRedmineTicketFrontmatter",
+        "title": "%command.insertRedmineTicketFrontmatter.title%",
+        "icon": "$(symbol-keyword)"
       },
       {
         "command": "redmine-client.createTicketFromList",
