@@ -19,3 +19,10 @@ export const EDITOR_DEFAULT_COMMANDS = {
   dueDate: "redmine-client.configureEditorDefaultDueDate",
   reset: "redmine-client.resetEditorDefaults",
 } as const;
+
+export const CREATE_TICKET_FROM_MARKDOWN_HEADER_COMMAND =
+  "redmine-client.createTicketFromMarkdownHeader";
+
+export const INSERT_REDMINE_TICKET_FRONTMATTER_COMMAND =
+  "redmine-client.insertRedmineTicketFrontmatter";
+

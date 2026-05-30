@@ -3,6 +3,7 @@ import { addCommentFromList } from "../commands/addCommentFromList";
 import { createTicketFromEditor } from "../commands/createTicket";
 import { createChildTicketFromList } from "../commands/createChildTicketFromList";
 import { createTicketFromList } from "../commands/createTicketFromList";
+import { createTicketFromMarkdownHeader } from "../commands/createTicketFromMarkdownHeader";
 import { editComment } from "../commands/editComment";
 import { focusTicketEditor } from "../commands/focusTicketEditor";
 import { runOfflineSync } from "../commands/offlineSync";
@@ -21,7 +22,13 @@ import {
   configureEditorDefaultField,
   resetEditorDefaults,
 } from "../views/editorDefaultCommands";
-import { EDITOR_DEFAULT_COMMANDS, TICKET_SETTINGS_COMMANDS } from "./commandIds";
+import { insertRedmineTicketFrontmatter } from "../commands/insertRedmineTicketFrontmatter";
+import {
+  CREATE_TICKET_FROM_MARKDOWN_HEADER_COMMAND,
+  EDITOR_DEFAULT_COMMANDS,
+  TICKET_SETTINGS_COMMANDS,
+  INSERT_REDMINE_TICKET_FRONTMATTER_COMMAND,
+} from "./commandIds";
 import {
   getAllEditorRecords,
   getTicketIdForEditor,
@@ -346,6 +353,12 @@ export const registerCommands = (
     ),
     vscode.commands.registerCommand("redmine-client.createTicket", async () => {
       await createTicketFromEditor();
+    }),
+    vscode.commands.registerCommand(CREATE_TICKET_FROM_MARKDOWN_HEADER_COMMAND, async () => {
+      await createTicketFromMarkdownHeader();
+    }),
+    vscode.commands.registerCommand(INSERT_REDMINE_TICKET_FRONTMATTER_COMMAND, async () => {
+      await insertRedmineTicketFrontmatter();
     }),
     vscode.commands.registerCommand("redmine-client.createTicketFromList", async () => {
       await createTicketFromList();

@@ -23,6 +23,8 @@
   "command.configureEditorDefaultDueDate.title": "Redmine: エディタデフォルト期日を設定",
   "command.resetEditorDefaults.title": "Redmine: エディタデフォルトをリセット",
   "command.createTicket.title": "Redmine: エディタからチケットを作成",
+  "command.createTicketFromMarkdownHeader.title": "Redmine: Markdownヘッダからチケットを作成",
+  "command.insertRedmineTicketFrontmatter.title": "Redmine: チケット用Frontmatterを挿入",
   "command.createTicketFromList.title": "Redmine: 新規チケット",
   "command.createChildTicketFromList.title": "Redmine: 子チケットを追加",
   "command.openProjectInBrowser.title": "Redmine: プロジェクトをブラウザで開く",

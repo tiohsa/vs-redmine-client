@@ -2,7 +2,7 @@
   "name": "redmine-client",
   "displayName": "%displayName%",
   "description": "%description%",
-  "version": "0.4.1",
+  "version": "0.5.0",
   "publisher": "tiohsa",
   "author": {
     "name": "tiohsa",
@@ -20,6 +20,11 @@
   ],
   "main": "./dist/extension.js",
   "l10n": "./l10n",
+  "activationEvents": [
+    "onView:redmine-clientActivityDashboard",
+    "onCommand:redmine-client.createTicketFromMarkdownHeader",
+    "onCommand:redmine-client.insertRedmineTicketFrontmatter"
+  ],
   "contributes": {
     "viewsContainers": {
       "activitybar": [
@@ -125,6 +130,16 @@
       {
         "command": "redmine-client.createTicket",
         "title": "%command.createTicket.title%"
+      },
+      {
+        "command": "redmine-client.createTicketFromMarkdownHeader",
+        "title": "%command.createTicketFromMarkdownHeader.title%",
+        "icon": "$(add)"
+      },
+      {
+        "command": "redmine-client.insertRedmineTicketFrontmatter",
+        "title": "%command.insertRedmineTicketFrontmatter.title%",
+        "icon": "$(symbol-keyword)"
       },
       {
         "command": "redmine-client.createTicketFromList",
