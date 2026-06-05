@@ -233,6 +233,18 @@ body.vscode-high-contrast .badge,.vscode-high-contrast .unsynced-kind-label{back
   flex-direction:column;
   gap:8px
 }
+.ticket-detail-card.composer-popover{
+  position:fixed;
+  left:var(--composer-popover-left, 8px);
+  top:var(--composer-popover-top, 48px);
+  width:var(--composer-popover-width, min(420px, calc(100vw - 16px)));
+  max-width:420px;
+  max-height:var(--composer-popover-max-height, calc(100vh - 56px));
+  margin:0;
+  overflow:auto;
+  z-index:50;
+  box-shadow:0 14px 36px rgba(0,0,0,0.28);
+}
 .ticket-work-panel{}
 .work-panel-head{display:flex;flex-direction:column;gap:4px;margin-bottom:8px}
 .work-panel-title{font-size:11px;font-weight:600;color:var(--app-text)}

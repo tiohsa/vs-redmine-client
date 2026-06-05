@@ -99,4 +99,15 @@ suite("Dashboard Webview 改善", () => {
     assert.ok(source.includes("getCurrentUserId"));
     assert.ok(source.includes("listComments"));
   });
+
+  test("新規チケット composer は New Ticket ボタン近くにだけ popover 表示する", () => {
+    assert.ok(dashboardWebviewScript.includes("getBoundingClientRect()"));
+    assert.ok(dashboardWebviewScript.includes("panel.mode === 'newTicket'"));
+    assert.ok(dashboardWebviewScript.includes("classList.toggle('composer-popover', isNewTicketComposer)"));
+    assert.ok(dashboardWebviewScript.includes("panel.mode === 'childTicket' ? STRINGS.createChildTicketTitle"));
+    assert.ok(dashboardStyles.includes(".ticket-detail-card.composer-popover"));
+    assert.ok(dashboardStyles.includes("max-width:420px"));
+    assert.ok(dashboardStyles.includes("overflow:auto"));
+    assert.ok(dashboardStyles.includes("z-index:50"));
+  });
 });

@@ -5,6 +5,8 @@ const vscode = acquireVsCodeApi();
 
 // ── State ──────────────────────────────────────────────────────────────────
 let state = null;
+const COMPOSER_POPOVER_MARGIN = 8;
+let newTicketPopoverAnchor = null;
 let reqCounter = 0;
 let activeTicketActionMenuId = null;
 let ticketDetailExpanded = false;
@@ -14,6 +16,37 @@ const nextReqId = () => 'req-' + (++reqCounter);
 function esc(s){ return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/\"/g,'&quot;'); }
 function send(msg){ vscode.postMessage(msg); }
 function req(type, extra){ send({type, requestId:nextReqId(), ...extra}); }
+function clampNumber(value, min, max){ return Math.min(Math.max(value, min), max); }
+function measureNewTicketPopoverAnchor(){
+  const button = document.getElementById('new-ticket-btn');
+  if(!button) return;
+  const rect = button.getBoundingClientRect();
+  const viewportWidth = document.documentElement.clientWidth || window.innerWidth;
+  const viewportHeight = document.documentElement.clientHeight || window.innerHeight;
+  const width = Math.min(420, Math.max(280, viewportWidth - COMPOSER_POPOVER_MARGIN * 2));
+  const minVisibleHeight = Math.min(240, Math.max(120, viewportHeight - COMPOSER_POPOVER_MARGIN * 2));
+  const maxTop = Math.max(COMPOSER_POPOVER_MARGIN, viewportHeight - minVisibleHeight - COMPOSER_POPOVER_MARGIN);
+  const left = clampNumber(rect.left, COMPOSER_POPOVER_MARGIN, Math.max(COMPOSER_POPOVER_MARGIN, viewportWidth - width - COMPOSER_POPOVER_MARGIN));
+  const top = clampNumber(rect.bottom + COMPOSER_POPOVER_MARGIN, COMPOSER_POPOVER_MARGIN, maxTop);
+  newTicketPopoverAnchor = {left, top, width};
+}
+function applyNewTicketComposerPosition(card){
+  if(!newTicketPopoverAnchor) measureNewTicketPopoverAnchor();
+  const anchor = newTicketPopoverAnchor || {left:COMPOSER_POPOVER_MARGIN, top:COMPOSER_POPOVER_MARGIN, width:Math.min(420, Math.max(280, window.innerWidth - COMPOSER_POPOVER_MARGIN * 2))};
+  const viewportHeight = document.documentElement.clientHeight || window.innerHeight;
+  const maxHeight = Math.max(0, viewportHeight - anchor.top - COMPOSER_POPOVER_MARGIN);
+  card.style.setProperty('--composer-popover-left', anchor.left+'px');
+  card.style.setProperty('--composer-popover-top', anchor.top+'px');
+  card.style.setProperty('--composer-popover-width', anchor.width+'px');
+  card.style.setProperty('--composer-popover-max-height', maxHeight+'px');
+}
+function clearNewTicketComposerPosition(card){
+  card.classList.remove('composer-popover');
+  card.style.removeProperty('--composer-popover-left');
+  card.style.removeProperty('--composer-popover-top');
+  card.style.removeProperty('--composer-popover-width');
+  card.style.removeProperty('--composer-popover-max-height');
+}
 function isTicketActionTarget(target){ return !!target.closest('.ticket-action-btn,.ticket-action-menu,.expand-btn'); }
 
 // ── Toast / operation feedback ─────────────────────────────────────────────
@@ -74,7 +107,14 @@ document.getElementById('tabs').addEventListener('keydown',function(e){
 
 // ── Header ─────────────────────────────────────────────────────────────────
 document.getElementById('refresh-btn').addEventListener('click',()=>req('dashboard.refresh'));
-document.getElementById('new-ticket-btn').addEventListener('click',()=>req('ticket.create'));
+document.getElementById('new-ticket-btn').addEventListener('click',()=>{ measureNewTicketPopoverAnchor(); req('ticket.create'); });
+window.addEventListener('resize',()=>{
+  const card = document.getElementById('ticket-detail-card');
+  if(state?.workPanel?.mode === 'newTicket' && card?.classList.contains('composer-popover')){
+    measureNewTicketPopoverAnchor();
+    applyNewTicketComposerPosition(card);
+  }
+});
 document.getElementById('include-children').addEventListener('change',function(){
   req('project.toggleChildren',{includeChildProjects:this.checked});
 });
@@ -438,6 +478,7 @@ function renderSelect(name, value, options, label, disabled){
 }
 function renderTicketDetailPanel(ticket){
   const card = document.getElementById('ticket-detail-card');
+  clearNewTicketComposerPosition(card);
   const node = findTicketNode(state.tickets, ticket.id) || {};
   const projectLabel = ticket.projectName
     ? esc(ticket.projectName)+' / ID: '+esc(ticket.projectId ?? '')
@@ -516,7 +557,14 @@ function renderTicketDetailPanel(ticket){
 
 function renderComposerPanel(panel){
   const card = document.getElementById('ticket-detail-card');
+  const isNewTicketComposer = panel.mode === 'newTicket';
   card.classList.remove('hidden');
+  card.classList.toggle('composer-popover', isNewTicketComposer);
+  if(isNewTicketComposer){
+    applyNewTicketComposerPosition(card);
+  }else{
+    clearNewTicketComposerPosition(card);
+  }
   const title = panel.mode === 'childTicket' ? STRINGS.createChildTicketTitle : STRINGS.createNewTicketTitle;
   const parentLabel = panel.mode === 'childTicket'
     ? '<div class="work-panel-subtitle">Parent: #'+panel.parentTicketId+' '+esc(panel.parentSubject || '')+'</div>'
@@ -574,6 +622,7 @@ function renderTicketDetail(){
   if(!panel){
     const ticket = state.selectedTicket;
     if(!ticket){
+      clearNewTicketComposerPosition(card);
       card.classList.add('hidden');
       card.innerHTML='';
       return;
@@ -588,6 +637,7 @@ function renderTicketDetail(){
     if(ticket){
       renderTicketDetailPanel(ticket);
     }else{
+      clearNewTicketComposerPosition(card);
       card.classList.add('hidden');
       card.innerHTML='';
     }
