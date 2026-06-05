@@ -84,6 +84,11 @@ suite("Dashboard メッセージバリデーション", () => {
     assert.strictEqual(r.ok, true);
   });
 
+  test("ticket.cancelDetail: 正常", () => {
+    const r = validateDashboardMessage({ type: "ticket.cancelDetail", requestId: "r" });
+    assert.strictEqual(r.ok, true);
+  });
+
   test("ticket.createChild: parentTicketId が数値でないと拒否される", () => {
     const r = validateDashboardMessage({ type: "ticket.createChild", requestId: "r", parentTicketId: "bad" });
     assert.strictEqual(r.ok, false);

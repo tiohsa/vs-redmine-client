@@ -233,6 +233,18 @@ body.vscode-high-contrast .badge,.vscode-high-contrast .unsynced-kind-label{back
   flex-direction:column;
   gap:8px
 }
+.ticket-detail-card.composer-popover{
+  position:fixed;
+  left:var(--composer-popover-left, 8px);
+  top:var(--composer-popover-top, 48px);
+  width:var(--composer-popover-width, min(420px, calc(100vw - 16px)));
+  max-width:420px;
+  max-height:var(--composer-popover-max-height, calc(100vh - 56px));
+  margin:0;
+  overflow:auto;
+  z-index:50;
+  box-shadow:0 14px 36px rgba(0,0,0,0.28);
+}
 .ticket-work-panel{}
 .work-panel-head{display:flex;flex-direction:column;gap:4px;margin-bottom:8px}
 .work-panel-title{font-size:11px;font-weight:600;color:var(--app-text)}
@@ -250,7 +262,7 @@ body.vscode-high-contrast .ticket-detail-card{border-top-color:var(--app-border)
 .detail-title span:last-child{overflow:hidden;text-overflow:ellipsis;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical}
 .detail-toggle{width:20px;height:20px;font-size:11px}
 .detail-project,.detail-parent,.detail-readonly{font-size:10px;color:var(--app-text-readable-muted);line-height:1.35}
-.detail-actions{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:6px}
+.detail-actions{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:6px}
 .detail-actions .btn{padding:4px 6px;min-width:0;font-size:11px}
 .detail-expanded{display:flex;flex-direction:column;gap:6px;padding-top:8px;border-top:1px solid var(--border-subtle)}
 .detail-field,.detail-meta{display:grid;grid-template-columns:70px minmax(0,1fr);align-items:center;gap:6px;font-size:10px}
