@@ -262,7 +262,7 @@ body.vscode-high-contrast .ticket-detail-card{border-top-color:var(--app-border)
 .detail-title span:last-child{overflow:hidden;text-overflow:ellipsis;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical}
 .detail-toggle{width:20px;height:20px;font-size:11px}
 .detail-project,.detail-parent,.detail-readonly{font-size:10px;color:var(--app-text-readable-muted);line-height:1.35}
-.detail-actions{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:6px}
+.detail-actions{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:6px}
 .detail-actions .btn{padding:4px 6px;min-width:0;font-size:11px}
 .detail-expanded{display:flex;flex-direction:column;gap:6px;padding-top:8px;border-top:1px solid var(--border-subtle)}
 .detail-field,.detail-meta{display:grid;grid-template-columns:70px minmax(0,1fr);align-items:center;gap:6px;font-size:10px}

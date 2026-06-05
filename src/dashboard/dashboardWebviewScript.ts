@@ -535,6 +535,7 @@ function renderTicketDetailPanel(ticket){
     + '<div class="detail-project">'+projectLabel+'</div>'
     + parentLabel
     + '<div class="detail-actions">'
+    + '<button class="btn btn-secondary" id="detail-cancel-btn">'+STRINGS.cancelAction+'</button>'
     + '<button class="btn btn-secondary" id="detail-open-btn">'+STRINGS.openTicketAction+'</button>'
     + '<button class="btn btn-secondary" id="detail-comment-btn">'+STRINGS.commentAction+'</button>'
     + '<button class="btn btn-primary" id="detail-sync-btn">'+STRINGS.syncAction+'</button>'
@@ -544,6 +545,7 @@ function renderTicketDetailPanel(ticket){
     ticketDetailExpanded = !ticketDetailExpanded;
     renderTicketDetail();
   });
+  card.querySelector('#detail-cancel-btn')?.addEventListener('click',()=>req('ticket.cancelDetail'));
   card.querySelector('#detail-open-btn')?.addEventListener('click',()=>req('ticket.openEditor',{ticketId:ticket.id}));
   card.querySelector('#detail-comment-btn')?.addEventListener('click',()=>req('comment.add',{ticketId:ticket.id}));
   card.querySelector('#detail-sync-btn')?.addEventListener('click',()=>req('ticket.syncSelected',{ticketId:ticket.id}));

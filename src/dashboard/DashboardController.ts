@@ -221,6 +221,9 @@ export class DashboardController {
         void this.selectTicket(req.parentTicketId);
         await this.openChildTicketComposer(req.parentTicketId);
         break;
+      case "ticket.cancelDetail":
+        this.cancelDetail();
+        break;
       case "ticket.cancelComposer":
         this.cancelComposer();
         break;
@@ -403,6 +406,22 @@ export class DashboardController {
 
   private async openChildTicketComposer(parentTicketId: number): Promise<void> {
     await this.composerService.openChildTicketComposer(parentTicketId);
+  }
+
+  private cancelDetail(): void {
+    const state = this.opts.store.getState();
+    this.opts.store.update({
+      selectedTicketId: undefined,
+      selectedTicket: undefined,
+      workPanel: undefined,
+      comments: {
+        ...state.comments,
+        ticketId: undefined,
+        items: [],
+        loading: false,
+        error: undefined,
+      },
+    });
   }
 
   private cancelComposer(): void {

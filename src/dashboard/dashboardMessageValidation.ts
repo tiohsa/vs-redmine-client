@@ -187,6 +187,7 @@ export const validateDashboardMessage = (raw: unknown): ValidationResult => {
       return { ok: true, request: { type, requestId, parentTicketId } };
     }
 
+    case "ticket.cancelDetail":
     case "ticket.cancelComposer":
       return { ok: true, request: { type, requestId } };
 
