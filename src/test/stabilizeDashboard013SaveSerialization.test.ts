@@ -15,13 +15,13 @@ const makeNoopProvider = (): {
   notifyChange: () => void;
   refreshForTicket: (id: number) => void;
   updateTicketSubject: (id: number, s: string) => void;
-  setSelectedProjectId: (id: number) => void;
+  setSelectedProjectId: (id: number) => Promise<void>;
 } => ({
   refresh: () => undefined,
   notifyChange: () => undefined,
   refreshForTicket: () => undefined,
   updateTicketSubject: () => undefined,
-  setSelectedProjectId: () => undefined,
+  setSelectedProjectId: async () => undefined,
 });
 
 // コメント更新ファイルのコンテンツを生成するヘルパー

@@ -10,18 +10,20 @@ interface DashboardProjectServiceDeps {
   context: DashboardServiceContext;
   getProjects: () => DashboardProjectNode[];
   setProjects: (projects: DashboardProjectNode[]) => void;
-  resetTickets: () => void;
+  resetTickets: (project: DashboardProjectNode | undefined) => void;
   loadTickets: () => Promise<void>;
 }
 
 export class DashboardProjectService {
+  private selectedProject = getProjectSelection();
+  private selectionQueue = Promise.resolve();
+
   constructor(private readonly deps: DashboardProjectServiceDeps) {}
 
   getResolvedProject(): ResolvedProject | undefined {
-    const selection = getProjectSelection();
     return resolveCurrentProject({
-      selectionId: selection.id,
-      selectionName: selection.name,
+      selectionId: this.selectedProject.id,
+      selectionName: this.selectedProject.name,
       defaultProjectId: getDefaultProjectId(),
       projects: this.deps.getProjects(),
     });
@@ -39,9 +41,29 @@ export class DashboardProjectService {
   }
 
   async selectProject(projectId: number): Promise<void> {
+    const operation = this.selectionQueue.then(() => this.selectProjectNow(projectId));
+    this.selectionQueue = operation.catch(() => undefined);
+    return operation;
+  }
+
+  private async selectProjectNow(projectId: number): Promise<void> {
+    if (this.deps.getProjects().length === 0) {
+      await this.loadProjects();
+    }
     const project = this.deps.getProjects().find((p) => p.id === projectId);
-    await setProjectSelection(projectId, project?.name ?? "");
-    this.deps.resetTickets();
+    if (!project) {
+      throw new Error(`Project ${projectId} is not available.`);
+    }
+    this.selectedProject = { id: project.id, name: project.name };
+    this.deps.resetTickets(project);
+    try {
+      await setProjectSelection(project.id, project.name);
+    } catch (err) {
+      this.deps.context.notifyToast(
+        "warning",
+        `Project selected for this session, but saving it failed: ${err instanceof Error ? err.message : String(err)}`,
+      );
+    }
     await this.deps.loadTickets();
   }
 

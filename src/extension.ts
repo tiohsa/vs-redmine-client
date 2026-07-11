@@ -1,6 +1,5 @@
 import * as vscode from "vscode";
 import { refreshOfflineSyncContext } from "./commands/offlineSyncMode";
-import { getProjectSelection } from "./config/projectSelection";
 import { initializeApiKeyStore } from "./config/apiKeyStore";
 import { getIgnoreSSLErrors } from "./config/settings";
 import { showWarning } from "./utils/notifications";
@@ -101,11 +100,6 @@ export async function activate(context: vscode.ExtensionContext) {
   );
 
   // ── 初期ロード ───────────────────────────────────────────────────────────
-  const initialSelection = getProjectSelection();
-  if (initialSelection.id) {
-    views.ticketsPresentation.setSelectedProjectId(initialSelection.id);
-  }
-
   vscode.workspace.textDocuments.forEach((document) => {
     registerEditorDocument(document);
   });

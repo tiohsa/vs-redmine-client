@@ -383,12 +383,17 @@ export const registerCommands = (
         return;
       }
       const numericId = Number(projectId);
-      if (Number.isNaN(numericId)) {
+      if (!Number.isSafeInteger(numericId) || numericId <= 0) {
         vscode.window.showErrorMessage(vscode.l10n.t("Project ID must be a number."));
         return;
       }
-      ticketsPresentation.setSelectedProjectId(numericId);
-      ticketsPresentation.refresh();
+      try {
+        await ticketsPresentation.setSelectedProjectId(numericId);
+      } catch (err) {
+        vscode.window.showErrorMessage(
+          vscode.l10n.t("The selected project is not available: {0}", err instanceof Error ? err.message : String(err)),
+        );
+      }
     }),
     vscode.commands.registerCommand("redmine-client.toggleChildProjects", async () => {
       const config = vscode.workspace.getConfiguration("redmine-client");
