@@ -116,8 +116,8 @@ export class DashboardWebviewProvider
     this.controller.refreshSettings();
   }
 
-  selectProject(projectId: number): void {
-    this.controller.selectProject(projectId);
+  selectProject(projectId: number): Promise<void> {
+    return this.controller.selectProject(projectId);
   }
 
   updateTicketSubject(ticketId: number, subject: string): void {

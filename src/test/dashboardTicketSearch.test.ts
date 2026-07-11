@@ -13,6 +13,16 @@ const makeTicket = (id: number, subject: string): Ticket => ({
   projectName: "Project",
 });
 
+const deferred = <T>() => {
+  let resolve!: (value: T) => void;
+  let reject!: (reason?: unknown) => void;
+  const promise = new Promise<T>((res, rej) => {
+    resolve = res;
+    reject = rej;
+  });
+  return { promise, resolve, reject };
+};
+
 const makeContext = (store: DashboardStateStore): DashboardServiceContext => ({
   store,
   notifyOperationStarted: () => undefined,
@@ -94,5 +104,39 @@ suite("DashboardTicketService all-project search", () => {
     assert.deepStrictEqual(tickets, []);
     assert.strictEqual(totalCount, 0);
     assert.strictEqual(store.getState().selectedProject, undefined);
+  });
+
+  test("古いプロジェクトのレスポンスが最新プロジェクトを上書きしない", async () => {
+    const store = new DashboardStateStore();
+    let tickets: Ticket[] = [];
+    let totalCount = 0;
+    let projectId = 1;
+    const projectA = deferred<IssuesListResult>();
+    const projectB = deferred<IssuesListResult>();
+    const service = new DashboardTicketService({
+      context: makeContext(store),
+      getResolvedProject: () => ({ id: projectId, name: `Project ${projectId}` }),
+      getTickets: () => tickets,
+      setTickets: (next) => { tickets = next; },
+      getTotalCount: () => totalCount,
+      setTotalCount: (next) => { totalCount = next; },
+      getSettings: () => DEFAULT_TICKET_LIST_SETTINGS,
+      loadComments: async () => undefined,
+      refreshUnsynced: () => undefined,
+      listIssues: (input) => input.projectId === 1 ? projectA.promise : projectB.promise,
+    });
+
+    const loadA = service.loadTickets();
+    projectId = 2;
+    const loadB = service.loadTickets();
+    projectB.resolve({ tickets: [makeTicket(2, "B")], totalCount: 1, limit: 50, offset: 0 });
+    await loadB;
+    projectA.resolve({ tickets: [makeTicket(1, "A")], totalCount: 1, limit: 50, offset: 0 });
+    await loadA;
+
+    assert.deepStrictEqual(tickets.map((ticket) => ticket.id), [2]);
+    assert.deepStrictEqual(store.getState().tickets.map((ticket) => ticket.id), [2]);
+    assert.strictEqual(store.getState().loading.tickets, false);
+    assert.strictEqual(store.getState().errors.tickets, undefined);
   });
 });

@@ -8,6 +8,8 @@ import { openCommentUpdateDraft } from "../../commands/openCommentUpdateDraft";
 import { addCommentFromList } from "../../commands/addCommentFromList";
 
 export class DashboardCommentService {
+  private loadGeneration = 0;
+
   constructor(
     private readonly context: DashboardServiceContext,
     private readonly deps: {
@@ -15,17 +17,28 @@ export class DashboardCommentService {
     },
   ) {}
 
+  invalidate(): void {
+    this.loadGeneration++;
+  }
+
   async loadComments(ticketId: number): Promise<void> {
+    const generation = ++this.loadGeneration;
     const { store } = this.context;
     store.updateNested("comments", { ticketId, loading: true, error: undefined });
     try {
       const currentUserId = await getCurrentUserId();
       const comments = await listComments(ticketId, currentUserId);
+      if (generation !== this.loadGeneration || store.getState().comments.ticketId !== ticketId) {
+        return;
+      }
       store.updateNested("comments", {
         loading: false,
         items: buildCommentDashboardItems(comments, ticketId),
       });
     } catch (err) {
+      if (generation !== this.loadGeneration || store.getState().comments.ticketId !== ticketId) {
+        return;
+      }
       const msg = (err as Error).message;
       store.updateNested("comments", {
         loading: false,

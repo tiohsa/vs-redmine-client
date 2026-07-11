@@ -71,9 +71,30 @@ export class DashboardController {
       setProjects: (projects) => {
         this.projects = projects;
       },
-      resetTickets: () => {
+      resetTickets: (project) => {
         this.tickets = [];
         this.totalCount = 0;
+        this.commentService?.invalidate();
+        const state = opts.store.getState();
+        opts.store.update({
+          selectedProject: project
+            ? { id: project.id, name: project.name }
+            : undefined,
+          tickets: [],
+          totalTicketCount: 0,
+          loadedTicketCount: 0,
+          ticketFilterOptions: { assignees: [], statuses: state.ticketFilterOptions.statuses },
+          selectedTicketId: undefined,
+          selectedTicket: undefined,
+          workPanel: undefined,
+          comments: {
+            ...state.comments,
+            ticketId: undefined,
+            items: [],
+            loading: false,
+            error: undefined,
+          },
+        });
       },
       loadTickets: () => this.loadTickets(),
     });
@@ -157,8 +178,8 @@ export class DashboardController {
     this.settingsCtrl.pushSettings();
   }
 
-  selectProject(projectId: number): void {
-    void this.projectService.selectProject(projectId);
+  selectProject(projectId: number): Promise<void> {
+    return this.projectService.selectProject(projectId);
   }
 
   updateTicketSubject(ticketId: number, subject: string): void {

@@ -10,6 +10,7 @@ import { openTicketInBrowser } from "../../commands/openInBrowser";
 import type { ResolvedProject } from "../resolveProject";
 
 export class DashboardTicketService {
+  private ticketLoadGeneration = 0;
   private allProjectsSearchQuery = "";
   private allProjectsSearchIssueOffset = 0;
   private allProjectsSearchExtraCount = 0;
@@ -29,6 +30,7 @@ export class DashboardTicketService {
   }) {}
 
   async loadTickets(): Promise<void> {
+    const generation = ++this.ticketLoadGeneration;
     this.allProjectsSearchQuery = "";
     this.allProjectsSearchIssueOffset = 0;
     this.allProjectsSearchExtraCount = 0;
@@ -43,6 +45,9 @@ export class DashboardTicketService {
     });
 
     if (!project) {
+      if (generation !== this.ticketLoadGeneration) {
+        return;
+      }
       this.deps.setTickets([]);
       this.deps.setTotalCount(0);
       this.pushTickets();
@@ -57,6 +62,9 @@ export class DashboardTicketService {
         limit: getTicketListLimit(),
         offset: 0,
       });
+      if (generation !== this.ticketLoadGeneration) {
+        return;
+      }
       this.deps.setTickets(result.tickets);
       this.deps.setTotalCount(result.totalCount);
       rememberTicketSummaries(result.tickets);
@@ -64,6 +72,9 @@ export class DashboardTicketService {
       this.pushTickets();
       store.updateNested("loading", { tickets: false });
     } catch (err) {
+      if (generation !== this.ticketLoadGeneration) {
+        return;
+      }
       const msg = (err as Error).message;
       store.update({
         loading: { ...store.getState().loading, tickets: false },
