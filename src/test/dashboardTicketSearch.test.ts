@@ -170,4 +170,99 @@ suite("DashboardTicketService all-project search", () => {
     assert.deepStrictEqual(store.getState().tickets.map((ticket) => ticket.id), [2]);
     assert.strictEqual(store.getState().loading.tickets, false);
   });
+
+  test("追加読み込みの連打は同一ページを1回だけ取得して1回だけ追加する", async () => {
+    const store = new DashboardStateStore();
+    let tickets: Ticket[] = [makeTicket(1, "first")];
+    let totalCount = 2;
+    const nextPage = deferred<IssuesListResult>();
+    const inputs: IssuesListInput[] = [];
+    const service = new DashboardTicketService({
+      context: makeContext(store),
+      getResolvedProject: () => ({ id: 1, name: "Project" }),
+      getTickets: () => tickets,
+      setTickets: (next) => { tickets = next; },
+      getTotalCount: () => totalCount,
+      setTotalCount: (next) => { totalCount = next; },
+      getSettings: () => DEFAULT_TICKET_LIST_SETTINGS,
+      loadComments: async () => undefined,
+      refreshUnsynced: () => undefined,
+      listIssues: (input) => {
+        inputs.push(input);
+        return nextPage.promise;
+      },
+    });
+
+    const first = service.loadMoreTickets();
+    const second = service.loadMoreTickets();
+    assert.strictEqual(first, second);
+    assert.strictEqual(inputs.length, 1);
+    assert.strictEqual(inputs[0].offset, 1);
+
+    nextPage.resolve({ tickets: [makeTicket(2, "second")], totalCount: 2, limit: 50, offset: 1 });
+    await Promise.all([first, second]);
+
+    assert.deepStrictEqual(tickets.map((ticket) => ticket.id), [1, 2]);
+  });
+
+  test("追加読み込み失敗後は同じページを再試行できる", async () => {
+    const store = new DashboardStateStore();
+    let tickets: Ticket[] = [makeTicket(1, "first")];
+    let totalCount = 2;
+    let calls = 0;
+    const service = new DashboardTicketService({
+      context: makeContext(store),
+      getResolvedProject: () => ({ id: 1, name: "Project" }),
+      getTickets: () => tickets,
+      setTickets: (next) => { tickets = next; },
+      getTotalCount: () => totalCount,
+      setTotalCount: (next) => { totalCount = next; },
+      getSettings: () => DEFAULT_TICKET_LIST_SETTINGS,
+      loadComments: async () => undefined,
+      refreshUnsynced: () => undefined,
+      listIssues: async (input) => {
+        calls++;
+        if (calls === 1) {
+          throw new Error("temporary");
+        }
+        return { tickets: [makeTicket(2, "second")], totalCount: 2, limit: 50, offset: input.offset };
+      },
+    });
+
+    await service.loadMoreTickets();
+    await service.loadMoreTickets();
+
+    assert.strictEqual(calls, 2);
+    assert.deepStrictEqual(tickets.map((ticket) => ticket.id), [1, 2]);
+    assert.match(store.getState().errors.tickets ?? "", /temporary/);
+  });
+
+  test("接続世代の変更後に返った旧ページは反映しない", async () => {
+    const store = new DashboardStateStore();
+    let tickets: Ticket[] = [makeTicket(1, "old")];
+    let totalCount = 2;
+    const oldPage = deferred<IssuesListResult>();
+    const service = new DashboardTicketService({
+      context: makeContext(store),
+      getResolvedProject: () => ({ id: 1, name: "Project" }),
+      getTickets: () => tickets,
+      setTickets: (next) => { tickets = next; },
+      getTotalCount: () => totalCount,
+      setTotalCount: (next) => { totalCount = next; },
+      getSettings: () => DEFAULT_TICKET_LIST_SETTINGS,
+      loadComments: async () => undefined,
+      refreshUnsynced: () => undefined,
+      listIssues: () => oldPage.promise,
+    });
+
+    const load = service.loadMoreTickets();
+    service.invalidate();
+    tickets = [];
+    totalCount = 0;
+    oldPage.resolve({ tickets: [makeTicket(2, "stale")], totalCount: 2, limit: 50, offset: 1 });
+    await load;
+
+    assert.deepStrictEqual(tickets, []);
+    assert.strictEqual(totalCount, 0);
+  });
 });

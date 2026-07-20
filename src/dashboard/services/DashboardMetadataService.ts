@@ -27,6 +27,11 @@ export class DashboardMetadataService {
     listProjectMembers?: typeof listProjectMembers;
   }) {}
 
+  invalidate(): void {
+    this.editOptionsGeneration++;
+    this.projectTrackerCache.clear();
+  }
+
   async loadEditOptions(ticketId: number, projectId: number): Promise<void> {
     const generation = ++this.editOptionsGeneration;
     const { store } = this.deps.context;

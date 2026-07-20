@@ -45,6 +45,8 @@ export type OfflineSyncQueue = {
 };
 
 const STORAGE_KEY = "redmine.offlineSyncQueue";
+const storageKeyForScope = (scope?: string): string =>
+  scope ? `${STORAGE_KEY}.${encodeURIComponent(scope)}` : STORAGE_KEY;
 
 type QueueChangeListener = () => void;
 
@@ -78,6 +80,7 @@ const queue: OfflineSyncQueue = {
 };
 
 let memento: Memento | undefined;
+let activeStorageKey = STORAGE_KEY;
 
 const persist = (): void => {
   if (memento) {
@@ -86,16 +89,15 @@ const persist = (): void => {
       comments: queue.comments,
       newTickets: queue.newTickets,
     };
-    Promise.resolve(memento.update(STORAGE_KEY, serialized)).catch((err: unknown) => {
+    Promise.resolve(memento.update(activeStorageKey, serialized)).catch((err: unknown) => {
       console.error("[vs-redmine-client] offlineSyncStore: persist failed", err);
     });
   }
   notifyQueueChanged();
 };
 
-export const initializeOfflineSyncStore = (storage: Memento): void => {
-  memento = storage;
-  const raw = storage.get<SerializedQueue>(STORAGE_KEY);
+const loadQueue = (storage: Memento, storageKey: string): void => {
+  const raw = storage.get<SerializedQueue>(storageKey);
   queue.tickets = new Map(
     raw && Array.isArray(raw.tickets)
       ? raw.tickets.filter(
@@ -115,6 +117,28 @@ export const initializeOfflineSyncStore = (storage: Memento): void => {
     raw && Array.isArray(raw.newTickets)
       ? raw.newTickets.filter((t) => t !== null && typeof t === "object")
       : [];
+};
+
+export const initializeOfflineSyncStore = (storage: Memento, scope?: string): void => {
+  memento = storage;
+  activeStorageKey = storageKeyForScope(scope);
+  const scoped = storage.get<SerializedQueue>(activeStorageKey);
+  const legacy = scope ? storage.get<SerializedQueue>(STORAGE_KEY) : undefined;
+  if (!scoped && legacy) {
+    void storage.update(activeStorageKey, legacy);
+    void storage.update(STORAGE_KEY, undefined);
+  }
+  loadQueue(storage, scoped ? activeStorageKey : legacy ? STORAGE_KEY : activeStorageKey);
+};
+
+/** 接続先ごとのキューへ切り替え、別Redmineの未送信データを混在させない。 */
+export const switchOfflineSyncStore = (scope: string): void => {
+  if (!memento) {
+    return;
+  }
+  activeStorageKey = storageKeyForScope(scope);
+  loadQueue(memento, activeStorageKey);
+  notifyQueueChanged();
 };
 
 export const addOfflineTicketUpdate = (

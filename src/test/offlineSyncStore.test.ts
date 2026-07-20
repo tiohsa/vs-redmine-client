@@ -7,6 +7,7 @@ import {
   clearOfflineSyncQueue,
   replaceOfflineSyncQueue,
   getOfflineSyncQueue,
+  switchOfflineSyncStore,
 } from "../views/offlineSyncStore";
 import { createTestMemento } from "./helpers/vscodeMemento";
 import { buildIssueMetadataFixture } from "./helpers/ticketMetadataFixtures";
@@ -161,5 +162,21 @@ suite("offlineSyncStore — workspaceState 永続化", () => {
     assert.strictEqual(q.tickets.size, 0);
     assert.strictEqual(q.comments.length, 0);
     assert.strictEqual(q.newTickets.length, 0);
+  });
+
+  test("baseUrlごとに未送信キューを隔離し、切り戻しと再起動で復元する", () => {
+    const memento = createTestMemento();
+    initializeOfflineSyncStore(memento, "https://old.example/redmine");
+    addOfflineTicketUpdate(1, ticketUpdate(1));
+
+    switchOfflineSyncStore("https://new.example/redmine");
+    assert.strictEqual(getOfflineSyncQueue().tickets.size, 0);
+    addOfflineTicketUpdate(2, ticketUpdate(2));
+
+    switchOfflineSyncStore("https://old.example/redmine");
+    assert.deepStrictEqual(Array.from(getOfflineSyncQueue().tickets.keys()), [1]);
+
+    initializeOfflineSyncStore(memento, "https://new.example/redmine");
+    assert.deepStrictEqual(Array.from(getOfflineSyncQueue().tickets.keys()), [2]);
   });
 });

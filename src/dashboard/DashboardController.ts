@@ -20,6 +20,7 @@ import type {
 } from "./dashboardProtocol";
 import type { TicketSaveResult } from "../views/ticketSaveTypes";
 import type { DashboardServiceContext } from "./services/DashboardServiceContext";
+import { clearTicketSummaries } from "../views/ticketSummaryStore";
 
 export interface ComposerSyncTestHooks {
   syncFn?: (editor: vscode.TextEditor) => Promise<TicketSaveResult>;
@@ -54,6 +55,7 @@ export class DashboardController {
   private readonly metadataService: DashboardMetadataService;
   private readonly composerService: DashboardComposerService;
   private readonly disposables: vscode.Disposable[] = [];
+  private connectionGeneration = 0;
 
   constructor(private readonly opts: DashboardControllerOptions) {
     this.settingsCtrl = new SettingsController(opts.store);
@@ -201,6 +203,40 @@ export class DashboardController {
     this.pushTickets();
   }
 
+  async resetForConnectionChange(): Promise<void> {
+    const generation = ++this.connectionGeneration;
+    this.ticketService.invalidate();
+    this.commentService.invalidate();
+    this.metadataService.invalidate();
+    this.tickets = [];
+    this.projects = [];
+    this.totalCount = 0;
+    this.metadataOptionsLoaded = false;
+    clearTicketSummaries();
+    this.opts.store.update({
+      projects: [],
+      tickets: [],
+      totalTicketCount: 0,
+      loadedTicketCount: 0,
+      selectedProject: undefined,
+      selectedTicketId: undefined,
+      selectedTicket: undefined,
+      workPanel: undefined,
+      editOptions: undefined,
+      metadataOptions: { trackers: [], priorities: [], statuses: [] },
+      unsynced: { totalCount: 0, items: [] },
+      ticketFilterOptions: { assignees: [], statuses: [] },
+      comments: { loading: false, items: [] },
+      loading: { tickets: false, comments: false },
+      errors: {},
+    });
+    await this.projectService.resetForConnectionChange();
+    if (generation !== this.connectionGeneration) {
+      return;
+    }
+    await this.initialize();
+  }
+
   // ── Private request handler ────────────────────────────────────────────
 
   private async handleRequest(req: DashboardRequest): Promise<void> {
@@ -339,12 +375,16 @@ export class DashboardController {
   }
 
   private async loadMetadataOptions(): Promise<void> {
+    const generation = this.connectionGeneration;
     try {
       const [trackers, priorities, statuses] = await Promise.all([
         listTrackers(),
         listIssuePriorities(),
         listIssueStatuses(),
       ]);
+      if (generation !== this.connectionGeneration) {
+        return;
+      }
       const options: DashboardMetadataOptions = {
         trackers,
         priorities,
@@ -353,6 +393,9 @@ export class DashboardController {
       this.metadataOptionsLoaded = true;
       this.opts.store.update({ metadataOptions: options });
     } catch {
+      if (generation !== this.connectionGeneration) {
+        return;
+      }
       this.metadataOptionsLoaded = false;
       this.opts.store.update({ metadataOptions: { trackers: [], priorities: [], statuses: [] } });
     }

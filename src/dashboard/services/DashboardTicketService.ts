@@ -14,6 +14,7 @@ export class DashboardTicketService {
   private allProjectsSearchQuery = "";
   private allProjectsSearchIssueOffset = 0;
   private allProjectsSearchExtraCount = 0;
+  private loadMoreFlight?: { key: string; promise: Promise<void> };
 
   constructor(private readonly deps: {
     context: DashboardServiceContext;
@@ -83,12 +84,43 @@ export class DashboardTicketService {
     }
   }
 
-  async loadMoreTickets(): Promise<void> {
+  loadMoreTickets(): Promise<void> {
     const generation = this.ticketLoadGeneration;
     const tickets = this.deps.getTickets();
     if (tickets.length >= this.deps.getTotalCount()) {
-      return;
+      return Promise.resolve();
     }
+    const project = this.deps.getResolvedProject();
+    const key = [
+      generation,
+      this.allProjectsSearchQuery,
+      this.allProjectsSearchQuery ? this.allProjectsSearchIssueOffset : tickets.length,
+      project?.id ?? "all",
+    ].join(":");
+    if (this.loadMoreFlight?.key === key) {
+      return this.loadMoreFlight.promise;
+    }
+    const promise = this.loadMoreTicketsNow(generation, tickets, project).finally(() => {
+      if (this.loadMoreFlight?.promise === promise) {
+        this.loadMoreFlight = undefined;
+      }
+    });
+    this.loadMoreFlight = { key, promise };
+    return promise;
+  }
+
+  invalidate(): void {
+    this.ticketLoadGeneration++;
+    this.allProjectsSearchQuery = "";
+    this.allProjectsSearchIssueOffset = 0;
+    this.allProjectsSearchExtraCount = 0;
+  }
+
+  private async loadMoreTicketsNow(
+    generation: number,
+    tickets: Ticket[],
+    project: ResolvedProject | undefined,
+  ): Promise<void> {
     const { store } = this.deps.context;
     if (this.allProjectsSearchQuery) {
       try {
@@ -112,7 +144,6 @@ export class DashboardTicketService {
       }
       return;
     }
-    const project = this.deps.getResolvedProject();
     if (!project) {
       return;
     }
