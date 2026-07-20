@@ -2,7 +2,7 @@
   "name": "redmine-client",
   "displayName": "%displayName%",
   "description": "%description%",
-  "version": "0.5.2",
+  "version": "0.5.4",
   "publisher": "tiohsa",
   "author": {
     "name": "tiohsa",

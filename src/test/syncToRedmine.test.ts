@@ -1,7 +1,12 @@
 import * as assert from "assert";
 import * as vscode from "vscode";
 import { syncEditorToRedmine } from "../commands/syncToRedmine";
-import { clearRegistry, registerTicketEditor } from "../views/ticketEditorRegistry";
+import {
+  clearRegistry,
+  getConnectionScopeForDocument,
+  registerTicketDocument,
+  registerTicketEditor,
+} from "../views/ticketEditorRegistry";
 import {
   clearTicketDrafts,
   getTicketDraft,
@@ -98,5 +103,40 @@ suite("syncEditorToRedmine — draft status management", () => {
     assert.strictEqual(apiCalled, false);
     assert.strictEqual(editor.document.getText(), content);
     assert.strictEqual(getTicketDraft(ticketId)?.baseDescription, "Keep this body");
+  });
+
+  test("新規コメント作成の非同期完了後も開始時スコープで登録する", async () => {
+    const ticketId = 104;
+    const currentScope = getCurrentConnectionScope();
+    const content = "New comment";
+    const editor = createEditorStub(vscode.Uri.parse("test://comment-draft-104"), content);
+    registerTicketDocument(ticketId, editor.document, "commentDraft", undefined, currentScope);
+
+    const result = await syncEditorToRedmine(editor, {
+      deps: {
+        addComment: async () => undefined,
+        getCurrentUserId: async () => 9,
+        getIssueDetail: async () => {
+          await Promise.resolve();
+          return {
+            ticket: { id: ticketId, subject: "Ticket", projectId: 7 },
+            comments: [{
+              id: 501,
+              ticketId,
+              authorId: 9,
+              authorName: "Tester",
+              body: content,
+              createdAt: "t1",
+              updatedAt: "t2",
+              editableByCurrentUser: true,
+            }],
+          };
+        },
+      },
+    });
+
+    assert.strictEqual(result?.kind, "comment");
+    assert.strictEqual(result?.result.status, "created");
+    assert.strictEqual(getConnectionScopeForDocument(editor.document), currentScope);
   });
 });

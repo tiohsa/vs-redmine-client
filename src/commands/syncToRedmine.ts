@@ -26,6 +26,7 @@ import {
 } from "../views/commentSaveSync";
 import { TicketSaveResult } from "../views/ticketSaveTypes";
 import { CommentSaveResult } from "../views/commentSaveTypes";
+import type { CommentSaveDependencies } from "../views/commentSaveSync";
 import {
   CONNECTION_SCOPE_MISMATCH_MESSAGE,
   getCurrentConnectionScope,
@@ -44,7 +45,7 @@ export interface SyncToRedmineOptions {
   onSubjectUpdated?: (ticketId: number, subject: string) => void;
   onTicketCreated?: () => void;
   onCommentsRefresh?: (ticketId: number) => void;
-  deps?: Partial<TicketSaveDependencies>;
+  deps?: Partial<TicketSaveDependencies & CommentSaveDependencies>;
 }
 
 export const syncEditorToRedmine = async (
@@ -124,6 +125,7 @@ const syncEditorToRedmineAtScope = async (
       content: editor.document.getText(),
       editor,
       documentUri: editor.document.uri,
+      deps: options.deps,
       onCreated: async ({ commentId, projectId }) => {
         finalizeNewCommentDraftDocument({
           document: editor.document,

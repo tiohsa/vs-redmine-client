@@ -31,11 +31,6 @@ const extractEditorScopeHash = (uri: vscode.Uri): string | undefined => {
     .match(/^redmine-client-([a-f0-9]{16})-/i)?.[1]?.toLowerCase();
 };
 
-const hasEditorFilename = (uri: vscode.Uri): boolean => {
-  const basename = path.posix.basename(uri.path.replace(/\\/g, "/"));
-  return /^(?:project-\d+_ticket-\d+|redmine-client-(?:[a-f0-9]{16}-)?new-(?:ticket|comment-\d+))/.test(basename);
-};
-
 /**
  * 再起動で復元されたファイルは、パスのスコープハッシュが現在の接続先と
  * 一致するときだけ現在スコープへ所属させる。旧形式は読み取り互換のため
@@ -47,7 +42,9 @@ export const resolveEditorConnectionScope = (
 ): string => {
   const storedHash = extractEditorScopeHash(uri);
   if (!storedHash) {
-    return hasEditorFilename(uri) ? `${UNRESOLVED_CONNECTION_SCOPE_PREFIX}unknown` : currentScope;
+    // Legacy editor files predate connection-scoped storage. Treat them as
+    // belonging to the connection that restored them so they remain usable.
+    return currentScope;
   }
   return storedHash === getConnectionScopeHash(currentScope)
     ? currentScope

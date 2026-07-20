@@ -238,6 +238,18 @@ suite("Ticket editor registry", () => {
     ]);
   });
 
+  test("旧形式ファイルは復元時の現在接続先へ移行する", () => {
+    const scope = "https://current.example/redmine/";
+    const document = createDocumentStub(
+      vscode.Uri.parse("file:/workspace/project-1_ticket-1.md"),
+      "",
+    );
+
+    assert.strictEqual(resolveEditorConnectionScope(document.uri, scope), scope);
+    registerTicketDocument(1, document, "ticket", undefined, scope);
+    assert.strictEqual(getConnectionScopeForDocument(document), scope);
+  });
+
   test("再起動復元された別接続先ファイルは切り戻すまで所有スコープを付与しない", () => {
     const scopeA = "https://a.example/redmine/";
     const scopeB = "https://b.example/redmine/";
