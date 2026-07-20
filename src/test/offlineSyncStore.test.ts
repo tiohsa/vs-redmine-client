@@ -6,6 +6,7 @@ import {
   addOfflineNewTicket,
   clearOfflineSyncQueue,
   replaceOfflineSyncQueue,
+  removeOfflineTicketUpdate,
   getOfflineSyncQueue,
   switchOfflineSyncStore,
 } from "../views/offlineSyncStore";
@@ -178,5 +179,50 @@ suite("offlineSyncStore — workspaceState 永続化", () => {
 
     initializeOfflineSyncStore(memento, "https://new.example/redmine");
     assert.deepStrictEqual(Array.from(getOfflineSyncQueue().tickets.keys()), [2]);
+  });
+
+  test("同一IDを持つ接続先別キューを明示スコープで独立操作する", () => {
+    const memento = createTestMemento();
+    const scopeA = "https://a.example/redmine/";
+    const scopeB = "https://b.example/redmine/";
+    initializeOfflineSyncStore(memento, scopeA);
+    addOfflineTicketUpdate(1, { ...ticketUpdate(1), subject: "A" }, scopeA);
+    addOfflineTicketUpdate(1, { ...ticketUpdate(1), subject: "B" }, scopeB);
+
+    removeOfflineTicketUpdate(1, scopeA);
+
+    assert.strictEqual(getOfflineSyncQueue(scopeA).tickets.has(1), false);
+    assert.strictEqual(getOfflineSyncQueue(scopeB).tickets.get(1)?.subject, "B");
+  });
+
+  test("逆順で完了した旧接続先処理が現在接続先キューを削除しない", async () => {
+    const memento = createTestMemento();
+    const scopeA = "https://a.example/redmine/";
+    const scopeB = "https://b.example/redmine/";
+    initializeOfflineSyncStore(memento, scopeA);
+    addOfflineTicketUpdate(1, ticketUpdate(1), scopeA);
+    addOfflineTicketUpdate(1, ticketUpdate(1), scopeB);
+
+    const oldCompletion = Promise.resolve().then(() => removeOfflineTicketUpdate(1, scopeA));
+    switchOfflineSyncStore(scopeB);
+    await oldCompletion;
+
+    assert.strictEqual(getOfflineSyncQueue(scopeA).tickets.has(1), false);
+    assert.strictEqual(getOfflineSyncQueue(scopeB).tickets.has(1), true);
+  });
+
+  test("旧形式キューを現在スコープへ移行し再起動後も復元する", () => {
+    const memento = createTestMemento();
+    void memento.update("redmine.offlineSyncQueue", {
+      tickets: [[5, ticketUpdate(5)]],
+      comments: [],
+      newTickets: [],
+    });
+    const scope = "https://legacy.example/redmine/";
+
+    initializeOfflineSyncStore(memento, scope);
+    assert.strictEqual(getOfflineSyncQueue(scope).tickets.has(5), true);
+    initializeOfflineSyncStore(memento, scope);
+    assert.strictEqual(getOfflineSyncQueue(scope).tickets.has(5), true);
   });
 });

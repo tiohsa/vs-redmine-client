@@ -3,9 +3,11 @@ import {
   clearTicketDrafts,
   getTicketDraft,
   initializeTicketDraft,
+  initializeDraftStore,
   markDraftStatus,
   updateDraftAfterSave,
 } from "../views/ticketDraftStore";
+import { createInMemoryDraftStorage } from "../views/draftPersistence";
 import { buildIssueMetadataFixture } from "./helpers/ticketMetadataFixtures";
 
 suite("Ticket draft store", () => {
@@ -44,5 +46,23 @@ suite("Ticket draft store", () => {
     assert.strictEqual(updated?.baseDescription, "Next Body");
     assert.strictEqual(updated?.lastKnownRemoteUpdatedAt, "2024-01-02T00:00:00Z");
     assert.strictEqual(updated?.status, "Synced");
+  });
+
+  test("同一ticket IDの下書きを接続スコープごとに分離する", () => {
+    const scopeA = "https://a.example/redmine/";
+    const scopeB = "https://b.example/redmine/";
+    initializeDraftStore(createInMemoryDraftStorage(), scopeA);
+    initializeTicketDraft(10, "A", "Body A", buildIssueMetadataFixture(), undefined, scopeA);
+    initializeDraftStore(createInMemoryDraftStorage(), scopeB);
+    initializeTicketDraft(10, "B", "Body B", buildIssueMetadataFixture(), undefined, scopeB);
+
+    markDraftStatus(10, "Dirty", scopeA);
+
+    assert.strictEqual(getTicketDraft(10, scopeA)?.baseSubject, "A");
+    assert.strictEqual(getTicketDraft(10, scopeA)?.status, "Dirty");
+    assert.strictEqual(getTicketDraft(10, scopeB)?.baseSubject, "B");
+    assert.strictEqual(getTicketDraft(10, scopeB)?.status, "Synced");
+    clearTicketDrafts(scopeA);
+    clearTicketDrafts(scopeB);
   });
 });

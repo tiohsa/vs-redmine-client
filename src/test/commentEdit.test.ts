@@ -1,12 +1,15 @@
 import * as assert from "assert";
 import { buildCommentUpdatePayload } from "../redmine/comments";
 import {
+  clearCommentEdits,
+  getCommentEdit,
   initializeCommentEdit,
   resolveCommentEditorBody,
   setCommentDraftBody,
 } from "../views/commentEditStore";
 
 suite("Comment edit", () => {
+  teardown(() => clearCommentEdits());
   test("builds update payload", () => {
     const payload = buildCommentUpdatePayload("Updated");
 
@@ -34,5 +37,19 @@ suite("Comment edit", () => {
 
     assert.strictEqual(resolved.source, "saved");
     assert.strictEqual(resolved.body, "Saved");
+  });
+
+  test("同一comment IDの編集状態を接続先ごとに分離する", () => {
+    const scopeA = "https://a.example/redmine/";
+    const scopeB = "https://b.example/redmine/";
+    initializeCommentEdit(7, 10, "Saved A", undefined, scopeA);
+    initializeCommentEdit(7, 20, "Saved B", undefined, scopeB);
+    setCommentDraftBody(7, "Draft A", scopeA);
+    setCommentDraftBody(7, "Draft B", scopeB);
+
+    assert.strictEqual(getCommentEdit(7, scopeA)?.draftBody, "Draft A");
+    assert.strictEqual(getCommentEdit(7, scopeB)?.draftBody, "Draft B");
+    assert.strictEqual(resolveCommentEditorBody(7, "remote", scopeA).body, "Draft A");
+    assert.strictEqual(resolveCommentEditorBody(7, "remote", scopeB).body, "Draft B");
   });
 });

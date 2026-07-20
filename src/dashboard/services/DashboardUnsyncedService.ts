@@ -15,6 +15,7 @@ import type { DashboardUnsyncedKey } from "../dashboardProtocol";
 import type { UnsyncedFileSyncKey } from "../../app/unsyncedTypes";
 import { getTicketEditors } from "../../views/ticketEditorRegistry";
 import type { SyncStatus } from "../../app/syncController";
+import { getCurrentConnectionScope } from "../../config/connectionScope";
 
 export class DashboardUnsyncedService {
   constructor(private readonly deps: {
@@ -87,6 +88,7 @@ export class DashboardUnsyncedService {
   }
 
   async handleDiscardOne(requestId: string, key: DashboardUnsyncedKey): Promise<void> {
+    const operationScope = getCurrentConnectionScope();
     const discardLabel = vscode.l10n.t("Discard");
     const confirmed = await vscode.window.showWarningMessage(
       vscode.l10n.t("This will discard the unsynced local changes. The ticket on the Redmine server will not be deleted."),
@@ -98,15 +100,18 @@ export class DashboardUnsyncedService {
     }
 
     if (key.kind === "ticket") {
-      removeOfflineTicketUpdate(key.ticketId);
+      removeOfflineTicketUpdate(key.ticketId, operationScope);
     } else if (key.kind === "newTicket") {
       if (!key.documentUri) {
         this.deps.context.notifyError(requestId, vscode.l10n.t("Cannot identify the target new ticket draft."));
         return;
       }
-      removeOfflineNewTicket({ documentUri: key.documentUri });
+      removeOfflineNewTicket({ documentUri: key.documentUri }, operationScope);
     } else if (key.kind === "comment") {
-      removeOfflineCommentEntry({ commentId: key.commentId, documentUri: key.documentUri });
+      removeOfflineCommentEntry(
+        { commentId: key.commentId, documentUri: key.documentUri },
+        operationScope,
+      );
     }
 
     this.refreshUnsynced();
@@ -143,7 +148,7 @@ export class DashboardUnsyncedService {
   }
 
   private buildSelectedTicketSyncKeys(ticketId: number): DashboardUnsyncedKey[] {
-    const queue = getOfflineSyncQueue();
+    const queue = getOfflineSyncQueue(getCurrentConnectionScope());
     const keys: DashboardUnsyncedKey[] = [];
     if (queue.tickets.has(ticketId)) {
       keys.push({ kind: "ticket", ticketId });

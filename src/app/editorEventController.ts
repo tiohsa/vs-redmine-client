@@ -12,6 +12,7 @@ import { parseTicketEditorContent } from "../views/ticketEditorContent";
 import { setTicketDraftContent } from "../views/ticketDraftStore";
 import {
   getCommentIdForEditor,
+  getConnectionScopeForEditor,
   getEditorContentType,
   getTicketIdForDocument,
   getTicketIdForEditor,
@@ -139,10 +140,18 @@ export const registerEditorEvents = (
           }
         } else if (ticketId && contentType === "comment") {
           const draft = previousActiveEditor.document.getText();
-          setCommentDraft(ticketId, draft);
+          setCommentDraft(
+            ticketId,
+            draft,
+            getConnectionScopeForEditor(previousActiveEditor),
+          );
           const commentId = getCommentIdForEditor(previousActiveEditor);
           if (commentId) {
-            setCommentDraftBody(commentId, draft);
+            setCommentDraftBody(
+              commentId,
+              draft,
+              getConnectionScopeForEditor(previousActiveEditor),
+            );
           }
         }
       }

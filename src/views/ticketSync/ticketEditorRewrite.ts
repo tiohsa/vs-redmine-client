@@ -9,6 +9,7 @@ import { withRegisteredTicketControlFields } from "../ticketControlFields";
 import { updateDraftAfterSave } from "../ticketDraftStore";
 
 export interface RewriteNewTicketEditorInput {
+  operationScope?: string;
   editor: vscode.TextEditor;
   createdId: number;
   projectId: number;
@@ -21,9 +22,23 @@ export const rewriteNewTicketEditorToTicketMode = async (
   input: RewriteNewTicketEditorInput,
 ): Promise<void> => {
   removeTicketEditorByDocument(input.editor.document);
-  registerTicketEditor(input.createdId, input.editor, "primary", "ticket", input.projectId);
+  registerTicketEditor(
+    input.createdId,
+    input.editor,
+    "primary",
+    "ticket",
+    input.projectId,
+    input.operationScope,
+  );
   setEditorDisplaySource(input.editor, "saved");
-  updateDraftAfterSave(input.createdId, input.parsed.subject, input.parsed.description, input.parsed.metadata);
+  updateDraftAfterSave(
+    input.createdId,
+    input.parsed.subject,
+    input.parsed.description,
+    input.parsed.metadata,
+    undefined,
+    input.operationScope,
+  );
 
   const newControlFields = withRegisteredTicketControlFields(
     input.originalControlFields ?? {},

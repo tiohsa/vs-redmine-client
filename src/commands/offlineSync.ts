@@ -17,6 +17,8 @@ import { finalizeNewCommentDraftDocument } from "../views/commentSaveSync";
 import { showInfo, showWarning } from "../utils/notifications";
 import { TicketSaveResult } from "../views/ticketSaveTypes";
 import { CommentSaveResult } from "../views/commentSaveTypes";
+import { getCurrentConnectionScope } from "../config/connectionScope";
+import { runWithConnectionScope } from "../redmine/client";
 
 const isTicketResultSuccess = (result: TicketSaveResult): boolean =>
   result.status === "success" ||
@@ -55,7 +57,14 @@ export type OfflineSyncRunResult =
   | { status: "failed"; total: number; synced: number; failed: number; conflicts: number };
 
 export const runOfflineSync = async (): Promise<OfflineSyncRunResult> => {
-  const queue = getOfflineSyncQueue();
+  const operationScope = getCurrentConnectionScope();
+  return runWithConnectionScope(operationScope, () => runOfflineSyncAtScope(operationScope));
+};
+
+const runOfflineSyncAtScope = async (
+  operationScope: string,
+): Promise<OfflineSyncRunResult> => {
+  const queue = getOfflineSyncQueue(operationScope);
   const ticketUpdates = Array.from(queue.tickets.values());
   const totalItems =
     queue.newTickets.length + ticketUpdates.length + queue.comments.length;
@@ -98,6 +107,7 @@ export const runOfflineSync = async (): Promise<OfflineSyncRunResult> => {
           break;
         }
         const { result, createdId } = await createTicketFromQueuedContent({
+          operationScope,
           content: entry.content,
           projectId: entry.projectId,
           baseDir: entry.baseDir,
@@ -110,7 +120,13 @@ export const runOfflineSync = async (): Promise<OfflineSyncRunResult> => {
             (doc) => doc.uri.toString() === entry.documentUri,
           );
           if (document) {
-            registerTicketDocument(createdId, document, "ticket", entry.projectId);
+            registerTicketDocument(
+              createdId,
+              document,
+              "ticket",
+              entry.projectId,
+              operationScope,
+            );
           }
         }
         if (isTicketResultSuccess(result)) {
@@ -128,7 +144,7 @@ export const runOfflineSync = async (): Promise<OfflineSyncRunResult> => {
           failedTickets.push(update);
           continue;
         }
-        const result = await applyQueuedTicketUpdate({ update });
+        const result = await applyQueuedTicketUpdate({ update, operationScope });
         if (isTicketResultSuccess(result)) {
           synced++;
         } else if (result.status === "conflict") {
@@ -147,7 +163,7 @@ export const runOfflineSync = async (): Promise<OfflineSyncRunResult> => {
           failedComments.push(update);
           continue;
         }
-        const result = await applyQueuedCommentUpdate({ update });
+        const result = await applyQueuedCommentUpdate({ update, operationScope });
         if (
           result.status === "created" &&
           update.documentUri &&
@@ -163,6 +179,7 @@ export const runOfflineSync = async (): Promise<OfflineSyncRunResult> => {
               ticketId: update.ticketId,
               projectId: result.projectId,
               commentId: result.commentId,
+              operationScope,
             });
           }
         }
@@ -187,7 +204,7 @@ export const runOfflineSync = async (): Promise<OfflineSyncRunResult> => {
       tickets: new Map(failedTickets.map((item) => [item.ticketId, item])),
       comments: failedComments,
       newTickets: failedNewTickets,
-    });
+    }, operationScope);
     const parts: string[] = [];
     if (synced > 0) { parts.push(vscode.l10n.t("Synced: {0}", synced)); }
     if (conflicts > 0) { parts.push(vscode.l10n.t("Conflicts: {0}", conflicts)); }
@@ -208,7 +225,7 @@ export const runOfflineSync = async (): Promise<OfflineSyncRunResult> => {
     return { status: "partial_failure", total: totalItems, synced, failed, conflicts };
   }
 
-  clearOfflineSyncQueue();
+  clearOfflineSyncQueue(operationScope);
   showInfo(vscode.l10n.t("Sync completed. Synced: {0}.", synced));
   return { status: "success", total: totalItems, synced, failed: 0, conflicts: 0 };
 };

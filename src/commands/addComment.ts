@@ -4,13 +4,22 @@ import { uploadFileAttachment } from "../redmine/attachments";
 import { getCommentLimitGuidance, validateComment } from "../utils/commentValidation";
 import { showError, showInfo } from "../utils/notifications";
 import { clearCommentDraft, setCommentDraft } from "../views/commentDraftStore";
-import { getEditorContentType, getTicketIdForEditor } from "../views/ticketEditorRegistry";
+import {
+  getConnectionScopeForEditor,
+  getEditorContentType,
+  getTicketIdForEditor,
+} from "../views/ticketEditorRegistry";
 import {
   buildMarkdownImageUploadFailureMessage,
   hasMarkdownImageUploadFailure,
   processMarkdownImageUploads,
 } from "../utils/markdownImageUpload";
 import { resolveEditorBaseDir } from "../utils/editorBaseDir";
+import {
+  CONNECTION_SCOPE_MISMATCH_MESSAGE,
+  getCurrentConnectionScope,
+} from "../config/connectionScope";
+import { runWithConnectionScope } from "../redmine/client";
 
 export interface AddCommentInput {
   issueId: number;
@@ -65,13 +74,22 @@ export const addCommentForIssue = async (
     return;
   }
 
+  const operationScope = getConnectionScopeForEditor(editor) ?? getCurrentConnectionScope();
+  if (operationScope !== getCurrentConnectionScope()) {
+    deps.showError(CONNECTION_SCOPE_MISMATCH_MESSAGE);
+    return;
+  }
+
   const text = editor.document.getText();
-  deps.setCommentDraft(ticketId, text);
-  const uploadResult = await processMarkdownImageUploads({
-    content: text,
-    baseDir: resolveEditorBaseDir({ editor }),
-    uploadFile: deps.uploadFile,
-  });
+  deps.setCommentDraft(ticketId, text, operationScope);
+  const uploadResult = await runWithConnectionScope(
+    operationScope,
+    () => processMarkdownImageUploads({
+      content: text,
+      baseDir: resolveEditorBaseDir({ editor }),
+      uploadFile: deps.uploadFile,
+    }),
+  );
   if (hasMarkdownImageUploadFailure(uploadResult.summary)) {
     deps.showError(buildMarkdownImageUploadFailureMessage(uploadResult.summary));
     return;
@@ -85,13 +103,16 @@ export const addCommentForIssue = async (
   }
 
   try {
-    await deps.addComment(
-      input.issueId,
-      nextContent,
-      uploadResult.uploads.length > 0 ? uploadResult.uploads : undefined,
+    await runWithConnectionScope(
+      operationScope,
+      () => deps.addComment(
+        input.issueId,
+        nextContent,
+        uploadResult.uploads.length > 0 ? uploadResult.uploads : undefined,
+      ),
     );
     deps.showInfo(vscode.l10n.t("Comment added."));
-    deps.clearCommentDraft(ticketId);
+    deps.clearCommentDraft(ticketId, operationScope);
     await input.onSuccess?.();
   } catch (error) {
     deps.showError((error as Error).message);

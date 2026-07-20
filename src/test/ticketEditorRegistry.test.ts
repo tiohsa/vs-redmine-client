@@ -24,9 +24,13 @@ import {
   registerNewCommentDraft,
   registerNewTicketDraft,
   registerTicketEditor,
+  refreshEditorConnectionScopes,
+  resolveEditorConnectionScope,
+  getConnectionScopeForDocument,
   removeTicketEditorByDocument,
   removeTicketEditorByUri,
 } from "../views/ticketEditorRegistry";
+import { getConnectionScopeHash } from "../config/connectionScope";
 import { createDocumentStub, createEditorStub } from "./helpers/editorStubs";
 
 suite("Ticket editor registry", () => {
@@ -216,5 +220,38 @@ suite("Ticket editor registry", () => {
       "untitled:C:\\tmp\\redmine-client-new-ticket.md",
     );
     assert.strictEqual(resolved, NEW_TICKET_DRAFT_ID);
+  });
+
+  test("同一ticket IDのエディターを接続スコープごとに分離する", () => {
+    const scopeA = "https://a.example/redmine/";
+    const scopeB = "https://b.example/redmine/";
+    const editorA = createEditorStub(vscode.Uri.parse("file:/a/ticket-1.md"), "A");
+    const editorB = createEditorStub(vscode.Uri.parse("file:/b/ticket-1.md"), "B");
+    registerTicketEditor(1, editorA, "primary", "ticket", undefined, scopeA);
+    registerTicketEditor(1, editorB, "primary", "ticket", undefined, scopeB);
+
+    assert.deepStrictEqual(getTicketEditors(1, scopeA).map((record) => record.uri), [
+      editorA.document.uri.toString(),
+    ]);
+    assert.deepStrictEqual(getTicketEditors(1, scopeB).map((record) => record.uri), [
+      editorB.document.uri.toString(),
+    ]);
+  });
+
+  test("再起動復元された別接続先ファイルは切り戻すまで所有スコープを付与しない", () => {
+    const scopeA = "https://a.example/redmine/";
+    const scopeB = "https://b.example/redmine/";
+    const hashA = getConnectionScopeHash(scopeA);
+    const document = createDocumentStub(
+      vscode.Uri.parse(`file:/workspace/.redmine-client/editors/${hashA}/ticket-1.md`),
+      "",
+    );
+
+    assert.strictEqual(resolveEditorConnectionScope(document.uri, scopeB), "");
+    registerTicketDocument(1, document, "ticket", undefined, "");
+    refreshEditorConnectionScopes(scopeB);
+    assert.strictEqual(getConnectionScopeForDocument(document), "");
+    refreshEditorConnectionScopes(scopeA);
+    assert.strictEqual(getConnectionScopeForDocument(document), scopeA);
   });
 });

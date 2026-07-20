@@ -1,12 +1,16 @@
 import * as assert from "assert";
 import * as vscode from "vscode";
+import * as os from "os";
+import * as path from "path";
 import {
   buildTicketPreviewContent,
   findEmptySubjectPosition,
   resolveTicketEditorUri,
   resolveEditorStorageDir,
+  ensureScopedEditorFile,
   withTrailingEditLines,
 } from "../views/ticketPreview";
+import { getConnectionScopeHash } from "../config/connectionScope";
 
 suite("Ticket preview", () => {
   test("renders subject and description", () => {
@@ -142,6 +146,53 @@ suite("Ticket preview", () => {
 
     assert.strictEqual(resolution.usedFallback, true);
     assert.strictEqual(resolution.uri, undefined);
+  });
+
+  test("編集ファイル保存先へ接続スコープハッシュを付与する", () => {
+    const scope = "https://example.com/redmine/";
+    const workspace = [{ uri: vscode.Uri.parse("file:/workspace") }] as vscode.WorkspaceFolder[];
+    const resolution = resolveEditorStorageDir({
+      configuredPath: "",
+      workspaceFolders: workspace,
+      connectionScope: scope,
+    });
+
+    assert.strictEqual(
+      resolution.uri?.toString(),
+      vscode.Uri.joinPath(
+        workspace[0].uri,
+        ".redmine-client",
+        "editors",
+        getConnectionScopeHash(scope),
+      ).toString(),
+    );
+    assert.strictEqual(
+      resolution.legacyUri?.toString(),
+      vscode.Uri.joinPath(workspace[0].uri, ".redmine-client", "editors").toString(),
+    );
+  });
+
+  test("旧形式編集ファイルを内容を保持したままスコープ別保存先へ移行する", async () => {
+    const root = vscode.Uri.file(path.join(os.tmpdir(), `redmine-editor-${Date.now()}-${Math.random()}`));
+    const scopedDir = vscode.Uri.joinPath(root, "0123456789abcdef");
+    const legacyFile = vscode.Uri.joinPath(root, "ticket-1.md");
+    const scopedFile = vscode.Uri.joinPath(scopedDir, "ticket-1.md");
+    try {
+      await vscode.workspace.fs.createDirectory(scopedDir);
+      await vscode.workspace.fs.writeFile(legacyFile, new TextEncoder().encode("unsaved draft"));
+
+      await ensureScopedEditorFile({
+        fileUri: scopedFile,
+        legacyFileUri: legacyFile,
+        initialContent: "server value",
+      });
+
+      const migrated = new TextDecoder().decode(await vscode.workspace.fs.readFile(scopedFile));
+      assert.strictEqual(migrated, "unsaved draft");
+      await assert.rejects(() => Promise.resolve(vscode.workspace.fs.stat(legacyFile)));
+    } finally {
+      await vscode.workspace.fs.delete(root, { recursive: true, useTrash: false });
+    }
   });
 
   test("locates the empty subject placeholder position", () => {

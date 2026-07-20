@@ -2,11 +2,18 @@ import * as https from "https";
 import * as http from "http";
 import { getBaseUrl, getIgnoreSSLErrors, getRequestTimeoutMs } from "../config/settings";
 import { resolveApiKey } from "../config/apiKeyStore";
+import { AsyncLocalStorage } from "async_hooks";
 
 type HttpMethod = "GET" | "POST" | "PUT" | "DELETE";
 type FetchBody = string | Uint8Array;
 
 export type QueryParams = Record<string, string | number | boolean | undefined>;
+const connectionScopeContext = new AsyncLocalStorage<string>();
+
+export const runWithConnectionScope = <T>(
+  connectionScope: string,
+  operation: () => Promise<T>,
+): Promise<T> => connectionScopeContext.run(connectionScope, operation);
 
 export interface RequestOptions {
   method: HttpMethod;
@@ -38,7 +45,7 @@ export const normalizeBaseUrl = (rawBaseUrl: string): string => {
 };
 
 const ensureConfig = (): { baseUrl: string; apiKey: string } => {
-  const baseUrl = getBaseUrl();
+  const baseUrl = connectionScopeContext.getStore() ?? getBaseUrl();
   const apiKey = resolveApiKey();
   if (!baseUrl) {
     throw new Error("Missing Redmine base URL configuration.");

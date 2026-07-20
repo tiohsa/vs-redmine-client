@@ -27,6 +27,10 @@ import {
 import { getEditorStorageDirectory } from "../config/settings";
 import { showError } from "../utils/notifications";
 import { rememberTicketSummary } from "./ticketSummaryStore";
+import {
+  getConnectionScopeHash,
+  getCurrentConnectionScope,
+} from "../config/connectionScope";
 
 export const buildTicketPreviewContent = (
   ticket: Pick<Ticket, "subject" | "description" | "trackerName" | "priorityName" | "statusName" | "dueDate" | "startDate" | "assigneeName" | "assigneeId">,
@@ -121,6 +125,7 @@ export const applyEditorContent = async (
 
 type StorageDirResolution = {
   uri?: vscode.Uri;
+  legacyUri?: vscode.Uri;
   usedFallback: boolean;
   errorMessage?: string;
 };
@@ -151,21 +156,33 @@ export const resolveEditorStorageDir = (
   options: {
     configuredPath?: string;
     workspaceFolders?: readonly vscode.WorkspaceFolder[];
+    connectionScope?: string;
   } = {},
 ): StorageDirResolution => {
   const configuredPath = options.configuredPath ?? getEditorStorageDirectory();
   const workspaceFolders = options.workspaceFolders ?? vscode.workspace.workspaceFolders;
 
+  const scopeHash = options.connectionScope
+    ? getConnectionScopeHash(options.connectionScope)
+    : undefined;
+  const withScope = (uri: vscode.Uri | undefined): vscode.Uri | undefined =>
+    uri && scopeHash ? vscode.Uri.joinPath(uri, scopeHash) : uri;
+
   if (configuredPath.length > 0) {
     const validation = validateStorageDir(configuredPath);
     if (validation.uri) {
-      return { uri: validation.uri, usedFallback: false };
+      return {
+        uri: withScope(validation.uri),
+        legacyUri: scopeHash ? validation.uri : undefined,
+        usedFallback: false,
+      };
     }
     const fallbackUri = workspaceFolders?.[0]
       ? vscode.Uri.joinPath(workspaceFolders[0].uri, ".redmine-client", "editors")
       : undefined;
     return {
-      uri: fallbackUri,
+      uri: withScope(fallbackUri),
+      legacyUri: scopeHash ? fallbackUri : undefined,
       usedFallback: true,
       errorMessage: validation.errorMessage,
     };
@@ -177,9 +194,42 @@ export const resolveEditorStorageDir = (
   }
 
   return {
-    uri: vscode.Uri.joinPath(workspace.uri, ".redmine-client", "editors"),
+    uri: withScope(vscode.Uri.joinPath(workspace.uri, ".redmine-client", "editors")),
+    legacyUri: scopeHash
+      ? vscode.Uri.joinPath(workspace.uri, ".redmine-client", "editors")
+      : undefined,
     usedFallback: true,
   };
+};
+
+const fileExists = async (uri: vscode.Uri): Promise<boolean> => {
+  try {
+    await vscode.workspace.fs.stat(uri);
+    return true;
+  } catch (err) {
+    if (err instanceof vscode.FileSystemError && err.code === "FileNotFound") {
+      return false;
+    }
+    throw err;
+  }
+};
+
+export const ensureScopedEditorFile = async (input: {
+  fileUri: vscode.Uri;
+  legacyFileUri?: vscode.Uri;
+  initialContent: string;
+}): Promise<void> => {
+  if (await fileExists(input.fileUri)) {
+    return;
+  }
+  if (input.legacyFileUri && await fileExists(input.legacyFileUri)) {
+    await vscode.workspace.fs.rename(input.legacyFileUri, input.fileUri, { overwrite: false });
+    return;
+  }
+  await vscode.workspace.fs.writeFile(
+    input.fileUri,
+    new TextEncoder().encode(input.initialContent),
+  );
 };
 
 const openTicketEditor = async (
@@ -187,28 +237,34 @@ const openTicketEditor = async (
   kind: TicketEditorKind,
   content: string,
 ): Promise<vscode.TextEditor> => {
-  const storageResolution = resolveEditorStorageDir();
+  const connectionScope = getCurrentConnectionScope();
+  const storageResolution = resolveEditorStorageDir({ connectionScope });
   if (storageResolution.errorMessage) {
     showError(storageResolution.errorMessage);
   }
   const storageDir = storageResolution.uri;
   if (!storageDir) {
+    const scopeHash = getConnectionScopeHash(connectionScope);
     const document = await vscode.workspace.openTextDocument(
-      resolveTicketEditorUri({ ticket, kind, storageDir }),
+      vscode.Uri.parse(
+        `untitled:redmine-client-${scopeHash}-${buildTicketEditorFilename(ticket.projectId, ticket.id, kind)}`,
+      ),
     );
     const editor = await vscode.window.showTextDocument(document, { preview: false });
     await applyEditorContent(editor, content);
-    registerTicketEditor(ticket.id, editor, kind, "ticket", ticket.projectId);
+    registerTicketEditor(ticket.id, editor, kind, "ticket", ticket.projectId, connectionScope);
     return editor;
   }
 
   await vscode.workspace.fs.createDirectory(storageDir);
   const fileUri = resolveTicketEditorUri({ ticket, kind, storageDir });
-  const bytes = new TextEncoder().encode(content);
-  await vscode.workspace.fs.writeFile(fileUri, bytes);
+  const legacyFileUri = storageResolution.legacyUri
+    ? resolveTicketEditorUri({ ticket, kind, storageDir: storageResolution.legacyUri })
+    : undefined;
+  await ensureScopedEditorFile({ fileUri, legacyFileUri, initialContent: content });
   const document = await vscode.workspace.openTextDocument(fileUri);
   const editor = await vscode.window.showTextDocument(document, { preview: false });
-  registerTicketEditor(ticket.id, editor, kind, "ticket", ticket.projectId);
+  registerTicketEditor(ticket.id, editor, kind, "ticket", ticket.projectId, connectionScope);
   return editor;
 };
 
@@ -266,7 +322,8 @@ export const showTicketComment = async (
   updatedAt?: string,
 ): Promise<vscode.TextEditor> => {
   rememberTicketSummary(ticket);
-  const display = resolveCommentEditorBody(commentId, comment);
+  const connectionScope = getCurrentConnectionScope();
+  const display = resolveCommentEditorBody(commentId, comment, connectionScope);
   const content =
     display.body.trim().length === 0
       ? buildCommentEditorContent(display.body)
@@ -276,7 +333,7 @@ export const showTicketComment = async (
   setEditorProjectId(editor, ticket.projectId);
   setEditorCommentId(editor, commentId);
   setEditorDisplaySource(editor, display.source);
-  ensureCommentEdit(commentId, ticket.id, comment, updatedAt);
+  ensureCommentEdit(commentId, ticket.id, comment, updatedAt, connectionScope);
   if (content.trim().length > 0) {
     moveCursorToEnd(editor);
   }

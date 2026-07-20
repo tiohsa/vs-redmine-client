@@ -10,6 +10,7 @@ import {
 import { buildTicketEditorContent } from "../views/ticketEditorContent";
 import { buildIssueMetadataFixture } from "./helpers/ticketMetadataFixtures";
 import { createEditorStub } from "./helpers/editorStubs";
+import { getCurrentConnectionScope } from "../config/connectionScope";
 
 suite("syncEditorToRedmine — draft status management", () => {
   teardown(() => {
@@ -59,5 +60,37 @@ suite("syncEditorToRedmine — draft status management", () => {
     });
 
     assert.strictEqual(getTicketDraft(ticketId)?.status, "Failed");
+  });
+
+  test("別接続先所有のエディターは同期せず未保存内容を保持する", async () => {
+    const ticketId = 103;
+    const metadata = buildIssueMetadataFixture();
+    const content = buildTicketEditorContent({
+      subject: "Unsaved",
+      description: "Keep this body",
+      metadata,
+    });
+    const editor = createEditorStub(vscode.Uri.parse("test://ticket-103"), content);
+    const currentScope = getCurrentConnectionScope();
+    const otherScope = currentScope === "https://other.example/redmine/"
+      ? "https://another.example/redmine/"
+      : "https://other.example/redmine/";
+    registerTicketEditor(ticketId, editor, "primary", "ticket", undefined, otherScope);
+    initializeTicketDraft(ticketId, "Unsaved", "Keep this body", metadata, "t1");
+    let apiCalled = false;
+
+    const result = await syncEditorToRedmine(editor, {
+      deps: {
+        getIssueDetail: async () => {
+          apiCalled = true;
+          throw new Error("must not be called");
+        },
+      },
+    });
+
+    assert.strictEqual(result, undefined);
+    assert.strictEqual(apiCalled, false);
+    assert.strictEqual(editor.document.getText(), content);
+    assert.strictEqual(getTicketDraft(ticketId)?.baseDescription, "Keep this body");
   });
 });

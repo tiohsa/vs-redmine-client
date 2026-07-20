@@ -8,7 +8,7 @@ import { createGlobalStateDraftStorage } from "./views/draftPersistence";
 import { initializeNewTicketDraftStore } from "./views/newTicketDraftStore";
 import { initializeOfflineSyncStore, switchOfflineSyncStore } from "./views/offlineSyncStore";
 import { initializeTicketListSettingsStore } from "./views/ticketListSettingsStore";
-import { isTicketEditor } from "./views/ticketEditorRegistry";
+import { isTicketEditor, refreshEditorConnectionScopes } from "./views/ticketEditorRegistry";
 import { setViewContext } from "./views/viewContext";
 import { registerConflictDiffProvider } from "./views/conflictDiffProvider";
 import { registerViews } from "./app/viewRegistry";
@@ -26,7 +26,10 @@ import { getConnectionScope } from "./config/connectionScope";
 export async function activate(context: vscode.ExtensionContext) {
   // ── ストア初期化 ─────────────────────────────────────────────────────────
   let activeBaseUrl = getConnectionScope(getBaseUrl());
-  initializeDraftStore(createGlobalStateDraftStorage(context.globalState, activeBaseUrl));
+  initializeDraftStore(
+    createGlobalStateDraftStorage(context.globalState, activeBaseUrl),
+    activeBaseUrl,
+  );
   initializeNewTicketDraftStore(context.globalState);
   initializeOfflineSyncStore(context.workspaceState, activeBaseUrl);
   initializeTicketListSettingsStore(context.workspaceState);
@@ -88,7 +91,11 @@ export async function activate(context: vscode.ExtensionContext) {
         if (nextBaseUrl !== activeBaseUrl) {
           activeBaseUrl = nextBaseUrl;
           switchOfflineSyncStore(nextBaseUrl);
-          initializeDraftStore(createGlobalStateDraftStorage(context.globalState, nextBaseUrl));
+          refreshEditorConnectionScopes(nextBaseUrl);
+          initializeDraftStore(
+            createGlobalStateDraftStorage(context.globalState, nextBaseUrl),
+            nextBaseUrl,
+          );
           void views.dashboardProvider.resetForConnectionChange().catch((err: unknown) => {
             console.error("[vs-redmine-client] Failed to reset connection state", err);
           });
