@@ -17,6 +17,7 @@ let editorByDocument = new WeakMap<vscode.TextDocument, TicketEditorRecord>();
 let editorByEditor = new WeakMap<vscode.TextEditor, TicketEditorRecord>();
 const editorsByTicket = new Map<number, Set<string>>();
 export const NEW_TICKET_DRAFT_ID = -1;
+const UNRESOLVED_CONNECTION_SCOPE_PREFIX = "unresolved:";
 
 const extractEditorScopeHash = (uri: vscode.Uri): string | undefined => {
   const normalized = uri.path.replace(/\\/g, "/");
@@ -40,7 +41,9 @@ export const resolveEditorConnectionScope = (
   if (!storedHash) {
     return currentScope;
   }
-  return storedHash === getConnectionScopeHash(currentScope) ? currentScope : "";
+  return storedHash === getConnectionScopeHash(currentScope)
+    ? currentScope
+    : `${UNRESOLVED_CONNECTION_SCOPE_PREFIX}${storedHash}`;
 };
 
 export const refreshEditorConnectionScopes = (

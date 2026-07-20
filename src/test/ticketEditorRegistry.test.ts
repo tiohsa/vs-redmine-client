@@ -247,10 +247,11 @@ suite("Ticket editor registry", () => {
       "",
     );
 
-    assert.strictEqual(resolveEditorConnectionScope(document.uri, scopeB), "");
-    registerTicketDocument(1, document, "ticket", undefined, "");
+    const unresolvedScope = `unresolved:${hashA}`;
+    assert.strictEqual(resolveEditorConnectionScope(document.uri, scopeB), unresolvedScope);
+    registerTicketDocument(1, document, "ticket", undefined, unresolvedScope);
     refreshEditorConnectionScopes(scopeB);
-    assert.strictEqual(getConnectionScopeForDocument(document), "");
+    assert.strictEqual(getConnectionScopeForDocument(document), unresolvedScope);
     refreshEditorConnectionScopes(scopeA);
     assert.strictEqual(getConnectionScopeForDocument(document), scopeA);
   });

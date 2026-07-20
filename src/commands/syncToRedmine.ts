@@ -52,7 +52,7 @@ export const syncEditorToRedmine = async (
   options: SyncToRedmineOptions = {},
 ): Promise<SyncToRedmineResult> => {
   const operationScope = getConnectionScopeForEditor(editor);
-  if (!operationScope) {
+  if (operationScope === undefined) {
     return undefined;
   }
   if (operationScope !== getCurrentConnectionScope()) {
