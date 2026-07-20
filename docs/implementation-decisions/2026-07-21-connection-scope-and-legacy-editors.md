@@ -55,8 +55,8 @@
 ## 検証と制約
 
 - 実行した検証: `pnpm install --frozen-lockfile`、`pnpm run compile-tests`、`pnpm run compile`、`pnpm run lint`、`pnpm test`（757 passing）。
-- 実行できなかった検証: GitHub APIを使ったPR本文更新、Draft解除、最終レビュー。ローカルからのGitHub API接続が失敗したため。
+- 実行できなかった検証: GitHub Actionsの更新後CI最終結果。PR #52 のCI run `29755068015` は確認時点で `pending`。
 
 ## 結果
 
-接続スコープ固定、旧形式ファイル移行、依存関係伝播、回帰テスト、`0.5.4` 更新を完了した。CI相当のローカル検証は成功し、GitHub上のPR操作のみ未実施。
+接続スコープ固定、旧形式ファイル移行、依存関係伝播、回帰テスト、`0.5.4` 更新を完了した。ローカル検証は成功し、PR #52 は本文更新済み・Draft解除済みで、GitHub Actions CIの完了を待っている。
