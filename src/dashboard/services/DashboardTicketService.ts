@@ -84,6 +84,7 @@ export class DashboardTicketService {
   }
 
   async loadMoreTickets(): Promise<void> {
+    const generation = this.ticketLoadGeneration;
     const tickets = this.deps.getTickets();
     if (tickets.length >= this.deps.getTotalCount()) {
       return;
@@ -97,6 +98,9 @@ export class DashboardTicketService {
           offset: this.allProjectsSearchIssueOffset,
           subjectQuery: this.allProjectsSearchQuery,
         });
+        if (generation !== this.ticketLoadGeneration) {
+          return;
+        }
         this.allProjectsSearchIssueOffset += result.tickets.length;
         this.deps.setTickets(mergeTicketsById(tickets, result.tickets));
         this.deps.setTotalCount(result.totalCount + this.allProjectsSearchExtraCount);
@@ -119,6 +123,9 @@ export class DashboardTicketService {
         limit: getTicketListLimit(),
         offset: tickets.length,
       });
+      if (generation !== this.ticketLoadGeneration) {
+        return;
+      }
       this.deps.setTickets([...tickets, ...result.tickets]);
       this.deps.setTotalCount(result.totalCount);
       rememberTicketSummaries(result.tickets);
@@ -130,6 +137,7 @@ export class DashboardTicketService {
   }
 
   async searchAllProjects(rawQuery: string): Promise<void> {
+    const generation = ++this.ticketLoadGeneration;
     const { store } = this.deps.context;
     const query = rawQuery.trim();
     this.allProjectsSearchQuery = query;
@@ -160,8 +168,14 @@ export class DashboardTicketService {
         offset: 0,
         subjectQuery: query,
       });
+      if (generation !== this.ticketLoadGeneration) {
+        return;
+      }
       this.allProjectsSearchIssueOffset = result.tickets.length;
       const idTicket = await this.searchTicketById(query);
+      if (generation !== this.ticketLoadGeneration) {
+        return;
+      }
       const tickets = idTicket ? mergeTicketsById([idTicket], result.tickets) : result.tickets;
       this.allProjectsSearchExtraCount = idTicket && !result.tickets.some((ticket) => ticket.id === idTicket.id) ? 1 : 0;
       this.deps.setTickets(tickets);
@@ -171,6 +185,9 @@ export class DashboardTicketService {
       this.pushTickets();
       store.updateNested("loading", { tickets: false });
     } catch (err) {
+      if (generation !== this.ticketLoadGeneration) {
+        return;
+      }
       const msg = (err as Error).message;
       store.update({
         loading: { ...store.getState().loading, tickets: false },

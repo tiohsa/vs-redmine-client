@@ -12,6 +12,8 @@ import { type DashboardWorkPanel, type NewTicketComposerValues } from "../dashbo
 import type { Ticket } from "../../redmine/types";
 
 export class DashboardComposerService {
+  private composerLoadGeneration = 0;
+
   constructor(private readonly deps: {
     context: DashboardServiceContext;
     getResolvedProject: () => { id: number; name: string } | undefined;
@@ -19,9 +21,12 @@ export class DashboardComposerService {
     refreshUnsynced: () => void;
     loadTickets: () => Promise<void>;
     selectTicket: (ticketId: number) => Promise<void>;
+    getProjectTrackers?: typeof getProjectTrackers;
+    listProjectMembers?: typeof listProjectMembers;
   }) {}
 
   async openNewTicketComposer(): Promise<void> {
+    const generation = ++this.composerLoadGeneration;
     const project = this.deps.getResolvedProject();
     if (!project) {
       this.deps.context.notifyToast("warning", vscode.l10n.t("Select a project before creating a ticket."));
@@ -41,10 +46,11 @@ export class DashboardComposerService {
         values: this.buildComposerValues({}),
       },
     });
-    await this.loadComposerOptions(project.id);
+    await this.loadComposerOptions(project.id, undefined, generation);
   }
 
   async openChildTicketComposer(parentTicketId: number): Promise<void> {
+    const generation = ++this.composerLoadGeneration;
     const parent = this.deps.getTickets().find((t) => t.id === parentTicketId);
     if (!parent) {
       this.deps.context.notifyError("ticket.createChild", vscode.l10n.t("Parent ticket not found."));
@@ -71,10 +77,11 @@ export class DashboardComposerService {
         values: this.buildComposerValues({}),
       },
     });
-    await this.loadComposerOptions(parent.projectId, parent);
+    await this.loadComposerOptions(parent.projectId, parent, generation);
   }
 
   cancelComposer(): void {
+    this.composerLoadGeneration++;
     const selectedTicketId = this.deps.context.store.getState().selectedTicketId;
     if (selectedTicketId) {
       this.deps.context.store.update({ workPanel: { mode: "detail", ticketId: selectedTicketId } });
@@ -316,12 +323,16 @@ export class DashboardComposerService {
   private async loadComposerOptions(
     projectId: number,
     parentTicket?: Ticket,
+    generation = this.composerLoadGeneration,
   ): Promise<void> {
     try {
       const [trackers, members] = await Promise.all([
-        getProjectTrackers(projectId),
-        listProjectMembers(projectId).catch(() => [] as Array<{ id: number; name: string }>),
+        (this.deps.getProjectTrackers ?? getProjectTrackers)(projectId),
+        (this.deps.listProjectMembers ?? listProjectMembers)(projectId).catch(() => [] as Array<{ id: number; name: string }>),
       ]);
+      if (generation !== this.composerLoadGeneration) {
+        return;
+      }
       if (trackers.length === 0) {
         this.updateWorkPanelComposer({ loading: false, trackers: [], assignees: members, error: vscode.l10n.t("No trackers configured for this project.") });
         return;
@@ -344,6 +355,9 @@ export class DashboardComposerService {
         }),
       });
     } catch (err) {
+      if (generation !== this.composerLoadGeneration) {
+        return;
+      }
       const msg = (err as Error).message;
       this.updateWorkPanelComposer({ loading: false, trackers: [], assignees: [], error: vscode.l10n.t("Failed to load trackers: {0}", msg) });
     }

@@ -114,6 +114,33 @@ function buildContext(store: DashboardStateStore): DashboardServiceContext {
 }
 
 suite("DashboardMetadataService — editOptions バリデーション", () => {
+  test("古いチケットの候補応答が最新チケットの候補を上書きしない", async () => {
+    const store = new DashboardStateStore();
+    const firstTrackers = deferred<Array<{ id: number; name: string }>>();
+    const secondTrackers = deferred<Array<{ id: number; name: string }>>();
+    const service = new DashboardMetadataService({
+      context: buildContext(store),
+      getTickets: () => [],
+      isMetadataOptionsLoaded: () => true,
+      refreshUnsynced: () => {},
+      pushTickets: () => {},
+      openEditor: async () => {},
+      getProjectTrackers: (projectId) => projectId === 1 ? firstTrackers.promise : secondTrackers.promise,
+      getIssueAllowedStatuses: async () => [],
+      listProjectMembers: async () => [],
+    });
+
+    const first = service.loadEditOptions(10, 1);
+    const second = service.loadEditOptions(20, 2);
+    secondTrackers.resolve([{ id: 2, name: "Second" }]);
+    await second;
+    firstTrackers.resolve([{ id: 1, name: "First" }]);
+    await first;
+
+    assert.strictEqual(store.getState().editOptions?.ticketId, 20);
+    assert.deepStrictEqual(store.getState().editOptions?.trackers, [{ id: 2, name: "Second" }]);
+  });
+
   test("editOptions がある場合、tracker バリデーションに editOptions.trackers を使う (テスト用: loadEditOptions 経由)", () => {
     // editOptions にプロジェクト固有トラッカーが設定されていれば
     // validateMetadataPatchAgainstOptions は editOptions.statuses / priorities を参照すべき
@@ -196,6 +223,12 @@ suite("DashboardMetadataService — editOptions バリデーション", () => {
   });
 });
 
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>((res) => { resolve = res; });
+  return { promise, resolve };
+}
+
 // ── DashboardComposerService — Status 非表示テスト ────────────────────────
 
 suite("DashboardComposerService — Status フィールド非表示 (Option A)", () => {
@@ -223,6 +256,50 @@ suite("DashboardComposerService — Status フィールド非表示 (Option A)",
     // status は undefined でも有効
     assert.strictEqual(panel.values.status, undefined);
     assert.strictEqual(panel.mode, "newTicket");
+  });
+});
+
+import { DashboardComposerService } from "../dashboard/services/DashboardComposerService";
+
+suite("DashboardComposerService — 非同期候補", () => {
+  test("古い作成パネルの候補応答が最新パネルを上書きしない", async () => {
+    const store = new DashboardStateStore();
+    store.update({
+      metadataOptions: {
+        trackers: [],
+        priorities: [{ id: 1, name: "Normal" }],
+        statuses: [{ id: 1, name: "New" }],
+      },
+    });
+    const firstTrackers = deferred<Array<{ id: number; name: string }>>();
+    const secondTrackers = deferred<Array<{ id: number; name: string }>>();
+    const service = new DashboardComposerService({
+      context: buildContext(store),
+      getResolvedProject: () => ({ id: 1, name: "First project" }),
+      getTickets: () => [{
+        id: 20,
+        subject: "Parent",
+        projectId: 2,
+        projectName: "Second project",
+      }],
+      refreshUnsynced: () => {},
+      loadTickets: async () => {},
+      selectTicket: async () => {},
+      getProjectTrackers: (projectId) => projectId === 1 ? firstTrackers.promise : secondTrackers.promise,
+      listProjectMembers: async () => [],
+    });
+
+    const first = service.openNewTicketComposer();
+    const second = service.openChildTicketComposer(20);
+    secondTrackers.resolve([{ id: 2, name: "Second" }]);
+    await second;
+    firstTrackers.resolve([{ id: 1, name: "First" }]);
+    await first;
+
+    const panel = store.getState().workPanel;
+    assert.ok(panel && panel.mode === "childTicket");
+    assert.strictEqual(panel.projectId, 2);
+    assert.deepStrictEqual(panel.trackers, [{ id: 2, name: "Second" }]);
   });
 });
 

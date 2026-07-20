@@ -139,4 +139,35 @@ suite("DashboardTicketService all-project search", () => {
     assert.strictEqual(store.getState().loading.tickets, false);
     assert.strictEqual(store.getState().errors.tickets, undefined);
   });
+
+  test("古い全プロジェクト検索のレスポンスが最新検索を上書きしない", async () => {
+    const store = new DashboardStateStore();
+    let tickets: Ticket[] = [];
+    let totalCount = 0;
+    const oldSearch = deferred<IssuesListResult>();
+    const newSearch = deferred<IssuesListResult>();
+    const service = new DashboardTicketService({
+      context: makeContext(store),
+      getResolvedProject: () => undefined,
+      getTickets: () => tickets,
+      setTickets: (next) => { tickets = next; },
+      getTotalCount: () => totalCount,
+      setTotalCount: (next) => { totalCount = next; },
+      getSettings: () => DEFAULT_TICKET_LIST_SETTINGS,
+      loadComments: async () => undefined,
+      refreshUnsynced: () => undefined,
+      listIssues: (input) => input.subjectQuery === "old" ? oldSearch.promise : newSearch.promise,
+    });
+
+    const first = service.searchAllProjects("old");
+    const second = service.searchAllProjects("new");
+    newSearch.resolve({ tickets: [makeTicket(2, "new")], totalCount: 1, limit: 50, offset: 0 });
+    await second;
+    oldSearch.resolve({ tickets: [makeTicket(1, "old")], totalCount: 1, limit: 50, offset: 0 });
+    await first;
+
+    assert.deepStrictEqual(tickets.map((ticket) => ticket.id), [2]);
+    assert.deepStrictEqual(store.getState().tickets.map((ticket) => ticket.id), [2]);
+    assert.strictEqual(store.getState().loading.tickets, false);
+  });
 });

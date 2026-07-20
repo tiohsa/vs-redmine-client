@@ -13,6 +13,7 @@ import type { TicketMetadataPatch } from "../dashboardProtocol";
 
 export class DashboardMetadataService {
   private readonly projectTrackerCache = new Map<number, Array<{ id: number; name: string }>>();
+  private editOptionsGeneration = 0;
 
   constructor(private readonly deps: {
     context: DashboardServiceContext;
@@ -21,9 +22,13 @@ export class DashboardMetadataService {
     refreshUnsynced: () => void;
     pushTickets: () => void;
     openEditor: (ticketId: number) => Promise<void>;
+    getProjectTrackers?: typeof getProjectTrackers;
+    getIssueAllowedStatuses?: typeof getIssueAllowedStatuses;
+    listProjectMembers?: typeof listProjectMembers;
   }) {}
 
   async loadEditOptions(ticketId: number, projectId: number): Promise<void> {
+    const generation = ++this.editOptionsGeneration;
     const { store } = this.deps.context;
     store.update({
       editOptions: {
@@ -40,10 +45,13 @@ export class DashboardMetadataService {
     const globalOptions = store.getState().metadataOptions;
     try {
       const [trackers, allowedStatuses, members] = await Promise.all([
-        getProjectTrackers(projectId),
-        getIssueAllowedStatuses(ticketId).catch(() => null),
-        listProjectMembers(projectId).catch(() => [] as Array<{ id: number; name: string }>),
+        (this.deps.getProjectTrackers ?? getProjectTrackers)(projectId),
+        (this.deps.getIssueAllowedStatuses ?? getIssueAllowedStatuses)(ticketId).catch(() => null),
+        (this.deps.listProjectMembers ?? listProjectMembers)(projectId).catch(() => [] as Array<{ id: number; name: string }>),
       ]);
+      if (generation !== this.editOptionsGeneration) {
+        return;
+      }
       this.projectTrackerCache.set(projectId, trackers);
       const statusFallback = allowedStatuses === null || allowedStatuses.length === 0;
       const statuses = !statusFallback ? allowedStatuses! : globalOptions.statuses;
@@ -63,6 +71,9 @@ export class DashboardMetadataService {
         },
       });
     } catch (err) {
+      if (generation !== this.editOptionsGeneration) {
+        return;
+      }
       const msg = (err as Error).message;
       store.update({
         editOptions: {

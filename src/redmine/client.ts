@@ -23,6 +23,11 @@ export const normalizeBaseUrl = (rawBaseUrl: string): string => {
     if (url.protocol !== "http:" && url.protocol !== "https:") {
       throw new Error("Base URL must start with http:// or https://");
     }
+    url.hash = "";
+    url.search = "";
+    if (!url.pathname.endsWith("/")) {
+      url.pathname = `${url.pathname}/`;
+    }
     return url.toString();
   } catch (error) {
     const message = error instanceof Error ? error.message : "Invalid base URL.";
@@ -44,8 +49,8 @@ const ensureConfig = (): { baseUrl: string; apiKey: string } => {
   return { baseUrl: normalizeBaseUrl(baseUrl), apiKey };
 };
 
-const buildUrl = (baseUrl: string, path: string, query?: QueryParams): string => {
-  const url = new URL(path, baseUrl);
+export const buildUrl = (baseUrl: string, path: string, query?: QueryParams): string => {
+  const url = new URL(path.replace(/^\/+/, ""), normalizeBaseUrl(baseUrl));
   if (query) {
     Object.entries(query).forEach(([key, value]) => {
       if (value !== undefined) {

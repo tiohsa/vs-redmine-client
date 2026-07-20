@@ -1,4 +1,4 @@
-import { requestJson } from "./client";
+import { requestJson, type RequestOptions } from "./client";
 import { Project, RedmineProjectResponse } from "./types";
 
 interface RedmineProjectDetailResponse {
@@ -10,6 +10,16 @@ interface RedmineProjectDetailResponse {
 }
 
 const PROJECTS_PAGE_LIMIT = 100;
+const MEMBERSHIPS_PAGE_LIMIT = 100;
+
+interface RedmineMembershipsResponse {
+  memberships: Array<{ user?: { id: number; name: string } }>;
+  total_count?: number;
+  limit?: number;
+  offset?: number;
+}
+
+type RequestJson = <T>(options: RequestOptions) => Promise<T>;
 
 const mapProjects = (
   raw: RedmineProjectResponse["projects"],
@@ -75,15 +85,33 @@ export const getProjectTrackers = async (
 
 export const listProjectMembers = async (
   projectId: number,
+  requester: RequestJson = requestJson,
 ): Promise<Array<{ id: number; name: string }>> => {
-  const response = await requestJson<{
-    memberships: Array<{ user?: { id: number; name: string } }>;
-  }>({
+  const first = await requester<RedmineMembershipsResponse>({
     method: "GET",
     path: `/projects/${projectId}/memberships.json`,
-    query: { limit: 100 },
+    query: { limit: MEMBERSHIPS_PAGE_LIMIT, offset: 0 },
   });
-  return response.memberships
+
+  const memberships = [...first.memberships];
+  const totalCount = first.total_count ?? memberships.length;
+  const pageLimit = first.limit && first.limit > 0 ? first.limit : MEMBERSHIPS_PAGE_LIMIT;
+  const firstOffset = first.offset ?? 0;
+  const remainingOffsets: number[] = [];
+  for (let offset = firstOffset + pageLimit; offset < totalCount; offset += pageLimit) {
+    remainingOffsets.push(offset);
+  }
+  const pages = await Promise.all(
+    remainingOffsets.map((offset) => requester<RedmineMembershipsResponse>({
+      method: "GET",
+      path: `/projects/${projectId}/memberships.json`,
+      query: { limit: pageLimit, offset },
+    })),
+  );
+  pages.forEach((page) => memberships.push(...page.memberships));
+
+  const users = memberships
     .filter((m) => m.user !== undefined)
     .map((m) => m.user!);
+  return Array.from(new Map(users.map((user) => [user.id, user])).values());
 };
