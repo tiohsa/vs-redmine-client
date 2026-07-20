@@ -4,6 +4,7 @@
   "command.setApiKey.title": "Redmine: Set API Key",
   "command.clearApiKey.title": "Redmine: Clear API Key",
   "command.showApiKeyStatus.title": "Redmine: Show API Key Status",
+  "command.assignEditorToCurrentConnection.title": "Redmine: Assign Editor to Current Connection",
   "command.refreshProjects.title": "Redmine: Refresh Projects",
   "command.refreshTickets.title": "Redmine: Refresh Tickets",
   "command.searchTickets.title": "Redmine: Search Tickets",

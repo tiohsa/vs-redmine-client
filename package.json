@@ -49,6 +49,10 @@
         "title": "%command.showApiKeyStatus.title%"
       },
       {
+        "command": "redmine-client.assignEditorToCurrentConnection",
+        "title": "%command.assignEditorToCurrentConnection.title%"
+      },
+      {
         "command": "redmine-client.refreshProjects",
         "title": "%command.refreshProjects.title%",
         "icon": "$(refresh)"

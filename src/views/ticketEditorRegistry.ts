@@ -31,10 +31,15 @@ const extractEditorScopeHash = (uri: vscode.Uri): string | undefined => {
     .match(/^redmine-client-([a-f0-9]{16})-/i)?.[1]?.toLowerCase();
 };
 
+const hasEditorFilename = (uri: vscode.Uri): boolean => {
+  const basename = path.posix.basename(uri.path.replace(/\\/g, "/"));
+  return /^(?:project-\d+_ticket-\d+|redmine-client-(?:[a-f0-9]{16}-)?new-(?:ticket|comment-\d+))/.test(basename);
+};
+
 /**
  * 再起動で復元されたファイルは、パスのスコープハッシュが現在の接続先と
- * 一致するときだけ現在スコープへ所属させる。旧形式は読み取り互換のため
- * 現在スコープとして扱う。
+ * 一致するときだけ現在スコープへ所属させる。旧形式は接続先を判定できない
+ * ため、明示割当まで `unresolved:unknown` として同期対象外にする。
  */
 export const resolveEditorConnectionScope = (
   uri: vscode.Uri,
@@ -42,9 +47,9 @@ export const resolveEditorConnectionScope = (
 ): string => {
   const storedHash = extractEditorScopeHash(uri);
   if (!storedHash) {
-    // Legacy editor files predate connection-scoped storage. Treat them as
-    // belonging to the connection that restored them so they remain usable.
-    return currentScope;
+    // Legacy editor files predate connection-scoped storage. Keep them
+    // unresolved until the user explicitly assigns the connection.
+    return hasEditorFilename(uri) ? `${UNRESOLVED_CONNECTION_SCOPE_PREFIX}unknown` : currentScope;
   }
   return storedHash === getConnectionScopeHash(currentScope)
     ? currentScope
@@ -158,14 +163,17 @@ export const registerTicketEditor = (
   return record;
 };
 
-export const registerNewTicketDraft = (editor: vscode.TextEditor): TicketEditorRecord =>
+export const registerNewTicketDraft = (
+  editor: vscode.TextEditor,
+  connectionScope = getCurrentConnectionScope(),
+): TicketEditorRecord =>
   registerTicketEditor(
     NEW_TICKET_DRAFT_ID,
     editor,
     "primary",
     "ticket",
     undefined,
-    getCurrentConnectionScope(),
+    connectionScope,
   );
 
 export const registerTicketDocument = (
@@ -232,6 +240,7 @@ const getCommentDraftRecord = (ticketId: number): TicketEditorRecord | undefined
 export const registerNewCommentDraft = (
   ticketId: number,
   editor: vscode.TextEditor,
+  connectionScope = getCurrentConnectionScope(),
 ): TicketEditorRecord =>
   registerTicketEditor(
     ticketId,
@@ -239,7 +248,7 @@ export const registerNewCommentDraft = (
     "primary",
     "commentDraft",
     undefined,
-    getCurrentConnectionScope(),
+    connectionScope,
   );
 
 export const getNewCommentDraftUri = (ticketId: number): vscode.Uri | undefined => {
@@ -472,6 +481,18 @@ export const getEditorContentTypeForUri = (
 export const getConnectionScopeForEditor = (
   editor: vscode.TextEditor,
 ): string | undefined => getRecord(editor)?.connectionScope;
+
+export const assignEditorConnectionScope = (
+  editor: vscode.TextEditor,
+  connectionScope = getCurrentConnectionScope(),
+): boolean => {
+  const record = getRecord(editor);
+  if (!record) {
+    return false;
+  }
+  record.connectionScope = connectionScope;
+  return true;
+};
 
 export const getConnectionScopeForDocument = (
   document: vscode.TextDocument,

@@ -105,7 +105,8 @@ export const openNewTicketDraft = async (input: {
   content: TicketEditorContent;
   projectId?: number;
 }): Promise<vscode.Uri> => {
-  const scopeHash = getConnectionScopeHash(getCurrentConnectionScope());
+  const operationScope = getCurrentConnectionScope();
+  const scopeHash = getConnectionScopeHash(operationScope);
   const knownUri =
     getNewTicketDraftUri() ?? buildNewTicketDraftUri(getEditorBasePath(), isFileExistsOrOpen, scopeHash);
   let existing = findOpenDocument(knownUri);
@@ -118,7 +119,7 @@ export const openNewTicketDraft = async (input: {
   const document = existing ?? (await vscode.workspace.openTextDocument(targetUri));
   const editor = await vscode.window.showTextDocument(document, { preview: false });
 
-  registerNewTicketDraft(editor);
+  registerNewTicketDraft(editor, operationScope);
   if (input.projectId) {
     setEditorProjectId(editor, input.projectId);
   }

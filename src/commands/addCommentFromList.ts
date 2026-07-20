@@ -24,6 +24,8 @@ export const addCommentFromList = async (ticketId?: number): Promise<void> => {
     return;
   }
 
+  const operationScope = getCurrentConnectionScope();
+
   const configured = getEditorStorageDirectory();
   const workspacePath =
     configured && path.isAbsolute(configured)
@@ -31,7 +33,7 @@ export const addCommentFromList = async (ticketId?: number): Promise<void> => {
       : vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
   const filename = buildNewCommentDraftFilename(
     ticketId,
-    getConnectionScopeHash(getCurrentConnectionScope()),
+    getConnectionScopeHash(operationScope),
   );
   const targetPath = workspacePath
     ? buildUniqueUntitledPath(workspacePath, filename, fs.existsSync)
@@ -48,5 +50,5 @@ export const addCommentFromList = async (ticketId?: number): Promise<void> => {
   );
   const document = existing ?? (await vscode.workspace.openTextDocument(draftUri));
   const editor = await vscode.window.showTextDocument(document, { preview: false });
-  registerNewCommentDraft(ticketId, editor);
+  registerNewCommentDraft(ticketId, editor, operationScope);
 };

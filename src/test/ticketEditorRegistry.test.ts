@@ -2,6 +2,7 @@ import * as assert from "assert";
 import * as vscode from "vscode";
 import {
   clearRegistry,
+  assignEditorConnectionScope,
   getCommentIdForDraftUri,
   getLastActiveEditor,
   getNewTicketDraftUri,
@@ -92,6 +93,18 @@ suite("Ticket editor registry", () => {
 
     assert.strictEqual(getTicketIdForDocument(primary.document), 5);
     assert.strictEqual(getProjectIdForDocument(primary.document), 20);
+  });
+
+  test("新規ドラフト登録は明示された接続スコープを保持する", () => {
+    const scope = "https://draft.example/redmine/";
+    const ticketEditor = createEditorStub(vscode.Uri.parse("untitled:redmine-client-new-ticket.md"), "");
+    const commentEditor = createEditorStub(vscode.Uri.parse("untitled:redmine-client-new-comment-5.md"), "");
+
+    registerNewTicketDraft(ticketEditor, scope);
+    registerNewCommentDraft(5, commentEditor, scope);
+
+    assert.strictEqual(getConnectionScopeForDocument(ticketEditor.document), scope);
+    assert.strictEqual(getConnectionScopeForDocument(commentEditor.document), scope);
   });
 
   test("prefers non-draft record when editor mapping is stale", () => {
@@ -238,15 +251,18 @@ suite("Ticket editor registry", () => {
     ]);
   });
 
-  test("旧形式ファイルは復元時の現在接続先へ移行する", () => {
+  test("旧形式ファイルは明示割当まで未解決のまま保持する", () => {
     const scope = "https://current.example/redmine/";
     const document = createDocumentStub(
       vscode.Uri.parse("file:/workspace/project-1_ticket-1.md"),
       "",
     );
 
-    assert.strictEqual(resolveEditorConnectionScope(document.uri, scope), scope);
-    registerTicketDocument(1, document, "ticket", undefined, scope);
+    const unresolved = "unresolved:unknown";
+    assert.strictEqual(resolveEditorConnectionScope(document.uri, scope), unresolved);
+    const editor = { document } as vscode.TextEditor;
+    registerTicketDocument(1, document, "ticket", undefined, unresolved);
+    assert.strictEqual(assignEditorConnectionScope(editor, scope), true);
     assert.strictEqual(getConnectionScopeForDocument(document), scope);
   });
 
