@@ -8,6 +8,8 @@ import {
   registerNewCommentDraft,
 } from "../views/ticketEditorRegistry";
 import { buildUniqueUntitledName, buildUniqueUntitledPath } from "../views/untitledPath";
+import { buildNewCommentDraftFilename } from "../views/editorFilename";
+import { getConnectionScopeHash, getCurrentConnectionScope } from "../config/connectionScope";
 
 const getOpenUntitledNames = (): Set<string> =>
   new Set(
@@ -27,7 +29,10 @@ export const addCommentFromList = async (ticketId?: number): Promise<void> => {
     configured && path.isAbsolute(configured)
       ? configured
       : vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
-  const filename = `redmine-client-new-comment-${ticketId}.md`;
+  const filename = buildNewCommentDraftFilename(
+    ticketId,
+    getConnectionScopeHash(getCurrentConnectionScope()),
+  );
   const targetPath = workspacePath
     ? buildUniqueUntitledPath(workspacePath, filename, fs.existsSync)
     : buildUniqueUntitledName(filename, (candidate) =>

@@ -6,8 +6,15 @@ const ticketPattern = /^project-(\d+)_ticket-(\d+)(?:_extra)?(?:-\d+)?\.md$/;
 const commentPattern = new RegExp(
   `^project-(\\d+)_ticket-(\\d+)_${COMMENT_TYPE_LABEL}-(\\d+)(?:-\\d+)?\\.md$`,
 );
-const newCommentDraftPattern = /^redmine-client-new-comment-(\d+)(?:-\d+)?\.md$/;
-const newTicketDraftPattern = /^redmine-client-new-ticket(?:-\d+)?\.md$/;
+const scopeHashPattern = "(?:[a-f0-9]{16}-)?";
+const newCommentDraftPattern = new RegExp(
+  `^redmine-client-${scopeHashPattern}new-comment-(\\d+)(?:-\\d+)?\\.md$`,
+  "i",
+);
+const newTicketDraftPattern = new RegExp(
+  `^redmine-client-${scopeHashPattern}new-ticket(?:-\\d+)?\\.md$`,
+  "i",
+);
 
 export type ParsedEditorFilename =
   | {
@@ -37,6 +44,15 @@ export const buildCommentEditorFilename = (
   commentId: number,
 ): string =>
   `project-${sanitizeId(projectId)}_ticket-${sanitizeId(ticketId)}_${COMMENT_TYPE_LABEL}-${sanitizeId(commentId)}.md`;
+
+export const buildNewTicketDraftFilename = (scopeHash?: string): string =>
+  `redmine-client-${scopeHash ? `${scopeHash}-` : ""}new-ticket.md`;
+
+export const buildNewCommentDraftFilename = (
+  ticketId: number,
+  scopeHash?: string,
+): string =>
+  `redmine-client-${scopeHash ? `${scopeHash}-` : ""}new-comment-${sanitizeId(ticketId)}.md`;
 
 export const parseEditorFilename = (
   filename: string,

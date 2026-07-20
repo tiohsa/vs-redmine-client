@@ -13,6 +13,7 @@ import { setTicketDraftContent } from "../views/ticketDraftStore";
 import {
   getCommentIdForEditor,
   getConnectionScopeForEditor,
+  resolveEditorConnectionScope,
   getEditorContentType,
   getTicketIdForDocument,
   getTicketIdForEditor,
@@ -53,6 +54,7 @@ export const buildRegisterEditorDocument = (): (
           parsed.commentId,
           document,
           parsed.projectId,
+          resolveEditorConnectionScope(document.uri),
         );
       }
       return;
@@ -134,7 +136,11 @@ export const registerEditorEvents = (
             const parsed = parseTicketEditorContent(
               previousActiveEditor.document.getText(),
             );
-            setTicketDraftContent(ticketId, parsed);
+            setTicketDraftContent(
+              ticketId,
+              parsed,
+              getConnectionScopeForEditor(previousActiveEditor),
+            );
           } catch {
             // Ignore parse errors when swapping focus.
           }

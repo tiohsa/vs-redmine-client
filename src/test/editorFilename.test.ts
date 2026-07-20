@@ -1,6 +1,9 @@
 import * as assert from "assert";
 import {
   buildCommentEditorFilename,
+  buildNewCommentDraftFilename,
+  buildNewTicketDraftFilename,
+  isNewTicketDraftFilename,
   buildTicketEditorFilename,
   parseEditorFilename,
   parseNewCommentDraftFilename,
@@ -99,5 +102,17 @@ suite("Editor filename builder", () => {
     const ticketId = parseNewCommentDraftFilename("redmine-client-new-comment.md");
 
     assert.strictEqual(ticketId, undefined);
+  });
+
+  test("parses connection-scoped new draft filenames", () => {
+    const hash = "0123456789abcdef";
+    assert.strictEqual(
+      parseNewCommentDraftFilename(buildNewCommentDraftFilename(42, hash)),
+      42,
+    );
+    assert.strictEqual(
+      isNewTicketDraftFilename(buildNewTicketDraftFilename(hash)),
+      true,
+    );
   });
 });

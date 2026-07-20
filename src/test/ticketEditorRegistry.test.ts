@@ -255,4 +255,20 @@ suite("Ticket editor registry", () => {
     refreshEditorConnectionScopes(scopeA);
     assert.strictEqual(getConnectionScopeForDocument(document), scopeA);
   });
+
+  test("設定済み保存先の接続ハッシュディレクトリを復元する", () => {
+    const scopeA = "https://a.example/redmine/";
+    const scopeB = "https://b.example/redmine/";
+    const hashA = getConnectionScopeHash(scopeA);
+    const document = createDocumentStub(
+      vscode.Uri.parse(`file:/custom/editor-store/${hashA}/project-1_ticket-1.md`),
+      "",
+    );
+
+    assert.strictEqual(resolveEditorConnectionScope(document.uri, scopeA), scopeA);
+    assert.strictEqual(
+      resolveEditorConnectionScope(document.uri, scopeB),
+      `unresolved:${hashA}`,
+    );
+  });
 });

@@ -21,11 +21,19 @@ const UNRESOLVED_CONNECTION_SCOPE_PREFIX = "unresolved:";
 
 const extractEditorScopeHash = (uri: vscode.Uri): string | undefined => {
   const normalized = uri.path.replace(/\\/g, "/");
-  const directoryMatch = normalized.match(/\/editors\/([a-f0-9]{16})(?:\/|$)/i);
+  // Both the default `.redmine-client/editors/<hash>/` and a configured
+  // storage directory use the hash directory immediately above the file.
+  const directoryMatch = normalized.match(/\/([a-f0-9]{16})\/[^/]+$/i);
   if (directoryMatch?.[1]) {
     return directoryMatch[1].toLowerCase();
   }
-  return path.posix.basename(normalized).match(/^redmine-client-([a-f0-9]{16})-/i)?.[1]?.toLowerCase();
+  return path.posix.basename(normalized)
+    .match(/^redmine-client-([a-f0-9]{16})-/i)?.[1]?.toLowerCase();
+};
+
+const hasEditorFilename = (uri: vscode.Uri): boolean => {
+  const basename = path.posix.basename(uri.path.replace(/\\/g, "/"));
+  return /^(?:project-\d+_ticket-\d+|redmine-client-(?:[a-f0-9]{16}-)?new-(?:ticket|comment-\d+))/.test(basename);
 };
 
 /**
@@ -39,7 +47,7 @@ export const resolveEditorConnectionScope = (
 ): string => {
   const storedHash = extractEditorScopeHash(uri);
   if (!storedHash) {
-    return currentScope;
+    return hasEditorFilename(uri) ? `${UNRESOLVED_CONNECTION_SCOPE_PREFIX}unknown` : currentScope;
   }
   return storedHash === getConnectionScopeHash(currentScope)
     ? currentScope
@@ -154,7 +162,14 @@ export const registerTicketEditor = (
 };
 
 export const registerNewTicketDraft = (editor: vscode.TextEditor): TicketEditorRecord =>
-  registerTicketEditor(NEW_TICKET_DRAFT_ID, editor, "primary", "ticket");
+  registerTicketEditor(
+    NEW_TICKET_DRAFT_ID,
+    editor,
+    "primary",
+    "ticket",
+    undefined,
+    getCurrentConnectionScope(),
+  );
 
 export const registerTicketDocument = (
   ticketId: number,
@@ -221,7 +236,14 @@ export const registerNewCommentDraft = (
   ticketId: number,
   editor: vscode.TextEditor,
 ): TicketEditorRecord =>
-  registerTicketEditor(ticketId, editor, "primary", "commentDraft");
+  registerTicketEditor(
+    ticketId,
+    editor,
+    "primary",
+    "commentDraft",
+    undefined,
+    getCurrentConnectionScope(),
+  );
 
 export const getNewCommentDraftUri = (ticketId: number): vscode.Uri | undefined => {
   const record = getCommentDraftRecord(ticketId);
