@@ -5,14 +5,20 @@ import { clearRegistry, registerTicketEditor } from "../views/ticketEditorRegist
 import {
   clearTicketDrafts,
   getTicketDraft,
+  initializeDraftStore,
   initializeTicketDraft,
 } from "../views/ticketDraftStore";
 import { buildTicketEditorContent } from "../views/ticketEditorContent";
 import { buildIssueMetadataFixture } from "./helpers/ticketMetadataFixtures";
 import { createEditorStub } from "./helpers/editorStubs";
 import { getCurrentConnectionScope } from "../config/connectionScope";
+import { createInMemoryDraftStorage } from "../views/draftPersistence";
 
 suite("syncEditorToRedmine — draft status management", () => {
+  setup(() => {
+    initializeDraftStore(createInMemoryDraftStorage(), getCurrentConnectionScope());
+  });
+
   teardown(() => {
     clearRegistry();
     clearTicketDrafts();
