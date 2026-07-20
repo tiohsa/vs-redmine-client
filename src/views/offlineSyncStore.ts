@@ -107,8 +107,7 @@ const persist = (scope = activeScope): void => {
   notifyQueueChanged();
 };
 
-function loadQueue(storage: Memento, storageKey: string): OfflineSyncQueue {
-  const raw = storage.get<SerializedQueue>(storageKey);
+const deserializeQueue = (raw: SerializedQueue | undefined): OfflineSyncQueue => {
   return {
     tickets: new Map(
       raw && Array.isArray(raw.tickets)
@@ -130,6 +129,10 @@ function loadQueue(storage: Memento, storageKey: string): OfflineSyncQueue {
         ? raw.newTickets.filter((t) => t !== null && typeof t === "object")
         : [],
   };
+};
+
+function loadQueue(storage: Memento, storageKey: string): OfflineSyncQueue {
+  return deserializeQueue(storage.get<SerializedQueue>(storageKey));
 }
 
 export const initializeOfflineSyncStore = (storage: Memento, scope?: string): void => {
@@ -143,10 +146,7 @@ export const initializeOfflineSyncStore = (storage: Memento, scope?: string): vo
     void storage.update(activeStorageKey, legacy);
     void storage.update(STORAGE_KEY, undefined);
   }
-  queuesByScope.set(
-    activeScope,
-    loadQueue(storage, scoped ? activeStorageKey : legacy ? STORAGE_KEY : activeStorageKey),
-  );
+  queuesByScope.set(activeScope, deserializeQueue(scoped ?? legacy));
 };
 
 /** 接続先ごとのキューへ切り替え、別Redmineの未送信データを混在させない。 */

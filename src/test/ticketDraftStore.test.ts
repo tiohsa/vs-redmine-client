@@ -13,6 +13,7 @@ import { buildIssueMetadataFixture } from "./helpers/ticketMetadataFixtures";
 suite("Ticket draft store", () => {
   teardown(() => {
     clearTicketDrafts();
+    initializeDraftStore(createInMemoryDraftStorage());
   });
 
   test("initializes and updates draft state", () => {
