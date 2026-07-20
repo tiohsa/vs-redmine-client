@@ -1,7 +1,7 @@
 # 接続スコープ固定と旧形式編集ファイル対応 実装判断ログ
 
 日付: 2026-07-21
-ステータス: 記録中
+ステータス: 完了
 プロジェクトルート: `/home/glorydays/projects/src/ts/pr`
 参照元: ユーザープロンプトおよび `docs/planning/2026-07-21-connection-scope-and-legacy-editors.md`
 実装対象: 新規チケット・コメント同期、編集ファイル接続スコープ、回帰テスト、バージョン
@@ -92,13 +92,13 @@
 
 ## 妥協点と残課題
 
-GitHub Actionsの更新後CI最終結果は、プッシュ後に確認する。
+GitHub Actionsの更新後CI最終結果は成功した。GitHub最終レビューコメントもPR #52へ登録した。
 
 ## 検証と制約
 
 - 実行した検証: `pnpm install --frozen-lockfile`、`pnpm run compile-tests`、`pnpm run compile`、`pnpm run lint`、`pnpm test`（759 passing）。
-- 実行できなかった検証: GitHub Actionsの更新後CI最終結果。PR #52 のCI run `29755068015` は確認時点で `pending`。
+- 実行した検証: GitHub Actions CI run `29756618740` は成功、PR #52 はReady for review・CLEAN。最終レビューコメントIDは `4736531255`。
 
 ## 結果
 
-接続スコープ固定、旧形式ファイルの明示割当、APIキー固定、依存関係伝播、回帰テスト、`0.5.4` 更新を完了した。ローカル検証は成功し、PR #52 は本文更新済み・Draft解除済みで、GitHub Actions CIの完了を待っている。
+接続スコープ固定、旧形式ファイルの明示割当、APIキー固定、依存関係伝播、回帰テスト、`0.5.4` 更新を完了した。ローカル検証とGitHub Actions CI、最終レビューコメントを完了した。
