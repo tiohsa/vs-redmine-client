@@ -6,7 +6,9 @@ import {
   addOfflineNewTicket,
   clearOfflineSyncQueue,
   replaceOfflineSyncQueue,
+  removeOfflineTicketUpdate,
   getOfflineSyncQueue,
+  switchOfflineSyncStore,
 } from "../views/offlineSyncStore";
 import { createTestMemento } from "./helpers/vscodeMemento";
 import { buildIssueMetadataFixture } from "./helpers/ticketMetadataFixtures";
@@ -161,5 +163,66 @@ suite("offlineSyncStore — workspaceState 永続化", () => {
     assert.strictEqual(q.tickets.size, 0);
     assert.strictEqual(q.comments.length, 0);
     assert.strictEqual(q.newTickets.length, 0);
+  });
+
+  test("baseUrlごとに未送信キューを隔離し、切り戻しと再起動で復元する", () => {
+    const memento = createTestMemento();
+    initializeOfflineSyncStore(memento, "https://old.example/redmine");
+    addOfflineTicketUpdate(1, ticketUpdate(1));
+
+    switchOfflineSyncStore("https://new.example/redmine");
+    assert.strictEqual(getOfflineSyncQueue().tickets.size, 0);
+    addOfflineTicketUpdate(2, ticketUpdate(2));
+
+    switchOfflineSyncStore("https://old.example/redmine");
+    assert.deepStrictEqual(Array.from(getOfflineSyncQueue().tickets.keys()), [1]);
+
+    initializeOfflineSyncStore(memento, "https://new.example/redmine");
+    assert.deepStrictEqual(Array.from(getOfflineSyncQueue().tickets.keys()), [2]);
+  });
+
+  test("同一IDを持つ接続先別キューを明示スコープで独立操作する", () => {
+    const memento = createTestMemento();
+    const scopeA = "https://a.example/redmine/";
+    const scopeB = "https://b.example/redmine/";
+    initializeOfflineSyncStore(memento, scopeA);
+    addOfflineTicketUpdate(1, { ...ticketUpdate(1), subject: "A" }, scopeA);
+    addOfflineTicketUpdate(1, { ...ticketUpdate(1), subject: "B" }, scopeB);
+
+    removeOfflineTicketUpdate(1, scopeA);
+
+    assert.strictEqual(getOfflineSyncQueue(scopeA).tickets.has(1), false);
+    assert.strictEqual(getOfflineSyncQueue(scopeB).tickets.get(1)?.subject, "B");
+  });
+
+  test("逆順で完了した旧接続先処理が現在接続先キューを削除しない", async () => {
+    const memento = createTestMemento();
+    const scopeA = "https://a.example/redmine/";
+    const scopeB = "https://b.example/redmine/";
+    initializeOfflineSyncStore(memento, scopeA);
+    addOfflineTicketUpdate(1, ticketUpdate(1), scopeA);
+    addOfflineTicketUpdate(1, ticketUpdate(1), scopeB);
+
+    const oldCompletion = Promise.resolve().then(() => removeOfflineTicketUpdate(1, scopeA));
+    switchOfflineSyncStore(scopeB);
+    await oldCompletion;
+
+    assert.strictEqual(getOfflineSyncQueue(scopeA).tickets.has(1), false);
+    assert.strictEqual(getOfflineSyncQueue(scopeB).tickets.has(1), true);
+  });
+
+  test("旧形式キューを現在スコープへ移行し再起動後も復元する", () => {
+    const memento = createTestMemento();
+    void memento.update("redmine.offlineSyncQueue", {
+      tickets: [[5, ticketUpdate(5)]],
+      comments: [],
+      newTickets: [],
+    });
+    const scope = "https://legacy.example/redmine/";
+
+    initializeOfflineSyncStore(memento, scope);
+    assert.strictEqual(getOfflineSyncQueue(scope).tickets.has(5), true);
+    initializeOfflineSyncStore(memento, scope);
+    assert.strictEqual(getOfflineSyncQueue(scope).tickets.has(5), true);
   });
 });

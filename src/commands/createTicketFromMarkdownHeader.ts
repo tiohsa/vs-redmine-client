@@ -10,6 +10,8 @@ import {
   type MarkdownTicketCreatePreview,
   type MarkdownTicketCreateResult,
 } from "../views/markdownTicketCreateService";
+import { getCurrentConnectionScope } from "../config/connectionScope";
+import { runWithConnectionScope } from "../redmine/client";
 
 type CreateTicketFromMarkdownHeaderDeps = {
   getActiveEditor: () => vscode.TextEditor | undefined;
@@ -22,6 +24,7 @@ type CreateTicketFromMarkdownHeaderDeps = {
     document: vscode.TextDocument,
     contentType?: "ticket",
     projectId?: number,
+    connectionScope?: string,
   ) => void;
   showError: (message: string) => void;
   showWarning: (message: string) => void;
@@ -92,6 +95,7 @@ export const createTicketFromMarkdownHeader = async (
   }
 
   const content = editor.document.getText();
+  const operationScope = getCurrentConnectionScope();
   let preview: MarkdownTicketCreatePreview;
   try {
     preview = deps.previewCreation(content);
@@ -110,11 +114,14 @@ export const createTicketFromMarkdownHeader = async (
 
   let result: MarkdownTicketCreateResult;
   try {
-    result = await deps.createTicket({
-      content,
-      projectId: preview.projectId,
-      baseDir: deps.resolveBaseDir(editor),
-    });
+    result = await runWithConnectionScope(
+      operationScope,
+      () => deps.createTicket({
+        content,
+        projectId: preview.projectId,
+        baseDir: deps.resolveBaseDir(editor),
+      }),
+    );
   } catch (error) {
     deps.showError(error instanceof Error ? error.message : vscode.l10n.t("An unexpected error occurred."));
     return;
@@ -141,6 +148,12 @@ export const createTicketFromMarkdownHeader = async (
     return;
   }
 
-  deps.registerTicketDocument(result.issueId, editor.document, "ticket", result.preview.projectId);
+  deps.registerTicketDocument(
+    result.issueId,
+    editor.document,
+    "ticket",
+    result.preview.projectId,
+    operationScope,
+  );
   deps.showSuccess(vscode.l10n.t("Redmine ticket created (#{0}).", result.issueId));
 };

@@ -2,6 +2,7 @@ import * as assert from "assert";
 import * as vscode from "vscode";
 import {
   clearRegistry,
+  assignEditorConnectionScope,
   getCommentIdForDraftUri,
   getLastActiveEditor,
   getNewTicketDraftUri,
@@ -24,9 +25,13 @@ import {
   registerNewCommentDraft,
   registerNewTicketDraft,
   registerTicketEditor,
+  refreshEditorConnectionScopes,
+  resolveEditorConnectionScope,
+  getConnectionScopeForDocument,
   removeTicketEditorByDocument,
   removeTicketEditorByUri,
 } from "../views/ticketEditorRegistry";
+import { getConnectionScopeHash } from "../config/connectionScope";
 import { createDocumentStub, createEditorStub } from "./helpers/editorStubs";
 
 suite("Ticket editor registry", () => {
@@ -88,6 +93,18 @@ suite("Ticket editor registry", () => {
 
     assert.strictEqual(getTicketIdForDocument(primary.document), 5);
     assert.strictEqual(getProjectIdForDocument(primary.document), 20);
+  });
+
+  test("新規ドラフト登録は明示された接続スコープを保持する", () => {
+    const scope = "https://draft.example/redmine/";
+    const ticketEditor = createEditorStub(vscode.Uri.parse("untitled:redmine-client-new-ticket.md"), "");
+    const commentEditor = createEditorStub(vscode.Uri.parse("untitled:redmine-client-new-comment-5.md"), "");
+
+    registerNewTicketDraft(ticketEditor, scope);
+    registerNewCommentDraft(5, commentEditor, scope);
+
+    assert.strictEqual(getConnectionScopeForDocument(ticketEditor.document), scope);
+    assert.strictEqual(getConnectionScopeForDocument(commentEditor.document), scope);
   });
 
   test("prefers non-draft record when editor mapping is stale", () => {
@@ -216,5 +233,70 @@ suite("Ticket editor registry", () => {
       "untitled:C:\\tmp\\redmine-client-new-ticket.md",
     );
     assert.strictEqual(resolved, NEW_TICKET_DRAFT_ID);
+  });
+
+  test("同一ticket IDのエディターを接続スコープごとに分離する", () => {
+    const scopeA = "https://a.example/redmine/";
+    const scopeB = "https://b.example/redmine/";
+    const editorA = createEditorStub(vscode.Uri.parse("file:/a/ticket-1.md"), "A");
+    const editorB = createEditorStub(vscode.Uri.parse("file:/b/ticket-1.md"), "B");
+    registerTicketEditor(1, editorA, "primary", "ticket", undefined, scopeA);
+    registerTicketEditor(1, editorB, "primary", "ticket", undefined, scopeB);
+
+    assert.deepStrictEqual(getTicketEditors(1, scopeA).map((record) => record.uri), [
+      editorA.document.uri.toString(),
+    ]);
+    assert.deepStrictEqual(getTicketEditors(1, scopeB).map((record) => record.uri), [
+      editorB.document.uri.toString(),
+    ]);
+  });
+
+  test("旧形式ファイルは明示割当まで未解決のまま保持する", () => {
+    const scope = "https://current.example/redmine/";
+    const document = createDocumentStub(
+      vscode.Uri.parse("file:/workspace/project-1_ticket-1.md"),
+      "",
+    );
+
+    const unresolved = "unresolved:unknown";
+    assert.strictEqual(resolveEditorConnectionScope(document.uri, scope), unresolved);
+    const editor = { document } as vscode.TextEditor;
+    registerTicketDocument(1, document, "ticket", undefined, unresolved);
+    assert.strictEqual(assignEditorConnectionScope(editor, scope), true);
+    assert.strictEqual(getConnectionScopeForDocument(document), scope);
+  });
+
+  test("再起動復元された別接続先ファイルは切り戻すまで所有スコープを付与しない", () => {
+    const scopeA = "https://a.example/redmine/";
+    const scopeB = "https://b.example/redmine/";
+    const hashA = getConnectionScopeHash(scopeA);
+    const document = createDocumentStub(
+      vscode.Uri.parse(`file:/workspace/.redmine-client/editors/${hashA}/ticket-1.md`),
+      "",
+    );
+
+    const unresolvedScope = `unresolved:${hashA}`;
+    assert.strictEqual(resolveEditorConnectionScope(document.uri, scopeB), unresolvedScope);
+    registerTicketDocument(1, document, "ticket", undefined, unresolvedScope);
+    refreshEditorConnectionScopes(scopeB);
+    assert.strictEqual(getConnectionScopeForDocument(document), unresolvedScope);
+    refreshEditorConnectionScopes(scopeA);
+    assert.strictEqual(getConnectionScopeForDocument(document), scopeA);
+  });
+
+  test("設定済み保存先の接続ハッシュディレクトリを復元する", () => {
+    const scopeA = "https://a.example/redmine/";
+    const scopeB = "https://b.example/redmine/";
+    const hashA = getConnectionScopeHash(scopeA);
+    const document = createDocumentStub(
+      vscode.Uri.parse(`file:/custom/editor-store/${hashA}/project-1_ticket-1.md`),
+      "",
+    );
+
+    assert.strictEqual(resolveEditorConnectionScope(document.uri, scopeA), scopeA);
+    assert.strictEqual(
+      resolveEditorConnectionScope(document.uri, scopeB),
+      `unresolved:${hashA}`,
+    );
   });
 });

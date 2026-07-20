@@ -11,6 +11,7 @@ export type TicketEditorDefaults = {
 };
 
 export interface TicketEditorRecord {
+  connectionScope: string;
   ticketId: number;
   projectId?: number;
   uri: string;

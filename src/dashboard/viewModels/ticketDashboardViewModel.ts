@@ -1,6 +1,7 @@
 import { Ticket } from "../../redmine/types";
 import { getTicketDraft } from "../../views/ticketDraftStore";
 import { getOfflineSyncQueue } from "../../views/offlineSyncStore";
+import { getCurrentConnectionScope } from "../../config/connectionScope";
 import { buildTree } from "../../views/treeBuilder";
 import { TreeNode, TreeSource } from "../../views/treeTypes";
 import type { DashboardSyncState, DashboardTicketDetail, DashboardTicketNode } from "../dashboardProtocol";
@@ -17,7 +18,7 @@ export const resolveTicketSyncState = (ticketId: number): DashboardSyncState => 
       case "Draft": return "Draft";
     }
   }
-  const queue = getOfflineSyncQueue();
+  const queue = getOfflineSyncQueue(getCurrentConnectionScope());
   if (queue.tickets.has(ticketId)) {
     return "Queued";
   }

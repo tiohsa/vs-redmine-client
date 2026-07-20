@@ -5,13 +5,22 @@ import { Comment } from "../redmine/types";
 import { getCommentLimitGuidance, validateComment } from "../utils/commentValidation";
 import { showError, showInfo } from "../utils/notifications";
 import { clearCommentDraft, setCommentDraft } from "../views/commentDraftStore";
-import { getEditorContentType, getTicketIdForEditor } from "../views/ticketEditorRegistry";
+import {
+  getConnectionScopeForEditor,
+  getEditorContentType,
+  getTicketIdForEditor,
+} from "../views/ticketEditorRegistry";
 import {
   buildMarkdownImageUploadFailureMessage,
   hasMarkdownImageUploadFailure,
   processMarkdownImageUploads,
 } from "../utils/markdownImageUpload";
 import { resolveEditorBaseDir } from "../utils/editorBaseDir";
+import {
+  CONNECTION_SCOPE_MISMATCH_MESSAGE,
+  getCurrentConnectionScope,
+} from "../config/connectionScope";
+import { runWithConnectionScope } from "../redmine/client";
 
 export interface EditCommentDependencies {
   getActiveEditor: () => vscode.TextEditor | undefined;
@@ -66,13 +75,22 @@ export const editComment = async (
     return;
   }
 
+  const operationScope = getConnectionScopeForEditor(editor) ?? getCurrentConnectionScope();
+  if (operationScope !== getCurrentConnectionScope()) {
+    deps.showError(CONNECTION_SCOPE_MISMATCH_MESSAGE);
+    return;
+  }
+
   const updated = editor.document.getText();
-  deps.setCommentDraft(ticketId, updated);
-  const uploadResult = await processMarkdownImageUploads({
-    content: updated,
-    baseDir: resolveEditorBaseDir({ editor }),
-    uploadFile: deps.uploadFile,
-  });
+  deps.setCommentDraft(ticketId, updated, operationScope);
+  const uploadResult = await runWithConnectionScope(
+    operationScope,
+    () => processMarkdownImageUploads({
+      content: updated,
+      baseDir: resolveEditorBaseDir({ editor }),
+      uploadFile: deps.uploadFile,
+    }),
+  );
   if (hasMarkdownImageUploadFailure(uploadResult.summary)) {
     deps.showError(buildMarkdownImageUploadFailureMessage(uploadResult.summary));
     return;
@@ -86,13 +104,16 @@ export const editComment = async (
   }
 
   try {
-    await deps.updateComment(
-      comment.id,
-      nextContent,
-      uploadResult.uploads.length > 0 ? uploadResult.uploads : undefined,
+    await runWithConnectionScope(
+      operationScope,
+      () => deps.updateComment(
+        comment.id,
+        nextContent,
+        uploadResult.uploads.length > 0 ? uploadResult.uploads : undefined,
+      ),
     );
     deps.showInfo(vscode.l10n.t("Comment updated successfully."));
-    deps.clearCommentDraft(ticketId);
+    deps.clearCommentDraft(ticketId, operationScope);
   } catch (error) {
     deps.showError((error as Error).message);
   }

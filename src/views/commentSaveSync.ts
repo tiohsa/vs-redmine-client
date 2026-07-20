@@ -260,6 +260,7 @@ const fetchPersistedCommentInfo = async (
 };
 
 export const finalizeNewCommentDraftState = (input: {
+  operationScope?: string;
   editor: vscode.TextEditor;
   ticketId: number;
   projectId: number;
@@ -268,10 +269,17 @@ export const finalizeNewCommentDraftState = (input: {
   setEditorContentType(input.editor, "comment");
   setEditorProjectId(input.editor, input.projectId);
   setEditorCommentId(input.editor, input.commentId);
-  ensureCommentEdit(input.commentId, input.ticketId, input.editor.document.getText());
+  ensureCommentEdit(
+    input.commentId,
+    input.ticketId,
+    input.editor.document.getText(),
+    undefined,
+    input.operationScope,
+  );
 };
 
 export const finalizeNewCommentDraftDocument = (input: {
+  operationScope?: string;
   document: vscode.TextDocument;
   ticketId: number;
   projectId: number;
@@ -282,11 +290,19 @@ export const finalizeNewCommentDraftDocument = (input: {
     input.commentId,
     input.document,
     input.projectId,
+    input.operationScope,
   );
-  ensureCommentEdit(input.commentId, input.ticketId, input.document.getText());
+  ensureCommentEdit(
+    input.commentId,
+    input.ticketId,
+    input.document.getText(),
+    undefined,
+    input.operationScope,
+  );
 };
 
 export const syncCommentDraft = async (input: {
+  operationScope?: string;
   commentId: number;
   content: string;
   editor?: vscode.TextEditor;
@@ -298,7 +314,7 @@ export const syncCommentDraft = async (input: {
     if (!validation.valid) {
       return buildResult("failed", validation.message ?? "Invalid comment.");
     }
-    const edit = getCommentEdit(input.commentId);
+    const edit = getCommentEdit(input.commentId, input.operationScope);
     if (!edit) {
       return buildResult("failed", "Missing comment edit state.");
     }
@@ -311,15 +327,20 @@ export const syncCommentDraft = async (input: {
       body: input.content,
       baseDir,
       documentUri: input.documentUri?.toString() ?? input.editor?.document.uri.toString(),
-    });
-    updateCommentEdit(input.commentId, input.content, edit.lastKnownRemoteUpdatedAt);
+    }, input.operationScope);
+    updateCommentEdit(
+      input.commentId,
+      input.content,
+      edit.lastKnownRemoteUpdatedAt,
+      input.operationScope,
+    );
     if (input.editor) {
       setEditorDisplaySource(input.editor, "saved");
     }
     return buildResult("queued", "Saved for offline sync.");
   }
   const deps = { ...defaultDeps, ...input.deps };
-  const edit = getCommentEdit(input.commentId);
+  const edit = getCommentEdit(input.commentId, input.operationScope);
   if (!edit) {
     return buildResult("failed", "Missing comment edit state.");
   }
@@ -361,7 +382,7 @@ export const syncCommentDraft = async (input: {
     });
   }
 
-  updateCommentEdit(input.commentId, nextContent);
+  updateCommentEdit(input.commentId, nextContent, undefined, input.operationScope);
   if (input.editor && nextContent !== input.content) {
     await applyEditorContent(input.editor, nextContent);
   }
@@ -369,6 +390,7 @@ export const syncCommentDraft = async (input: {
 };
 
 export const syncNewCommentDraft = async (input: {
+  operationScope?: string;
   ticketId: number;
   content: string;
   editor?: vscode.TextEditor;
@@ -387,7 +409,7 @@ export const syncNewCommentDraft = async (input: {
       body: input.content,
       baseDir,
       documentUri: input.documentUri?.toString() ?? input.editor?.document.uri.toString(),
-    });
+    }, input.operationScope);
     if (input.editor) {
       setEditorDisplaySource(input.editor, "saved");
     }
@@ -431,6 +453,7 @@ export const syncNewCommentDraft = async (input: {
 
 export const saveCommentDraftLocally = (
   editor: vscode.TextEditor,
+  operationScope?: string,
 ): CommentSaveResult | undefined => {
   if (!isTicketEditor(editor)) { return undefined; }
   const contentType = getEditorContentType(editor);
@@ -438,18 +461,19 @@ export const saveCommentDraftLocally = (
   const ticketId = getTicketIdForEditor(editor);
   if (!ticketId) { return undefined; }
   const body = editor.document.getText();
-  setCommentDraft(ticketId, body);
+  setCommentDraft(ticketId, body, operationScope);
   const commentId = getCommentIdForEditor(editor);
   addOfflineCommentUpdate({
     ticketId,
     commentId,
     body,
     documentUri: editor.document.uri.toString(),
-  });
+  }, operationScope);
   return buildResult("queued", vscode.l10n.t("Saved locally. Run a sync command to apply changes to Redmine."));
 };
 
 export const saveCommentDocumentLocally = (input: {
+  operationScope?: string;
   ticketId: number;
   commentId?: number;
   content: string;
@@ -460,15 +484,16 @@ export const saveCommentDocumentLocally = (input: {
     commentId: input.commentId,
     body: input.content,
     documentUri: input.documentUri.toString(),
-  });
+  }, input.operationScope);
   return buildResult("queued", vscode.l10n.t("Saved locally. Run a sync command to apply changes to Redmine."));
 };
 
 export const handleCommentEditorSave = async (
   editor: vscode.TextEditor,
   _deps?: Partial<CommentSaveDependencies>,
+  operationScope?: string,
 ): Promise<CommentSaveResult | undefined> => {
-  return saveCommentDraftLocally(editor);
+  return saveCommentDraftLocally(editor, operationScope);
 };
 
 const detectHashBasedConflict = async (input: {
@@ -516,6 +541,7 @@ const mapHashBasedUpdateError = (mapped: CommentSaveResult): CommentSaveResult =
 };
 
 const applyQueuedExistingComment = async (input: {
+  operationScope?: string;
   deps: CommentSaveDependencies;
   update: OfflineCommentUpdate & { commentId: number };
   nextContent: string;
@@ -559,7 +585,12 @@ const applyQueuedExistingComment = async (input: {
     return update.sourceNotesHash ? mapHashBasedUpdateError(mapped) : mapped;
   }
 
-  updateCommentEdit(update.commentId, nextContent, update.lastKnownRemoteUpdatedAt);
+  updateCommentEdit(
+    update.commentId,
+    nextContent,
+    update.lastKnownRemoteUpdatedAt,
+    input.operationScope,
+  );
   return buildResult("success", "Comment updated.", { uploadSummary });
 };
 
@@ -592,6 +623,7 @@ const applyQueuedNewComment = async (input: {
 export const applyQueuedCommentUpdate = async (input: {
   update: OfflineCommentUpdate;
   deps?: Partial<CommentSaveDependencies>;
+  operationScope?: string;
 }): Promise<CommentSaveResult> => {
   const deps = { ...defaultDeps, ...input.deps };
   const update = input.update;
@@ -610,6 +642,7 @@ export const applyQueuedCommentUpdate = async (input: {
       nextContent,
       uploads,
       uploadSummary,
+      operationScope: input.operationScope,
     });
   }
 
@@ -623,6 +656,7 @@ export const applyQueuedCommentUpdate = async (input: {
 };
 
 export const reloadCommentEditor = async (input: {
+  operationScope?: string;
   ticketId: number;
   commentId: number;
   editor: vscode.TextEditor;
@@ -637,7 +671,7 @@ export const reloadCommentEditor = async (input: {
     }
 
     await deps.applyEditorContent(input.editor, comment.body);
-    updateCommentEdit(input.commentId, comment.body);
+    updateCommentEdit(input.commentId, comment.body, undefined, input.operationScope);
     return buildResult("success", "Comment reloaded.");
   } catch (error) {
     return mapErrorToResult(error);

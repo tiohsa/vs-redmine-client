@@ -36,12 +36,13 @@ const resolveProjectIdForEditor = (editor: vscode.TextEditor): number | undefine
   resolveProjectIdForCreate(getProjectIdForEditor(editor));
 
 export const syncNewTicketDraft = async (input: {
+  operationScope?: string;
   editor: vscode.TextEditor;
   deps?: Partial<TicketCreateDependencies>;
   applyContent?: (editor: vscode.TextEditor, content: string) => Promise<void>;
 }): Promise<TicketSaveResult> => {
   if (getOfflineSyncMode() === "manual") {
-    return queueNewTicketDraft({ editor: input.editor });
+    return queueNewTicketDraft({ editor: input.editor, operationScope: input.operationScope });
   }
   const deps = { ...defaultCreateDeps, ...input.deps };
   const baseDir = resolveEditorBaseDir({ editor: input.editor });
@@ -80,6 +81,7 @@ export const syncNewTicketDraft = async (input: {
   }
 
   await rewriteNewTicketEditorToTicketMode({
+    operationScope: input.operationScope,
     editor: input.editor,
     createdId,
     projectId,
@@ -92,6 +94,7 @@ export const syncNewTicketDraft = async (input: {
 };
 
 export const syncNewTicketDraftContent = async (input: {
+  operationScope?: string;
   content: string;
   projectId?: number;
   documentUri?: vscode.Uri;
@@ -110,7 +113,14 @@ export const syncNewTicketDraftContent = async (input: {
     deps,
   });
   if (result.status === "created" && createdId && parsed) {
-    updateDraftAfterSave(createdId, parsed.subject, parsed.description, parsed.metadata);
+    updateDraftAfterSave(
+      createdId,
+      parsed.subject,
+      parsed.description,
+      parsed.metadata,
+      undefined,
+      input.operationScope,
+    );
     input.onCreated?.(createdId, parsed);
   }
   return result;
@@ -239,6 +249,7 @@ export const createTicketFromContent = async (input: {
 };
 
 export const createTicketFromQueuedContent = async (input: {
+  operationScope?: string;
   content: string;
   projectId?: number;
   baseDir?: string;
@@ -261,6 +272,8 @@ export const createTicketFromQueuedContent = async (input: {
       output.parsed.subject,
       output.parsed.description,
       output.parsed.metadata,
+      undefined,
+      input.operationScope,
     );
   }
   return output;

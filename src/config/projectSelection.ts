@@ -32,3 +32,9 @@ export const setProjectSelection = async (id: number, name: string): Promise<voi
     vscode.ConfigurationTarget.Global,
   );
 };
+
+export const clearProjectSelection = async (): Promise<void> => {
+  const config = vscode.workspace.getConfiguration(CONFIG_SECTION);
+  await config.update("selectedProjectId", undefined, vscode.ConfigurationTarget.Global);
+  await config.update("selectedProjectName", undefined, vscode.ConfigurationTarget.Global);
+};

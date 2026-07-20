@@ -7,12 +7,66 @@ import {
   TicketEditorRecord,
 } from "./ticketEditorTypes";
 import { clearEditorDisplayState, setEditorDisplayState } from "./viewState";
+import {
+  getConnectionScopeHash,
+  getCurrentConnectionScope,
+} from "../config/connectionScope";
 
 const editorByUri = new Map<string, TicketEditorRecord>();
 let editorByDocument = new WeakMap<vscode.TextDocument, TicketEditorRecord>();
 let editorByEditor = new WeakMap<vscode.TextEditor, TicketEditorRecord>();
 const editorsByTicket = new Map<number, Set<string>>();
 export const NEW_TICKET_DRAFT_ID = -1;
+const UNRESOLVED_CONNECTION_SCOPE_PREFIX = "unresolved:";
+
+const extractEditorScopeHash = (uri: vscode.Uri): string | undefined => {
+  const normalized = uri.path.replace(/\\/g, "/");
+  // Both the default `.redmine-client/editors/<hash>/` and a configured
+  // storage directory use the hash directory immediately above the file.
+  const directoryMatch = normalized.match(/\/([a-f0-9]{16})\/[^/]+$/i);
+  if (directoryMatch?.[1]) {
+    return directoryMatch[1].toLowerCase();
+  }
+  return path.posix.basename(normalized)
+    .match(/^redmine-client-([a-f0-9]{16})-/i)?.[1]?.toLowerCase();
+};
+
+const hasEditorFilename = (uri: vscode.Uri): boolean => {
+  const basename = path.posix.basename(uri.path.replace(/\\/g, "/"));
+  return /^(?:project-\d+_ticket-\d+|redmine-client-(?:[a-f0-9]{16}-)?new-(?:ticket|comment-\d+))/.test(basename);
+};
+
+/**
+ * 再起動で復元されたファイルは、パスのスコープハッシュが現在の接続先と
+ * 一致するときだけ現在スコープへ所属させる。旧形式は接続先を判定できない
+ * ため、明示割当まで `unresolved:unknown` として同期対象外にする。
+ */
+export const resolveEditorConnectionScope = (
+  uri: vscode.Uri,
+  currentScope = getCurrentConnectionScope(),
+): string => {
+  const storedHash = extractEditorScopeHash(uri);
+  if (!storedHash) {
+    // Legacy editor files predate connection-scoped storage. Keep them
+    // unresolved until the user explicitly assigns the connection.
+    return hasEditorFilename(uri) ? `${UNRESOLVED_CONNECTION_SCOPE_PREFIX}unknown` : currentScope;
+  }
+  return storedHash === getConnectionScopeHash(currentScope)
+    ? currentScope
+    : `${UNRESOLVED_CONNECTION_SCOPE_PREFIX}${storedHash}`;
+};
+
+export const refreshEditorConnectionScopes = (
+  currentScope = getCurrentConnectionScope(),
+): void => {
+  const currentHash = getConnectionScopeHash(currentScope);
+  for (const record of editorByUri.values()) {
+    const storedHash = extractEditorScopeHash(vscode.Uri.parse(record.uri));
+    if (storedHash === currentHash) {
+      record.connectionScope = currentScope;
+    }
+  }
+};
 
 const syncRecordUri = (record: TicketEditorRecord, nextUri: string): void => {
   if (record.uri === nextUri) {
@@ -83,9 +137,11 @@ export const registerTicketEditor = (
   kind: TicketEditorKind,
   contentType: TicketEditorContentType = "ticket",
   projectId?: number,
+  connectionScope = resolveEditorConnectionScope(editor.document.uri),
 ): TicketEditorRecord => {
   const uri = editor.document.uri.toString();
   const record: TicketEditorRecord = {
+    connectionScope,
     ticketId,
     projectId,
     uri,
@@ -107,17 +163,29 @@ export const registerTicketEditor = (
   return record;
 };
 
-export const registerNewTicketDraft = (editor: vscode.TextEditor): TicketEditorRecord =>
-  registerTicketEditor(NEW_TICKET_DRAFT_ID, editor, "primary", "ticket");
+export const registerNewTicketDraft = (
+  editor: vscode.TextEditor,
+  connectionScope = getCurrentConnectionScope(),
+): TicketEditorRecord =>
+  registerTicketEditor(
+    NEW_TICKET_DRAFT_ID,
+    editor,
+    "primary",
+    "ticket",
+    undefined,
+    connectionScope,
+  );
 
 export const registerTicketDocument = (
   ticketId: number,
   document: vscode.TextDocument,
   contentType: TicketEditorContentType = "ticket",
   projectId?: number,
+  connectionScope = resolveEditorConnectionScope(document.uri),
 ): TicketEditorRecord => {
   const uri = document.uri.toString();
   const record: TicketEditorRecord = {
+    connectionScope,
     ticketId,
     projectId,
     uri,
@@ -143,8 +211,15 @@ export const registerCommentDocument = (
   commentId: number,
   document: vscode.TextDocument,
   projectId?: number,
+  connectionScope = getCurrentConnectionScope(),
 ): TicketEditorRecord => {
-  const record = registerTicketDocument(ticketId, document, "comment", projectId);
+  const record = registerTicketDocument(
+    ticketId,
+    document,
+    "comment",
+    projectId,
+    connectionScope,
+  );
   record.commentId = commentId;
   return record;
 };
@@ -165,8 +240,16 @@ const getCommentDraftRecord = (ticketId: number): TicketEditorRecord | undefined
 export const registerNewCommentDraft = (
   ticketId: number,
   editor: vscode.TextEditor,
+  connectionScope = getCurrentConnectionScope(),
 ): TicketEditorRecord =>
-  registerTicketEditor(ticketId, editor, "primary", "commentDraft");
+  registerTicketEditor(
+    ticketId,
+    editor,
+    "primary",
+    "commentDraft",
+    undefined,
+    connectionScope,
+  );
 
 export const getNewCommentDraftUri = (ticketId: number): vscode.Uri | undefined => {
   const record = getCommentDraftRecord(ticketId);
@@ -177,9 +260,14 @@ export const getNewCommentDraftUri = (ticketId: number): vscode.Uri | undefined 
   return vscode.Uri.parse(record.uri);
 };
 
-export const getTicketEditors = (ticketId: number): TicketEditorRecord[] =>
+export const getTicketEditors = (
+  ticketId: number,
+  connectionScope = getCurrentConnectionScope(),
+): TicketEditorRecord[] =>
   Array.from(editorsByTicket.get(ticketId) ?? []).map((uri) => editorByUri.get(uri))
-    .filter((record): record is TicketEditorRecord => Boolean(record));
+    .filter((record): record is TicketEditorRecord =>
+      Boolean(record) && record?.connectionScope === connectionScope
+    );
 
 export const getTrackedTicketIds = (): number[] =>
   Array.from(editorsByTicket.keys());
@@ -389,6 +477,29 @@ export const getCommentIdForUri = (uri: vscode.Uri): number | undefined =>
 export const getEditorContentTypeForUri = (
   uri: vscode.Uri,
 ): TicketEditorContentType | undefined => editorByUri.get(uri.toString())?.contentType;
+
+export const getConnectionScopeForEditor = (
+  editor: vscode.TextEditor,
+): string | undefined => getRecord(editor)?.connectionScope;
+
+export const assignEditorConnectionScope = (
+  editor: vscode.TextEditor,
+  connectionScope = getCurrentConnectionScope(),
+): boolean => {
+  const record = getRecord(editor);
+  if (!record) {
+    return false;
+  }
+  record.connectionScope = connectionScope;
+  return true;
+};
+
+export const getConnectionScopeForDocument = (
+  document: vscode.TextDocument,
+): string | undefined => editorByDocument.get(document)?.connectionScope;
+
+export const getConnectionScopeForUri = (uri: vscode.Uri): string | undefined =>
+  editorByUri.get(uri.toString())?.connectionScope;
 
 export const getCommentIdForEditor = (editor: vscode.TextEditor): number | undefined =>
   getRecord(editor)?.commentId;

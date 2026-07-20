@@ -2,7 +2,7 @@
   "name": "redmine-client",
   "displayName": "%displayName%",
   "description": "%description%",
-  "version": "0.5.2",
+  "version": "0.5.4",
   "publisher": "tiohsa",
   "author": {
     "name": "tiohsa",
@@ -47,6 +47,10 @@
       {
         "command": "redmine-client.showApiKeyStatus",
         "title": "%command.showApiKeyStatus.title%"
+      },
+      {
+        "command": "redmine-client.assignEditorToCurrentConnection",
+        "title": "%command.assignEditorToCurrentConnection.title%"
       },
       {
         "command": "redmine-client.refreshProjects",

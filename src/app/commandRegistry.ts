@@ -30,6 +30,7 @@ import {
   INSERT_REDMINE_TICKET_FRONTMATTER_COMMAND,
 } from "./commandIds";
 import {
+  assignEditorConnectionScope,
   getAllEditorRecords,
   getTicketIdForEditor,
   isTicketEditor,
@@ -487,6 +488,15 @@ export const registerCommands = (
   );
 
   context.subscriptions.push(
+    vscode.commands.registerCommand("redmine-client.assignEditorToCurrentConnection", () => {
+      const editor = vscode.window.activeTextEditor;
+      if (!editor || !isTicketEditor(editor)) {
+        showError(vscode.l10n.t("Open a Redmine editor before assigning its connection."));
+        return;
+      }
+      assignEditorConnectionScope(editor);
+      showSuccess(vscode.l10n.t("Editor assigned to the current Redmine connection."));
+    }),
     vscode.commands.registerCommand("redmine-client.setApiKey", async () => {
       const key = await vscode.window.showInputBox({
         prompt: vscode.l10n.t("Enter Redmine API key"),

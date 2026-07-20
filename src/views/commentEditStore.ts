@@ -1,4 +1,7 @@
+import { getCurrentConnectionScope } from "../config/connectionScope";
+
 export interface CommentEditState {
+  connectionScope: string;
   commentId: number;
   ticketId: number;
   baseBody: string;
@@ -7,25 +10,31 @@ export interface CommentEditState {
   lastKnownRemoteUpdatedAt?: string;
 }
 
-const edits = new Map<number, CommentEditState>();
+const edits = new Map<string, CommentEditState>();
+const editKey = (connectionScope: string, commentId: number): string =>
+  `${connectionScope}\u0000${commentId}`;
 
-export const getCommentEdit = (commentId: number): CommentEditState | undefined =>
-  edits.get(commentId);
+export const getCommentEdit = (
+  commentId: number,
+  connectionScope = getCurrentConnectionScope(),
+): CommentEditState | undefined => edits.get(editKey(connectionScope, commentId));
 
 export const initializeCommentEdit = (
   commentId: number,
   ticketId: number,
   body: string,
   remoteUpdatedAt?: string,
+  connectionScope = getCurrentConnectionScope(),
 ): CommentEditState => {
   const state: CommentEditState = {
+    connectionScope,
     commentId,
     ticketId,
     baseBody: body,
     lastSavedAt: Date.now(),
     lastKnownRemoteUpdatedAt: remoteUpdatedAt,
   };
-  edits.set(commentId, state);
+  edits.set(editKey(connectionScope, commentId), state);
   return state;
 };
 
@@ -34,10 +43,11 @@ export const ensureCommentEdit = (
   ticketId: number,
   body: string,
   remoteUpdatedAt?: string,
+  connectionScope = getCurrentConnectionScope(),
 ): CommentEditState => {
-  const state = edits.get(commentId);
+  const state = getCommentEdit(commentId, connectionScope);
   if (!state) {
-    return initializeCommentEdit(commentId, ticketId, body, remoteUpdatedAt);
+    return initializeCommentEdit(commentId, ticketId, body, remoteUpdatedAt, connectionScope);
   }
 
   state.baseBody = body;
@@ -52,8 +62,9 @@ export const updateCommentEdit = (
   commentId: number,
   body: string,
   remoteUpdatedAt?: string,
+  connectionScope = getCurrentConnectionScope(),
 ): void => {
-  const state = edits.get(commentId);
+  const state = getCommentEdit(commentId, connectionScope);
   if (!state) {
     return;
   }
@@ -66,8 +77,12 @@ export const updateCommentEdit = (
   }
 };
 
-export const setCommentDraftBody = (commentId: number, body: string): void => {
-  const state = edits.get(commentId);
+export const setCommentDraftBody = (
+  commentId: number,
+  body: string,
+  connectionScope = getCurrentConnectionScope(),
+): void => {
+  const state = getCommentEdit(commentId, connectionScope);
   if (!state) {
     return;
   }
@@ -83,8 +98,9 @@ export const setCommentDraftBody = (commentId: number, body: string): void => {
 export const resolveCommentEditorBody = (
   commentId: number,
   savedBody: string,
+  connectionScope = getCurrentConnectionScope(),
 ): { body: string; source: "draft" | "saved" } => {
-  const state = edits.get(commentId);
+  const state = getCommentEdit(commentId, connectionScope);
   if (state?.draftBody) {
     return { body: state.draftBody, source: "draft" };
   }
@@ -92,11 +108,13 @@ export const resolveCommentEditorBody = (
   return { body: savedBody, source: "saved" };
 };
 
-export const clearCommentEdit = (commentId: number): void => {
-  edits.delete(commentId);
+export const clearCommentEdit = (
+  commentId: number,
+  connectionScope = getCurrentConnectionScope(),
+): void => {
+  edits.delete(editKey(connectionScope, commentId));
 };
 
 export const clearCommentEdits = (): void => {
   edits.clear();
 };
-

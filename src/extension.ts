@@ -1,14 +1,14 @@
 import * as vscode from "vscode";
 import { refreshOfflineSyncContext } from "./commands/offlineSyncMode";
 import { initializeApiKeyStore } from "./config/apiKeyStore";
-import { getIgnoreSSLErrors } from "./config/settings";
+import { getBaseUrl, getIgnoreSSLErrors } from "./config/settings";
 import { showWarning } from "./utils/notifications";
 import { initializeDraftStore } from "./views/ticketDraftStore";
 import { createGlobalStateDraftStorage } from "./views/draftPersistence";
 import { initializeNewTicketDraftStore } from "./views/newTicketDraftStore";
-import { initializeOfflineSyncStore } from "./views/offlineSyncStore";
+import { initializeOfflineSyncStore, switchOfflineSyncStore } from "./views/offlineSyncStore";
 import { initializeTicketListSettingsStore } from "./views/ticketListSettingsStore";
-import { isTicketEditor } from "./views/ticketEditorRegistry";
+import { isTicketEditor, refreshEditorConnectionScopes } from "./views/ticketEditorRegistry";
 import { setViewContext } from "./views/viewContext";
 import { registerConflictDiffProvider } from "./views/conflictDiffProvider";
 import { registerViews } from "./app/viewRegistry";
@@ -21,12 +21,17 @@ import {
   registerEditorEvents,
 } from "./app/editorEventController";
 import { registerCommands } from "./app/commandRegistry";
+import { getConnectionScope } from "./config/connectionScope";
 
 export async function activate(context: vscode.ExtensionContext) {
   // ── ストア初期化 ─────────────────────────────────────────────────────────
-  initializeDraftStore(createGlobalStateDraftStorage(context.globalState));
+  let activeBaseUrl = getConnectionScope(getBaseUrl());
+  initializeDraftStore(
+    createGlobalStateDraftStorage(context.globalState, activeBaseUrl),
+    activeBaseUrl,
+  );
   initializeNewTicketDraftStore(context.globalState);
-  initializeOfflineSyncStore(context.workspaceState);
+  initializeOfflineSyncStore(context.workspaceState, activeBaseUrl);
   initializeTicketListSettingsStore(context.workspaceState);
   await initializeApiKeyStore(context.secrets, context.subscriptions);
   registerConflictDiffProvider(context);
@@ -81,6 +86,21 @@ export async function activate(context: vscode.ExtensionContext) {
   void refreshOfflineSyncContext();
   context.subscriptions.push(
     vscode.workspace.onDidChangeConfiguration((event) => {
+      if (event.affectsConfiguration("redmine-client.baseUrl")) {
+        const nextBaseUrl = getConnectionScope(getBaseUrl());
+        if (nextBaseUrl !== activeBaseUrl) {
+          activeBaseUrl = nextBaseUrl;
+          switchOfflineSyncStore(nextBaseUrl);
+          refreshEditorConnectionScopes(nextBaseUrl);
+          initializeDraftStore(
+            createGlobalStateDraftStorage(context.globalState, nextBaseUrl),
+            nextBaseUrl,
+          );
+          void views.dashboardProvider.resetForConnectionChange().catch((err: unknown) => {
+            console.error("[vs-redmine-client] Failed to reset connection state", err);
+          });
+        }
+      }
       if (event.affectsConfiguration("redmine-client.offlineSyncMode")) {
         void refreshOfflineSyncContext();
         views.settingsPresentation.refresh();

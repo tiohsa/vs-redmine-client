@@ -2,9 +2,10 @@ import { getOfflineSyncQueue } from "../../views/offlineSyncStore";
 import { getTicketSummary } from "../../views/ticketSummaryStore";
 import { formatTicketLabel } from "../../views/ticketLabel";
 import type { DashboardUnsyncedItem } from "../dashboardProtocol";
+import { getCurrentConnectionScope } from "../../config/connectionScope";
 
 export const buildUnsyncedDashboardItems = (): DashboardUnsyncedItem[] => {
-  const queue = getOfflineSyncQueue();
+  const queue = getOfflineSyncQueue(getCurrentConnectionScope());
   const items: DashboardUnsyncedItem[] = [];
 
   queue.tickets.forEach((_update, ticketId) => {

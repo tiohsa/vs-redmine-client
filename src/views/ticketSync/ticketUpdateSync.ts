@@ -22,6 +22,7 @@ import type { TicketReloadDependencies, TicketSaveDependencies } from "./types";
 import { buildTicketPreviewContent } from "../ticketPreview";
 
 export interface SyncTicketDraftInput {
+  operationScope?: string;
   ticketId: number;
   content: string;
   editor?: vscode.TextEditor;
@@ -31,6 +32,7 @@ export interface SyncTicketDraftInput {
 }
 
 export interface ReloadTicketEditorInput {
+  operationScope?: string;
   ticketId: number;
   editor: vscode.TextEditor;
   deps?: TicketReloadDependencies;
@@ -43,7 +45,7 @@ export const syncTicketDraft = async (
     return queueTicketDraft(input);
   }
   const deps = { ...defaultDeps, ...input.deps };
-  const draft = getTicketDraft(input.ticketId);
+  const draft = getTicketDraft(input.ticketId, input.operationScope);
   if (!draft) {
     return buildResult("failed", "Missing draft state for ticket.");
   }
@@ -109,7 +111,7 @@ export const syncTicketDraft = async (
     return buildResult("no_change", "No changes to save.", { uploadSummary });
   }
 
-  markDraftStatus(input.ticketId, "Dirty");
+  markDraftStatus(input.ticketId, "Dirty", input.operationScope);
 
   if (draft.lastKnownRemoteUpdatedAt) {
     try {
@@ -118,7 +120,7 @@ export const syncTicketDraft = async (
       }
       const remoteUpdatedAt = remoteDetail.ticket.updatedAt;
       if (remoteUpdatedAt && remoteUpdatedAt !== draft.lastKnownRemoteUpdatedAt) {
-        markDraftStatus(input.ticketId, "Conflict");
+        markDraftStatus(input.ticketId, "Conflict", input.operationScope);
         return buildResult("conflict", "Remote changes detected. Refresh before saving.", {
           conflictContext: {
             ticketId: input.ticketId,
@@ -133,7 +135,7 @@ export const syncTicketDraft = async (
     } catch (error) {
       const result = mapErrorToResult(error);
       if (result.status === "conflict") {
-        markDraftStatus(input.ticketId, "Conflict");
+        markDraftStatus(input.ticketId, "Conflict", input.operationScope);
       }
       return result;
     }
@@ -192,7 +194,7 @@ export const syncTicketDraft = async (
     }
     const result = mapErrorToResult(error);
     if (result.status === "conflict") {
-      markDraftStatus(input.ticketId, "Conflict");
+      markDraftStatus(input.ticketId, "Conflict", input.operationScope);
     }
     return result;
   }
@@ -209,7 +211,14 @@ export const syncTicketDraft = async (
   }
 
   const clearedMetadata: IssueMetadata = { ...metadata, children: [] };
-  updateDraftAfterSave(input.ticketId, subject, description, clearedMetadata, updatedAt);
+  updateDraftAfterSave(
+    input.ticketId,
+    subject,
+    description,
+    clearedMetadata,
+    updatedAt,
+    input.operationScope,
+  );
   if (input.editor) {
     const nextContent = buildTicketEditorContent({
       subject,
@@ -256,6 +265,7 @@ export const reloadTicketEditor = async (
       detail.ticket.description ?? "",
       metadata,
       detail.ticket.updatedAt,
+      input.operationScope,
     );
     return buildResult("success", "Reloaded from Redmine.");
   } catch (error) {

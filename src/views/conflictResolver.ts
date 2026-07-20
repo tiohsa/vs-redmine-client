@@ -85,10 +85,12 @@ export async function openDiffEditor(
 export async function applyRemoteContent(
     context: ConflictContext,
     editor: vscode.TextEditor,
+    operationScope?: string,
 ): Promise<TicketSaveResult> {
     return reloadTicketEditor({
         ticketId: context.ticketId,
         editor,
+        operationScope,
     });
 }
 
@@ -99,8 +101,9 @@ export async function applyRemoteContent(
 export async function forceSaveLocal(
     context: ConflictContext,
     editor: vscode.TextEditor,
+    operationScope?: string,
 ): Promise<TicketSaveResult> {
-    const draft = getTicketDraft(context.ticketId);
+    const draft = getTicketDraft(context.ticketId, operationScope);
     if (!draft) {
         return { status: "failed", message: "Missing draft state for ticket." };
     }
@@ -112,14 +115,16 @@ export async function forceSaveLocal(
         draft.baseDescription,
         draft.baseMetadata,
         context.remoteUpdatedAt,
+        operationScope,
     );
-    markDraftStatus(context.ticketId, "Dirty");
+    markDraftStatus(context.ticketId, "Dirty", operationScope);
 
     // Now sync again with the updated timestamp.
     const result = await syncTicketDraft({
         ticketId: context.ticketId,
         content: editor.document.getText(),
         editor,
+        operationScope,
     });
 
     return result;
@@ -133,6 +138,7 @@ export async function handleConflict(
     result: TicketSaveResult,
     editor: vscode.TextEditor,
     deps: ConflictResolverDeps = defaultDeps,
+    operationScope?: string,
 ): Promise<TicketSaveResult> {
     if (result.status !== "conflict" || !result.conflictContext) {
         return result;
@@ -143,10 +149,10 @@ export async function handleConflict(
 
     switch (resolution) {
         case "local":
-            return deps.forceSaveLocal(context, editor);
+            return deps.forceSaveLocal(context, editor, operationScope);
 
         case "remote":
-            return deps.applyRemoteContent(context, editor);
+            return deps.applyRemoteContent(context, editor, operationScope);
 
         case "diff":
             await deps.openDiffEditor(context, editor);
@@ -236,9 +242,10 @@ export async function openCommentDiffEditor(
 export async function applyRemoteCommentContent(
     context: CommentConflictContext,
     editor: vscode.TextEditor,
+    operationScope?: string,
 ): Promise<CommentSaveResult> {
     await applyEditorContent(editor, context.remoteBody);
-    updateCommentEdit(context.commentId, context.remoteBody);
+    updateCommentEdit(context.commentId, context.remoteBody, undefined, operationScope);
     return { status: "success", message: vscode.l10n.t("Overwritten with remote content.") };
 }
 
@@ -248,20 +255,27 @@ export async function applyRemoteCommentContent(
 export async function forceCommentSaveLocal(
     context: CommentConflictContext,
     editor: vscode.TextEditor,
+    operationScope?: string,
 ): Promise<CommentSaveResult> {
-    const edit = getCommentEdit(context.commentId);
+    const edit = getCommentEdit(context.commentId, operationScope);
     if (!edit) {
         return { status: "failed", message: "Missing comment edit state." };
     }
 
     // Update the base to remote so next save won't detect conflict
-    updateCommentEdit(context.commentId, context.remoteBody, context.remoteUpdatedAt);
+    updateCommentEdit(
+        context.commentId,
+        context.remoteBody,
+        context.remoteUpdatedAt,
+        operationScope,
+    );
 
     // Now sync again
     const result = await syncCommentDraft({
         commentId: context.commentId,
         content: editor.document.getText(),
         editor,
+        operationScope,
     });
 
     return result;
@@ -274,6 +288,7 @@ export async function forceCommentSaveLocal(
 export async function handleCommentConflict(
     result: CommentSaveResult,
     editor: vscode.TextEditor,
+    operationScope?: string,
 ): Promise<CommentSaveResult> {
     if (result.status !== "conflict" || !result.conflictContext) {
         return result;
@@ -284,10 +299,10 @@ export async function handleCommentConflict(
 
     switch (resolution) {
         case "local":
-            return forceCommentSaveLocal(context, editor);
+            return forceCommentSaveLocal(context, editor, operationScope);
 
         case "remote":
-            return applyRemoteCommentContent(context, editor);
+            return applyRemoteCommentContent(context, editor, operationScope);
 
         case "diff":
             await openCommentDiffEditor(context, editor);
@@ -306,4 +321,3 @@ export async function handleCommentConflict(
             };
     }
 }
-

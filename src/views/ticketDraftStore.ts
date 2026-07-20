@@ -5,22 +5,45 @@ import { IssueMetadata, isIssueMetadataEqual } from "./ticketMetadataTypes";
 import { Ticket } from "../redmine/types";
 import { createInMemoryDraftStorage, DraftStorage } from "./draftPersistence";
 
-// インメモリキャッシュ（高速読み取り用）
-let cache = new Map<number, TicketDraftState>();
-let persistentStorage: DraftStorage = createInMemoryDraftStorage();
+let activeScope = "";
+const cachesByScope = new Map<string, Map<number, TicketDraftState>>();
+const storageByScope = new Map<string, DraftStorage>();
+
+const getCache = (scope = activeScope): Map<number, TicketDraftState> => {
+  let cache = cachesByScope.get(scope);
+  if (!cache) {
+    const storage = storageByScope.get(scope) ?? createInMemoryDraftStorage();
+    storageByScope.set(scope, storage);
+    cache = storage.loadAll();
+    cachesByScope.set(scope, cache);
+  }
+  return cache;
+};
+
+const getStorage = (scope = activeScope): DraftStorage => {
+  let storage = storageByScope.get(scope);
+  if (!storage) {
+    storage = createInMemoryDraftStorage();
+    storageByScope.set(scope, storage);
+  }
+  return storage;
+};
 
 /** 起動時に永続ストレージを注入し、保存済みドラフトをキャッシュに読み込む */
-export const initializeDraftStore = (storage: DraftStorage): void => {
-  persistentStorage = storage;
-  cache = storage.loadAll();
+export const initializeDraftStore = (storage: DraftStorage, scope = ""): void => {
+  activeScope = scope;
+  storageByScope.set(scope, storage);
+  cachesByScope.set(scope, storage.loadAll());
 };
 
-const persist = (ticketId: number, draft: TicketDraftState): void => {
-  persistentStorage.save(ticketId, draft);
+const persist = (ticketId: number, draft: TicketDraftState, scope = activeScope): void => {
+  getStorage(scope).save(ticketId, draft);
 };
 
-export const getTicketDraft = (ticketId: number): TicketDraftState | undefined =>
-  cache.get(ticketId);
+export const getTicketDraft = (
+  ticketId: number,
+  scope = activeScope,
+): TicketDraftState | undefined => getCache(scope).get(ticketId);
 
 export interface NewTicketInitialValues {
   subject?: string;
@@ -108,6 +131,7 @@ export const initializeTicketDraft = (
   description: string,
   metadata: IssueMetadata,
   lastKnownRemoteUpdatedAt?: string,
+  scope = activeScope,
 ): TicketDraftState => {
   const draft: TicketDraftState = {
     ticketId,
@@ -118,8 +142,8 @@ export const initializeTicketDraft = (
     lastSyncedAt: Date.now(),
     status: "Synced",
   };
-  cache.set(ticketId, draft);
-  persist(ticketId, draft);
+  getCache(scope).set(ticketId, draft);
+  persist(ticketId, draft, scope);
   return draft;
 };
 
@@ -129,8 +153,9 @@ export const ensureTicketDraft = (
   description: string,
   metadata: IssueMetadata,
   lastKnownRemoteUpdatedAt?: string,
+  scope = activeScope,
 ): TicketDraftState => {
-  const draft = cache.get(ticketId);
+  const draft = getCache(scope).get(ticketId);
   if (!draft) {
     return initializeTicketDraft(
       ticketId,
@@ -138,6 +163,7 @@ export const ensureTicketDraft = (
       description,
       metadata,
       lastKnownRemoteUpdatedAt,
+      scope,
     );
   }
 
@@ -145,14 +171,15 @@ export const ensureTicketDraft = (
   draft.baseDescription = description;
   draft.baseMetadata = metadata;
   draft.lastKnownRemoteUpdatedAt = lastKnownRemoteUpdatedAt ?? draft.lastKnownRemoteUpdatedAt;
-  persist(ticketId, draft);
+  persist(ticketId, draft, scope);
   return draft;
 };
 
 export const getTicketDraftContent = (
   ticketId: number,
+  scope = activeScope,
 ): TicketEditorContent | undefined => {
-  const draft = cache.get(ticketId);
+  const draft = getCache(scope).get(ticketId);
   if (
     !draft ||
     (!draft.draftSubject && !draft.draftDescription && !draft.draftMetadata)
@@ -170,8 +197,9 @@ export const getTicketDraftContent = (
 export const setTicketDraftContent = (
   ticketId: number,
   content: TicketEditorContent,
+  scope = activeScope,
 ): void => {
-  const draft = cache.get(ticketId);
+  const draft = getCache(scope).get(ticketId);
   if (!draft) {
     return;
   }
@@ -189,11 +217,11 @@ export const setTicketDraftContent = (
     draft.draftDescription = content.description;
     draft.draftMetadata = content.metadata;
   }
-  persist(ticketId, draft);
+  persist(ticketId, draft, scope);
 };
 
-export const clearTicketDraftContent = (ticketId: number): void => {
-  const draft = cache.get(ticketId);
+export const clearTicketDraftContent = (ticketId: number, scope = activeScope): void => {
+  const draft = getCache(scope).get(ticketId);
   if (!draft) {
     return;
   }
@@ -201,7 +229,7 @@ export const clearTicketDraftContent = (ticketId: number): void => {
   draft.draftSubject = undefined;
   draft.draftDescription = undefined;
   draft.draftMetadata = undefined;
-  persist(ticketId, draft);
+  persist(ticketId, draft, scope);
 };
 
 export const updateDraftAfterSave = (
@@ -210,8 +238,9 @@ export const updateDraftAfterSave = (
   description: string,
   metadata: IssueMetadata,
   lastKnownRemoteUpdatedAt?: string,
+  scope = activeScope,
 ): void => {
-  const draft = cache.get(ticketId);
+  const draft = getCache(scope).get(ticketId);
   if (!draft) {
     initializeTicketDraft(
       ticketId,
@@ -219,6 +248,7 @@ export const updateDraftAfterSave = (
       description,
       metadata,
       lastKnownRemoteUpdatedAt,
+      scope,
     );
     return;
   }
@@ -232,25 +262,29 @@ export const updateDraftAfterSave = (
   draft.draftSubject = undefined;
   draft.draftDescription = undefined;
   draft.draftMetadata = undefined;
-  persist(ticketId, draft);
+  persist(ticketId, draft, scope);
 };
 
-export const markDraftStatus = (ticketId: number, status: TicketDraftStatus): void => {
-  const draft = cache.get(ticketId);
+export const markDraftStatus = (
+  ticketId: number,
+  status: TicketDraftStatus,
+  scope = activeScope,
+): void => {
+  const draft = getCache(scope).get(ticketId);
   if (!draft) {
     return;
   }
 
   draft.status = status;
-  persist(ticketId, draft);
+  persist(ticketId, draft, scope);
 };
 
-export const clearTicketDraft = (ticketId: number): void => {
-  cache.delete(ticketId);
-  persistentStorage.delete(ticketId);
+export const clearTicketDraft = (ticketId: number, scope = activeScope): void => {
+  getCache(scope).delete(ticketId);
+  getStorage(scope).delete(ticketId);
 };
 
-export const clearTicketDrafts = (): void => {
-  cache.clear();
-  persistentStorage.clear();
+export const clearTicketDrafts = (scope = activeScope): void => {
+  getCache(scope).clear();
+  getStorage(scope).clear();
 };

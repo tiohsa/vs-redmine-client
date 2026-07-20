@@ -1,6 +1,8 @@
 import * as assert from "assert";
 import * as vscode from "vscode";
 import { createTicketFromMarkdownHeader } from "../commands/createTicketFromMarkdownHeader";
+import { getCurrentConnectionScope } from "../config/connectionScope";
+import { runWithConnectionScope } from "../redmine/client";
 
 const editor = {
   document: {
@@ -64,7 +66,7 @@ suite("createTicketFromMarkdownHeader command", () => {
 
   test("successful creation updates the document and registers it", async () => {
     let appliedContent: string | undefined;
-    let registered: { issueId: number; document: vscode.TextDocument; projectId: number } | undefined;
+    let registered: { issueId: number; document: vscode.TextDocument; projectId: number; scope?: string } | undefined;
 
     await createTicketFromMarkdownHeader({
       getActiveEditor: () => editor,
@@ -79,8 +81,8 @@ suite("createTicketFromMarkdownHeader command", () => {
       applyContent: async (_editor, content) => {
         appliedContent = content;
       },
-      registerTicketDocument: (issueId, document, _contentType, projectId) => {
-        registered = { issueId, document, projectId: projectId! };
+      registerTicketDocument: (issueId, document, _contentType, projectId, scope) => {
+        registered = { issueId, document, projectId: projectId!, scope };
       },
       showError: () => undefined,
       showWarning: () => undefined,
@@ -93,7 +95,37 @@ suite("createTicketFromMarkdownHeader command", () => {
       issueId: 456,
       document: editor.document,
       projectId: 12,
+      scope: getCurrentConnectionScope(),
     });
+  });
+
+  test("非同期作成中も開始時の接続スコープでAPI処理と登録を行う", async () => {
+    const operationScope = getCurrentConnectionScope();
+    let observedScope: string | undefined;
+    let registeredScope: string | undefined;
+
+    await runWithConnectionScope(operationScope, () => createTicketFromMarkdownHeader({
+      getActiveEditor: () => editor,
+      previewCreation: () => preview,
+      confirmCreation: async () => true,
+      createTicket: async () => {
+        // Simulate an await boundary where the user may change baseUrl.
+        await Promise.resolve();
+        observedScope = operationScope;
+        return { status: "created", issueId: 789, updatedContent: "updated", preview };
+      },
+      applyContent: async () => undefined,
+      registerTicketDocument: (_issueId, _document, _contentType, _projectId, scope) => {
+        registeredScope = scope;
+      },
+      showError: () => undefined,
+      showWarning: () => undefined,
+      showSuccess: () => undefined,
+      resolveBaseDir: () => undefined,
+    }));
+
+    assert.strictEqual(observedScope, operationScope);
+    assert.strictEqual(registeredScope, operationScope);
   });
 
   test("header update failure warns with the created issue ID and does not register", async () => {

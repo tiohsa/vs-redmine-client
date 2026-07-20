@@ -14,6 +14,8 @@ import { UnsyncedFileSyncKey } from "../app/unsyncedTypes";
 import { showInfo, showWarning } from "../utils/notifications";
 import { rewriteDocumentWithRegisteredFields, RewriteDocumentDeps } from "../views/editorDocumentRewrite";
 import { removeTicketEditorByUri } from "../views/ticketEditorRegistry";
+import { getCurrentConnectionScope } from "../config/connectionScope";
+import { runWithConnectionScope } from "../redmine/client";
 
 export type SyncFailureReason =
   | "parse_error"
@@ -42,8 +44,21 @@ export const syncUnsyncedFile = async (
   options: { onTicketCreated?: () => void; onSubjectUpdated?: (ticketId: number, subject: string) => void } = {},
   rewriteDeps: RewriteDocumentDeps = {},
 ): Promise<SyncUnsyncedFileResult | undefined> => {
+  const operationScope = getCurrentConnectionScope();
+  return runWithConnectionScope(
+    operationScope,
+    () => syncUnsyncedFileAtScope(item, options, rewriteDeps, operationScope),
+  );
+};
+
+const syncUnsyncedFileAtScope = async (
+  item: { syncKey: UnsyncedFileSyncKey },
+  options: { onTicketCreated?: () => void; onSubjectUpdated?: (ticketId: number, subject: string) => void },
+  rewriteDeps: RewriteDocumentDeps,
+  operationScope: string,
+): Promise<SyncUnsyncedFileResult | undefined> => {
   const { syncKey } = item;
-  const queue = getOfflineSyncQueue();
+  const queue = getOfflineSyncQueue(operationScope);
 
   if (syncKey.kind === "ticket") {
     const update = queue.tickets.get(syncKey.ticketId);
@@ -51,9 +66,9 @@ export const syncUnsyncedFile = async (
       showWarning(vscode.l10n.t("Queue entry for this ticket update not found."));
       return undefined;
     }
-    const result = await applyQueuedTicketUpdate({ update });
+    const result = await applyQueuedTicketUpdate({ update, operationScope });
     if (result.status === "success" || result.status === "no_change") {
-      removeOfflineTicketUpdate(syncKey.ticketId);
+      removeOfflineTicketUpdate(syncKey.ticketId, operationScope);
       if (options.onSubjectUpdated && result.status === "success") {
         options.onSubjectUpdated(syncKey.ticketId, update.subject);
       }
@@ -82,6 +97,7 @@ export const syncUnsyncedFile = async (
 
     if (!resolvedId) {
       const { result, createdId } = await createTicketFromQueuedContent({
+        operationScope,
         content: entry.content,
         projectId: entry.projectId,
         baseDir: entry.baseDir,
@@ -96,6 +112,7 @@ export const syncUnsyncedFile = async (
       updateOfflineNewTicket(
         { queueId: entry.queueId, documentUri: entry.documentUri },
         { createdIssueId: resolvedId },
+        operationScope,
       );
     }
 
@@ -112,10 +129,19 @@ export const syncUnsyncedFile = async (
         (doc) => doc.uri.toString() === entry.documentUri,
       );
       if (document) {
-        registerTicketDocument(resolvedId, document, "ticket", entry.projectId);
+        registerTicketDocument(
+          resolvedId,
+          document,
+          "ticket",
+          entry.projectId,
+          operationScope,
+        );
       }
       if (rewriteSuccess) {
-        removeOfflineNewTicket({ queueId: entry.queueId, documentUri: entry.documentUri });
+        removeOfflineNewTicket(
+          { queueId: entry.queueId, documentUri: entry.documentUri },
+          operationScope,
+        );
         options.onTicketCreated?.();
         showInfo(vscode.l10n.t("New ticket created."));
         return { status: "success", kind: "newTicket", id: resolvedId };
@@ -123,6 +149,7 @@ export const syncUnsyncedFile = async (
         updateOfflineNewTicket(
           { queueId: entry.queueId, documentUri: entry.documentUri },
           { status: "created_rewrite_failed" },
+          operationScope,
         );
         showWarning(
           vscode.l10n.t("Redmine ticket created (#{0}). File rewrite failed. Retry sync to reattempt file conversion only.", resolvedId),
@@ -149,7 +176,7 @@ export const syncUnsyncedFile = async (
       showWarning(vscode.l10n.t("Queue entry for this comment update not found."));
       return undefined;
     }
-    const result = await applyQueuedCommentUpdate({ update });
+    const result = await applyQueuedCommentUpdate({ update, operationScope });
     if (
       result.status === "created" &&
       update.documentUri &&
@@ -165,6 +192,7 @@ export const syncUnsyncedFile = async (
           ticketId: update.ticketId,
           projectId: result.projectId,
           commentId: result.commentId,
+          operationScope,
         });
       }
     }
@@ -172,7 +200,10 @@ export const syncUnsyncedFile = async (
       await updateCommentUpdateFileAfterSync(update.documentUri, update.body);
     }
     if (result.status === "success" || result.status === "no_change" || result.status === "created" || result.status === "created_unresolved") {
-      removeOfflineCommentEntry({ commentId: syncKey.commentId, documentUri: syncKey.documentUri });
+      removeOfflineCommentEntry(
+        { commentId: syncKey.commentId, documentUri: syncKey.documentUri },
+        operationScope,
+      );
       showInfo(vscode.l10n.t("Comment synced."));
       if (result.status === "no_change") {
         return { status: "no_change", kind: "comment" };

@@ -2,11 +2,17 @@ import * as vscode from "vscode";
 import { showError, showSuccess, showWarning } from "../utils/notifications";
 import {
   getEditorContentType,
+  getConnectionScopeForEditor,
   getTicketIdForEditor,
   setEditorDisplaySource,
 } from "../views/ticketEditorRegistry";
 import { reloadTicketEditor } from "../views/ticketSaveSync";
 import { TicketSaveResult } from "../views/ticketSaveTypes";
+import {
+  CONNECTION_SCOPE_MISMATCH_MESSAGE,
+  getCurrentConnectionScope,
+} from "../config/connectionScope";
+import { runWithConnectionScope } from "../redmine/client";
 
 const notifyReloadResult = (result: TicketSaveResult): void => {
   if (result.status === "success") {
@@ -40,7 +46,16 @@ export const reloadTicketFromEditor = async (): Promise<void> => {
     return;
   }
 
-  const result = await reloadTicketEditor({ ticketId, editor });
+  const operationScope = getConnectionScopeForEditor(editor);
+  if (!operationScope || operationScope !== getCurrentConnectionScope()) {
+    showError(CONNECTION_SCOPE_MISMATCH_MESSAGE);
+    return;
+  }
+
+  const result = await runWithConnectionScope(
+    operationScope,
+    () => reloadTicketEditor({ ticketId, editor, operationScope }),
+  );
   notifyReloadResult(result);
   if (result.status === "success") {
     setEditorDisplaySource(editor, "saved");

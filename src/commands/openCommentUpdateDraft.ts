@@ -7,7 +7,13 @@ import {
   buildCommentUpdateFileContent,
   CommentUpdateFileFields,
 } from "../views/commentUpdateFile";
-import { resolveEditorStorageDir } from "../views/ticketPreview";
+import { ensureScopedEditorFile, resolveEditorStorageDir } from "../views/ticketPreview";
+import { getConnectionScopeHash, getCurrentConnectionScope } from "../config/connectionScope";
+
+export const shouldSeedStoredCommentDraft = (exists: boolean): boolean => !exists;
+
+export const shouldSeedUntitledCommentDraft = (content: string): boolean =>
+  content.length === 0;
 
 export const openCommentUpdateDraft = async (
   comment: Comment,
@@ -26,21 +32,30 @@ export const openCommentUpdateDraft = async (
   };
   const fileContent = buildCommentUpdateFileContent(fields, comment.body);
 
-  const storageResolution = resolveEditorStorageDir();
+  const connectionScope = getCurrentConnectionScope();
+  const storageResolution = resolveEditorStorageDir({ connectionScope });
   let fileUri: vscode.Uri;
 
   if (storageResolution.uri) {
     await vscode.workspace.fs.createDirectory(storageResolution.uri);
     fileUri = vscode.Uri.joinPath(storageResolution.uri, filename);
-    await vscode.workspace.fs.writeFile(fileUri, new TextEncoder().encode(fileContent));
+    const legacyFileUri = storageResolution.legacyUri
+      ? vscode.Uri.joinPath(storageResolution.legacyUri, filename)
+      : undefined;
+    await ensureScopedEditorFile({ fileUri, legacyFileUri, initialContent: fileContent });
     const document = await vscode.workspace.openTextDocument(fileUri);
     await vscode.window.showTextDocument(document, { preview: false });
   } else {
-    const untitledUri = vscode.Uri.parse(`untitled:${filename}`);
+    const untitledUri = vscode.Uri.parse(
+      `untitled:redmine-client-${getConnectionScopeHash(connectionScope)}-${filename}`,
+    );
     const document = await vscode.workspace.openTextDocument(untitledUri);
     const editor = await vscode.window.showTextDocument(document, { preview: false });
-    await editor.edit((b) => {
-      b.insert(new vscode.Position(0, 0), fileContent);
-    });
+    // 同じ untitled ドキュメントを再利用した場合も、入力済み内容を保持する。
+    if (shouldSeedUntitledCommentDraft(document.getText())) {
+      await editor.edit((b) => {
+        b.insert(new vscode.Position(0, 0), fileContent);
+      });
+    }
   }
 };

@@ -10,9 +10,15 @@ import { getTicketEditors, registerTicketDocument } from "../../views/ticketEdit
 import { applyEditorContent } from "../../views/ticketPreview";
 import type { Ticket } from "../../redmine/types";
 import type { TicketMetadataPatch } from "../dashboardProtocol";
+import {
+  CONNECTION_SCOPE_MISMATCH_MESSAGE,
+  getCurrentConnectionScope,
+} from "../../config/connectionScope";
+import { runWithConnectionScope } from "../../redmine/client";
 
 export class DashboardMetadataService {
   private readonly projectTrackerCache = new Map<number, Array<{ id: number; name: string }>>();
+  private editOptionsGeneration = 0;
 
   constructor(private readonly deps: {
     context: DashboardServiceContext;
@@ -21,9 +27,18 @@ export class DashboardMetadataService {
     refreshUnsynced: () => void;
     pushTickets: () => void;
     openEditor: (ticketId: number) => Promise<void>;
+    getProjectTrackers?: typeof getProjectTrackers;
+    getIssueAllowedStatuses?: typeof getIssueAllowedStatuses;
+    listProjectMembers?: typeof listProjectMembers;
   }) {}
 
+  invalidate(): void {
+    this.editOptionsGeneration++;
+    this.projectTrackerCache.clear();
+  }
+
   async loadEditOptions(ticketId: number, projectId: number): Promise<void> {
+    const generation = ++this.editOptionsGeneration;
     const { store } = this.deps.context;
     store.update({
       editOptions: {
@@ -40,10 +55,13 @@ export class DashboardMetadataService {
     const globalOptions = store.getState().metadataOptions;
     try {
       const [trackers, allowedStatuses, members] = await Promise.all([
-        getProjectTrackers(projectId),
-        getIssueAllowedStatuses(ticketId).catch(() => null),
-        listProjectMembers(projectId).catch(() => [] as Array<{ id: number; name: string }>),
+        (this.deps.getProjectTrackers ?? getProjectTrackers)(projectId),
+        (this.deps.getIssueAllowedStatuses ?? getIssueAllowedStatuses)(ticketId).catch(() => null),
+        (this.deps.listProjectMembers ?? listProjectMembers)(projectId).catch(() => [] as Array<{ id: number; name: string }>),
       ]);
+      if (generation !== this.editOptionsGeneration) {
+        return;
+      }
       this.projectTrackerCache.set(projectId, trackers);
       const statusFallback = allowedStatuses === null || allowedStatuses.length === 0;
       const statuses = !statusFallback ? allowedStatuses! : globalOptions.statuses;
@@ -63,6 +81,9 @@ export class DashboardMetadataService {
         },
       });
     } catch (err) {
+      if (generation !== this.editOptionsGeneration) {
+        return;
+      }
       const msg = (err as Error).message;
       store.update({
         editOptions: {
@@ -85,6 +106,19 @@ export class DashboardMetadataService {
     ticketId: number,
     patch: TicketMetadataPatch,
   ): Promise<void> {
+    const operationScope = getCurrentConnectionScope();
+    return runWithConnectionScope(
+      operationScope,
+      () => this.updateTicketMetadataAtScope(requestId, ticketId, patch, operationScope),
+    );
+  }
+
+  private async updateTicketMetadataAtScope(
+    requestId: string,
+    ticketId: number,
+    patch: TicketMetadataPatch,
+    operationScope: string,
+  ): Promise<void> {
     const validationError = this.validateMetadataPatchAgainstOptions(patch, ticketId);
     if (validationError) {
       this.deps.context.notifyError(requestId, validationError);
@@ -106,6 +140,11 @@ export class DashboardMetadataService {
       }
     }
 
+    if (operationScope !== getCurrentConnectionScope()) {
+      this.deps.context.notifyError(requestId, CONNECTION_SCOPE_MISMATCH_MESSAGE);
+      return;
+    }
+
     ensureTicketDraft(
       ticket.id,
       ticket.subject,
@@ -120,13 +159,14 @@ export class DashboardMetadataService {
         assignee_id: ticket.assigneeId,
       },
       ticket.updatedAt,
+      operationScope,
     );
 
-    const updated = await this.updateRegisteredTicketEditor(ticket, patch)
-      || this.updateQueuedTicket(ticket, patch);
+    const updated = await this.updateRegisteredTicketEditor(ticket, patch, operationScope)
+      || this.updateQueuedTicket(ticket, patch, operationScope);
     if (!updated) {
       await this.deps.openEditor(ticketId);
-      if (!await this.updateRegisteredTicketEditor(ticket, patch)) {
+      if (!await this.updateRegisteredTicketEditor(ticket, patch, operationScope)) {
         this.deps.context.notifyError(requestId, vscode.l10n.t("Cannot identify the ticket editor to update."));
         return;
       }
@@ -229,8 +269,13 @@ export class DashboardMetadataService {
     }
   }
 
-  private async updateRegisteredTicketEditor(ticket: Ticket, patch: TicketMetadataPatch): Promise<boolean> {
-    const record = getTicketEditors(ticket.id).find((candidate) => candidate.contentType === "ticket");
+  private async updateRegisteredTicketEditor(
+    ticket: Ticket,
+    patch: TicketMetadataPatch,
+    operationScope: string,
+  ): Promise<boolean> {
+    const record = getTicketEditors(ticket.id, operationScope)
+      .find((candidate) => candidate.contentType === "ticket");
     if (!record) {
       return false;
     }
@@ -238,7 +283,7 @@ export class DashboardMetadataService {
     let document = vscode.workspace.textDocuments.find((candidate) => candidate.uri.toString() === record.uri);
     if (!document) {
       document = await vscode.workspace.openTextDocument(uri);
-      registerTicketDocument(ticket.id, document, "ticket", ticket.projectId);
+      registerTicketDocument(ticket.id, document, "ticket", ticket.projectId, operationScope);
     }
     const editor = vscode.window.visibleTextEditors.find((candidate) => candidate.document.uri.toString() === record.uri);
     const parsed = parseTicketEditorContent(document.getText(), {
@@ -270,8 +315,8 @@ export class DashboardMetadataService {
       edit.replace(document.uri, fullRange, nextText);
       await vscode.workspace.applyEdit(edit);
     }
-    setTicketDraftContent(ticket.id, next);
-    markDraftStatus(ticket.id, "Dirty");
+    setTicketDraftContent(ticket.id, next, operationScope);
+    markDraftStatus(ticket.id, "Dirty", operationScope);
     addOfflineTicketUpdate(ticket.id, {
       ticketId: ticket.id,
       baseSubject: ticket.subject,
@@ -291,12 +336,16 @@ export class DashboardMetadataService {
       metadata: next.metadata,
       layout: next.layout,
       metadataBlock: next.metadataBlock,
-    });
+    }, operationScope);
     return true;
   }
 
-  private updateQueuedTicket(ticket: Ticket, patch: TicketMetadataPatch): boolean {
-    const queued = getOfflineSyncQueue().tickets.get(ticket.id);
+  private updateQueuedTicket(
+    ticket: Ticket,
+    patch: TicketMetadataPatch,
+    operationScope: string,
+  ): boolean {
+    const queued = getOfflineSyncQueue(operationScope).tickets.get(ticket.id);
     if (!queued) {
       return false;
     }
@@ -325,12 +374,12 @@ export class DashboardMetadataService {
       allowMissingMetadata: true,
       fallbackMetadata: nextMetadata,
     });
-    setTicketDraftContent(ticket.id, nextContent);
-    markDraftStatus(ticket.id, "Dirty");
+    setTicketDraftContent(ticket.id, nextContent, operationScope);
+    markDraftStatus(ticket.id, "Dirty", operationScope);
     addOfflineTicketUpdate(ticket.id, {
       ...queued,
       metadata: nextMetadata,
-    });
+    }, operationScope);
     return true;
   }
 }

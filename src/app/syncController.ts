@@ -6,6 +6,7 @@ import { isSaveSyncSuppressed } from "../views/saveSyncSuppression";
 import type { NotificationController } from "./notificationController";
 import { performSyncOnSave } from "./saveSyncExecutor";
 import { scheduleSave } from "./saveSyncQueue";
+import { getConnectionScopeForEditor } from "../views/ticketEditorRegistry";
 import type {
   CommentPresentationPort,
   TicketPresentationPort,
@@ -57,7 +58,12 @@ export const createSyncController = (deps: SyncControllerDeps): SyncController =
       if (syncResult.kind === "ticket") {
         let result = syncResult.result;
         if (result.status === "conflict" && result.conflictContext) {
-          result = await handleConflict(result, editor);
+          result = await handleConflict(
+            result,
+            editor,
+            undefined,
+            getConnectionScopeForEditor(editor),
+          );
         }
         notifications.notifyTicketSaveResult(result);
         if (result.status === "created") {
@@ -69,7 +75,11 @@ export const createSyncController = (deps: SyncControllerDeps): SyncController =
       } else {
         let result = syncResult.result;
         if (result.status === "conflict" && result.conflictContext) {
-          result = await handleCommentConflict(result, editor);
+          result = await handleCommentConflict(
+            result,
+            editor,
+            getConnectionScopeForEditor(editor),
+          );
         }
         notifications.notifyCommentSaveResult(result);
         if (shouldRefreshComments(result.status)) {

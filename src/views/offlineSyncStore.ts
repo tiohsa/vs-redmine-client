@@ -45,6 +45,8 @@ export type OfflineSyncQueue = {
 };
 
 const STORAGE_KEY = "redmine.offlineSyncQueue";
+const storageKeyForScope = (scope?: string): string =>
+  scope ? `${STORAGE_KEY}.${encodeURIComponent(scope)}` : STORAGE_KEY;
 
 type QueueChangeListener = () => void;
 
@@ -71,56 +73,98 @@ type SerializedQueue = {
   newTickets: OfflineNewTicket[];
 };
 
-const queue: OfflineSyncQueue = {
+let memento: Memento | undefined;
+let activeScope = "";
+const queuesByScope = new Map<string, OfflineSyncQueue>();
+
+const emptyQueue = (): OfflineSyncQueue => ({
   tickets: new Map<number, OfflineTicketUpdate>(),
   comments: [],
   newTickets: [],
+});
+
+const getQueue = (scope = activeScope): OfflineSyncQueue => {
+  let queue = queuesByScope.get(scope);
+  if (!queue) {
+    queue = memento ? loadQueue(memento, storageKeyForScope(scope)) : emptyQueue();
+    queuesByScope.set(scope, queue);
+  }
+  return queue;
 };
 
-let memento: Memento | undefined;
-
-const persist = (): void => {
+const persist = (scope = activeScope): void => {
+  const queue = getQueue(scope);
   if (memento) {
     const serialized: SerializedQueue = {
       tickets: Array.from(queue.tickets.entries()),
       comments: queue.comments,
       newTickets: queue.newTickets,
     };
-    Promise.resolve(memento.update(STORAGE_KEY, serialized)).catch((err: unknown) => {
+    Promise.resolve(memento.update(storageKeyForScope(scope), serialized)).catch((err: unknown) => {
       console.error("[vs-redmine-client] offlineSyncStore: persist failed", err);
     });
   }
   notifyQueueChanged();
 };
 
-export const initializeOfflineSyncStore = (storage: Memento): void => {
-  memento = storage;
-  const raw = storage.get<SerializedQueue>(STORAGE_KEY);
-  queue.tickets = new Map(
-    raw && Array.isArray(raw.tickets)
-      ? raw.tickets.filter(
+const deserializeQueue = (raw: SerializedQueue | undefined): OfflineSyncQueue => {
+  return {
+    tickets: new Map(
+      raw && Array.isArray(raw.tickets)
+        ? raw.tickets.filter(
           (e): e is [number, OfflineTicketUpdate] =>
             Array.isArray(e) &&
             typeof e[0] === "number" &&
             e[1] !== null &&
             typeof e[1] === "object",
         )
-      : [],
-  );
-  queue.comments =
-    raw && Array.isArray(raw.comments)
-      ? raw.comments.filter((c) => c !== null && typeof c === "object")
-      : [];
-  queue.newTickets =
-    raw && Array.isArray(raw.newTickets)
-      ? raw.newTickets.filter((t) => t !== null && typeof t === "object")
-      : [];
+        : [],
+    ),
+    comments:
+      raw && Array.isArray(raw.comments)
+        ? raw.comments.filter((c) => c !== null && typeof c === "object")
+        : [],
+    newTickets:
+      raw && Array.isArray(raw.newTickets)
+        ? raw.newTickets.filter((t) => t !== null && typeof t === "object")
+        : [],
+  };
+};
+
+function loadQueue(storage: Memento, storageKey: string): OfflineSyncQueue {
+  return deserializeQueue(storage.get<SerializedQueue>(storageKey));
+}
+
+export const initializeOfflineSyncStore = (storage: Memento, scope?: string): void => {
+  memento = storage;
+  activeScope = scope ?? "";
+  queuesByScope.clear();
+  const activeStorageKey = storageKeyForScope(activeScope);
+  const scoped = storage.get<SerializedQueue>(activeStorageKey);
+  const legacy = scope ? storage.get<SerializedQueue>(STORAGE_KEY) : undefined;
+  if (!scoped && legacy) {
+    void storage.update(activeStorageKey, legacy);
+    void storage.update(STORAGE_KEY, undefined);
+  }
+  queuesByScope.set(activeScope, deserializeQueue(scoped ?? legacy));
+};
+
+/** 接続先ごとのキューへ切り替え、別Redmineの未送信データを混在させない。 */
+export const switchOfflineSyncStore = (scope: string): void => {
+  if (!memento) {
+    return;
+  }
+  activeScope = scope;
+  getQueue(scope);
+  notifyQueueChanged();
 };
 
 export const addOfflineTicketUpdate = (
   ticketId: number,
   update: OfflineTicketUpdate,
+  scope = activeScope,
 ): void => {
+  const queue = getQueue(scope);
   const existing = queue.tickets.get(ticketId);
   queue.tickets.set(ticketId, {
     ...(existing ?? update),
@@ -131,7 +175,7 @@ export const addOfflineTicketUpdate = (
     lastKnownRemoteUpdatedAt:
       existing?.lastKnownRemoteUpdatedAt ?? update.lastKnownRemoteUpdatedAt,
   });
-  persist();
+  persist(scope);
 };
 
 const replaceFirstMatch = (
@@ -147,10 +191,14 @@ const replaceFirstMatch = (
   return true;
 };
 
-export const addOfflineCommentUpdate = (update: OfflineCommentUpdate): void => {
+export const addOfflineCommentUpdate = (
+  update: OfflineCommentUpdate,
+  scope = activeScope,
+): void => {
+  const queue = getQueue(scope);
   if (update.commentId !== undefined) {
     if (replaceFirstMatch(queue.comments, (item) => item.commentId === update.commentId, update)) {
-      persist();
+      persist(scope);
       return;
     }
   }
@@ -162,15 +210,18 @@ export const addOfflineCommentUpdate = (update: OfflineCommentUpdate): void => {
         update,
       )
     ) {
-      persist();
+      persist(scope);
       return;
     }
   }
   queue.comments.push(update);
-  persist();
+  persist(scope);
 };
 
-const findNewTicketIndex = (key: { queueId?: string; documentUri?: string }): number => {
+const findNewTicketIndex = (
+  queue: OfflineSyncQueue,
+  key: { queueId?: string; documentUri?: string },
+): number => {
   if (key.queueId) {
     const idx = queue.newTickets.findIndex((t) => t.queueId === key.queueId);
     if (idx !== -1) { return idx; }
@@ -181,7 +232,11 @@ const findNewTicketIndex = (key: { queueId?: string; documentUri?: string }): nu
   return -1;
 };
 
-export const addOfflineNewTicket = (update: Omit<OfflineNewTicket, "queueId">): void => {
+export const addOfflineNewTicket = (
+  update: Omit<OfflineNewTicket, "queueId">,
+  scope = activeScope,
+): void => {
+  const queue = getQueue(scope);
   const index = update.documentUri
     ? queue.newTickets.findIndex((item) => item.documentUri === update.documentUri)
     : -1;
@@ -192,54 +247,73 @@ export const addOfflineNewTicket = (update: Omit<OfflineNewTicket, "queueId">): 
   } else {
     queue.newTickets.unshift({ ...update, queueId: randomUUID() });
   }
-  persist();
+  persist(scope);
 };
 
-export const getOfflineSyncQueue = (): OfflineSyncQueue => ({
-  tickets: new Map(queue.tickets),
-  comments: [...queue.comments],
-  newTickets: [...queue.newTickets],
-});
+export const getOfflineSyncQueue = (scope = activeScope): OfflineSyncQueue => {
+  const queue = getQueue(scope);
+  return {
+    tickets: new Map(queue.tickets),
+    comments: [...queue.comments],
+    newTickets: [...queue.newTickets],
+  };
+};
 
-export const clearOfflineSyncQueue = (): void => {
+export const clearOfflineSyncQueue = (scope = activeScope): void => {
+  const queue = getQueue(scope);
   queue.tickets.clear();
   queue.comments = [];
   queue.newTickets = [];
-  persist();
+  persist(scope);
 };
 
-export const replaceOfflineSyncQueue = (next: OfflineSyncQueue): void => {
+export const replaceOfflineSyncQueue = (
+  next: OfflineSyncQueue,
+  scope = activeScope,
+): void => {
+  const queue = getQueue(scope);
   queue.tickets = new Map(next.tickets);
   queue.comments = [...next.comments];
   queue.newTickets = [...next.newTickets];
-  persist();
+  persist(scope);
 };
 
-export const removeOfflineTicketUpdate = (ticketId: number): void => {
+export const removeOfflineTicketUpdate = (ticketId: number, scope = activeScope): void => {
+  const queue = getQueue(scope);
   queue.tickets.delete(ticketId);
-  persist();
+  persist(scope);
 };
 
 export const updateOfflineNewTicket = (
   key: { queueId?: string; documentUri?: string },
   updates: Partial<Pick<OfflineNewTicket, "createdIssueId" | "status">>,
+  scope = activeScope,
 ): void => {
-  const index = findNewTicketIndex(key);
+  const queue = getQueue(scope);
+  const index = findNewTicketIndex(queue, key);
   if (index !== -1) {
     queue.newTickets[index] = { ...queue.newTickets[index], ...updates };
-    persist();
+    persist(scope);
   }
 };
 
-export const removeOfflineNewTicket = (key: { queueId?: string; documentUri?: string }): void => {
-  const index = findNewTicketIndex(key);
+export const removeOfflineNewTicket = (
+  key: { queueId?: string; documentUri?: string },
+  scope = activeScope,
+): void => {
+  const queue = getQueue(scope);
+  const index = findNewTicketIndex(queue, key);
   if (index !== -1) {
     queue.newTickets.splice(index, 1);
-    persist();
+    persist(scope);
   }
 };
 
-export const removeOfflineCommentEntry = (params: { commentId?: number; documentUri?: string }): void => {
+export const removeOfflineCommentEntry = (
+  params: { commentId?: number; documentUri?: string },
+  scope = activeScope,
+): void => {
+  const queue = getQueue(scope);
   queue.comments = queue.comments.filter((item) => {
     if (params.commentId !== undefined && item.commentId === params.commentId) {
       return false;
@@ -249,5 +323,5 @@ export const removeOfflineCommentEntry = (params: { commentId?: number; document
     }
     return true;
   });
-  persist();
+  persist(scope);
 };

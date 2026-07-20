@@ -2,11 +2,29 @@ import * as https from "https";
 import * as http from "http";
 import { getBaseUrl, getIgnoreSSLErrors, getRequestTimeoutMs } from "../config/settings";
 import { resolveApiKey } from "../config/apiKeyStore";
+import { AsyncLocalStorage } from "async_hooks";
 
 type HttpMethod = "GET" | "POST" | "PUT" | "DELETE";
 type FetchBody = string | Uint8Array;
 
+type ConnectionContext = {
+  baseUrl: string;
+  apiKey: string;
+};
+
 export type QueryParams = Record<string, string | number | boolean | undefined>;
+const connectionScopeContext = new AsyncLocalStorage<ConnectionContext>();
+
+export const runWithConnectionScope = <T>(
+  connectionScope: string,
+  operation: () => Promise<T>,
+): Promise<T> => connectionScopeContext.run(
+  {
+    baseUrl: connectionScope,
+    apiKey: connectionScopeContext.getStore()?.apiKey ?? resolveApiKey(),
+  },
+  operation,
+);
 
 export interface RequestOptions {
   method: HttpMethod;
@@ -23,6 +41,11 @@ export const normalizeBaseUrl = (rawBaseUrl: string): string => {
     if (url.protocol !== "http:" && url.protocol !== "https:") {
       throw new Error("Base URL must start with http:// or https://");
     }
+    url.hash = "";
+    url.search = "";
+    if (!url.pathname.endsWith("/")) {
+      url.pathname = `${url.pathname}/`;
+    }
     return url.toString();
   } catch (error) {
     const message = error instanceof Error ? error.message : "Invalid base URL.";
@@ -33,8 +56,9 @@ export const normalizeBaseUrl = (rawBaseUrl: string): string => {
 };
 
 const ensureConfig = (): { baseUrl: string; apiKey: string } => {
-  const baseUrl = getBaseUrl();
-  const apiKey = resolveApiKey();
+  const context = connectionScopeContext.getStore();
+  const baseUrl = context?.baseUrl ?? getBaseUrl();
+  const apiKey = context?.apiKey ?? resolveApiKey();
   if (!baseUrl) {
     throw new Error("Missing Redmine base URL configuration.");
   }
@@ -44,8 +68,8 @@ const ensureConfig = (): { baseUrl: string; apiKey: string } => {
   return { baseUrl: normalizeBaseUrl(baseUrl), apiKey };
 };
 
-const buildUrl = (baseUrl: string, path: string, query?: QueryParams): string => {
-  const url = new URL(path, baseUrl);
+export const buildUrl = (baseUrl: string, path: string, query?: QueryParams): string => {
+  const url = new URL(path.replace(/^\/+/, ""), normalizeBaseUrl(baseUrl));
   if (query) {
     Object.entries(query).forEach(([key, value]) => {
       if (value !== undefined) {

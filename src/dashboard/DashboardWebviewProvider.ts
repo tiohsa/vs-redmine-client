@@ -128,6 +128,10 @@ export class DashboardWebviewProvider
     this.controller.notifyTicketChanged();
   }
 
+  resetForConnectionChange(): Promise<void> {
+    return this.controller.resetForConnectionChange();
+  }
+
   getStateSnapshot(): DashboardState {
     return this.store.getState();
   }

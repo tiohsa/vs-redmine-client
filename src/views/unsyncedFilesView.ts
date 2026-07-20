@@ -3,6 +3,7 @@ import { getOfflineSyncQueue, onOfflineSyncQueueChanged } from "./offlineSyncSto
 import { formatTicketLabel } from "./ticketLabel";
 import { getTicketSummary } from "./ticketSummaryStore";
 import { createEmptyStateItem } from "./viewState";
+import { getCurrentConnectionScope } from "../config/connectionScope";
 
 export type UnsyncedFileSyncKey =
   | { kind: "ticket"; ticketId: number }
@@ -88,7 +89,7 @@ export class UnsyncedFilesTreeProvider
   }
 
   getChildren(): vscode.ProviderResult<vscode.TreeItem[]> {
-    const queue = getOfflineSyncQueue();
+    const queue = getOfflineSyncQueue(getCurrentConnectionScope());
     const items: vscode.TreeItem[] = [];
 
     queue.tickets.forEach((_update, ticketId) => {

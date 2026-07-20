@@ -1,5 +1,5 @@
 import * as vscode from "vscode";
-import { getProjectSelection, setProjectSelection } from "../../config/projectSelection";
+import { clearProjectSelection, getProjectSelection, setProjectSelection } from "../../config/projectSelection";
 import { getDefaultProjectId } from "../../config/settings";
 import { listProjects } from "../../redmine/projects";
 import { resolveCurrentProject, type ResolvedProject } from "../resolveProject";
@@ -17,6 +17,8 @@ interface DashboardProjectServiceDeps {
 export class DashboardProjectService {
   private selectedProject = getProjectSelection();
   private selectionQueue = Promise.resolve();
+  private loadGeneration = 0;
+  private connectionGeneration = 0;
 
   constructor(private readonly deps: DashboardProjectServiceDeps) {}
 
@@ -30,8 +32,12 @@ export class DashboardProjectService {
   }
 
   async loadProjects(): Promise<void> {
+    const generation = ++this.loadGeneration;
     try {
       const raw = await listProjects(true);
+      if (generation !== this.loadGeneration) {
+        return;
+      }
       const projects = this.buildProjectNodes(raw);
       this.deps.setProjects(projects);
       this.deps.context.store.update({ projects });
@@ -40,15 +46,31 @@ export class DashboardProjectService {
     }
   }
 
+  async resetForConnectionChange(): Promise<void> {
+    this.connectionGeneration++;
+    this.loadGeneration++;
+    this.selectedProject = {};
+    this.deps.setProjects([]);
+    this.deps.resetTickets(undefined);
+    await clearProjectSelection();
+  }
+
   async selectProject(projectId: number): Promise<void> {
-    const operation = this.selectionQueue.then(() => this.selectProjectNow(projectId));
+    const generation = this.connectionGeneration;
+    const operation = this.selectionQueue.then(() => this.selectProjectNow(projectId, generation));
     this.selectionQueue = operation.catch(() => undefined);
     return operation;
   }
 
-  private async selectProjectNow(projectId: number): Promise<void> {
+  private async selectProjectNow(projectId: number, generation: number): Promise<void> {
+    if (generation !== this.connectionGeneration) {
+      return;
+    }
     if (this.deps.getProjects().length === 0) {
       await this.loadProjects();
+    }
+    if (generation !== this.connectionGeneration) {
+      return;
     }
     const project = this.deps.getProjects().find((p) => p.id === projectId);
     if (!project) {

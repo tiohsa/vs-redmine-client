@@ -2,6 +2,7 @@ import * as vscode from "vscode";
 import {
   getCommentIdForEditor,
   getEditorContentType,
+  getConnectionScopeForEditor,
   getTicketIdForEditor,
   isTicketEditor,
   NEW_TICKET_DRAFT_ID,
@@ -25,6 +26,15 @@ import {
 } from "../views/commentSaveSync";
 import { TicketSaveResult } from "../views/ticketSaveTypes";
 import { CommentSaveResult } from "../views/commentSaveTypes";
+import type { CommentSaveDependencies } from "../views/commentSaveSync";
+import {
+  CONNECTION_SCOPE_MISMATCH_MESSAGE,
+  getCurrentConnectionScope,
+} from "../config/connectionScope";
+import { runWithConnectionScope } from "../redmine/client";
+import { showError } from "../utils/notifications";
+
+export { CONNECTION_SCOPE_MISMATCH_MESSAGE } from "../config/connectionScope";
 
 export type SyncToRedmineResult =
   | { kind: "ticket"; result: TicketSaveResult }
@@ -35,12 +45,31 @@ export interface SyncToRedmineOptions {
   onSubjectUpdated?: (ticketId: number, subject: string) => void;
   onTicketCreated?: () => void;
   onCommentsRefresh?: (ticketId: number) => void;
-  deps?: Partial<TicketSaveDependencies>;
+  deps?: Partial<TicketSaveDependencies & CommentSaveDependencies>;
 }
 
 export const syncEditorToRedmine = async (
   editor: vscode.TextEditor,
   options: SyncToRedmineOptions = {},
+): Promise<SyncToRedmineResult> => {
+  const operationScope = getConnectionScopeForEditor(editor);
+  if (operationScope === undefined) {
+    return undefined;
+  }
+  if (operationScope !== getCurrentConnectionScope()) {
+    showError(CONNECTION_SCOPE_MISMATCH_MESSAGE);
+    return undefined;
+  }
+  return runWithConnectionScope(
+    operationScope,
+    () => syncEditorToRedmineAtScope(editor, options, operationScope),
+  );
+};
+
+const syncEditorToRedmineAtScope = async (
+  editor: vscode.TextEditor,
+  options: SyncToRedmineOptions,
+  operationScope: string,
 ): Promise<SyncToRedmineResult> => {
   if (!isTicketEditor(editor)) {
     return undefined;
@@ -53,16 +82,20 @@ export const syncEditorToRedmine = async (
   }
 
   if (ticketId === NEW_TICKET_DRAFT_ID) {
-    const result = await syncNewTicketDraft({ editor, deps: options.deps });
+    const result = await syncNewTicketDraft({
+      editor,
+      deps: options.deps,
+      operationScope,
+    });
     if (result.status === "created") {
       options.onTicketCreated?.();
-      removeOfflineNewTicket({ documentUri: editor.document.uri.toString() });
+      removeOfflineNewTicket({ documentUri: editor.document.uri.toString() }, operationScope);
     }
     return { kind: "ticket", result };
   }
 
   if (contentType === "ticket") {
-    markDraftStatus(ticketId, "Syncing");
+    markDraftStatus(ticketId, "Syncing", operationScope);
     let result: TicketSaveResult;
     try {
       result = await syncTicketDraft({
@@ -71,16 +104,17 @@ export const syncEditorToRedmine = async (
         editor,
         deps: options.deps,
         onSubjectUpdated: options.onSubjectUpdated,
+        operationScope,
       });
     } catch (error) {
-      markDraftStatus(ticketId, "Failed");
+      markDraftStatus(ticketId, "Failed", operationScope);
       throw error;
     }
     if (result.status === "no_change" || result.status === "success") {
-      markDraftStatus(ticketId, "Synced");
-      removeOfflineTicketUpdate(ticketId);
+      markDraftStatus(ticketId, "Synced", operationScope);
+      removeOfflineTicketUpdate(ticketId, operationScope);
     } else if (result.status !== "conflict" && result.status !== "queued") {
-      markDraftStatus(ticketId, "Failed");
+      markDraftStatus(ticketId, "Failed", operationScope);
     }
     return { kind: "ticket", result };
   }
@@ -91,20 +125,23 @@ export const syncEditorToRedmine = async (
       content: editor.document.getText(),
       editor,
       documentUri: editor.document.uri,
+      deps: options.deps,
       onCreated: async ({ commentId, projectId }) => {
         finalizeNewCommentDraftDocument({
           document: editor.document,
           ticketId,
           projectId,
           commentId,
+          operationScope,
         });
       },
+      operationScope,
     });
     if (shouldRefreshComments(result.status)) {
       options.onCommentsRefresh?.(ticketId);
     }
     if (result.status === "created" || result.status === "no_change") {
-      removeOfflineCommentEntry({ documentUri: editor.document.uri.toString() });
+      removeOfflineCommentEntry({ documentUri: editor.document.uri.toString() }, operationScope);
     }
     return { kind: "comment", result, ticketId };
   }
@@ -119,12 +156,16 @@ export const syncEditorToRedmine = async (
       content: editor.document.getText(),
       editor,
       documentUri: editor.document.uri,
+      operationScope,
     });
     if (shouldRefreshComments(result.status)) {
       options.onCommentsRefresh?.(ticketId);
     }
     if (result.status === "success" || result.status === "no_change") {
-      removeOfflineCommentEntry({ commentId, documentUri: editor.document.uri.toString() });
+      removeOfflineCommentEntry(
+        { commentId, documentUri: editor.document.uri.toString() },
+        operationScope,
+      );
     }
     return { kind: "comment", result, ticketId };
   }

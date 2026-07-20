@@ -68,7 +68,7 @@ suite("openNewTicketDraft – reuse prevention after sync", () => {
     );
   });
 
-  test("without removeTicketEditorByUri, getNewTicketDraftUri returns stale URI (pre-fix behavior)", () => {
+  test("without removeTicketEditorByUri, unresolved legacy URI is not reused", () => {
     const uri = vscode.Uri.parse("untitled:redmine-client-new-ticket-stale.md");
     const editor = makeEditorWith(uri, buildNewTicketText());
     const document = editor.document;
@@ -79,12 +79,9 @@ suite("openNewTicketDraft – reuse prevention after sync", () => {
     const { registerTicketDocument, getNewTicketDraftUri } = require("../views/ticketEditorRegistry") as typeof import("../views/ticketEditorRegistry");
     registerTicketDocument(99999, document, "ticket", 5);
 
-    // The URI is still in editorsByTicket[-1] – stale reference
+    // The URI is no longer eligible for the current connection after the
+    // document is registered as a different editor record.
     const result = getNewTicketDraftUri();
-    // This demonstrates the bug: result is not undefined
-    assert.ok(
-      result !== undefined,
-      "without cleanup, stale URI is still returned (demonstrating the bug)",
-    );
+    assert.strictEqual(result, undefined);
   });
 });

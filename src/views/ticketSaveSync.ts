@@ -32,6 +32,7 @@ export type {
 } from "./ticketSync/types";
 
 export const syncTicketDraft = async (input: {
+  operationScope?: string;
   ticketId: number;
   content: string;
   editor?: vscode.TextEditor;
@@ -41,6 +42,7 @@ export const syncTicketDraft = async (input: {
 }): Promise<TicketSaveResult> => syncTicketDraftInternal(input);
 
 export const queueTicketDraft = async (input: {
+  operationScope?: string;
   ticketId: number;
   content: string;
   editor?: vscode.TextEditor;
@@ -49,12 +51,14 @@ export const queueTicketDraft = async (input: {
 }): Promise<TicketSaveResult> => queueTicketDraftInternal(input);
 
 export const syncNewTicketDraft = async (input: {
+  operationScope?: string;
   editor: vscode.TextEditor;
   deps?: Partial<TicketCreateDependencies>;
   applyContent?: (editor: vscode.TextEditor, content: string) => Promise<void>;
 }): Promise<TicketSaveResult> => syncNewTicketDraftInternal(input);
 
 export const syncNewTicketDraftContent = async (input: {
+  operationScope?: string;
   content: string;
   projectId?: number;
   documentUri?: vscode.Uri;
@@ -63,6 +67,7 @@ export const syncNewTicketDraftContent = async (input: {
 }): Promise<TicketSaveResult> => syncNewTicketDraftContentInternal(input);
 
 export const createTicketFromQueuedContent = async (input: {
+  operationScope?: string;
   content: string;
   projectId?: number;
   baseDir?: string;
@@ -74,21 +79,25 @@ export const createTicketFromQueuedContent = async (input: {
 }> => createTicketFromQueuedContentInternal(input);
 
 export const applyQueuedTicketUpdate = async (input: {
+  operationScope?: string;
   update: OfflineTicketUpdate;
   deps?: Partial<TicketSaveDependencies>;
 }): Promise<TicketSaveResult> => applyQueuedTicketUpdateInternal(input);
 
 export const queueNewTicketDraft = async (input: {
   editor: vscode.TextEditor;
+  operationScope?: string;
 }): Promise<TicketSaveResult> => queueNewTicketDraftInternal(input);
 
 export const queueNewTicketDraftContent = async (input: {
+  operationScope?: string;
   content: string;
   projectId?: number;
   documentUri?: vscode.Uri;
 }): Promise<TicketSaveResult> => queueNewTicketDraftContentInternal(input);
 
 export const reloadTicketEditor = async (input: {
+  operationScope?: string;
   ticketId: number;
   editor: vscode.TextEditor;
   deps?: TicketReloadDependencies;
@@ -100,5 +109,8 @@ export const saveTicketDraftLocally = (
 
 export const handleTicketEditorSave = async (
   editor: vscode.TextEditor,
-  options: { onSubjectUpdated?: (ticketId: number, subject: string) => void } = {},
+  options: {
+    onSubjectUpdated?: (ticketId: number, subject: string) => void;
+    operationScope?: string;
+  } = {},
 ): Promise<TicketSaveResult | undefined> => handleTicketEditorSaveInternal(editor, options);

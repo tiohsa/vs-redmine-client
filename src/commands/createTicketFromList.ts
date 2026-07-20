@@ -16,8 +16,13 @@ import {
 import { buildUniqueUntitledName, buildUniqueUntitledPath } from "../views/untitledPath";
 import { buildNewTicketDraftContent } from "../views/ticketDraftStore";
 import { TicketEditorContent, parseTicketEditorContent } from "../views/ticketEditorContent";
+import {
+  buildNewTicketDraftFilename,
+} from "../views/editorFilename";
+import { getConnectionScopeHash, getCurrentConnectionScope } from "../config/connectionScope";
 
-const DRAFT_FILENAME = "redmine-client-new-ticket.md";
+const getDraftFilename = (scopeHash?: string): string =>
+  scopeHash ? buildNewTicketDraftFilename(scopeHash) : "redmine-client-new-ticket.md";
 
 const findOpenDocument = (uri: vscode.Uri): vscode.TextDocument | undefined =>
   vscode.workspace.textDocuments.find(
@@ -65,17 +70,19 @@ const getOpenUntitledNames = (): Set<string> =>
 export const buildNewTicketDraftUri = (
   workspacePath?: string,
   existsSync: (candidate: string) => boolean = isFileExistsOrOpen,
+  scopeHash?: string,
 ): vscode.Uri => {
   if (!workspacePath) {
     const takenNames = getOpenUntitledNames();
+    const draftFilename = getDraftFilename(scopeHash);
     const uniqueName = buildUniqueUntitledName(
-      DRAFT_FILENAME,
+      draftFilename,
       (candidate) => takenNames.has(candidate),
     );
     return vscode.Uri.parse(`untitled:${uniqueName}`);
   }
 
-  const targetPath = buildUniqueUntitledPath(workspacePath, DRAFT_FILENAME, existsSync);
+  const targetPath = buildUniqueUntitledPath(workspacePath, getDraftFilename(scopeHash), existsSync);
   return vscode.Uri.file(targetPath).with({ scheme: "untitled" });
 };
 
@@ -98,17 +105,21 @@ export const openNewTicketDraft = async (input: {
   content: TicketEditorContent;
   projectId?: number;
 }): Promise<vscode.Uri> => {
+  const operationScope = getCurrentConnectionScope();
+  const scopeHash = getConnectionScopeHash(operationScope);
   const knownUri =
-    getNewTicketDraftUri() ?? buildNewTicketDraftUri(getEditorBasePath());
+    getNewTicketDraftUri() ?? buildNewTicketDraftUri(getEditorBasePath(), isFileExistsOrOpen, scopeHash);
   let existing = findOpenDocument(knownUri);
   if (existing && isAlreadySyncedDocument(existing)) {
     existing = undefined;
   }
-  const targetUri = existing ? knownUri : buildNewTicketDraftUri(getEditorBasePath());
+  const targetUri = existing
+    ? knownUri
+    : buildNewTicketDraftUri(getEditorBasePath(), isFileExistsOrOpen, scopeHash);
   const document = existing ?? (await vscode.workspace.openTextDocument(targetUri));
   const editor = await vscode.window.showTextDocument(document, { preview: false });
 
-  registerNewTicketDraft(editor);
+  registerNewTicketDraft(editor, operationScope);
   if (input.projectId) {
     setEditorProjectId(editor, input.projectId);
   }

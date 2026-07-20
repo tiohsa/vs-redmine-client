@@ -6,12 +6,22 @@ import { buildNewTicketDraftContent } from "../../views/ticketDraftStore";
 import { openNewTicketDraft } from "../../commands/createTicketFromList";
 import { syncNewTicketDraft } from "../../views/ticketSaveSync";
 import type { TicketSaveResult } from "../../views/ticketSaveTypes";
-import { getTicketIdForEditor } from "../../views/ticketEditorRegistry";
+import {
+  getConnectionScopeForEditor,
+  getTicketIdForEditor,
+} from "../../views/ticketEditorRegistry";
 import { removeOfflineNewTicket } from "../../views/offlineSyncStore";
 import { type DashboardWorkPanel, type NewTicketComposerValues } from "../dashboardProtocol";
 import type { Ticket } from "../../redmine/types";
+import {
+  CONNECTION_SCOPE_MISMATCH_MESSAGE,
+  getCurrentConnectionScope,
+} from "../../config/connectionScope";
+import { runWithConnectionScope } from "../../redmine/client";
 
 export class DashboardComposerService {
+  private composerLoadGeneration = 0;
+
   constructor(private readonly deps: {
     context: DashboardServiceContext;
     getResolvedProject: () => { id: number; name: string } | undefined;
@@ -19,9 +29,12 @@ export class DashboardComposerService {
     refreshUnsynced: () => void;
     loadTickets: () => Promise<void>;
     selectTicket: (ticketId: number) => Promise<void>;
+    getProjectTrackers?: typeof getProjectTrackers;
+    listProjectMembers?: typeof listProjectMembers;
   }) {}
 
   async openNewTicketComposer(): Promise<void> {
+    const generation = ++this.composerLoadGeneration;
     const project = this.deps.getResolvedProject();
     if (!project) {
       this.deps.context.notifyToast("warning", vscode.l10n.t("Select a project before creating a ticket."));
@@ -41,10 +54,11 @@ export class DashboardComposerService {
         values: this.buildComposerValues({}),
       },
     });
-    await this.loadComposerOptions(project.id);
+    await this.loadComposerOptions(project.id, undefined, generation);
   }
 
   async openChildTicketComposer(parentTicketId: number): Promise<void> {
+    const generation = ++this.composerLoadGeneration;
     const parent = this.deps.getTickets().find((t) => t.id === parentTicketId);
     if (!parent) {
       this.deps.context.notifyError("ticket.createChild", vscode.l10n.t("Parent ticket not found."));
@@ -71,10 +85,11 @@ export class DashboardComposerService {
         values: this.buildComposerValues({}),
       },
     });
-    await this.loadComposerOptions(parent.projectId, parent);
+    await this.loadComposerOptions(parent.projectId, parent, generation);
   }
 
   cancelComposer(): void {
+    this.composerLoadGeneration++;
     const selectedTicketId = this.deps.context.store.getState().selectedTicketId;
     if (selectedTicketId) {
       this.deps.context.store.update({ workPanel: { mode: "detail", ticketId: selectedTicketId } });
@@ -148,6 +163,7 @@ export class DashboardComposerService {
       afterCreatedFn?: (createdId: number) => Promise<void>;
     },
   ): Promise<void> {
+    const operationScope = getCurrentConnectionScope();
     const workPanel = this.deps.context.store.getState().workPanel;
     if (!workPanel || (workPanel.mode !== "newTicket" && workPanel.mode !== "childTicket")) {
       this.deps.context.notifyError(requestId, vscode.l10n.t("Composer is not open."));
@@ -167,7 +183,11 @@ export class DashboardComposerService {
         const doc = await vscode.workspace.openTextDocument(uri);
         return vscode.window.showTextDocument(doc, { preview: false });
       });
-    const syncFn = hooks?.syncFn ?? ((editor: vscode.TextEditor) => syncNewTicketDraft({ editor }));
+    const syncFn = hooks?.syncFn ?? ((editor: vscode.TextEditor) =>
+      runWithConnectionScope(
+        operationScope,
+        () => syncNewTicketDraft({ editor, operationScope }),
+      ));
     const getTicketIdFn = hooks?.getTicketIdFn ?? getTicketIdForEditor;
 
     const editor = await this.openDraftEditorSafely(draftUri, {
@@ -181,13 +201,23 @@ export class DashboardComposerService {
       this.updateWorkPanelComposer({ draftUri: resolvedUri });
     }
 
+    const editorScope = getConnectionScopeForEditor(editor);
+    if (editorScope !== undefined && editorScope !== operationScope) {
+      this.deps.context.notifyError(requestId, CONNECTION_SCOPE_MISMATCH_MESSAGE);
+      return;
+    }
+
     const result = await syncFn(editor);
 
     if (result.status === "created") {
       const createdId = getTicketIdFn(editor);
-      this.removeOfflineNewTicketByUriVariants(draftUri);
-      this.removeOfflineNewTicketByUriVariants(resolvedUri);
+      this.removeOfflineNewTicketByUriVariants(draftUri, operationScope);
+      this.removeOfflineNewTicketByUriVariants(resolvedUri, operationScope);
       this.deps.refreshUnsynced();
+      if (operationScope !== getCurrentConnectionScope()) {
+        this.deps.context.notifyError(requestId, CONNECTION_SCOPE_MISMATCH_MESSAGE);
+        return;
+      }
       if (hooks?.afterCreatedFn) {
         await hooks.afterCreatedFn(createdId ?? 0);
         this.deps.context.onTicketsRefreshed();
@@ -278,7 +308,10 @@ export class DashboardComposerService {
     return deps.openEditorFn(parsed);
   }
 
-  private removeOfflineNewTicketByUriVariants(uriText: string): void {
+  private removeOfflineNewTicketByUriVariants(
+    uriText: string,
+    operationScope: string,
+  ): void {
     const variants = new Set<string>([uriText]);
     const parsed = vscode.Uri.parse(uriText);
     variants.add(parsed.toString());
@@ -288,7 +321,9 @@ export class DashboardComposerService {
     if (parsed.scheme === "file" && parsed.path) {
       variants.add(`file:${parsed.path}`);
     }
-    variants.forEach((uri) => removeOfflineNewTicket({ documentUri: uri }));
+    variants.forEach((uri) =>
+      removeOfflineNewTicket({ documentUri: uri }, operationScope)
+    );
   }
 
   private buildComposerValues(input: {
@@ -316,12 +351,16 @@ export class DashboardComposerService {
   private async loadComposerOptions(
     projectId: number,
     parentTicket?: Ticket,
+    generation = this.composerLoadGeneration,
   ): Promise<void> {
     try {
       const [trackers, members] = await Promise.all([
-        getProjectTrackers(projectId),
-        listProjectMembers(projectId).catch(() => [] as Array<{ id: number; name: string }>),
+        (this.deps.getProjectTrackers ?? getProjectTrackers)(projectId),
+        (this.deps.listProjectMembers ?? listProjectMembers)(projectId).catch(() => [] as Array<{ id: number; name: string }>),
       ]);
+      if (generation !== this.composerLoadGeneration) {
+        return;
+      }
       if (trackers.length === 0) {
         this.updateWorkPanelComposer({ loading: false, trackers: [], assignees: members, error: vscode.l10n.t("No trackers configured for this project.") });
         return;
@@ -344,6 +383,9 @@ export class DashboardComposerService {
         }),
       });
     } catch (err) {
+      if (generation !== this.composerLoadGeneration) {
+        return;
+      }
       const msg = (err as Error).message;
       this.updateWorkPanelComposer({ loading: false, trackers: [], assignees: [], error: vscode.l10n.t("Failed to load trackers: {0}", msg) });
     }

@@ -17,4 +17,14 @@ suite("Comment draft store", () => {
     assert.strictEqual(getCommentDraft(100), "Draft A");
     assert.strictEqual(getCommentDraft(200), "Draft B");
   });
+
+  test("同一ticket IDのコメント下書きを接続先ごとに分離する", () => {
+    const scopeA = "https://a.example/redmine/";
+    const scopeB = "https://b.example/redmine/";
+    setCommentDraft(100, "Draft A", scopeA);
+    setCommentDraft(100, "Draft B", scopeB);
+
+    assert.strictEqual(getCommentDraft(100, scopeA), "Draft A");
+    assert.strictEqual(getCommentDraft(100, scopeB), "Draft B");
+  });
 });

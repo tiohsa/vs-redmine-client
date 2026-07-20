@@ -1,12 +1,13 @@
 import { Comment } from "../../redmine/types";
 import type { DashboardCommentItem, DashboardUnsyncedKey } from "../dashboardProtocol";
 import { getOfflineSyncQueue } from "../../views/offlineSyncStore";
+import { getCurrentConnectionScope } from "../../config/connectionScope";
 
 export const buildCommentDashboardItems = (
   comments: Comment[],
   ticketId?: number,
 ): DashboardCommentItem[] => {
-  const queue = getOfflineSyncQueue();
+  const queue = getOfflineSyncQueue(getCurrentConnectionScope());
   const targetTicketId = ticketId ?? comments[0]?.ticketId;
   const localUnsyncedComments: DashboardCommentItem[] =
     targetTicketId === undefined
