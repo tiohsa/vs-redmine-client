@@ -161,6 +161,7 @@ export const createTicketFromContent = async (input: {
   result: TicketSaveResult;
   createdId?: number;
   parsed?: TicketEditorContent;
+  remoteIssueMayExist?: boolean;
 }> => {
   const projectId = resolveProjectIdForCreate(input.projectId);
   if (!projectId) {
@@ -244,15 +245,22 @@ export const createTicketFromContent = async (input: {
       description: "",
     });
     if (childCreateResult.error) {
+      let parentDeleted = false;
       try {
         await input.deps.deleteIssue(createdId);
+        parentDeleted = true;
       } catch {
-        // ignore rollback failure
+        // The parent issue may still exist and must be journaled by the caller.
       }
       await Promise.allSettled(
         childCreateResult.createdChildIds.map((issueId) => input.deps.deleteIssue(issueId)),
       );
-      return { result: buildResult("failed", childCreateResult.error, { uploadSummary }) };
+      return {
+        result: buildResult("failed", childCreateResult.error, { uploadSummary }),
+        createdId: parentDeleted ? undefined : createdId,
+        parsed: parentDeleted ? undefined : parsed,
+        remoteIssueMayExist: !parentDeleted,
+      };
     }
   }
 
@@ -284,6 +292,7 @@ export const createTicketFromQueuedContent = async (input: {
   result: TicketSaveResult;
   createdId?: number;
   parsed?: TicketEditorContent;
+  remoteIssueMayExist?: boolean;
 }> => {
   const deps = { ...defaultCreateDeps, ...input.deps };
   const output = await createTicketFromContent({

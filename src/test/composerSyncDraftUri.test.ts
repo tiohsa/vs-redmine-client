@@ -3,7 +3,12 @@ import * as vscode from "vscode";
 import { DashboardController } from "../dashboard/DashboardController";
 import { DashboardStateStore } from "../dashboard/DashboardStateStore";
 import type { DashboardWorkPanel } from "../dashboard/dashboardProtocol";
-import { clearOfflineSyncQueue, addOfflineNewTicket, getOfflineSyncQueue } from "../views/offlineSyncStore";
+import {
+  clearOfflineSyncQueue,
+  addOfflineNewTicket,
+  getOfflineSyncQueue,
+  removeOfflineNewTicket,
+} from "../views/offlineSyncStore";
 import { clearTicketDrafts, updateDraftAfterSave } from "../views/ticketDraftStore";
 import { clearRegistry, registerNewTicketDraft, setEditorProjectId, getTicketIdForEditor } from "../views/ticketEditorRegistry";
 import { clearNewTicketDrafts } from "../views/newTicketDraftStore";
@@ -100,7 +105,10 @@ suite("composerSync – draftUri ルーティング", () => {
           syncedEditorUri = uri;
           return editorStub;
         },
-        syncFn: async (_editor): Promise<TicketSaveResult> => ({ status: "created", message: "Ticket created." }),
+        syncFn: async (_editor): Promise<TicketSaveResult> => {
+          removeOfflineNewTicket({ documentUri: DRAFT_URI });
+          return { status: "created", message: "Ticket created." };
+        },
         getTicketIdFn: (_editor) => 42,
         afterCreatedFn: async () => {},
       },
@@ -172,7 +180,10 @@ suite("composerSync – draftUri ルーティング", () => {
       onTicketsRefreshed: () => {},
       _composerSyncTestHooks: {
         findEditorFn: (_uri) => editorStub,
-        syncFn: async (_editor): Promise<TicketSaveResult> => ({ status: "created", message: "Ticket created." }),
+        syncFn: async (_editor): Promise<TicketSaveResult> => {
+          removeOfflineNewTicket({ documentUri: DRAFT_URI });
+          return { status: "created", message: "Ticket created." };
+        },
         getTicketIdFn: (_editor) => 77,
         afterCreatedFn: async () => {},
       },
@@ -284,7 +295,10 @@ suite("composerSync – draftUri ルーティング", () => {
       onTicketsRefreshed: () => {},
       _composerSyncTestHooks: {
         findEditorFn: (_uri) => editorStub,
-        syncFn: async (_editor): Promise<TicketSaveResult> => ({ status: "created", message: "Ticket created." }),
+        syncFn: async (_editor): Promise<TicketSaveResult> => {
+          removeOfflineNewTicket({ documentUri: normalizedCurrentFile });
+          return { status: "created", message: "Ticket created." };
+        },
         getTicketIdFn: (_editor) => 92,
         afterCreatedFn: async () => {},
       },

@@ -106,6 +106,23 @@ suite("syncUnsyncedFileNewTicket – rewriteDocumentWithRegisteredFields open do
     const success = await rewriteDocumentWithRegisteredFields(DOC_URI, 1, rewriteDeps);
     assert.strictEqual(success, false);
   });
+
+  test("document.save failure returns false", async () => {
+    const text = buildNewTicketText();
+    const openDocument = {
+      uri: vscode.Uri.parse(DOC_URI),
+      getText: () => text,
+      isDirty: true,
+    } as vscode.TextDocument;
+
+    const success = await rewriteDocumentWithRegisteredFields(DOC_URI, 1, {
+      textDocuments: [openDocument],
+      applyEdit: async () => true,
+      saveDocument: async () => false,
+    });
+
+    assert.strictEqual(success, false);
+  });
 });
 
 suite("syncUnsyncedFileNewTicket – rewriteDocumentWithRegisteredFields closed file", () => {

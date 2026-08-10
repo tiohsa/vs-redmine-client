@@ -40,6 +40,7 @@ export type RewriteDocumentDeps = {
   applyEdit?: (edit: vscode.WorkspaceEdit) => Promise<boolean>;
   readFile?: (uri: vscode.Uri) => Promise<Uint8Array>;
   writeFile?: (uri: vscode.Uri, content: Uint8Array) => Promise<void>;
+  saveDocument?: (document: vscode.TextDocument) => Promise<boolean>;
 };
 
 export const rewriteDocumentWithRegisteredFields = async (
@@ -54,6 +55,7 @@ export const rewriteDocumentWithRegisteredFields = async (
   const readFile = deps.readFile ?? ((uri: vscode.Uri) => vscode.workspace.fs.readFile(uri));
   const writeFile = deps.writeFile ?? ((uri: vscode.Uri, content: Uint8Array) =>
     vscode.workspace.fs.writeFile(uri, content));
+  const saveDocument = deps.saveDocument ?? ((target: vscode.TextDocument) => target.save());
 
   const document = textDocuments.find((doc) => doc.uri.toString() === documentUriString);
 
@@ -83,7 +85,14 @@ export const rewriteDocumentWithRegisteredFields = async (
       );
       const edit = new vscode.WorkspaceEdit();
       edit.replace(uri, fullRange, newContent);
-      return await applyEdit(edit);
+      const changed = await applyEdit(edit);
+      if (!changed) {
+        return false;
+      }
+      if (document.isDirty && !(await saveDocument(document))) {
+        return false;
+      }
+      return true;
     } finally {
       releaseSaveSync(documentUriString);
     }

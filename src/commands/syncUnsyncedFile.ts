@@ -1,21 +1,17 @@
 import * as vscode from "vscode";
 import {
   getOfflineSyncQueue,
-  removeOfflineTicketUpdate,
-  removeOfflineNewTicket,
   updateOfflineNewTicket,
   removeOfflineCommentEntry,
 } from "../views/offlineSyncStore";
-import { applyQueuedTicketUpdate, createTicketFromQueuedContent } from "../views/ticketSaveSync";
 import { applyQueuedCommentUpdate, finalizeNewCommentDraftDocument } from "../views/commentSaveSync";
 import { updateCommentUpdateFileAfterSync } from "../views/commentUpdateFile";
-import { registerTicketDocument } from "../views/ticketEditorRegistry";
 import { UnsyncedFileSyncKey } from "../app/unsyncedTypes";
 import { showInfo, showWarning } from "../utils/notifications";
-import { rewriteDocumentWithRegisteredFields, RewriteDocumentDeps } from "../views/editorDocumentRewrite";
-import { removeTicketEditorByUri } from "../views/ticketEditorRegistry";
+import { RewriteDocumentDeps } from "../views/editorDocumentRewrite";
 import { getCurrentConnectionScope } from "../config/connectionScope";
 import { runWithConnectionScope } from "../redmine/client";
+import { createTicketSyncService } from "../app/ticketSync";
 
 export type SyncFailureReason =
   | "parse_error"
@@ -66,20 +62,31 @@ const syncUnsyncedFileAtScope = async (
       showWarning(vscode.l10n.t("Queue entry for this ticket update not found."));
       return undefined;
     }
-    const result = await applyQueuedTicketUpdate({ update, operationScope });
-    if (result.status === "success" || result.status === "no_change") {
-      removeOfflineTicketUpdate(syncKey.ticketId, operationScope);
-      if (options.onSubjectUpdated && result.status === "success") {
+    const outcome = await createTicketSyncService().syncQueueItem({
+      context: { connectionScope: operationScope },
+      item: { kind: "ticket", operation: update },
+    });
+    if (outcome.kind === "completed" || outcome.kind === "no_change") {
+      if (options.onSubjectUpdated && outcome.kind === "completed") {
         options.onSubjectUpdated(syncKey.ticketId, update.subject);
       }
       showInfo(vscode.l10n.t("Ticket update synced."));
-      return { status: result.status, kind: "ticket", id: syncKey.ticketId };
-    } else if (result.status === "conflict") {
+      return {
+        status: outcome.kind === "no_change" ? "no_change" : "success",
+        kind: "ticket",
+        id: syncKey.ticketId,
+      };
+    } else if (outcome.kind === "conflict") {
       showWarning(vscode.l10n.t("Conflicts with remote changes detected. Open the file to review."));
       return { status: "conflict", kind: "ticket", id: syncKey.ticketId };
     } else {
-      showWarning(vscode.l10n.t("Sync failed: {0}", result.message ?? vscode.l10n.t("Unknown error")));
-      return { status: "failed", kind: "ticket", message: result.message };
+      const message = outcome.kind === "remote_committed"
+        ? outcome.message
+        : outcome.kind === "failed_before_commit"
+          ? outcome.error.message
+          : vscode.l10n.t("Unknown error");
+      showWarning(vscode.l10n.t("Sync failed: {0}", message ?? vscode.l10n.t("Unknown error")));
+      return { status: "failed", kind: "ticket", message };
     }
   }
 
@@ -92,83 +99,38 @@ const syncUnsyncedFileAtScope = async (
       return undefined;
     }
 
-    // createdIssueId が既にある場合は作成済み → ファイル書き換えのみ再試行
-    let resolvedId = entry.createdIssueId;
-    let createdParsed;
-
-    if (!resolvedId) {
-      const { result, createdId, parsed } = await createTicketFromQueuedContent({
-        operationScope,
-        content: entry.content,
-        projectId: entry.projectId,
-        baseDir: entry.baseDir,
-      });
-      if (result.status !== "created" || !createdId) {
-        const message = normalizeNewTicketSyncFailureMessage(result.message);
-        showWarning(vscode.l10n.t("Sync failed: {0}", message));
-        return { status: "failed", kind: "newTicket", message, reason: "api_error" };
-      }
-      resolvedId = createdId;
-      createdParsed = parsed;
-      // 作成成功を即座にキューに記録してから書き換えへ（重複作成防止）
-      updateOfflineNewTicket(
-        { queueId: entry.queueId, documentUri: entry.documentUri },
-        { createdIssueId: resolvedId },
-        operationScope,
-      );
-    }
-
-    if (entry.documentUri) {
-      const docUri = vscode.Uri.parse(entry.documentUri);
-      removeTicketEditorByUri(docUri);
-      const rewriteSuccess = await rewriteDocumentWithRegisteredFields(
-        entry.documentUri,
-        resolvedId,
-        rewriteDeps,
-        entry.projectId,
-        createdParsed,
-      );
-      const document = vscode.workspace.textDocuments.find(
-        (doc) => doc.uri.toString() === entry.documentUri,
-      );
-      if (document) {
-        registerTicketDocument(
-          resolvedId,
-          document,
-          "ticket",
-          entry.projectId,
-          operationScope,
-        );
-      }
-      if (rewriteSuccess) {
-        removeOfflineNewTicket(
-          { queueId: entry.queueId, documentUri: entry.documentUri },
-          operationScope,
-        );
-        options.onTicketCreated?.();
-        showInfo(vscode.l10n.t("New ticket created."));
-        return { status: "success", kind: "newTicket", id: resolvedId };
-      } else {
-        updateOfflineNewTicket(
-          { queueId: entry.queueId, documentUri: entry.documentUri },
-          { status: "created_rewrite_failed" },
-          operationScope,
-        );
-        showWarning(
-          vscode.l10n.t("Redmine ticket created (#{0}). File rewrite failed. Retry sync to reattempt file conversion only.", resolvedId),
-        );
-        return {
-          status: "failed",
-          kind: "newTicket",
-          message: vscode.l10n.t("File rewrite failed (ticket #{0} already created)", resolvedId),
-          reason: "file_rewrite_failed",
-        };
-      }
-    } else {
+    const outcome = await createTicketSyncService({ rewrite: rewriteDeps }).syncQueueItem({
+      context: { connectionScope: operationScope },
+      item: { kind: "newTicket", operation: entry },
+    });
+    if (outcome.kind === "completed") {
       options.onTicketCreated?.();
       showInfo(vscode.l10n.t("New ticket created."));
-      return { status: "success", kind: "newTicket", id: resolvedId };
+      return { status: "success", kind: "newTicket", id: outcome.ticketId };
     }
+    if (outcome.kind === "remote_committed") {
+      updateOfflineNewTicket(
+        { queueId: entry.queueId, documentUri: entry.documentUri },
+        { status: "created_rewrite_failed" },
+        operationScope,
+      );
+      const message = outcome.message ?? vscode.l10n.t(
+        "Ticket #{0} was created, but local finalization is pending.",
+        outcome.ticketId,
+      );
+      showWarning(message);
+      return {
+        status: "failed",
+        kind: "newTicket",
+        message,
+        reason: outcome.pending === "local_finalize" ? "file_rewrite_failed" : "api_error",
+      };
+    }
+    const message = normalizeNewTicketSyncFailureMessage(
+      outcome.kind === "failed_before_commit" ? outcome.error.message : undefined,
+    );
+    showWarning(vscode.l10n.t("Sync failed: {0}", message));
+    return { status: "failed", kind: "newTicket", message, reason: "api_error" };
   }
 
   if (syncKey.kind === "comment") {

@@ -2,34 +2,31 @@ import * as path from "path";
 import * as vscode from "vscode";
 import { resolveEditorBaseDir } from "../utils/editorBaseDir";
 import { showError, showSuccess, showWarning } from "../utils/notifications";
-import { applyEditorContent } from "../views/ticketPreview";
-import { registerTicketDocument } from "../views/ticketEditorRegistry";
 import {
-  createTicketFromMarkdownContent,
   previewMarkdownTicketCreation,
   type MarkdownTicketCreatePreview,
-  type MarkdownTicketCreateResult,
 } from "../views/markdownTicketCreateService";
 import { getCurrentConnectionScope } from "../config/connectionScope";
-import { runWithConnectionScope } from "../redmine/client";
+import {
+  createTicketSyncService,
+  type TicketSyncOutcome,
+} from "../app/ticketSync";
 
 type CreateTicketFromMarkdownHeaderDeps = {
   getActiveEditor: () => vscode.TextEditor | undefined;
   previewCreation: (content: string) => MarkdownTicketCreatePreview;
   confirmCreation: (preview: MarkdownTicketCreatePreview) => Promise<boolean>;
-  createTicket: typeof createTicketFromMarkdownContent;
-  applyContent: typeof applyEditorContent;
-  registerTicketDocument: (
-    issueId: number,
-    document: vscode.TextDocument,
-    contentType?: "ticket",
-    projectId?: number,
-    connectionScope?: string,
-  ) => void;
   showError: (message: string) => void;
   showWarning: (message: string) => void;
   showSuccess: (message: string) => void;
   resolveBaseDir: (editor: vscode.TextEditor) => string | undefined;
+  syncTicket: (input: {
+    editor: vscode.TextEditor;
+    content: string;
+    projectId: number;
+    baseDir?: string;
+    connectionScope: string;
+  }) => Promise<TicketSyncOutcome>;
 };
 
 const confirmCreation = async (preview: MarkdownTicketCreatePreview): Promise<boolean> => {
@@ -53,13 +50,19 @@ const defaultDeps: CreateTicketFromMarkdownHeaderDeps = {
   getActiveEditor: () => vscode.window.activeTextEditor,
   previewCreation: previewMarkdownTicketCreation,
   confirmCreation,
-  createTicket: createTicketFromMarkdownContent,
-  applyContent: applyEditorContent,
-  registerTicketDocument,
   showError,
   showWarning,
   showSuccess,
   resolveBaseDir: (editor) => resolveEditorBaseDir({ editor }),
+  syncTicket: ({ editor, projectId, connectionScope }) =>
+    createTicketSyncService().syncEditor({
+      context: { connectionScope },
+      editor,
+      ticketId: 0,
+      newTicket: true,
+      manual: false,
+      projectId,
+    }),
 };
 
 const isMarkdownEditor = (editor: vscode.TextEditor): boolean =>
@@ -112,48 +115,28 @@ export const createTicketFromMarkdownHeader = async (
     return;
   }
 
-  let result: MarkdownTicketCreateResult;
+  let outcome: TicketSyncOutcome;
   try {
-    result = await runWithConnectionScope(
-      operationScope,
-      () => deps.createTicket({
-        content,
-        projectId: preview.projectId,
-        baseDir: deps.resolveBaseDir(editor),
-      }),
-    );
+    outcome = await deps.syncTicket({
+      editor,
+      content,
+      projectId: preview.projectId,
+      baseDir: deps.resolveBaseDir(editor),
+      connectionScope: operationScope,
+    });
   } catch (error) {
-    deps.showError(error instanceof Error ? error.message : vscode.l10n.t("An unexpected error occurred."));
+    deps.showError(error instanceof Error
+      ? error.message
+      : vscode.l10n.t("An unexpected error occurred."));
     return;
   }
-  if (result.status === "failed") {
-    deps.showError(localizeCreationError(result.message));
-    return;
+  if (outcome.kind === "completed") {
+    deps.showSuccess(vscode.l10n.t("Redmine ticket created (#{0}).", outcome.ticketId));
+  } else if (outcome.kind === "remote_committed") {
+    deps.showWarning(outcome.message ?? createFailureWarning(outcome.ticketId));
+  } else if (outcome.kind === "failed_before_commit") {
+    deps.showError(localizeCreationError(outcome.error.message));
+  } else {
+    deps.showError(vscode.l10n.t("Ticket creation did not complete."));
   }
-  if (result.status === "header-update-failed") {
-    deps.showWarning(createFailureWarning(result.issueId));
-    return;
-  }
-
-  try {
-    await deps.applyContent(editor, result.updatedContent);
-    if (editor.document.isDirty) {
-      const saved = await editor.document.save();
-      if (!saved) {
-        throw new Error("Markdown save failed.");
-      }
-    }
-  } catch {
-    deps.showWarning(createFailureWarning(result.issueId));
-    return;
-  }
-
-  deps.registerTicketDocument(
-    result.issueId,
-    editor.document,
-    "ticket",
-    result.preview.projectId,
-    operationScope,
-  );
-  deps.showSuccess(vscode.l10n.t("Redmine ticket created (#{0}).", result.issueId));
 };

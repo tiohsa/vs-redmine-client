@@ -1,6 +1,10 @@
 import * as vscode from "vscode";
 import { ConflictContext, TicketSaveResult } from "./ticketSaveTypes";
-import { reloadTicketEditor, syncTicketDraft } from "./ticketSaveSync";
+import { reloadTicketEditor } from "./ticketSaveSync";
+import {
+    createTicketSyncService,
+    ticketSyncOutcomeToSaveResult,
+} from "../app/ticketSync";
 import {
     getTicketDraft,
     markDraftStatus,
@@ -119,15 +123,17 @@ export async function forceSaveLocal(
     );
     markDraftStatus(context.ticketId, "Dirty", operationScope);
 
-    // Now sync again with the updated timestamp.
-    const result = await syncTicketDraft({
-        ticketId: context.ticketId,
-        content: editor.document.getText(),
+    if (operationScope === undefined) {
+        return { status: "failed", message: "Connection scope is required." };
+    }
+    const outcome = await createTicketSyncService().syncEditor({
+        context: { connectionScope: operationScope },
         editor,
-        operationScope,
+        ticketId: context.ticketId,
+        newTicket: false,
+        manual: false,
     });
-
-    return result;
+    return ticketSyncOutcomeToSaveResult(outcome, false);
 }
 
 /**

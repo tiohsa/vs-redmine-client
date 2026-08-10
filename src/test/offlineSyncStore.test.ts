@@ -4,6 +4,7 @@ import {
   addOfflineTicketUpdate,
   addOfflineCommentUpdate,
   addOfflineNewTicket,
+  addOfflineNewTicketAsync,
   clearOfflineSyncQueue,
   replaceOfflineSyncQueue,
   removeOfflineTicketUpdate,
@@ -224,5 +225,85 @@ suite("offlineSyncStore — workspaceState 永続化", () => {
     assert.strictEqual(getOfflineSyncQueue(scope).tickets.has(5), true);
     initializeOfflineSyncStore(memento, scope);
     assert.strictEqual(getOfflineSyncQueue(scope).tickets.has(5), true);
+  });
+
+  test("created_rewrite_failed の legacy entry を local_finalize_pending として復元する", () => {
+    const memento = createTestMemento();
+    void memento.update("redmine.offlineSyncQueue", {
+      tickets: [],
+      comments: [],
+      newTickets: [{
+        queueId: "legacy-new-1",
+        content: "# Ticket",
+        createdIssueId: 88,
+        status: "created_rewrite_failed",
+      }],
+    });
+
+    initializeOfflineSyncStore(memento);
+    const restored = getOfflineSyncQueue().newTickets[0];
+    assert.strictEqual(restored.phase, "local_finalize_pending");
+    assert.strictEqual(restored.operationId, "legacy-new-1");
+  });
+
+  test("async mutation は Memento.update 完了まで resolve しない", async () => {
+    let release: (() => void) | undefined;
+    const writes: unknown[] = [];
+    const memento = {
+      get: <T>(_key: string, defaultValue?: T): T => defaultValue as T,
+      keys: (): readonly string[] => [],
+      update: async (_key: string, value: unknown): Promise<void> => {
+        writes.push(value);
+        await new Promise<void>((resolve) => { release = resolve; });
+      },
+    };
+    initializeOfflineSyncStore(memento as import("vscode").Memento, "scope-a");
+    let completed = false;
+    const pending = addOfflineNewTicketAsync(
+      { content: "# Durable", connectionScope: "scope-a" },
+      "scope-a",
+    ).then(() => { completed = true; });
+
+    await Promise.resolve();
+    assert.strictEqual(completed, false);
+    assert.strictEqual(writes.length, 1);
+    release?.();
+    await pending;
+    assert.strictEqual(completed, true);
+  });
+
+  test("untitled/file URI variants は同一 document operation として扱う", () => {
+    const stale = "untitled:/tmp/same-ticket.md";
+    const saved = "file:///tmp/same-ticket.md";
+    addOfflineNewTicket({
+      content: "# First",
+      documentUri: stale,
+      createdIssueId: 321,
+      phase: "local_finalize_pending",
+    });
+    const operationId = getOfflineSyncQueue().newTickets[0].operationId;
+
+    addOfflineNewTicket({ content: "# Saved", documentUri: saved });
+    const queue = getOfflineSyncQueue();
+    assert.strictEqual(queue.newTickets.length, 1);
+    assert.strictEqual(queue.newTickets[0].operationId, operationId);
+    assert.strictEqual(queue.newTickets[0].createdIssueId, 321);
+  });
+
+  test("remote committed ticket update に後続 save が来ても pending phase を queued へ戻さない", () => {
+    addOfflineTicketUpdate(901, {
+      ...ticketUpdate(901),
+      phase: "reconciliation_pending",
+      operationId: "ticket-901",
+    });
+    addOfflineTicketUpdate(901, {
+      ...ticketUpdate(901),
+      description: "Saved while pending",
+      phase: "queued",
+    });
+
+    const restored = getOfflineSyncQueue().tickets.get(901);
+    assert.strictEqual(restored?.phase, "reconciliation_pending");
+    assert.strictEqual(restored?.operationId, "ticket-901");
   });
 });

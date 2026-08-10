@@ -7,17 +7,9 @@ import {
   isTicketEditor,
   NEW_TICKET_DRAFT_ID,
 } from "../views/ticketEditorRegistry";
-import {
-  removeOfflineTicketUpdate,
-  removeOfflineNewTicket,
-  removeOfflineCommentEntry,
-} from "../views/offlineSyncStore";
-import { markDraftStatus } from "../views/ticketDraftStore";
-import {
-  syncNewTicketDraft,
-  syncTicketDraft,
-  TicketSaveDependencies,
-} from "../views/ticketSaveSync";
+import { removeOfflineCommentEntry } from "../views/offlineSyncStore";
+import { getTicketDraft, markDraftStatus } from "../views/ticketDraftStore";
+import { TicketSaveDependencies } from "../views/ticketSaveSync";
 import {
   finalizeNewCommentDraftDocument,
   shouldRefreshComments,
@@ -33,6 +25,8 @@ import {
 } from "../config/connectionScope";
 import { runWithConnectionScope } from "../redmine/client";
 import { showError } from "../utils/notifications";
+import { getOfflineSyncMode } from "../config/settings";
+import { createTicketSyncService, ticketSyncOutcomeToSaveResult } from "../app/ticketSync";
 
 export { CONNECTION_SCOPE_MISMATCH_MESSAGE } from "../config/connectionScope";
 
@@ -82,14 +76,19 @@ const syncEditorToRedmineAtScope = async (
   }
 
   if (ticketId === NEW_TICKET_DRAFT_ID) {
-    const result = await syncNewTicketDraft({
+    const outcome = await createTicketSyncService({
+      create: options.deps,
+      update: options.deps,
+    }).syncEditor({
+      context: { connectionScope: operationScope },
       editor,
-      deps: options.deps,
-      operationScope,
+      ticketId,
+      newTicket: true,
+      manual: getOfflineSyncMode() === "manual",
     });
-    if (result.status === "created") {
+    const result = ticketSyncOutcomeToSaveResult(outcome, true);
+    if (outcome.kind === "completed") {
       options.onTicketCreated?.();
-      removeOfflineNewTicket({ documentUri: editor.document.uri.toString() }, operationScope);
     }
     return { kind: "ticket", result };
   }
@@ -98,21 +97,29 @@ const syncEditorToRedmineAtScope = async (
     markDraftStatus(ticketId, "Syncing", operationScope);
     let result: TicketSaveResult;
     try {
-      result = await syncTicketDraft({
-        ticketId,
-        content: editor.document.getText(),
+      const outcome = await createTicketSyncService({
+        create: options.deps,
+        update: options.deps,
+      }).syncEditor({
+        context: { connectionScope: operationScope },
         editor,
-        deps: options.deps,
-        onSubjectUpdated: options.onSubjectUpdated,
-        operationScope,
+        ticketId,
+        newTicket: false,
+        manual: getOfflineSyncMode() === "manual",
       });
+      result = ticketSyncOutcomeToSaveResult(outcome, false);
+      if (outcome.kind === "completed") {
+        const canonicalSubject = getTicketDraft(ticketId, operationScope)?.baseSubject;
+        if (canonicalSubject) {
+          options.onSubjectUpdated?.(ticketId, canonicalSubject);
+        }
+      }
     } catch (error) {
       markDraftStatus(ticketId, "Failed", operationScope);
       throw error;
     }
     if (result.status === "no_change" || result.status === "success") {
       markDraftStatus(ticketId, "Synced", operationScope);
-      removeOfflineTicketUpdate(ticketId, operationScope);
     } else if (result.status !== "conflict" && result.status !== "queued") {
       markDraftStatus(ticketId, "Failed", operationScope);
     }

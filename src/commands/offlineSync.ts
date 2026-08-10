@@ -1,29 +1,18 @@
 import * as vscode from "vscode";
 import {
-  clearOfflineSyncQueue,
   getOfflineSyncQueue,
   OfflineCommentUpdate,
   OfflineTicketUpdate,
-  replaceOfflineSyncQueue,
+  removeOfflineCommentEntry,
 } from "../views/offlineSyncStore";
-import {
-  applyQueuedTicketUpdate,
-  createTicketFromQueuedContent,
-} from "../views/ticketSaveSync";
 import { applyQueuedCommentUpdate } from "../views/commentSaveSync";
-import { registerTicketDocument, removeTicketEditorByUri } from "../views/ticketEditorRegistry";
-import { rewriteDocumentWithRegisteredFields } from "../views/editorDocumentRewrite";
 import { finalizeNewCommentDraftDocument } from "../views/commentSaveSync";
 import { showInfo, showWarning } from "../utils/notifications";
-import { TicketSaveResult } from "../views/ticketSaveTypes";
 import { CommentSaveResult } from "../views/commentSaveTypes";
 import { getCurrentConnectionScope } from "../config/connectionScope";
 import { runWithConnectionScope } from "../redmine/client";
-
-const isTicketResultSuccess = (result: TicketSaveResult): boolean =>
-  result.status === "success" ||
-  result.status === "created" ||
-  result.status === "no_change";
+import { createTicketSyncService } from "../app/ticketSync";
+import type { TicketSyncService } from "../app/ticketSync";
 
 const isCommentResultSuccess = (result: CommentSaveResult): boolean =>
   result.status === "success" ||
@@ -56,15 +45,30 @@ export type OfflineSyncRunResult =
   | { status: "cancelled"; total: number; synced: number; failed: number; conflicts: number }
   | { status: "failed"; total: number; synced: number; failed: number; conflicts: number };
 
-export const runOfflineSync = async (): Promise<OfflineSyncRunResult> => {
+type OfflineSyncDependencies = {
+  createTicketSyncService: () => Pick<TicketSyncService, "syncAll">;
+};
+
+const defaultOfflineSyncDependencies: OfflineSyncDependencies = {
+  createTicketSyncService,
+};
+
+export const runOfflineSync = async (
+  deps: OfflineSyncDependencies = defaultOfflineSyncDependencies,
+): Promise<OfflineSyncRunResult> => {
   const operationScope = getCurrentConnectionScope();
-  return runWithConnectionScope(operationScope, () => runOfflineSyncAtScope(operationScope));
+  return runWithConnectionScope(
+    operationScope,
+    () => runOfflineSyncAtScope(operationScope, deps),
+  );
 };
 
 const runOfflineSyncAtScope = async (
   operationScope: string,
+  deps: OfflineSyncDependencies,
 ): Promise<OfflineSyncRunResult> => {
   const queue = getOfflineSyncQueue(operationScope);
+  const ticketSyncService = deps.createTicketSyncService();
   const ticketUpdates = Array.from(queue.tickets.values());
   const totalItems =
     queue.newTickets.length + ticketUpdates.length + queue.comments.length;
@@ -99,67 +103,47 @@ const runOfflineSyncAtScope = async (
         });
       };
 
-      // ── 新規チケット ────────────────────────────────────────────────────
-      for (const entry of queue.newTickets) {
-        if (token.isCancellationRequested) {
-          wasCancelled = true;
-          failedNewTickets.push(...queue.newTickets.slice(processed));
-          break;
-        }
-        const { result, createdId, parsed } = await createTicketFromQueuedContent({
-          operationScope,
-          content: entry.content,
-          projectId: entry.projectId,
-          baseDir: entry.baseDir,
+      const ticketOperations = [
+        ...queue.newTickets.map((operation) => ({ kind: "newTicket" as const, operation })),
+        ...ticketUpdates.map((operation) => ({ kind: "ticket" as const, operation })),
+      ];
+      if (ticketOperations.length > 0) {
+        const outcomes = await ticketSyncService.syncAll({
+          context: { connectionScope: operationScope },
+          newTickets: queue.newTickets,
+          tickets: ticketUpdates,
+          shouldContinue: () => !token.isCancellationRequested,
         });
-        if (result.status === "created" && createdId && entry.documentUri) {
-          const docUri = vscode.Uri.parse(entry.documentUri);
-          removeTicketEditorByUri(docUri);
-          await rewriteDocumentWithRegisteredFields(
-            entry.documentUri,
-            createdId,
-            {},
-            entry.projectId,
-            parsed,
-          );
-          const document = vscode.workspace.textDocuments.find(
-            (doc) => doc.uri.toString() === entry.documentUri,
-          );
-          if (document) {
-            registerTicketDocument(
-              createdId,
-              document,
-              "ticket",
-              entry.projectId,
-              operationScope,
+        for (let index = 0; index < outcomes.length; index++) {
+          const item = ticketOperations[index];
+          const outcome = outcomes[index];
+          if (outcome.kind === "completed" || outcome.kind === "no_change") {
+            synced++;
+          } else if (item.kind === "newTicket") {
+            const current = getOfflineSyncQueue(operationScope).newTickets.find(
+              (candidate) => candidate.queueId === item.operation.queueId,
             );
+            failedNewTickets.push(current ?? item.operation);
+          } else {
+            if (outcome.kind === "conflict") {
+              conflicts++;
+            }
+            failedTickets.push(item.operation);
+          }
+          advance(item.kind === "newTicket"
+            ? `New ticket (${processed}/${totalItems})`
+            : `Ticket #${item.operation.ticketId} (${processed}/${totalItems})`);
+        }
+        if (outcomes.length < ticketOperations.length) {
+          wasCancelled = true;
+          for (const item of ticketOperations.slice(outcomes.length)) {
+            if (item.kind === "newTicket") {
+              failedNewTickets.push(item.operation);
+            } else {
+              failedTickets.push(item.operation);
+            }
           }
         }
-        if (isTicketResultSuccess(result)) {
-          synced++;
-        } else {
-          failedNewTickets.push(entry);
-        }
-        advance(`New ticket (${processed}/${totalItems})`);
-      }
-
-      // ── チケット更新 ────────────────────────────────────────────────────
-      for (const update of ticketUpdates) {
-        if (token.isCancellationRequested) {
-          wasCancelled = true;
-          failedTickets.push(update);
-          continue;
-        }
-        const result = await applyQueuedTicketUpdate({ update, operationScope });
-        if (isTicketResultSuccess(result)) {
-          synced++;
-        } else if (result.status === "conflict") {
-          conflicts++;
-          failedTickets.push(update);
-        } else {
-          failedTickets.push(update);
-        }
-        advance(`Ticket #${update.ticketId} (${processed}/${totalItems})`);
       }
 
       // ── コメント更新 ────────────────────────────────────────────────────
@@ -191,6 +175,10 @@ const runOfflineSyncAtScope = async (
         }
         if (isCommentResultSuccess(result)) {
           synced++;
+          removeOfflineCommentEntry(
+            { commentId: update.commentId, documentUri: update.documentUri },
+            operationScope,
+          );
         } else if (result.status === "conflict") {
           conflicts++;
           failedComments.push(update);
@@ -206,11 +194,6 @@ const runOfflineSyncAtScope = async (
     failedTickets.length + failedComments.length + failedNewTickets.length;
 
   if (wasCancelled || failed > 0 || conflicts > 0) {
-    replaceOfflineSyncQueue({
-      tickets: new Map(failedTickets.map((item) => [item.ticketId, item])),
-      comments: failedComments,
-      newTickets: failedNewTickets,
-    }, operationScope);
     const parts: string[] = [];
     if (synced > 0) { parts.push(vscode.l10n.t("Synced: {0}", synced)); }
     if (conflicts > 0) { parts.push(vscode.l10n.t("Conflicts: {0}", conflicts)); }
@@ -231,7 +214,6 @@ const runOfflineSyncAtScope = async (
     return { status: "partial_failure", total: totalItems, synced, failed, conflicts };
   }
 
-  clearOfflineSyncQueue(operationScope);
   showInfo(vscode.l10n.t("Sync completed. Synced: {0}.", synced));
   return { status: "success", total: totalItems, synced, failed: 0, conflicts: 0 };
 };

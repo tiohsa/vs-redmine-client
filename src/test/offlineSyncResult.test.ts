@@ -1,10 +1,12 @@
 import * as assert from "assert";
 import {
+  addOfflineTicketUpdate,
   clearOfflineSyncQueue,
   initializeOfflineSyncStore,
 } from "../views/offlineSyncStore";
 import { runOfflineSync, type OfflineSyncRunResult } from "../commands/offlineSync";
 import { createTestMemento } from "./helpers/vscodeMemento";
+import { buildIssueMetadataFixture } from "./helpers/ticketMetadataFixtures";
 
 suite("offlineSyncResult — 構造化戻り値", () => {
   setup(() => {
@@ -23,6 +25,34 @@ suite("offlineSyncResult — 構造化戻り値", () => {
     assert.strictEqual(result.synced, 0);
     assert.strictEqual(result.failed, 0);
     assert.strictEqual(result.conflicts, 0);
+  });
+
+  test("ticket の Sync All は TicketSyncService.syncAll を一度だけ呼ぶ", async () => {
+    addOfflineTicketUpdate(42, {
+      ticketId: 42,
+      baseSubject: "Base",
+      baseDescription: "Old",
+      baseMetadata: buildIssueMetadataFixture(),
+      subject: "Updated",
+      description: "New",
+      metadata: buildIssueMetadataFixture(),
+    });
+    let syncAllCalls = 0;
+    let receivedTicketIds: number[] = [];
+
+    const result = await runOfflineSync({
+      createTicketSyncService: () => ({
+        syncAll: async (input) => {
+          syncAllCalls++;
+          receivedTicketIds = input.tickets.map((ticket) => ticket.ticketId);
+          return [{ kind: "completed", ticketId: 42 }];
+        },
+      }),
+    });
+
+    assert.strictEqual(syncAllCalls, 1);
+    assert.deepStrictEqual(receivedTicketIds, [42]);
+    assert.strictEqual(result.status, "success");
   });
 
   test("OfflineSyncRunResult 型: nothing_to_sync の数値フィールドが 0", () => {

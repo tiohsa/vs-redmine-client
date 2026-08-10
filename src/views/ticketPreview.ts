@@ -114,13 +114,18 @@ export const applyEditorContent = async (
     return;
   }
 
-  await editor.edit((builder) => {
+  const changed = await editor.edit((builder) => {
+    const lines = current.split("\n");
+    const lastLine = Math.max(0, lines.length - 1);
     const fullRange = new vscode.Range(
-      editor.document.positionAt(0),
-      editor.document.positionAt(current.length),
+      new vscode.Position(0, 0),
+      new vscode.Position(lastLine, lines[lastLine].length),
     );
     builder.replace(fullRange, nextContent);
   });
+  if (!changed) {
+    throw new Error("editor_edit_failed");
+  }
 };
 
 type StorageDirResolution = {

@@ -93,7 +93,7 @@ suite("Ticket save sync", () => {
     assert.ok(content.includes("status:    Closed"));
   });
 
-  test("queued no_change clears dirty draft status", async () => {
+  test("queued no_change reconciles remote canonical state and clears dirty draft status", async () => {
     const metadata = buildIssueMetadataFixture();
     initializeTicketDraft(101, "Title", "Body", metadata, "t1");
     markDraftStatus(101, "Dirty");
@@ -110,9 +110,20 @@ suite("Ticket save sync", () => {
         metadata,
       },
       deps: {
-        getIssueDetail: async () => {
-          throw new Error("should not load detail");
-        },
+        getIssueDetail: async () => ({
+          ticket: {
+            id: 101,
+            subject: "Title",
+            description: "Body",
+            projectId: 1,
+            trackerName: "Task",
+            priorityName: "Normal",
+            statusName: "In Progress",
+            dueDate: "2025-12-31",
+            updatedAt: "t1",
+          },
+          comments: [],
+        }),
         updateIssue: async () => {
           throw new Error("should not update");
         },

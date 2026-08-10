@@ -1,5 +1,9 @@
 import * as vscode from "vscode";
-import { addOfflineNewTicket, addOfflineTicketUpdate } from "../offlineSyncStore";
+import {
+  addOfflineNewTicket,
+  addOfflineTicketUpdate,
+  updateOfflineTicketUpdateAsync,
+} from "../offlineSyncStore";
 import { buildTicketEditorContent, parseTicketEditorContent } from "../ticketEditorContent";
 import { getTicketDraft, markDraftStatus, setTicketDraftContent, updateDraftAfterSave } from "../ticketDraftStore";
 import type { IssueMetadata } from "../ticketMetadataTypes";
@@ -28,6 +32,8 @@ import {
 import { isSaveSyncSuppressed } from "../saveSyncSuppression";
 import { getDefaultProjectId } from "../../config/settings";
 import { getProjectSelection } from "../../config/projectSelection";
+import { editorContentFromTicket } from "./ticketRemoteContent";
+import { rewriteDocumentWithRegisteredFields } from "../editorDocumentRewrite";
 
 export interface QueueTicketDraftInput {
   operationScope?: string;
@@ -88,7 +94,12 @@ export const queueTicketDraft = async (
     metadata: parsed.metadata,
     layout: parsed.layout,
     metadataBlock: parsed.metadataBlock,
+    controlFields: parsed.controlFields,
     baseDir,
+    documentUri: input.editor?.document.uri.toString() ?? input.documentUri?.toString(),
+    connectionScope: input.operationScope,
+    operationId: `${input.operationScope ?? "legacy"}:ticket:${input.ticketId}`,
+    phase: "queued",
   }, input.operationScope);
   markDraftStatus(input.ticketId, "Dirty", input.operationScope);
   if (input.editor) {
@@ -219,16 +230,111 @@ const createQueuedChildTickets = async (input: {
   return { createdChildIds: childCreateResult.createdChildIds };
 };
 
-const refetchUpdatedAt = async (
-  deps: TicketSaveDependencies,
-  ticketId: number,
-  fallback: string | undefined,
-): Promise<string | undefined> => {
+const reconcileQueuedTicketUpdate = async (input: {
+  deps: TicketSaveDependencies;
+  update: OfflineTicketUpdate;
+  operationScope?: string;
+  uploadSummary?: ReturnType<typeof resolveUploadSummary>;
+}): Promise<TicketSaveResult> => {
+  const scope = input.operationScope;
+  let detail: IssueDetailResult;
   try {
-    const detail = await deps.getIssueDetail(ticketId);
-    return detail.ticket.updatedAt ?? fallback;
-  } catch {
-    return fallback;
+    detail = await input.deps.getIssueDetail(input.update.ticketId);
+  } catch (error) {
+    if (scope !== undefined) {
+      try {
+        await updateOfflineTicketUpdateAsync(
+          input.update.ticketId,
+          { phase: "reconciliation_pending", remoteUpdatedAt: undefined },
+          scope,
+        );
+      } catch {
+        // The remote commit remains authoritative even if phase persistence fails.
+      }
+    }
+    const message = error instanceof Error ? error.message : "Remote read-back failed.";
+    return buildResult("failed", `remote_reconcile_pending: ${message}`, {
+      uploadSummary: input.uploadSummary,
+    });
+  }
+
+  if (!detail.ticket.updatedAt) {
+    if (scope !== undefined) {
+      try {
+        await updateOfflineTicketUpdateAsync(
+          input.update.ticketId,
+          { phase: "reconciliation_pending", remoteUpdatedAt: undefined },
+          scope,
+        );
+      } catch {
+        // Preserve the pending reconciliation result.
+      }
+    }
+    return buildResult(
+      "failed",
+      "remote_reconcile_pending: Remote read-back did not include an updated revision.",
+      { uploadSummary: input.uploadSummary },
+    );
+  }
+
+  try {
+    const canonical = editorContentFromTicket(detail.ticket, {
+      layout: input.update.layout,
+      metadataBlock: input.update.metadataBlock,
+      controlFields: input.update.controlFields,
+    });
+    if (input.update.documentUri) {
+      const rewritten = await rewriteDocumentWithRegisteredFields(
+        input.update.documentUri,
+        input.update.ticketId,
+        {},
+        detail.ticket.projectId,
+        canonical,
+      );
+      if (!rewritten) {
+        if (scope !== undefined) {
+          try {
+            await updateOfflineTicketUpdateAsync(
+              input.update.ticketId,
+              { phase: "local_finalize_pending", remoteUpdatedAt: detail.ticket.updatedAt },
+              scope,
+            );
+          } catch {
+            // Report pending local finalization even if phase persistence fails.
+          }
+        }
+        return buildResult("failed", "local_finalize_pending", {
+          uploadSummary: input.uploadSummary,
+        });
+      }
+    }
+    updateDraftAfterSave(
+      input.update.ticketId,
+      canonical.subject,
+      canonical.description,
+      canonical.metadata,
+      detail.ticket.updatedAt,
+      scope,
+    );
+    return buildResult("success", "Redmine updated.", {
+      uploadSummary: input.uploadSummary,
+    });
+  } catch (error) {
+    if (scope !== undefined) {
+      try {
+        await updateOfflineTicketUpdateAsync(
+          input.update.ticketId,
+          { phase: "local_finalize_pending", remoteUpdatedAt: detail.ticket.updatedAt },
+          scope,
+        );
+      } catch {
+        // Report pending local finalization even if phase persistence fails.
+      }
+    }
+    const message = error instanceof Error ? error.message : "Local finalization failed.";
+    return buildResult("failed", `local_finalize_pending: ${message}`, {
+      uploadSummary: input.uploadSummary,
+    });
   }
 };
 
@@ -236,9 +342,25 @@ export const applyQueuedTicketUpdate = async (input: {
   operationScope?: string;
   update: OfflineTicketUpdate;
   deps?: Partial<TicketSaveDependencies>;
+  deferReconciliation?: boolean;
 }): Promise<TicketSaveResult> => {
   const deps = { ...defaultDeps, ...input.deps };
   const update = input.update;
+
+  if (
+    update.phase === "remote_committed" ||
+    update.phase === "reconciliation_pending" ||
+    update.phase === "local_finalize_pending"
+  ) {
+    if (input.deferReconciliation) {
+      return buildResult("success", "Remote commit pending reconciliation.");
+    }
+    return reconcileQueuedTicketUpdate({
+      deps,
+      update,
+      operationScope: input.operationScope,
+    });
+  }
 
   const processed = await processTicketDescriptionUploads(update, deps);
   if (!processed.ok) { return processed.failure; }
@@ -283,15 +405,18 @@ export const applyQueuedTicketUpdate = async (input: {
   }
 
   if (Object.keys(changes).length === 0 && children.length === 0) {
-    updateDraftAfterSave(
-      update.ticketId,
-      update.subject,
-      description,
-      { ...update.metadata, children: [] },
-      update.lastKnownRemoteUpdatedAt,
-      input.operationScope,
-    );
-    return buildResult("no_change", "No changes to save.", { uploadSummary });
+    if (input.deferReconciliation) {
+      return buildResult("no_change", "No changes to save.", { uploadSummary });
+    }
+    const reconciled = await reconcileQueuedTicketUpdate({
+      deps,
+      update,
+      operationScope: input.operationScope,
+      uploadSummary,
+    });
+    return reconciled.status === "success"
+      ? buildResult("no_change", "No changes to save.", { uploadSummary })
+      : reconciled;
   }
 
   const conflict = await detectTicketUpdatedAtConflict({
@@ -324,18 +449,30 @@ export const applyQueuedTicketUpdate = async (input: {
     return mapErrorToResult(error);
   }
 
-  const updatedAt = Object.keys(changes).length > 0
-    ? await refetchUpdatedAt(deps, update.ticketId, update.lastKnownRemoteUpdatedAt)
-    : update.lastKnownRemoteUpdatedAt;
+  if (input.operationScope !== undefined) {
+    try {
+      await updateOfflineTicketUpdateAsync(
+        update.ticketId,
+        { phase: "remote_committed", remoteUpdatedAt: undefined, createdChildIds },
+        input.operationScope,
+      );
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Sync journal persistence failed.";
+      return buildResult("failed", `remote_commit_journal_failed: ${message}`, { uploadSummary });
+    }
+  }
 
-  updateDraftAfterSave(
-    update.ticketId,
-    update.subject,
-    description,
-    { ...update.metadata, children: [] },
-    updatedAt,
-    input.operationScope,
-  );
+  if (!input.deferReconciliation) {
+    const reconciled = await reconcileQueuedTicketUpdate({
+      deps,
+      update: { ...update, phase: "remote_committed", createdChildIds },
+      operationScope: input.operationScope,
+      uploadSummary,
+    });
+    if (reconciled.status !== "success") {
+      return reconciled;
+    }
+  }
 
   if (duplicateChildren.length > 0) {
     const duplicates = Array.from(new Set(duplicateChildren)).join(", ");
@@ -397,6 +534,11 @@ export const saveTicketDraftLocally = (
         metadata: parsed.metadata ?? draft.baseMetadata,
         layout: parsed.layout,
         metadataBlock: parsed.metadataBlock,
+        controlFields: parsed.controlFields,
+        documentUri: editor.document.uri.toString(),
+        connectionScope: operationScope,
+        operationId: `${operationScope ?? "legacy"}:ticket:${ticketId}`,
+        phase: "queued",
       }, operationScope);
     }
     return buildResult("queued", vscode.l10n.t("Saved locally. Run a sync command to apply changes to Redmine."));

@@ -4,20 +4,19 @@ import * as fs from "fs";
 import { getProjectTrackers, listProjectMembers } from "../../redmine/projects";
 import { buildNewTicketDraftContent } from "../../views/ticketDraftStore";
 import { openNewTicketDraft } from "../../commands/createTicketFromList";
-import { syncNewTicketDraft } from "../../views/ticketSaveSync";
 import type { TicketSaveResult } from "../../views/ticketSaveTypes";
+import { syncEditorToRedmine } from "../../commands/syncToRedmine";
 import {
   getConnectionScopeForEditor,
   getTicketIdForEditor,
 } from "../../views/ticketEditorRegistry";
-import { removeOfflineNewTicket } from "../../views/offlineSyncStore";
 import { type DashboardWorkPanel, type NewTicketComposerValues } from "../dashboardProtocol";
 import type { Ticket } from "../../redmine/types";
 import {
   CONNECTION_SCOPE_MISMATCH_MESSAGE,
   getCurrentConnectionScope,
 } from "../../config/connectionScope";
-import { runWithConnectionScope } from "../../redmine/client";
+import { buildResult } from "../../views/ticketSync/ticketSyncResult";
 
 export class DashboardComposerService {
   private composerLoadGeneration = 0;
@@ -183,11 +182,12 @@ export class DashboardComposerService {
         const doc = await vscode.workspace.openTextDocument(uri);
         return vscode.window.showTextDocument(doc, { preview: false });
       });
-    const syncFn = hooks?.syncFn ?? ((editor: vscode.TextEditor) =>
-      runWithConnectionScope(
-        operationScope,
-        () => syncNewTicketDraft({ editor, operationScope }),
-      ));
+    const syncFn = hooks?.syncFn ?? (async (editor: vscode.TextEditor) => {
+      const synced = await syncEditorToRedmine(editor);
+      return synced?.kind === "ticket"
+        ? synced.result
+        : buildResult("failed", "Ticket sync did not produce a result.");
+    });
     const getTicketIdFn = hooks?.getTicketIdFn ?? getTicketIdForEditor;
 
     const editor = await this.openDraftEditorSafely(draftUri, {
@@ -211,8 +211,6 @@ export class DashboardComposerService {
 
     if (result.status === "created") {
       const createdId = getTicketIdFn(editor);
-      this.removeOfflineNewTicketByUriVariants(draftUri, operationScope);
-      this.removeOfflineNewTicketByUriVariants(resolvedUri, operationScope);
       this.deps.refreshUnsynced();
       if (operationScope !== getCurrentConnectionScope()) {
         this.deps.context.notifyError(requestId, CONNECTION_SCOPE_MISMATCH_MESSAGE);
@@ -306,24 +304,6 @@ export class DashboardComposerService {
       }
     }
     return deps.openEditorFn(parsed);
-  }
-
-  private removeOfflineNewTicketByUriVariants(
-    uriText: string,
-    operationScope: string,
-  ): void {
-    const variants = new Set<string>([uriText]);
-    const parsed = vscode.Uri.parse(uriText);
-    variants.add(parsed.toString());
-    if (parsed.fsPath) {
-      variants.add(vscode.Uri.file(parsed.fsPath).toString());
-    }
-    if (parsed.scheme === "file" && parsed.path) {
-      variants.add(`file:${parsed.path}`);
-    }
-    variants.forEach((uri) =>
-      removeOfflineNewTicket({ documentUri: uri }, operationScope)
-    );
   }
 
   private buildComposerValues(input: {
