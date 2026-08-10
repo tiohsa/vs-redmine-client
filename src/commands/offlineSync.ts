@@ -106,7 +106,7 @@ const runOfflineSyncAtScope = async (
           failedNewTickets.push(...queue.newTickets.slice(processed));
           break;
         }
-        const { result, createdId } = await createTicketFromQueuedContent({
+        const { result, createdId, parsed } = await createTicketFromQueuedContent({
           operationScope,
           content: entry.content,
           projectId: entry.projectId,
@@ -115,7 +115,13 @@ const runOfflineSyncAtScope = async (
         if (result.status === "created" && createdId && entry.documentUri) {
           const docUri = vscode.Uri.parse(entry.documentUri);
           removeTicketEditorByUri(docUri);
-          await rewriteDocumentWithRegisteredFields(entry.documentUri, createdId);
+          await rewriteDocumentWithRegisteredFields(
+            entry.documentUri,
+            createdId,
+            {},
+            entry.projectId,
+            parsed,
+          );
           const document = vscode.workspace.textDocuments.find(
             (doc) => doc.uri.toString() === entry.documentUri,
           );

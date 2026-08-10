@@ -1,5 +1,5 @@
 import * as vscode from "vscode";
-import { parseTicketEditorContent, buildTicketEditorContent } from "./ticketEditorContent";
+import { parseTicketEditorContent, buildTicketEditorContent, TicketEditorContent } from "./ticketEditorContent";
 import { withRegisteredTicketControlFields } from "./ticketControlFields";
 import { suppressSaveSync, releaseSaveSync } from "./saveSyncSuppression";
 
@@ -15,6 +15,7 @@ export const buildRegisteredDocumentContent = (
   currentContent: string,
   createdId: number,
   projectId?: number,
+  replacement?: TicketEditorContent,
 ): string => {
   const parsed = parseTicketEditorContent(currentContent, {
     allowMissingMetadata: true,
@@ -26,7 +27,12 @@ export const buildRegisteredDocumentContent = (
     createdId,
     projectId,
   );
-  return buildTicketEditorContent({ ...parsed, controlFields: newControlFields });
+  return buildTicketEditorContent({
+    ...(replacement ?? parsed),
+    layout: replacement?.layout ?? parsed.layout,
+    metadataBlock: replacement?.metadataBlock ?? parsed.metadataBlock,
+    controlFields: newControlFields,
+  });
 };
 
 export type RewriteDocumentDeps = {
@@ -41,6 +47,7 @@ export const rewriteDocumentWithRegisteredFields = async (
   createdId: number,
   deps: RewriteDocumentDeps = {},
   projectId?: number,
+  replacement?: TicketEditorContent,
 ): Promise<boolean> => {
   const textDocuments = deps.textDocuments ?? vscode.workspace.textDocuments;
   const applyEdit = deps.applyEdit ?? ((edit: vscode.WorkspaceEdit) => vscode.workspace.applyEdit(edit));
@@ -53,7 +60,12 @@ export const rewriteDocumentWithRegisteredFields = async (
   if (document) {
     let newContent: string;
     try {
-      newContent = buildRegisteredDocumentContent(document.getText(), createdId, projectId);
+      newContent = buildRegisteredDocumentContent(
+        document.getText(),
+        createdId,
+        projectId,
+        replacement,
+      );
     } catch {
       return false;
     }
@@ -85,7 +97,12 @@ export const rewriteDocumentWithRegisteredFields = async (
   try {
     const fileContent = await readFile(uri);
     const currentContent = Buffer.from(fileContent).toString("utf8");
-    const newContent = buildRegisteredDocumentContent(currentContent, createdId, projectId);
+    const newContent = buildRegisteredDocumentContent(
+      currentContent,
+      createdId,
+      projectId,
+      replacement,
+    );
     await writeFile(uri, Buffer.from(newContent, "utf8"));
     return true;
   } catch {

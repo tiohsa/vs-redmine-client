@@ -195,6 +195,38 @@ suite("syncNewTicketDraft – editor rewrite", () => {
     assert.ok(!raw.includes("issue_id:  "), "empty issue_id should be gone");
     assert.ok(raw.includes("issue_id: 777"), "numeric issue_id should appear");
   });
+
+  test("uses the remote status after creation", async () => {
+    const text = buildNewTicketContent("T", "D");
+    const { editor } = makeEditorStub(text);
+    registerNewTicketDraft(editor);
+    setEditorProjectId(editor, 12);
+
+    const captured: { content?: string } = {};
+    await syncNewTicketDraft({
+      editor,
+      deps: {
+        ...defaultDeps,
+        createIssue: async () => 778,
+        getIssueDetail: async () => ({
+          ticket: {
+            id: 778,
+            subject: "T",
+            description: "D",
+            projectId: 12,
+            trackerName: "Task",
+            priorityName: "Normal",
+            statusName: "Closed",
+            updatedAt: "2026-08-09T12:00:00Z",
+          },
+          comments: [],
+        }),
+      },
+      applyContent: makeCapturingApply(captured),
+    });
+
+    assert.strictEqual(parseTicketEditorContent(captured.content!).metadata.status, "Closed");
+  });
 });
 
 suite("handleTicketEditorSave – suppression", () => {

@@ -94,9 +94,10 @@ const syncUnsyncedFileAtScope = async (
 
     // createdIssueId が既にある場合は作成済み → ファイル書き換えのみ再試行
     let resolvedId = entry.createdIssueId;
+    let createdParsed;
 
     if (!resolvedId) {
-      const { result, createdId } = await createTicketFromQueuedContent({
+      const { result, createdId, parsed } = await createTicketFromQueuedContent({
         operationScope,
         content: entry.content,
         projectId: entry.projectId,
@@ -108,6 +109,7 @@ const syncUnsyncedFileAtScope = async (
         return { status: "failed", kind: "newTicket", message, reason: "api_error" };
       }
       resolvedId = createdId;
+      createdParsed = parsed;
       // 作成成功を即座にキューに記録してから書き換えへ（重複作成防止）
       updateOfflineNewTicket(
         { queueId: entry.queueId, documentUri: entry.documentUri },
@@ -124,6 +126,7 @@ const syncUnsyncedFileAtScope = async (
         resolvedId,
         rewriteDeps,
         entry.projectId,
+        createdParsed,
       );
       const document = vscode.workspace.textDocuments.find(
         (doc) => doc.uri.toString() === entry.documentUri,

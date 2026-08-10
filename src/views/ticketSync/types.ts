@@ -19,6 +19,7 @@ export interface TicketSaveDependencies {
 }
 
 export interface TicketCreateDependencies {
+  getIssueDetail?: typeof getIssueDetail;
   createIssue: typeof createIssue;
   deleteIssue: typeof deleteIssue;
   listIssueStatuses: typeof listIssueStatuses;

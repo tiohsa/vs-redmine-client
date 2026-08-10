@@ -10,6 +10,7 @@ import { updateDraftAfterSave } from "../ticketDraftStore";
 import { getProjectIdForEditor } from "../ticketEditorRegistry";
 import type { TicketSaveResult } from "../ticketSaveTypes";
 import type { TicketUpdateFields } from "../../redmine/types";
+import type { IssueDetailResult } from "../../redmine/issues";
 import { handleTicketUploadFailure, resolveUploadSummary } from "./ticketImageUploadSync";
 import { resolveMetadataForCreate } from "./ticketMetadataResolver";
 import { createChildTickets } from "./ticketChildCreateSync";
@@ -18,6 +19,7 @@ import { queueNewTicketDraft, queueNewTicketDraftContent } from "./ticketQueueSy
 import { buildResult, mapErrorToResult } from "./ticketSyncResult";
 import { defaultCreateDeps } from "./ticketSyncDeps";
 import type { TicketCreateDependencies } from "./types";
+import { editorContentFromTicket } from "./ticketRemoteContent";
 
 const resolveProjectIdForCreate = (projectId?: number): number | undefined => {
   if (projectId) {
@@ -80,12 +82,18 @@ export const syncNewTicketDraft = async (input: {
     markNewTicketDraftSynced(draftId, createdId);
   }
 
+  const remote = await getCreatedTicketDetail(deps.getIssueDetail, createdId);
+  const syncedParsed = remote
+    ? editorContentFromTicket(remote.ticket, parsed)
+    : parsed;
+
   await rewriteNewTicketEditorToTicketMode({
     operationScope: input.operationScope,
     editor: input.editor,
     createdId,
     projectId,
-    parsed,
+    parsed: syncedParsed,
+    lastKnownRemoteUpdatedAt: remote?.ticket.updatedAt,
     originalControlFields,
     applyContent: input.applyContent,
   });
@@ -113,17 +121,35 @@ export const syncNewTicketDraftContent = async (input: {
     deps,
   });
   if (result.status === "created" && createdId && parsed) {
+    const remote = await getCreatedTicketDetail(deps.getIssueDetail, createdId);
+    const syncedParsed = remote
+      ? editorContentFromTicket(remote.ticket, parsed)
+      : parsed;
     updateDraftAfterSave(
       createdId,
-      parsed.subject,
-      parsed.description,
-      parsed.metadata,
-      undefined,
+      syncedParsed.subject,
+      syncedParsed.description,
+      syncedParsed.metadata,
+      remote?.ticket.updatedAt,
       input.operationScope,
     );
-    input.onCreated?.(createdId, parsed);
+    input.onCreated?.(createdId, syncedParsed);
   }
   return result;
+};
+
+const getCreatedTicketDetail = async (
+  getIssueDetail: TicketCreateDependencies["getIssueDetail"],
+  createdId: number,
+): Promise<IssueDetailResult | undefined> => {
+  if (!getIssueDetail) {
+    return undefined;
+  }
+  try {
+    return await getIssueDetail(createdId);
+  } catch {
+    return undefined;
+  }
 };
 
 export const createTicketFromContent = async (input: {
@@ -267,14 +293,19 @@ export const createTicketFromQueuedContent = async (input: {
     deps,
   });
   if (output.result.status === "created" && output.createdId && output.parsed) {
+    const remote = await getCreatedTicketDetail(deps.getIssueDetail, output.createdId);
+    const syncedParsed = remote
+      ? editorContentFromTicket(remote.ticket, output.parsed)
+      : output.parsed;
     updateDraftAfterSave(
       output.createdId,
-      output.parsed.subject,
-      output.parsed.description,
-      output.parsed.metadata,
-      undefined,
+      syncedParsed.subject,
+      syncedParsed.description,
+      syncedParsed.metadata,
+      remote?.ticket.updatedAt,
       input.operationScope,
     );
+    return { ...output, parsed: syncedParsed };
   }
   return output;
 };
