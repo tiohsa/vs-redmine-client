@@ -2,8 +2,8 @@ import * as vscode from "vscode";
 import type { OfflineNewTicket, OfflineTicketUpdate } from "../../views/offlineSyncStore";
 import {
   addOfflineNewTicketAsync,
-  removeOfflineNewTicketAsync,
-  removeOfflineTicketUpdateAsync,
+  completeOfflineNewTicketAsync,
+  completeOfflineTicketUpdateAsync,
   updateOfflineNewTicketAsync,
   updateOfflineTicketUpdateAsync,
   getOfflineSyncQueue,
@@ -38,11 +38,13 @@ import {
 } from "../../views/ticketEditorRegistry";
 
 const defaultJournal: SyncJournal = {
+  getNewTicket: getOfflineNewTicket,
+  getTicketUpdate: (ticketId, scope) => getOfflineSyncQueue(scope).tickets.get(ticketId),
   saveNewTicket: addOfflineNewTicketAsync,
   markNewTicket: updateOfflineNewTicketAsync,
-  completeNewTicket: removeOfflineNewTicketAsync,
+  completeNewTicket: completeOfflineNewTicketAsync,
   markTicketUpdate: updateOfflineTicketUpdateAsync,
-  completeTicketUpdate: removeOfflineTicketUpdateAsync,
+  completeTicketUpdate: completeOfflineTicketUpdateAsync,
 };
 
 const defaultDocumentPort = (rewriteDeps: RewriteDocumentDeps = {}): DocumentPort => ({
@@ -205,8 +207,9 @@ export class TicketSyncService {
       content: input.editor.document.getText(),
       editor: input.editor,
       operationScope: input.context.connectionScope,
+      queueUnchanged: !input.manual,
     });
-    if (input.manual || prepared.status !== "queued") {
+    if (input.manual || (prepared.status !== "queued" && prepared.status !== "no_change")) {
       return this.preparationOutcome(prepared, input.ticketId);
     }
     return this.syncQueueItem(
@@ -290,6 +293,19 @@ export class TicketSyncService {
       };
     }
 
+    const operationId = input.operation.operationId ?? input.operation.queueId;
+    if (
+      input.operation.phase === "remote_write_started" ||
+      input.operation.phase === "commit_unknown"
+    ) {
+      return {
+        kind: "commit_unknown",
+        operationId,
+        ticketId: input.operation.createdIssueId,
+        message: "The previous remote create may have committed. Resolve it before retrying.",
+      };
+    }
+
     let ticketId = input.operation.createdIssueId;
     let operation = input.operation;
     if (!ticketId) {
@@ -298,11 +314,49 @@ export class TicketSyncService {
         projectId: operation.projectId,
         baseDir: operation.baseDir,
         deps: this.createDeps,
+        beforeRemoteWrite: async () => {
+          const started = await this.journal.markNewTicket(
+            { queueId: operation.queueId, documentUri: operation.documentUri },
+            { phase: "remote_write_started" },
+            input.context.connectionScope,
+          );
+          if (!started) {
+            throw new Error("New ticket operation disappeared before remote create.");
+          }
+          operation = started;
+        },
       });
+      if (created.remoteCommitUnknown) {
+        try {
+          await this.journal.markNewTicket(
+            { queueId: operation.queueId, documentUri: operation.documentUri },
+            { phase: "commit_unknown" },
+            input.context.connectionScope,
+          );
+        } catch {
+          // remote_write_started is already durable and is treated as commit_unknown on restart.
+        }
+        return {
+          kind: "commit_unknown",
+          operationId,
+          message: "The remote create result is unknown. Automatic retry is disabled.",
+        };
+      }
       if (
         !created.createdId ||
         (created.result.status !== "created" && !created.remoteIssueMayExist)
       ) {
+        if (created.remoteWriteAttempted) {
+          try {
+            await this.journal.markNewTicket(
+              { queueId: operation.queueId, documentUri: operation.documentUri },
+              { phase: "queued" },
+              input.context.connectionScope,
+            );
+          } catch {
+            // The failure result remains authoritative; a later remote_write_started is safe-side.
+          }
+        }
         return {
           kind: "failed_before_commit",
           error: new Error(created.result.message),
@@ -384,6 +438,132 @@ export class TicketSyncService {
     }
   }
 
+  public async resolveCommitUnknown(input: {
+    key: TicketSyncQueueKey;
+    context: SyncContext;
+    resolution:
+      | { kind: "link_created_ticket"; ticketId: number }
+      | { kind: "assume_update_committed" }
+      | { kind: "retry_remote_write" };
+  }): Promise<TicketSyncOutcome> {
+    return this.runInConnectionScope(input.context.connectionScope, async () => {
+      if (input.key.kind === "newTicket") {
+        const operation = this.journal.getNewTicket(
+          input.key,
+          input.context.connectionScope,
+        );
+        if (!operation) {
+          return {
+            kind: "failed_before_commit",
+            error: new TicketSyncQueueItemNotFoundError(input.key),
+          };
+        }
+        if (
+          operation.phase !== "commit_unknown" &&
+          operation.phase !== "remote_write_started"
+        ) {
+          return this.createOrResume({ context: input.context, operation });
+        }
+        if (input.resolution.kind === "retry_remote_write") {
+          const queued = await this.journal.markNewTicket(
+            input.key,
+            { phase: "queued", createdIssueId: undefined },
+            input.context.connectionScope,
+          );
+          return queued
+            ? this.createOrResume({ context: input.context, operation: queued })
+            : {
+              kind: "failed_before_commit",
+              error: new TicketSyncQueueItemNotFoundError(input.key),
+            };
+        }
+        if (input.resolution.kind !== "link_created_ticket") {
+          return {
+            kind: "failed_before_commit",
+            error: new Error("A new-ticket recovery requires a verified ticket ID."),
+          };
+        }
+        if (!this.createDeps.getIssueDetail) {
+          return {
+            kind: "failed_before_commit",
+            error: new Error("Remote ticket verification is unavailable."),
+          };
+        }
+        let detail;
+        try {
+          detail = await this.createDeps.getIssueDetail(input.resolution.ticketId);
+        } catch (error) {
+          return {
+            kind: "failed_before_commit",
+            error: error instanceof Error ? error : new Error("Remote ticket verification failed."),
+          };
+        }
+        if (
+          operation.projectId !== undefined &&
+          detail.ticket.projectId !== undefined &&
+          operation.projectId !== detail.ticket.projectId
+        ) {
+          return {
+            kind: "failed_before_commit",
+            error: new Error("The selected ticket belongs to a different project."),
+          };
+        }
+        const linked = await this.journal.markNewTicket(
+          input.key,
+          {
+            createdIssueId: input.resolution.ticketId,
+            phase: "remote_created",
+          },
+          input.context.connectionScope,
+        );
+        if (!linked) {
+          return {
+            kind: "failed_before_commit",
+            error: new TicketSyncQueueItemNotFoundError(input.key),
+          };
+        }
+        return this.newTicketFinalizer.finalize({
+          context: input.context,
+          operation: linked,
+          ticketId: input.resolution.ticketId,
+          deps: this.createDeps,
+          detail,
+        });
+      }
+
+      const operation = this.journal.getTicketUpdate(
+        input.key.ticketId,
+        input.context.connectionScope,
+      );
+      if (!operation) {
+        return {
+          kind: "failed_before_commit",
+          error: new TicketSyncQueueItemNotFoundError(input.key),
+        };
+      }
+      if (input.resolution.kind === "link_created_ticket") {
+        return {
+          kind: "failed_before_commit",
+          error: new Error("An existing-ticket recovery cannot link another ticket ID."),
+        };
+      }
+      const phase = input.resolution.kind === "assume_update_committed"
+        ? "remote_committed"
+        : "queued";
+      const resolved = await this.journal.markTicketUpdate(
+        operation.ticketId,
+        { phase, remoteUpdatedAt: undefined },
+        input.context.connectionScope,
+      );
+      return resolved
+        ? this.updateOrReconcile(input.context, resolved)
+        : {
+          kind: "failed_before_commit",
+          error: new TicketSyncQueueItemNotFoundError(input.key),
+        };
+    });
+  }
+
   private async updateOrReconcile(
     context: SyncContext,
     operation: OfflineTicketUpdate,
@@ -404,12 +584,51 @@ export class TicketSyncService {
         error: new Error("Connection scope mismatch."),
       };
     }
+    const operationId = operation.operationId ?? `ticket:${operation.ticketId}`;
+    if (
+      operation.phase === "remote_write_started" ||
+      operation.phase === "commit_unknown"
+    ) {
+      return {
+        kind: "commit_unknown",
+        operationId,
+        ticketId: operation.ticketId,
+        message: "The previous remote update may have committed. Resolve it before retrying.",
+      };
+    }
     const result = await applyQueuedTicketUpdate({
       operationScope: context.connectionScope,
       update: operation,
       deps: this.updateDeps,
       deferReconciliation: true,
+      beforeRemoteWrite: async () => {
+        const started = await this.journal.markTicketUpdate(
+          operation.ticketId,
+          { phase: "remote_write_started", remoteUpdatedAt: undefined },
+          context.connectionScope,
+        );
+        if (!started) {
+          throw new Error("Ticket update operation disappeared before remote update.");
+        }
+      },
     });
+    if (result.remoteCommitUnknown) {
+      try {
+        await this.journal.markTicketUpdate(
+          operation.ticketId,
+          { phase: "commit_unknown", remoteUpdatedAt: undefined },
+          context.connectionScope,
+        );
+      } catch {
+        // remote_write_started remains a conservative commit-unknown checkpoint.
+      }
+      return {
+        kind: "commit_unknown",
+        operationId,
+        ticketId: operation.ticketId,
+        message: "The remote update result is unknown. Automatic retry is disabled.",
+      };
+    }
     if (result.status === "success" || result.status === "no_change") {
       const current = getOfflineSyncQueue(context.connectionScope).tickets.get(
         operation.ticketId,
@@ -435,6 +654,17 @@ export class TicketSyncService {
         message: result.message,
         conflictContext: result.conflictContext,
       };
+    }
+    if (result.remoteWriteAttempted) {
+      try {
+        await this.journal.markTicketUpdate(
+          operation.ticketId,
+          { phase: "queued", remoteUpdatedAt: undefined },
+          context.connectionScope,
+        );
+      } catch {
+        // Preserve the safe-side remote_write_started checkpoint.
+      }
     }
     const pending = getOfflineSyncQueue(context.connectionScope).tickets.get(
       operation.ticketId,

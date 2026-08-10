@@ -12,6 +12,12 @@ export type TicketSyncOutcome =
     }
   | { kind: "queued" }
   | {
+      kind: "commit_unknown";
+      operationId: string;
+      ticketId?: number;
+      message: string;
+    }
+  | {
       kind: "no_change";
       ticketId: number;
       saveResult?: import("../../views/ticketSaveTypes").TicketSaveResult;

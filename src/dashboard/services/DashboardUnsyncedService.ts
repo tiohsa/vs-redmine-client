@@ -7,8 +7,8 @@ import type { SyncUnsyncedFileResult } from "../../commands/syncUnsyncedFile";
 import {
   getOfflineSyncQueue,
   removeOfflineCommentEntry,
-  removeOfflineNewTicket,
-  removeOfflineTicketUpdate,
+  discardOfflineNewTicketAsync,
+  discardOfflineTicketUpdateAsync,
 } from "../../views/offlineSyncStore";
 import { buildUnsyncedDashboardItems } from "../viewModels/unsyncedDashboardViewModel";
 import type { DashboardUnsyncedKey } from "../dashboardProtocol";
@@ -99,19 +99,33 @@ export class DashboardUnsyncedService {
       return;
     }
 
+    let recoveryRequired = false;
     if (key.kind === "ticket") {
-      removeOfflineTicketUpdate(key.ticketId, operationScope);
+      const result = await discardOfflineTicketUpdateAsync(key.ticketId, operationScope);
+      recoveryRequired = result === "recovery_required";
     } else if (key.kind === "newTicket") {
       if (!key.documentUri) {
         this.deps.context.notifyError(requestId, vscode.l10n.t("Cannot identify the target new ticket draft."));
         return;
       }
-      removeOfflineNewTicket({ documentUri: key.documentUri }, operationScope);
+      const result = await discardOfflineNewTicketAsync(
+        { documentUri: key.documentUri },
+        operationScope,
+      );
+      recoveryRequired = result === "recovery_required";
     } else if (key.kind === "comment") {
       removeOfflineCommentEntry(
         { commentId: key.commentId, documentUri: key.documentUri },
         operationScope,
       );
+    }
+
+    if (recoveryRequired) {
+      this.deps.context.notifyError(
+        requestId,
+        vscode.l10n.t("This item has a remote sync checkpoint and must be resumed before it can be discarded."),
+      );
+      return;
     }
 
     this.refreshUnsynced();

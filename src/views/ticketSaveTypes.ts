@@ -26,6 +26,8 @@ export interface TicketSaveResult {
   message: string;
   uploadSummary?: UploadSummary;
   conflictContext?: ConflictContext;
+  remoteWriteAttempted?: boolean;
+  remoteCommitUnknown?: boolean;
 }
 
 export type TicketMode = "new-ticket" | "ticket-update" | "comment";

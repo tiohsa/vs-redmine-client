@@ -3,6 +3,7 @@ import * as vscode from "vscode";
 import { TicketSyncService } from "../app/ticketSync";
 import {
   addOfflineNewTicketAsync,
+  addOfflineNewTicket,
   addOfflineTicketUpdate,
   getOfflineSyncQueue,
   initializeOfflineSyncStore,
@@ -13,6 +14,11 @@ import { createTestMemento } from "./helpers/vscodeMemento";
 import { syncUnsyncedFile } from "../commands/syncUnsyncedFile";
 import { runOfflineSync } from "../commands/offlineSync";
 import { getCurrentConnectionScope } from "../config/connectionScope";
+import {
+  initializeDraftStore,
+  initializeTicketDraft,
+} from "../views/ticketDraftStore";
+import { createInMemoryDraftStorage } from "../views/draftPersistence";
 
 const SCOPE = "https://redmine.example/";
 const DOCUMENT_URI = "file:///tmp/durable-new-ticket.md";
@@ -53,6 +59,53 @@ const issueDetail = (id: number) => ({
 });
 
 suite("TicketSyncService durable lifecycle", () => {
+  test("direct editor no_change も共通reconcilerでremote canonicalを反映する", async () => {
+    initializeOfflineSyncStore(createTestMemento(), SCOPE);
+    initializeDraftStore(createInMemoryDraftStorage(), SCOPE);
+    const metadata = buildIssueMetadataFixture();
+    initializeTicketDraft(99, "Durable ticket", "Body", metadata, "t1", SCOPE);
+    const document = {
+      uri: vscode.Uri.parse("file:///tmp/no-change.md"),
+      getText: () => content,
+    } as unknown as vscode.TextDocument;
+    const editor = { document } as vscode.TextEditor;
+    let getCalls = 0;
+    let rewrittenStatus: string | undefined;
+    const service = new TicketSyncService({
+      update: {
+        getIssueDetail: async () => {
+          getCalls++;
+          return issueDetail(99);
+        },
+        listIssueStatuses: async () => [],
+        listTrackers: async () => [],
+        listIssuePriorities: async () => [],
+        searchUsers: async () => [],
+      },
+      documents: {
+        rewriteNewTicket: async () => true,
+        rewriteTicket: async ({ replacement }) => {
+          rewrittenStatus = replacement.metadata.status;
+          return true;
+        },
+        findOpenDocument: () => undefined,
+      },
+    });
+
+    const outcome = await service.syncEditor({
+      context: { connectionScope: SCOPE },
+      editor,
+      ticketId: 99,
+      newTicket: false,
+      manual: false,
+    });
+
+    assert.strictEqual(outcome.kind, "no_change");
+    assert.strictEqual(getCalls, 1);
+    assert.strictEqual(rewrittenStatus, "Closed");
+    assert.strictEqual(getOfflineSyncQueue(SCOPE).tickets.size, 0);
+  });
+
   test("create 成功後の rewrite 失敗で createdIssueId を保持し retry は POST しない", async () => {
     initializeOfflineSyncStore(createTestMemento(), SCOPE);
     let createCalls = 0;
@@ -395,6 +448,129 @@ suite("TicketSyncService durable lifecycle", () => {
     assert.strictEqual(getCalls, 2);
   });
 
+  test("POST timeout は commit_unknown として restart 後も自動再送しない", async () => {
+    const memento = createTestMemento();
+    initializeOfflineSyncStore(memento, SCOPE);
+    let createCalls = 0;
+    const service = new TicketSyncService({
+      create: {
+        ...metadataDeps,
+        createIssue: async () => {
+          createCalls++;
+          throw new Error("Request timed out after 30000ms");
+        },
+      },
+      documents: {
+        rewriteNewTicket: async () => true,
+        findOpenDocument: () => undefined,
+      },
+    });
+
+    const first = await service.syncNewTicket({
+      context: { connectionScope: SCOPE },
+      operation: { content, projectId: 12, documentUri: DOCUMENT_URI },
+    });
+    assert.strictEqual(first.kind, "commit_unknown");
+    assert.strictEqual(getOfflineSyncQueue(SCOPE).newTickets[0].phase, "commit_unknown");
+
+    initializeOfflineSyncStore(memento, SCOPE);
+    const retried = await service.syncQueueItem(
+      { kind: "newTicket", documentUri: DOCUMENT_URI },
+      { connectionScope: SCOPE },
+    );
+    assert.strictEqual(retried.kind, "commit_unknown");
+    assert.strictEqual(createCalls, 1);
+  });
+
+  test("commit_unknown new ticket はverified issue IDをlinkしてPOSTなしでfinalizeできる", async () => {
+    initializeOfflineSyncStore(createTestMemento(), SCOPE);
+    let createCalls = 0;
+    const service = new TicketSyncService({
+      create: {
+        ...metadataDeps,
+        createIssue: async () => {
+          createCalls++;
+          throw new Error("Request timed out after 30000ms");
+        },
+        getIssueDetail: async (ticketId) => issueDetail(ticketId),
+      },
+      documents: {
+        rewriteNewTicket: async () => true,
+        findOpenDocument: () => undefined,
+      },
+    });
+    await service.syncNewTicket({
+      context: { connectionScope: SCOPE },
+      operation: { content, projectId: 12, documentUri: DOCUMENT_URI },
+    });
+
+    const outcome = await service.resolveCommitUnknown({
+      key: { kind: "newTicket", documentUri: DOCUMENT_URI },
+      context: { connectionScope: SCOPE },
+      resolution: { kind: "link_created_ticket", ticketId: 777 },
+    });
+
+    assert.strictEqual(outcome.kind, "completed");
+    assert.strictEqual(outcome.kind === "completed" ? outcome.ticketId : undefined, 777);
+    assert.strictEqual(createCalls, 1);
+    assert.strictEqual(getOfflineSyncQueue(SCOPE).newTickets.length, 0);
+  });
+
+  test("new ticket finalize 待ち中の後続編集を作成済みticketの次revisionへ昇格する", async () => {
+    initializeOfflineSyncStore(createTestMemento(), SCOPE);
+    let createCalls = 0;
+    let rewriteSucceeds = false;
+    let rewrittenSubject: string | undefined;
+    const service = new TicketSyncService({
+      create: {
+        ...metadataDeps,
+        createIssue: async () => {
+          createCalls++;
+          return 304;
+        },
+        getIssueDetail: async () => issueDetail(304),
+      },
+      documents: {
+        rewriteNewTicket: async ({ replacement }) => {
+          rewrittenSubject = replacement.subject;
+          return rewriteSucceeds;
+        },
+        findOpenDocument: () => undefined,
+      },
+    });
+    await service.syncNewTicket({
+      context: { connectionScope: SCOPE },
+      operation: { content, projectId: 12, documentUri: DOCUMENT_URI },
+    });
+    const laterContent = buildTicketEditorContent({
+      subject: "Edited after create",
+      description: "Later body",
+      metadata: buildIssueMetadataFixture(),
+      controlFields: { mode: "new-ticket", issue_id: null, project_id: 12 },
+    });
+    addOfflineNewTicket({
+      content: laterContent,
+      projectId: 12,
+      documentUri: DOCUMENT_URI,
+    }, SCOPE);
+
+    rewriteSucceeds = true;
+    const outcome = await service.syncQueueItem(
+      { kind: "newTicket", documentUri: DOCUMENT_URI },
+      { connectionScope: SCOPE },
+    );
+
+    assert.strictEqual(outcome.kind, "completed");
+    assert.strictEqual(createCalls, 1);
+    assert.strictEqual(rewrittenSubject, "Edited after create");
+    const queue = getOfflineSyncQueue(SCOPE);
+    assert.strictEqual(queue.newTickets.length, 0);
+    const promoted = queue.tickets.get(304);
+    assert.strictEqual(promoted?.phase, "queued");
+    assert.strictEqual(promoted?.baseSubject, "Canonical subject");
+    assert.strictEqual(promoted?.subject, "Edited after create");
+  });
+
   test("operation の connection scope と context が異なる場合は fail closed", async () => {
     initializeOfflineSyncStore(createTestMemento(), SCOPE);
     const service = new TicketSyncService({
@@ -515,5 +691,164 @@ suite("TicketSyncService durable lifecycle", () => {
     assert.strictEqual(retried.kind, "completed");
     assert.strictEqual(updateCalls, 1);
     assert.strictEqual(getCalls, 2);
+  });
+
+  test("PUT timeout は commit_unknown として通常retryでPUTを再送しない", async () => {
+    initializeOfflineSyncStore(createTestMemento(), SCOPE);
+    const ticketMetadata = buildIssueMetadataFixture();
+    addOfflineTicketUpdate(406, {
+      ticketId: 406,
+      baseSubject: "Title",
+      baseDescription: "Old",
+      baseMetadata: ticketMetadata,
+      subject: "Title",
+      description: "New",
+      metadata: ticketMetadata,
+      connectionScope: SCOPE,
+      phase: "queued",
+    }, SCOPE);
+    let updateCalls = 0;
+    const service = new TicketSyncService({
+      update: {
+        updateIssue: async () => {
+          updateCalls++;
+          throw new Error("Network request failed: socket closed");
+        },
+        getIssueDetail: async () => issueDetail(406),
+        listIssueStatuses: async () => [],
+        listTrackers: async () => [],
+        listIssuePriorities: async () => [],
+        searchUsers: async () => [],
+      },
+    });
+
+    const first = await service.syncQueueItem(
+      { kind: "ticket", ticketId: 406 },
+      { connectionScope: SCOPE },
+    );
+    const retried = await service.syncQueueItem(
+      { kind: "ticket", ticketId: 406 },
+      { connectionScope: SCOPE },
+    );
+
+    assert.strictEqual(first.kind, "commit_unknown");
+    assert.strictEqual(retried.kind, "commit_unknown");
+    assert.strictEqual(getOfflineSyncQueue(SCOPE).tickets.get(406)?.phase, "commit_unknown");
+    assert.strictEqual(updateCalls, 1);
+  });
+
+  test("commit_unknown existing update は明示的assume-committedでGETから再開する", async () => {
+    initializeOfflineSyncStore(createTestMemento(), SCOPE);
+    const ticketMetadata = buildIssueMetadataFixture();
+    addOfflineTicketUpdate(407, {
+      ticketId: 407,
+      baseSubject: "Title",
+      baseDescription: "Old",
+      baseMetadata: ticketMetadata,
+      subject: "Title",
+      description: "New",
+      metadata: ticketMetadata,
+      connectionScope: SCOPE,
+      phase: "queued",
+    }, SCOPE);
+    let updateCalls = 0;
+    let getCalls = 0;
+    const service = new TicketSyncService({
+      update: {
+        updateIssue: async () => {
+          updateCalls++;
+          throw new Error("Network request failed: socket closed");
+        },
+        getIssueDetail: async () => {
+          getCalls++;
+          return issueDetail(407);
+        },
+        listIssueStatuses: async () => [],
+        listTrackers: async () => [],
+        listIssuePriorities: async () => [],
+        searchUsers: async () => [],
+      },
+    });
+    await service.syncQueueItem(
+      { kind: "ticket", ticketId: 407 },
+      { connectionScope: SCOPE },
+    );
+
+    const outcome = await service.resolveCommitUnknown({
+      key: { kind: "ticket", ticketId: 407 },
+      context: { connectionScope: SCOPE },
+      resolution: { kind: "assume_update_committed" },
+    });
+
+    assert.strictEqual(outcome.kind, "completed");
+    assert.strictEqual(updateCalls, 1);
+    assert.strictEqual(getCalls, 1);
+    assert.strictEqual(getOfflineSyncQueue(SCOPE).tickets.has(407), false);
+  });
+
+  test("PUT後のreconciliation待ち中の後続編集を次revisionとして保持する", async () => {
+    initializeOfflineSyncStore(createTestMemento(), SCOPE);
+    const ticketMetadata = buildIssueMetadataFixture();
+    addOfflineTicketUpdate(405, {
+      ticketId: 405,
+      baseSubject: "Title",
+      baseDescription: "Old",
+      baseMetadata: ticketMetadata,
+      subject: "Title",
+      description: "Sent revision",
+      metadata: ticketMetadata,
+      connectionScope: SCOPE,
+      phase: "queued",
+      documentUri: "file:///tmp/ticket-405.md",
+    }, SCOPE);
+    let updateCalls = 0;
+    let getSucceeds = false;
+    let rewrittenDescription: string | undefined;
+    const service = new TicketSyncService({
+      update: {
+        updateIssue: async () => { updateCalls++; },
+        getIssueDetail: async () => {
+          if (!getSucceeds) {
+            throw new Error("read-back failed");
+          }
+          return issueDetail(405);
+        },
+        listIssueStatuses: async () => [],
+        listTrackers: async () => [],
+        listIssuePriorities: async () => [],
+        searchUsers: async () => [],
+      },
+      documents: {
+        rewriteNewTicket: async () => true,
+        rewriteTicket: async ({ replacement }) => {
+          rewrittenDescription = replacement.description;
+          return true;
+        },
+        findOpenDocument: () => undefined,
+      },
+    });
+    await service.syncQueueItem(
+      { kind: "ticket", ticketId: 405 },
+      { connectionScope: SCOPE },
+    );
+    addOfflineTicketUpdate(405, {
+      ...getOfflineSyncQueue(SCOPE).tickets.get(405)!,
+      description: "Edited while pending",
+      phase: "queued",
+    }, SCOPE);
+
+    getSucceeds = true;
+    const reconciled = await service.syncQueueItem(
+      { kind: "ticket", ticketId: 405 },
+      { connectionScope: SCOPE },
+    );
+
+    assert.strictEqual(reconciled.kind, "completed");
+    assert.strictEqual(updateCalls, 1);
+    assert.strictEqual(rewrittenDescription, "Edited while pending");
+    const promoted = getOfflineSyncQueue(SCOPE).tickets.get(405);
+    assert.strictEqual(promoted?.phase, "queued");
+    assert.strictEqual(promoted?.baseDescription, "Canonical body");
+    assert.strictEqual(promoted?.description, "Edited while pending");
   });
 });

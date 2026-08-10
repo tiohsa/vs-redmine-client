@@ -10,6 +10,9 @@ import {
   removeOfflineTicketUpdate,
   getOfflineSyncQueue,
   switchOfflineSyncStore,
+  discardOfflineNewTicketAsync,
+  discardOfflineTicketUpdateAsync,
+  mergeOfflineTicketUpdate,
 } from "../views/offlineSyncStore";
 import { createTestMemento } from "./helpers/vscodeMemento";
 import { buildIssueMetadataFixture } from "./helpers/ticketMetadataFixtures";
@@ -305,5 +308,133 @@ suite("offlineSyncStore — workspaceState 永続化", () => {
     const restored = getOfflineSyncQueue().tickets.get(901);
     assert.strictEqual(restored?.phase, "reconciliation_pending");
     assert.strictEqual(restored?.operationId, "ticket-901");
+  });
+
+  test("remote committed ticket update の active payload を後続 save が上書きしない", () => {
+    addOfflineTicketUpdate(902, {
+      ...ticketUpdate(902),
+      description: "Already sent",
+      phase: "reconciliation_pending",
+      operationId: "ticket-902",
+    });
+
+    addOfflineTicketUpdate(902, {
+      ...ticketUpdate(902),
+      description: "Edited while reconciliation is pending",
+      phase: "queued",
+    });
+
+    const operation = getOfflineSyncQueue().tickets.get(902);
+    assert.strictEqual(operation?.description, "Already sent");
+    assert.strictEqual(
+      operation?.nextIntent?.description,
+      "Edited while reconciliation is pending",
+    );
+    assert.ok((operation?.nextIntent?.revision ?? 0) > (operation?.revision ?? 0));
+  });
+
+  test("remote created new ticket の active content を後続 save が上書きしない", () => {
+    addOfflineNewTicket({
+      content: "# Already sent",
+      documentUri: "file:///tmp/pending-new.md",
+      createdIssueId: 903,
+      phase: "local_finalize_pending",
+    });
+    const active = getOfflineSyncQueue().newTickets[0];
+
+    addOfflineNewTicket({
+      content: "# Edited while finalization is pending",
+      documentUri: "file:///tmp/pending-new.md",
+    });
+
+    const operation = getOfflineSyncQueue().newTickets[0];
+    assert.strictEqual(operation.content, "# Already sent");
+    assert.strictEqual(operation.operationId, active.operationId);
+    assert.strictEqual(
+      operation.nextIntent?.content,
+      "# Edited while finalization is pending",
+    );
+    assert.ok((operation.nextIntent?.revision ?? 0) > (operation.revision ?? 0));
+  });
+
+  test("同一 scope の fire-and-forget persistence を completion 順ではなく mutation 順に直列化する", async () => {
+    const releases: Array<() => void> = [];
+    let updateCalls = 0;
+    const memento = {
+      get: <T>(_key: string, defaultValue?: T): T => defaultValue as T,
+      keys: (): readonly string[] => [],
+      update: async (): Promise<void> => {
+        updateCalls++;
+        await new Promise<void>((resolve) => releases.push(resolve));
+      },
+    };
+    initializeOfflineSyncStore(memento as import("vscode").Memento, "scope-serial");
+
+    addOfflineTicketUpdate(1, ticketUpdate(1), "scope-serial");
+    addOfflineTicketUpdate(2, ticketUpdate(2), "scope-serial");
+    await Promise.resolve();
+
+    assert.strictEqual(updateCalls, 1);
+    releases.shift()?.();
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    assert.strictEqual(updateCalls, 2);
+    releases.shift()?.();
+  });
+
+  test("remote-created new ticket の durable checkpoint は通常 discard で削除しない", async () => {
+    addOfflineNewTicket({
+      content: "# Created",
+      documentUri: "file:///tmp/created-pending.md",
+      createdIssueId: 910,
+      phase: "local_finalize_pending",
+    });
+
+    const result = await discardOfflineNewTicketAsync(
+      { documentUri: "file:///tmp/created-pending.md" },
+      "",
+    );
+
+    assert.strictEqual(result, "recovery_required");
+    assert.strictEqual(getOfflineSyncQueue().newTickets[0].createdIssueId, 910);
+  });
+
+  test("remote-committed ticket は後続 intent だけを discard して checkpoint を保持する", async () => {
+    addOfflineTicketUpdate(911, {
+      ...ticketUpdate(911),
+      phase: "reconciliation_pending",
+    });
+    addOfflineTicketUpdate(911, {
+      ...ticketUpdate(911),
+      description: "Later edit",
+    });
+
+    const result = await discardOfflineTicketUpdateAsync(911, "");
+
+    assert.strictEqual(result, "discarded_next");
+    const operation = getOfflineSyncQueue().tickets.get(911);
+    assert.strictEqual(operation?.phase, "reconciliation_pending");
+    assert.strictEqual(operation?.nextIntent, undefined);
+  });
+
+  test("10,000回の後続saveをidentityあたりactive+nextの2 snapshotへcoalesceする", () => {
+    let operation = mergeOfflineTicketUpdate(
+      912,
+      undefined,
+      { ...ticketUpdate(912), phase: "reconciliation_pending" },
+    );
+
+    for (let revision = 1; revision <= 10_000; revision++) {
+      operation = mergeOfflineTicketUpdate(912, operation, {
+        ...ticketUpdate(912),
+        description: `Later edit ${revision}`,
+        phase: "queued",
+      });
+    }
+
+    assert.strictEqual(operation.phase, "reconciliation_pending");
+    assert.strictEqual(operation.description, "Updated body");
+    assert.strictEqual(operation.nextIntent?.description, "Later edit 10000");
+    assert.strictEqual(operation.nextIntent?.revision, 10_001);
+    assert.strictEqual("nextIntent" in (operation.nextIntent ?? {}), false);
   });
 });

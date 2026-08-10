@@ -41,7 +41,29 @@ suite("syncEditorToRedmine — draft status management", () => {
     registerTicketEditor(ticketId, editor, "primary", "ticket");
     initializeTicketDraft(ticketId, "Title", "Body", metadata, "t1");
 
-    await syncEditorToRedmine(editor, { deps: {} });
+    await syncEditorToRedmine(editor, {
+      rewrite: {
+        textDocuments: [editor.document],
+        textEditors: [],
+        applyEdit: async () => true,
+        saveDocument: async () => true,
+      },
+      deps: {
+        getIssueDetail: async () => ({
+          ticket: {
+            id: ticketId,
+            projectId: 1,
+            subject: "Title",
+            description: "Body",
+            trackerName: metadata.tracker,
+            priorityName: metadata.priority,
+            statusName: metadata.status,
+            updatedAt: "t2",
+          },
+          comments: [],
+        }),
+      },
+    });
 
     assert.strictEqual(
       getTicketDraft(ticketId)?.status,

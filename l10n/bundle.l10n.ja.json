@@ -264,5 +264,14 @@
     "This file is already linked to Redmine ticket #{0}.": "このファイルは既にRedmineチケット #{0} に紐づいています。",
     "This file already has non-Redmine frontmatter. Insert Redmine frontmatter manually to avoid overwriting existing metadata.": "このファイルにはRedmine用ではないFrontmatterがあります。既存メタデータの破壊を避けるため、自動挿入は行いません。",
     "Replace existing Redmine ticket frontmatter?": "既存のRedmineチケット用Frontmatterを置き換えますか？",
-    "Replace": "置換"
+    "Replace": "置換",
+    "This item has a remote sync checkpoint and must be resumed before it can be discarded.": "この項目にはリモート同期の復旧情報があるため、破棄する前に同期を再開してください。",
+    "Status: Remote sync recovery pending": "状態: リモート同期の復旧待ち",
+    "Retry remote write": "リモート書込みを再試行",
+    "Link existing ticket": "作成済みチケットへ紐付け",
+    "Treat as committed": "適用済みとして照合",
+    "The previous ticket creation may have reached Redmine. Link the created ticket ID, or retry only after confirming that no ticket was created.": "前回のチケット作成がRedmineへ到達した可能性があります。作成済みチケットIDを紐付けるか、チケットが作成されていないことを確認した場合だけ再試行してください。",
+    "Enter the Redmine ticket ID created by the previous attempt.": "前回の試行で作成されたRedmineチケットIDを入力してください。",
+    "Enter a positive ticket ID.": "正のチケットIDを入力してください。",
+    "The previous ticket update may have reached Redmine. Reconcile from Redmine, or retry only after confirming that the update was not applied.": "前回のチケット更新がRedmineへ到達した可能性があります。Redmineの状態から照合するか、更新が適用されていないことを確認した場合だけ再試行してください。"
 }

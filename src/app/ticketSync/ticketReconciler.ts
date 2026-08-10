@@ -5,6 +5,7 @@ import type { TicketSaveDependencies } from "../../views/ticketSync/types";
 import type { TicketSaveResult } from "../../views/ticketSaveTypes";
 import type { DocumentPort, SyncContext, SyncJournal } from "./ports";
 import type { TicketSyncOutcome } from "./ticketSyncOutcome";
+import { rebaseTicketEditorContent } from "./ticketIntentRebase";
 
 export class TicketReconciler {
   public constructor(
@@ -76,6 +77,32 @@ export class TicketReconciler {
       metadataBlock: input.operation.metadataBlock,
       controlFields: input.operation.controlFields,
     });
+    const latestOperation = this.journal.getTicketUpdate(
+      input.operation.ticketId,
+      input.context.connectionScope,
+    ) ?? input.operation;
+    const next = latestOperation.nextIntent;
+    const replacement = next
+      ? rebaseTicketEditorContent(
+        {
+          subject: input.operation.subject,
+          description: input.operation.description,
+          metadata: input.operation.metadata,
+          layout: input.operation.layout,
+          metadataBlock: input.operation.metadataBlock,
+          controlFields: input.operation.controlFields,
+        },
+        canonical,
+        {
+          subject: next.subject,
+          description: next.description,
+          metadata: next.metadata,
+          layout: next.layout,
+          metadataBlock: next.metadataBlock,
+          controlFields: next.controlFields,
+        },
+      )
+      : canonical;
 
     if (input.remoteCommitted) {
       try {
@@ -100,7 +127,7 @@ export class TicketReconciler {
           documentUri: input.operation.documentUri,
           ticketId: input.operation.ticketId,
           projectId: detail.ticket.projectId,
-          replacement: canonical,
+          replacement,
         });
         if (!rewritten) {
           if (input.remoteCommitted) {
@@ -141,10 +168,19 @@ export class TicketReconciler {
     }
 
     try {
-      await this.journal.completeTicketUpdate(
+      const completed = await this.journal.completeTicketUpdate(
         input.operation.ticketId,
         input.context.connectionScope,
+        { canonical, remoteUpdatedAt: detail.ticket.updatedAt },
       );
+      if (!completed) {
+        return {
+          kind: "remote_committed",
+          ticketId: input.operation.ticketId,
+          pending: "local_finalize",
+          message: "A newer local revision arrived during finalization.",
+        };
+      }
     } catch (error) {
       return input.remoteCommitted
         ? {

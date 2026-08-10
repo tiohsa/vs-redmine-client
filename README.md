@@ -78,6 +78,8 @@ Supported actions per item:
 
 A **Sync all** button uploads all queued items at once.
 
+After Redmine accepts a create or update, the item remains in the Unsynced tab until remote read-back and local Markdown finalization complete. Such recovery items cannot be discarded because their checkpoint prevents duplicate remote writes. If the connection is lost while a write result is unknown, automatic retry is disabled and the item is shown as requiring recovery.
+
 ## Workflows
 
 ### Basic Ticket Editing

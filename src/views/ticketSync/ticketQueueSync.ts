@@ -17,7 +17,11 @@ import { createChildTickets, splitUniqueChildren } from "./ticketChildCreateSync
 import { handleTicketUploadFailure, resolveUploadSummary } from "./ticketImageUploadSync";
 import { computeChanges, computeMetadataChanges, resolveMetadataForCreate, resolveMetadataUpdates } from "./ticketMetadataResolver";
 import { defaultDeps } from "./ticketSyncDeps";
-import { buildResult, mapErrorToResult } from "./ticketSyncResult";
+import {
+  buildResult,
+  isRemoteCommitUnknownError,
+  mapErrorToResult,
+} from "./ticketSyncResult";
 import type { TicketSaveResult } from "../ticketSaveTypes";
 import type { TicketSaveDependencies } from "./types";
 import type { UploadToken } from "../../redmine/types";
@@ -42,6 +46,7 @@ export interface QueueTicketDraftInput {
   editor?: vscode.TextEditor;
   documentUri?: vscode.Uri;
   onSubjectUpdated?: (ticketId: number, subject: string) => void;
+  queueUnchanged?: boolean;
 }
 
 export const queueTicketDraft = async (
@@ -74,7 +79,7 @@ export const queueTicketDraft = async (
   const hasChanges =
     Object.keys(contentChanges).length > 0 || Object.keys(metadataChanges).length > 0;
   const children = parsed.metadata.children ?? [];
-  if (!hasChanges && children.length === 0) {
+  if (!hasChanges && children.length === 0 && !input.queueUnchanged) {
     return buildResult("no_change", "No changes to save.");
   }
 
@@ -101,6 +106,9 @@ export const queueTicketDraft = async (
     operationId: `${input.operationScope ?? "legacy"}:ticket:${input.ticketId}`,
     phase: "queued",
   }, input.operationScope);
+  if (!hasChanges && children.length === 0) {
+    return buildResult("no_change", "No changes to save.");
+  }
   markDraftStatus(input.ticketId, "Dirty", input.operationScope);
   if (input.editor) {
     const clearedMetadata: IssueMetadata = { ...parsed.metadata, children: [] };
@@ -343,6 +351,7 @@ export const applyQueuedTicketUpdate = async (input: {
   update: OfflineTicketUpdate;
   deps?: Partial<TicketSaveDependencies>;
   deferReconciliation?: boolean;
+  beforeRemoteWrite?: () => Promise<void>;
 }): Promise<TicketSaveResult> => {
   const deps = { ...defaultDeps, ...input.deps };
   const update = input.update;
@@ -427,6 +436,15 @@ export const applyQueuedTicketUpdate = async (input: {
   });
   if (conflict) { return conflict; }
 
+  if (input.beforeRemoteWrite) {
+    try {
+      await input.beforeRemoteWrite();
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Sync journal persistence failed.";
+      return buildResult("failed", message, { uploadSummary });
+    }
+  }
+
   const childCreate = await createQueuedChildTickets({
     deps,
     update,
@@ -446,7 +464,11 @@ export const applyQueuedTicketUpdate = async (input: {
         createdChildIds.map((issueId) => deps.deleteIssue(issueId)),
       );
     }
-    return mapErrorToResult(error);
+    return {
+      ...mapErrorToResult(error),
+      remoteWriteAttempted: true,
+      remoteCommitUnknown: isRemoteCommitUnknownError(error),
+    };
   }
 
   if (input.operationScope !== undefined) {

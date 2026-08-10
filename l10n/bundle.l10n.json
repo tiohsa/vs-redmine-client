@@ -264,5 +264,14 @@
     "This file is already linked to Redmine ticket #{0}.": "This file is already linked to Redmine ticket #{0}.",
     "This file already has non-Redmine frontmatter. Insert Redmine frontmatter manually to avoid overwriting existing metadata.": "This file already has non-Redmine frontmatter. Insert Redmine frontmatter manually to avoid overwriting existing metadata.",
     "Replace existing Redmine ticket frontmatter?": "Replace existing Redmine ticket frontmatter?",
-    "Replace": "Replace"
+    "Replace": "Replace",
+    "This item has a remote sync checkpoint and must be resumed before it can be discarded.": "This item has a remote sync checkpoint and must be resumed before it can be discarded.",
+    "Status: Remote sync recovery pending": "Status: Remote sync recovery pending",
+    "Retry remote write": "Retry remote write",
+    "Link existing ticket": "Link existing ticket",
+    "Treat as committed": "Treat as committed",
+    "The previous ticket creation may have reached Redmine. Link the created ticket ID, or retry only after confirming that no ticket was created.": "The previous ticket creation may have reached Redmine. Link the created ticket ID, or retry only after confirming that no ticket was created.",
+    "Enter the Redmine ticket ID created by the previous attempt.": "Enter the Redmine ticket ID created by the previous attempt.",
+    "Enter a positive ticket ID.": "Enter a positive ticket ID.",
+    "The previous ticket update may have reached Redmine. Reconcile from Redmine, or retry only after confirming that the update was not applied.": "The previous ticket update may have reached Redmine. Reconcile from Redmine, or retry only after confirming that the update was not applied."
 }

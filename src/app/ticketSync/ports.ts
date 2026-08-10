@@ -9,19 +9,32 @@ export interface SyncContext {
 }
 
 export interface SyncJournal {
+  getNewTicket(
+    key: { queueId?: string; documentUri?: string },
+    scope: string,
+  ): OfflineNewTicket | undefined;
+  getTicketUpdate(ticketId: number, scope: string): OfflineTicketUpdate | undefined;
   saveNewTicket(operation: Omit<OfflineNewTicket, "queueId"> & { queueId?: string }, scope: string): Promise<OfflineNewTicket>;
   markNewTicket(
     key: { queueId?: string; documentUri?: string },
     updates: Partial<Pick<OfflineNewTicket, "createdIssueId" | "status" | "phase" | "remoteUpdatedAt" | "createdChildIds">>,
     scope: string,
   ): Promise<OfflineNewTicket | undefined>;
-  completeNewTicket(key: { queueId?: string; documentUri?: string }, scope: string): Promise<void>;
+  completeNewTicket(
+    key: { queueId?: string; documentUri?: string },
+    scope: string,
+    promotion?: OfflineTicketUpdate & { sourceRevision?: number },
+  ): Promise<boolean>;
   markTicketUpdate(
     ticketId: number,
     updates: Partial<Pick<OfflineTicketUpdate, "phase" | "remoteUpdatedAt" | "createdChildIds">>,
     scope: string,
   ): Promise<OfflineTicketUpdate | undefined>;
-  completeTicketUpdate(ticketId: number, scope: string): Promise<void>;
+  completeTicketUpdate(
+    ticketId: number,
+    scope: string,
+    completion?: { canonical: TicketEditorContent; remoteUpdatedAt: string },
+  ): Promise<boolean>;
 }
 
 export interface DocumentPort {

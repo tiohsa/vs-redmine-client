@@ -9,6 +9,9 @@ import type {
   SyncJournal,
 } from "./ports";
 import type { TicketSyncOutcome } from "./ticketSyncOutcome";
+import { rebaseTicketEditorContent } from "./ticketIntentRebase";
+import type { OfflineTicketUpdate } from "../../views/offlineSyncStore";
+import type { IssueDetailResult } from "../../redmine/issues";
 
 export class NewTicketFinalizer {
   public constructor(
@@ -22,12 +25,13 @@ export class NewTicketFinalizer {
     operation: OfflineNewTicket;
     ticketId: number;
     deps: TicketCreateDependencies;
+    detail?: IssueDetailResult;
   }): Promise<TicketSyncOutcome> {
     const key = {
       queueId: input.operation.queueId,
       documentUri: input.operation.documentUri,
     };
-    if (!input.deps.getIssueDetail) {
+    if (!input.detail && !input.deps.getIssueDetail) {
       try {
         await this.journal.markNewTicket(
           key,
@@ -45,9 +49,9 @@ export class NewTicketFinalizer {
       };
     }
 
-    let detail;
+    let detail = input.detail;
     try {
-      detail = await input.deps.getIssueDetail(input.ticketId);
+      detail ??= await input.deps.getIssueDetail!(input.ticketId);
     } catch (error) {
       try {
         await this.journal.markNewTicket(
@@ -116,6 +120,49 @@ export class NewTicketFinalizer {
     }
 
     const canonical = editorContentFromTicket(detail.ticket, parsed);
+    const latestOperation = this.journal.getNewTicket(
+      key,
+      input.context.connectionScope,
+    ) ?? input.operation;
+    let replacement = canonical;
+    let promotion: (OfflineTicketUpdate & { sourceRevision?: number }) | undefined;
+    if (latestOperation.nextIntent) {
+      try {
+        const latest = parseTicketEditorContent(latestOperation.nextIntent.content, {
+          allowMissingMetadata: true,
+          fallbackMetadata: parsed.metadata,
+          allowMissingSubject: true,
+        });
+        replacement = rebaseTicketEditorContent(parsed, canonical, latest);
+        promotion = {
+          ticketId: input.ticketId,
+          baseSubject: canonical.subject,
+          baseDescription: canonical.description,
+          baseMetadata: canonical.metadata,
+          lastKnownRemoteUpdatedAt: detail.ticket.updatedAt,
+          subject: replacement.subject,
+          description: replacement.description,
+          metadata: replacement.metadata,
+          layout: replacement.layout,
+          metadataBlock: replacement.metadataBlock,
+          controlFields: replacement.controlFields,
+          baseDir: latestOperation.nextIntent.baseDir ?? input.operation.baseDir,
+          documentUri: latestOperation.nextIntent.documentUri ?? input.operation.documentUri,
+          operationId: input.operation.operationId,
+          connectionScope: input.context.connectionScope,
+          phase: "queued",
+          revision: latestOperation.nextIntent.revision,
+          sourceRevision: latestOperation.nextIntent.revision,
+        };
+      } catch (error) {
+        return {
+          kind: "remote_committed",
+          ticketId: input.ticketId,
+          pending: "local_finalize",
+          message: error instanceof Error ? error.message : "Later local content parsing failed.",
+        };
+      }
+    }
     try {
       await this.journal.markNewTicket(
         key,
@@ -140,7 +187,7 @@ export class NewTicketFinalizer {
           documentUri: input.operation.documentUri,
           ticketId: input.ticketId,
           projectId: detail.ticket.projectId ?? input.operation.projectId,
-          replacement: canonical,
+          replacement,
         });
       } catch (error) {
         return {
@@ -183,7 +230,19 @@ export class NewTicketFinalizer {
     }
 
     try {
-      await this.journal.completeNewTicket(key, input.context.connectionScope);
+      const completed = await this.journal.completeNewTicket(
+        key,
+        input.context.connectionScope,
+        promotion,
+      );
+      if (!completed) {
+        return {
+          kind: "remote_committed",
+          ticketId: input.ticketId,
+          pending: "local_finalize",
+          message: "A newer local revision arrived during finalization.",
+        };
+      }
     } catch (error) {
       return {
         kind: "remote_committed",

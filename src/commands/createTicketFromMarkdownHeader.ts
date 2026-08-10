@@ -134,6 +134,8 @@ export const createTicketFromMarkdownHeader = async (
     deps.showSuccess(vscode.l10n.t("Redmine ticket created (#{0}).", outcome.ticketId));
   } else if (outcome.kind === "remote_committed") {
     deps.showWarning(outcome.message ?? createFailureWarning(outcome.ticketId));
+  } else if (outcome.kind === "commit_unknown") {
+    deps.showWarning(outcome.message);
   } else if (outcome.kind === "failed_before_commit") {
     deps.showError(localizeCreationError(outcome.error.message));
   } else {

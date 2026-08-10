@@ -27,6 +27,7 @@ import { runWithConnectionScope } from "../redmine/client";
 import { showError } from "../utils/notifications";
 import { getOfflineSyncMode } from "../config/settings";
 import { createTicketSyncService, ticketSyncOutcomeToSaveResult } from "../app/ticketSync";
+import type { RewriteDocumentDeps } from "../views/editorDocumentRewrite";
 
 export { CONNECTION_SCOPE_MISMATCH_MESSAGE } from "../config/connectionScope";
 
@@ -40,6 +41,7 @@ export interface SyncToRedmineOptions {
   onTicketCreated?: () => void;
   onCommentsRefresh?: (ticketId: number) => void;
   deps?: Partial<TicketSaveDependencies & CommentSaveDependencies>;
+  rewrite?: RewriteDocumentDeps;
 }
 
 export const syncEditorToRedmine = async (
@@ -79,6 +81,7 @@ const syncEditorToRedmineAtScope = async (
     const outcome = await createTicketSyncService({
       create: options.deps,
       update: options.deps,
+      rewrite: options.rewrite,
     }).syncEditor({
       context: { connectionScope: operationScope },
       editor,
@@ -100,6 +103,7 @@ const syncEditorToRedmineAtScope = async (
       const outcome = await createTicketSyncService({
         create: options.deps,
         update: options.deps,
+        rewrite: options.rewrite,
       }).syncEditor({
         context: { connectionScope: operationScope },
         editor,

@@ -313,7 +313,10 @@ export class DashboardMetadataService {
         document.positionAt(document.getText().length),
       );
       edit.replace(document.uri, fullRange, nextText);
-      await vscode.workspace.applyEdit(edit);
+      const changed = await vscode.workspace.applyEdit(edit);
+      if (!changed) {
+        return false;
+      }
     }
     setTicketDraftContent(ticket.id, next, operationScope);
     markDraftStatus(ticket.id, "Dirty", operationScope);

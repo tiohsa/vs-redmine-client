@@ -1,11 +1,17 @@
 import { randomUUID } from "crypto";
 import type { Memento } from "vscode";
 import { IssueMetadata } from "./ticketMetadataTypes";
-import { TicketEditorLayout, TicketEditorMetadataBlock } from "./ticketEditorContent";
+import {
+  TicketEditorContent,
+  TicketEditorLayout,
+  TicketEditorMetadataBlock,
+} from "./ticketEditorContent";
 import type { FrontmatterControlFields } from "./ticketMetadataControlFields";
 
 export type TicketUpdateSyncPhase =
   | "queued"
+  | "remote_write_started"
+  | "commit_unknown"
   | "remote_committed"
   | "reconciliation_pending"
   | "local_finalize_pending"
@@ -13,10 +19,24 @@ export type TicketUpdateSyncPhase =
 
 export type NewTicketSyncPhase =
   | "queued"
+  | "remote_write_started"
+  | "commit_unknown"
   | "remote_created"
   | "reconciliation_pending"
   | "local_finalize_pending"
   | "completed";
+
+export type TicketUpdateIntentSnapshot = {
+  revision: number;
+  subject: string;
+  description: string;
+  metadata: IssueMetadata;
+  layout?: TicketEditorLayout;
+  metadataBlock?: TicketEditorMetadataBlock;
+  controlFields?: FrontmatterControlFields;
+  baseDir?: string;
+  documentUri?: string;
+};
 
 export type OfflineTicketUpdate = {
   ticketId: number;
@@ -37,6 +57,8 @@ export type OfflineTicketUpdate = {
   phase?: TicketUpdateSyncPhase;
   remoteUpdatedAt?: string;
   createdChildIds?: number[];
+  revision?: number;
+  nextIntent?: TicketUpdateIntentSnapshot;
 };
 
 export type OfflineCommentUpdate = {
@@ -48,6 +70,14 @@ export type OfflineCommentUpdate = {
   baseDir?: string;
   documentUri?: string;
   sourceNotesHash?: string;
+};
+
+export type NewTicketIntentSnapshot = {
+  revision: number;
+  content: string;
+  projectId?: number;
+  documentUri?: string;
+  baseDir?: string;
 };
 
 export type OfflineNewTicket = {
@@ -63,12 +93,34 @@ export type OfflineNewTicket = {
   connectionScope?: string;
   remoteUpdatedAt?: string;
   createdChildIds?: number[];
+  revision?: number;
+  nextIntent?: NewTicketIntentSnapshot;
 };
 
 export type OfflineSyncQueue = {
   tickets: Map<number, OfflineTicketUpdate>;
   comments: OfflineCommentUpdate[];
   newTickets: OfflineNewTicket[];
+};
+
+export type OfflineDiscardResult =
+  | "discarded"
+  | "discarded_next"
+  | "recovery_required"
+  | "not_found";
+
+export type OfflineSyncLifecycle = "queued" | "recovery_pending" | "commit_unknown";
+
+export const getOfflineSyncLifecycle = (
+  operation: Pick<OfflineNewTicket | OfflineTicketUpdate, "phase">,
+): OfflineSyncLifecycle => {
+  if (operation.phase === "commit_unknown" || operation.phase === "remote_write_started") {
+    return "commit_unknown";
+  }
+  if (operation.phase && operation.phase !== "queued" && operation.phase !== "completed") {
+    return "recovery_pending";
+  }
+  return "queued";
 };
 
 const STORAGE_KEY = "redmine.offlineSyncQueue";
@@ -104,6 +156,7 @@ let memento: Memento | undefined;
 let activeScope = "";
 const queuesByScope = new Map<string, OfflineSyncQueue>();
 const persistenceByScope = new Map<string, Promise<void>>();
+const pendingSnapshotByScope = new Map<string, SerializedQueue>();
 
 const emptyQueue = (): OfflineSyncQueue => ({
   tickets: new Map<number, OfflineTicketUpdate>(),
@@ -131,41 +184,43 @@ const serializeQueue = (scope: string): SerializedQueue => {
   };
 };
 
-const persistAsync = async (scope = activeScope): Promise<void> => {
-  const serialized = serializeQueue(scope);
+const schedulePersist = (
+  scope: string,
+  serialized: SerializedQueue,
+): Promise<void> => {
+  pendingSnapshotByScope.set(scope, serialized);
+  const targetMemento = memento;
   const previous = persistenceByScope.get(scope);
   const perform = async (): Promise<void> => {
-      if (memento) {
-        await memento.update(storageKeyForScope(scope), serialized);
-      }
+    if (targetMemento) {
+      await targetMemento.update(storageKeyForScope(scope), serialized);
+    }
   };
   const current = previous
     ? previous.catch(() => undefined).then(perform)
     : perform();
   persistenceByScope.set(scope, current);
-  try {
-    await current;
-    notifyQueueChanged();
-  } finally {
+  void current.finally(() => {
     if (persistenceByScope.get(scope) === current) {
       persistenceByScope.delete(scope);
+      pendingSnapshotByScope.delete(scope);
     }
-  }
+  }).catch(() => undefined);
+  return current;
+};
+
+const persistAsync = async (scope = activeScope): Promise<void> => {
+  const serialized = serializeQueue(scope);
+  await schedulePersist(scope, serialized);
+  notifyQueueChanged();
 };
 
 const persist = (scope = activeScope): void => {
   const serialized = serializeQueue(scope);
-  const current = memento
-    ? Promise.resolve(memento.update(storageKeyForScope(scope), serialized))
-    : Promise.resolve();
-  persistenceByScope.set(scope, current);
+  const current = schedulePersist(scope, serialized);
   notifyQueueChanged();
   void current.catch((err: unknown) => {
-      console.error("[vs-redmine-client] offlineSyncStore: persist failed", err);
-  }).finally(() => {
-    if (persistenceByScope.get(scope) === current) {
-      persistenceByScope.delete(scope);
-    }
+    console.error("[vs-redmine-client] offlineSyncStore: persist failed", err);
   });
 };
 
@@ -181,7 +236,11 @@ const deserializeQueue = (raw: SerializedQueue | undefined): OfflineSyncQueue =>
             typeof e[1] === "object",
         ).map(([ticketId, update]) => [
           ticketId,
-          { ...update, phase: update.phase ?? "queued" },
+          {
+            ...update,
+            phase: update.phase ?? "queued",
+            revision: update.revision ?? 1,
+          },
         ] as [number, OfflineTicketUpdate])
         : [],
     ),
@@ -196,6 +255,7 @@ const deserializeQueue = (raw: SerializedQueue | undefined): OfflineSyncQueue =>
           .map((ticket) => ({
             ...ticket,
             operationId: ticket.operationId ?? ticket.queueId,
+            revision: ticket.revision ?? 1,
             phase: ticket.phase ?? (
               ticket.createdIssueId !== undefined || ticket.status === "created_rewrite_failed"
                 ? "local_finalize_pending"
@@ -211,10 +271,18 @@ function loadQueue(storage: Memento, storageKey: string): OfflineSyncQueue {
 }
 
 export const initializeOfflineSyncStore = (storage: Memento, scope?: string): void => {
+  const sameStorage = memento === storage;
+  const requestedScope = scope ?? "";
+  const pendingSnapshot = sameStorage
+    ? pendingSnapshotByScope.get(requestedScope)
+    : undefined;
   memento = storage;
-  activeScope = scope ?? "";
+  activeScope = requestedScope;
   queuesByScope.clear();
-  persistenceByScope.clear();
+  if (!sameStorage) {
+    persistenceByScope.clear();
+    pendingSnapshotByScope.clear();
+  }
   const activeStorageKey = storageKeyForScope(activeScope);
   const scoped = storage.get<SerializedQueue>(activeStorageKey);
   const legacy = scope ? storage.get<SerializedQueue>(STORAGE_KEY) : undefined;
@@ -222,7 +290,7 @@ export const initializeOfflineSyncStore = (storage: Memento, scope?: string): vo
     void storage.update(activeStorageKey, legacy);
     void storage.update(STORAGE_KEY, undefined);
   }
-  queuesByScope.set(activeScope, deserializeQueue(scoped ?? legacy));
+  queuesByScope.set(activeScope, deserializeQueue(pendingSnapshot ?? scoped ?? legacy));
 };
 
 /** 接続先ごとのキューへ切り替え、別Redmineの未送信データを混在させない。 */
@@ -235,14 +303,33 @@ export const switchOfflineSyncStore = (scope: string): void => {
   notifyQueueChanged();
 };
 
-export const addOfflineTicketUpdate = (
+export const mergeOfflineTicketUpdate = (
   ticketId: number,
+  existing: OfflineTicketUpdate | undefined,
   update: OfflineTicketUpdate,
-  scope = activeScope,
-): void => {
-  const queue = getQueue(scope);
-  const existing = queue.tickets.get(ticketId);
-  queue.tickets.set(ticketId, {
+): OfflineTicketUpdate => {
+  if (existing?.phase && existing.phase !== "queued" && existing.phase !== "completed") {
+    const revision = Math.max(
+      existing.revision ?? 1,
+      existing.nextIntent?.revision ?? 0,
+    ) + 1;
+    return {
+      ...existing,
+      documentUri: existing.documentUri ?? update.documentUri,
+      nextIntent: {
+        revision,
+        subject: update.subject,
+        description: update.description,
+        metadata: update.metadata,
+        layout: update.layout,
+        metadataBlock: update.metadataBlock,
+        controlFields: update.controlFields,
+        baseDir: update.baseDir,
+        documentUri: update.documentUri ?? existing.documentUri,
+      },
+    };
+  }
+  return {
     ...(existing ?? update),
     ...update,
     baseSubject: existing?.baseSubject ?? update.baseSubject,
@@ -250,14 +337,23 @@ export const addOfflineTicketUpdate = (
     baseMetadata: existing?.baseMetadata ?? update.baseMetadata,
     lastKnownRemoteUpdatedAt:
       existing?.lastKnownRemoteUpdatedAt ?? update.lastKnownRemoteUpdatedAt,
-    operationId: existing?.operationId ?? update.operationId,
+    operationId: existing?.operationId ?? update.operationId ?? `ticket:${ticketId}`,
     connectionScope: existing?.connectionScope ?? update.connectionScope,
-    phase: existing?.phase && existing.phase !== "queued"
-      ? existing.phase
-      : update.phase ?? existing?.phase,
+    phase: update.phase ?? existing?.phase,
     remoteUpdatedAt: existing?.remoteUpdatedAt ?? update.remoteUpdatedAt,
     createdChildIds: existing?.createdChildIds ?? update.createdChildIds,
-  });
+    revision: existing?.revision ?? update.revision ?? 1,
+  };
+};
+
+export const addOfflineTicketUpdate = (
+  ticketId: number,
+  update: OfflineTicketUpdate,
+  scope = activeScope,
+): void => {
+  const queue = getQueue(scope);
+  const existing = queue.tickets.get(ticketId);
+  queue.tickets.set(ticketId, mergeOfflineTicketUpdate(ticketId, existing, update));
   persist(scope);
 };
 
@@ -352,7 +448,29 @@ export const addOfflineNewTicket = (
   if (index !== -1) {
     const existing = queue.newTickets[index];
     queue.newTickets.splice(index, 1);
-    queue.newTickets.unshift({ ...existing, ...update });
+    if (existing.phase && existing.phase !== "queued" && existing.phase !== "completed") {
+      const revision = Math.max(
+        existing.revision ?? 1,
+        existing.nextIntent?.revision ?? 0,
+      ) + 1;
+      queue.newTickets.unshift({
+        ...existing,
+        documentUri: existing.documentUri ?? update.documentUri,
+        nextIntent: {
+          revision,
+          content: update.content,
+          projectId: update.projectId ?? existing.projectId,
+          documentUri: update.documentUri ?? existing.documentUri,
+          baseDir: update.baseDir ?? existing.baseDir,
+        },
+      });
+    } else {
+      queue.newTickets.unshift({
+        ...existing,
+        ...update,
+        revision: existing.revision ?? update.revision ?? 1,
+      });
+    }
   } else {
     const queueId = randomUUID();
     queue.newTickets.unshift({
@@ -361,6 +479,7 @@ export const addOfflineNewTicket = (
       operationId: queueId,
       phase: update.phase ?? "queued",
       connectionScope: update.connectionScope ?? scope,
+      revision: update.revision ?? 1,
     });
   }
   persist(scope);
@@ -379,6 +498,7 @@ export const addOfflineNewTicketAsync = async (
       ? queue.newTickets.findIndex((item) => item.queueId === update.queueId)
       : -1;
   const queueId = update.queueId ?? randomUUID();
+  const existing = index === -1 ? undefined : queue.newTickets[index];
   const entry: OfflineNewTicket = index === -1
     ? {
       ...update,
@@ -386,8 +506,29 @@ export const addOfflineNewTicketAsync = async (
       operationId: update.operationId ?? queueId,
       phase: update.phase ?? "queued",
       connectionScope: update.connectionScope ?? scope,
+      revision: update.revision ?? 1,
     }
-    : { ...queue.newTickets[index], ...update };
+    : existing?.phase && existing.phase !== "queued" && existing.phase !== "completed"
+      ? {
+        ...existing,
+        documentUri: existing.documentUri ?? update.documentUri,
+        nextIntent: {
+          revision: Math.max(
+            existing.revision ?? 1,
+            existing.nextIntent?.revision ?? 0,
+          ) + 1,
+          content: update.content,
+          projectId: update.projectId ?? existing.projectId,
+          documentUri: update.documentUri ?? existing.documentUri,
+          baseDir: update.baseDir ?? existing.baseDir,
+        },
+      }
+      : {
+        ...existing,
+        ...update,
+        queueId,
+        revision: existing?.revision ?? update.revision ?? 1,
+      };
   if (index === -1) {
     queue.newTickets.unshift(entry);
   } else {
@@ -502,6 +643,54 @@ export const removeOfflineNewTicketAsync = async (
   }
 };
 
+export const discardOfflineNewTicketAsync = async (
+  key: { queueId?: string; documentUri?: string },
+  scope: string,
+): Promise<OfflineDiscardResult> => {
+  const queue = getQueue(scope);
+  const index = findNewTicketIndex(queue, key);
+  if (index === -1) {
+    return "not_found";
+  }
+  const operation = queue.newTickets[index];
+  if (operation.phase && operation.phase !== "queued" && operation.phase !== "completed") {
+    if (!operation.nextIntent) {
+      return "recovery_required";
+    }
+    queue.newTickets[index] = { ...operation, nextIntent: undefined };
+    await persistAsync(scope);
+    return "discarded_next";
+  }
+  queue.newTickets.splice(index, 1);
+  await persistAsync(scope);
+  return "discarded";
+};
+
+export const completeOfflineNewTicketAsync = async (
+  key: { queueId?: string; documentUri?: string },
+  scope: string,
+  promotion?: OfflineTicketUpdate & { sourceRevision?: number },
+): Promise<boolean> => {
+  const queue = getQueue(scope);
+  const index = findNewTicketIndex(queue, key);
+  if (index === -1) {
+    return true;
+  }
+  const current = queue.newTickets[index];
+  if (current.nextIntent) {
+    if (!promotion || promotion.sourceRevision !== current.nextIntent.revision) {
+      return false;
+    }
+  }
+  queue.newTickets.splice(index, 1);
+  if (promotion) {
+    const { sourceRevision: _sourceRevision, ...ticketUpdate } = promotion;
+    queue.tickets.set(promotion.ticketId, ticketUpdate);
+  }
+  await persistAsync(scope);
+  return true;
+};
+
 export const updateOfflineTicketUpdateAsync = async (
   ticketId: number,
   updates: Partial<Pick<OfflineTicketUpdate, "phase" | "remoteUpdatedAt" | "createdChildIds">>,
@@ -526,6 +715,66 @@ export const removeOfflineTicketUpdateAsync = async (
   if (queue.tickets.delete(ticketId)) {
     await persistAsync(scope);
   }
+};
+
+export const discardOfflineTicketUpdateAsync = async (
+  ticketId: number,
+  scope: string,
+): Promise<OfflineDiscardResult> => {
+  const queue = getQueue(scope);
+  const operation = queue.tickets.get(ticketId);
+  if (!operation) {
+    return "not_found";
+  }
+  if (operation.phase && operation.phase !== "queued" && operation.phase !== "completed") {
+    if (!operation.nextIntent) {
+      return "recovery_required";
+    }
+    queue.tickets.set(ticketId, { ...operation, nextIntent: undefined });
+    await persistAsync(scope);
+    return "discarded_next";
+  }
+  queue.tickets.delete(ticketId);
+  await persistAsync(scope);
+  return "discarded";
+};
+
+export const completeOfflineTicketUpdateAsync = async (
+  ticketId: number,
+  scope: string,
+  completion?: { canonical: TicketEditorContent; remoteUpdatedAt: string },
+): Promise<boolean> => {
+  const queue = getQueue(scope);
+  const current = queue.tickets.get(ticketId);
+  if (!current) {
+    return true;
+  }
+  if (current.nextIntent && completion) {
+    const next = current.nextIntent;
+    queue.tickets.set(ticketId, {
+      ticketId,
+      baseSubject: completion.canonical.subject,
+      baseDescription: completion.canonical.description,
+      baseMetadata: completion.canonical.metadata,
+      lastKnownRemoteUpdatedAt: completion.remoteUpdatedAt,
+      subject: next.subject,
+      description: next.description,
+      metadata: next.metadata,
+      layout: next.layout ?? completion.canonical.layout,
+      metadataBlock: next.metadataBlock ?? completion.canonical.metadataBlock,
+      controlFields: next.controlFields ?? completion.canonical.controlFields,
+      baseDir: next.baseDir ?? current.baseDir,
+      documentUri: next.documentUri ?? current.documentUri,
+      operationId: current.operationId,
+      connectionScope: current.connectionScope ?? scope,
+      phase: "queued",
+      revision: next.revision,
+    });
+  } else {
+    queue.tickets.delete(ticketId);
+  }
+  await persistAsync(scope);
+  return true;
 };
 
 export const removeOfflineCommentEntry = (

@@ -14,6 +14,11 @@ import {
   createTicketSyncService,
   TicketSyncQueueItemNotFoundError,
 } from "../app/ticketSync";
+import type {
+  TicketSyncOutcome,
+  TicketSyncQueueKey,
+  TicketSyncService,
+} from "../app/ticketSync";
 import { getTicketDraft } from "../views/ticketDraftStore";
 
 export type SyncFailureReason =
@@ -44,6 +49,70 @@ const normalizeNewTicketSyncFailureMessage = (message?: string): string => {
   return message ?? vscode.l10n.t("Unknown error");
 };
 
+const resolveCommitUnknownInteractive = async (
+  service: TicketSyncService,
+  key: TicketSyncQueueKey,
+  operationScope: string,
+): Promise<TicketSyncOutcome | undefined> => {
+  const retryLabel = vscode.l10n.t("Retry remote write");
+  if (key.kind === "newTicket") {
+    const linkLabel = vscode.l10n.t("Link existing ticket");
+    const choice = await vscode.window.showWarningMessage(
+      vscode.l10n.t("The previous ticket creation may have reached Redmine. Link the created ticket ID, or retry only after confirming that no ticket was created."),
+      { modal: true },
+      linkLabel,
+      retryLabel,
+    );
+    if (choice === linkLabel) {
+      const rawTicketId = await vscode.window.showInputBox({
+        prompt: vscode.l10n.t("Enter the Redmine ticket ID created by the previous attempt."),
+        validateInput: (value) => /^\d+$/.test(value) && Number(value) > 0
+          ? undefined
+          : vscode.l10n.t("Enter a positive ticket ID."),
+      });
+      if (!rawTicketId) {
+        return undefined;
+      }
+      return service.resolveCommitUnknown({
+        key,
+        context: { connectionScope: operationScope },
+        resolution: { kind: "link_created_ticket", ticketId: Number(rawTicketId) },
+      });
+    }
+    if (choice === retryLabel) {
+      return service.resolveCommitUnknown({
+        key,
+        context: { connectionScope: operationScope },
+        resolution: { kind: "retry_remote_write" },
+      });
+    }
+    return undefined;
+  }
+
+  const committedLabel = vscode.l10n.t("Treat as committed");
+  const choice = await vscode.window.showWarningMessage(
+    vscode.l10n.t("The previous ticket update may have reached Redmine. Reconcile from Redmine, or retry only after confirming that the update was not applied."),
+    { modal: true },
+    committedLabel,
+    retryLabel,
+  );
+  if (choice === committedLabel) {
+    return service.resolveCommitUnknown({
+      key,
+      context: { connectionScope: operationScope },
+      resolution: { kind: "assume_update_committed" },
+    });
+  }
+  if (choice === retryLabel) {
+    return service.resolveCommitUnknown({
+      key,
+      context: { connectionScope: operationScope },
+      resolution: { kind: "retry_remote_write" },
+    });
+  }
+  return undefined;
+};
+
 export const syncUnsyncedFile = async (
   item: { syncKey: UnsyncedFileSyncKey },
   options: SyncUnsyncedFileOptions = {},
@@ -66,10 +135,21 @@ const syncUnsyncedFileAtScope = async (
   const serviceFactory = options.createTicketSyncService ?? createTicketSyncService;
 
   if (syncKey.kind === "ticket") {
-    const outcome = await serviceFactory().syncQueueItem(
+    const previousPhase = getOfflineSyncQueue(operationScope).tickets.get(
+      syncKey.ticketId,
+    )?.phase;
+    const service = serviceFactory();
+    let outcome = await service.syncQueueItem(
       syncKey,
       { connectionScope: operationScope },
     );
+    if (
+      outcome.kind === "commit_unknown" &&
+      (previousPhase === "commit_unknown" || previousPhase === "remote_write_started")
+    ) {
+      outcome = await resolveCommitUnknownInteractive(service, syncKey, operationScope)
+        ?? outcome;
+    }
     if (outcome.kind === "completed" || outcome.kind === "no_change") {
       if (options.onSubjectUpdated && outcome.kind === "completed") {
         const canonicalSubject = getTicketDraft(
@@ -99,6 +179,8 @@ const syncUnsyncedFileAtScope = async (
       }
       const message = outcome.kind === "remote_committed"
         ? outcome.message
+        : outcome.kind === "commit_unknown"
+          ? outcome.message
         : outcome.kind === "failed_before_commit"
           ? outcome.error.message
           : vscode.l10n.t("Unknown error");
@@ -108,10 +190,22 @@ const syncUnsyncedFileAtScope = async (
   }
 
   if (syncKey.kind === "newTicket") {
-    const outcome = await serviceFactory({ rewrite: rewriteDeps }).syncQueueItem(
+    const previousPhase = getOfflineSyncQueue(operationScope).newTickets.find(
+      (candidate) =>
+        syncKey.documentUri && candidate.documentUri === syncKey.documentUri,
+    )?.phase;
+    const service = serviceFactory({ rewrite: rewriteDeps });
+    let outcome = await service.syncQueueItem(
       syncKey,
       { connectionScope: operationScope },
     );
+    if (
+      outcome.kind === "commit_unknown" &&
+      (previousPhase === "commit_unknown" || previousPhase === "remote_write_started")
+    ) {
+      outcome = await resolveCommitUnknownInteractive(service, syncKey, operationScope)
+        ?? outcome;
+    }
     if (outcome.kind === "completed") {
       options.onTicketCreated?.();
       showInfo(vscode.l10n.t("New ticket created."));
@@ -128,6 +222,15 @@ const syncUnsyncedFileAtScope = async (
         kind: "newTicket",
         message,
         reason: outcome.pending === "local_finalize" ? "file_rewrite_failed" : "api_error",
+      };
+    }
+    if (outcome.kind === "commit_unknown") {
+      showWarning(outcome.message);
+      return {
+        status: "failed",
+        kind: "newTicket",
+        message: outcome.message,
+        reason: "api_error",
       };
     }
     if (

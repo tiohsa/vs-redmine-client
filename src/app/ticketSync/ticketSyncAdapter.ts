@@ -16,6 +16,8 @@ export const ticketSyncOutcomeToSaveResult = (
       return outcome.saveResult ?? buildResult("no_change", "No changes to save.");
     case "queued":
       return buildResult("queued", "Saved for offline sync.");
+    case "commit_unknown":
+      return buildResult("failed", outcome.message);
     case "conflict":
       return buildResult(
         "conflict",

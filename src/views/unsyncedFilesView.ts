@@ -1,5 +1,9 @@
 import * as vscode from "vscode";
-import { getOfflineSyncQueue, onOfflineSyncQueueChanged } from "./offlineSyncStore";
+import {
+  getOfflineSyncLifecycle,
+  getOfflineSyncQueue,
+  onOfflineSyncQueueChanged,
+} from "./offlineSyncStore";
 import { formatTicketLabel } from "./ticketLabel";
 import { getTicketSummary } from "./ticketSummaryStore";
 import { createEmptyStateItem } from "./viewState";
@@ -34,7 +38,11 @@ export class UnsyncedFileTreeItem extends vscode.TreeItem {
   }
 }
 
-const buildTicketTooltip = (ticketId: number, documentUri?: string): string => {
+const buildTicketTooltip = (
+  ticketId: number,
+  documentUri?: string,
+  status = vscode.l10n.t("Status: Saved locally (unsynced)"),
+): string => {
   const subject = getTicketSummary(ticketId);
   const parts: string[] = [vscode.l10n.t("Ticket: {0}", formatTicketLabel(ticketId))];
   if (subject) {
@@ -43,7 +51,7 @@ const buildTicketTooltip = (ticketId: number, documentUri?: string): string => {
   if (documentUri) {
     parts.push(`URI: ${documentUri}`);
   }
-  parts.push(vscode.l10n.t("Status: Saved locally (unsynced)"));
+  parts.push(status);
   return parts.join("\n");
 };
 
@@ -92,7 +100,7 @@ export class UnsyncedFilesTreeProvider
     const queue = getOfflineSyncQueue(getCurrentConnectionScope());
     const items: vscode.TreeItem[] = [];
 
-    queue.tickets.forEach((_update, ticketId) => {
+    queue.tickets.forEach((update, ticketId) => {
       const subject = getTicketSummary(ticketId);
       const label = subject
         ? `${formatTicketLabel(ticketId)} ${subject}`
@@ -103,7 +111,13 @@ export class UnsyncedFilesTreeProvider
           "file-text",
           { kind: "ticket", ticketId },
           undefined,
-          buildTicketTooltip(ticketId),
+          buildTicketTooltip(
+            ticketId,
+            update.documentUri,
+            getOfflineSyncLifecycle(update) === "queued"
+              ? vscode.l10n.t("Status: Saved locally (unsynced)")
+              : vscode.l10n.t("Status: Remote sync recovery pending"),
+          ),
         ),
       );
     });
@@ -141,7 +155,11 @@ export class UnsyncedFilesTreeProvider
       if (newTicket.documentUri) {
         tooltipParts.push(`URI: ${newTicket.documentUri}`);
       }
-      tooltipParts.push(vscode.l10n.t("Status: Saved locally (unsynced)"));
+      tooltipParts.push(
+        getOfflineSyncLifecycle(newTicket) === "queued"
+          ? vscode.l10n.t("Status: Saved locally (unsynced)")
+          : vscode.l10n.t("Status: Remote sync recovery pending"),
+      );
       items.push(
         new UnsyncedFileTreeItem(
           "New ticket",

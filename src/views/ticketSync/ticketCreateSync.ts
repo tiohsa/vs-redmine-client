@@ -16,7 +16,11 @@ import { resolveMetadataForCreate } from "./ticketMetadataResolver";
 import { createChildTickets } from "./ticketChildCreateSync";
 import { rewriteNewTicketEditorToTicketMode } from "./ticketEditorRewrite";
 import { queueNewTicketDraft, queueNewTicketDraftContent } from "./ticketQueueSync";
-import { buildResult, mapErrorToResult } from "./ticketSyncResult";
+import {
+  buildResult,
+  isRemoteCommitUnknownError,
+  mapErrorToResult,
+} from "./ticketSyncResult";
 import { defaultCreateDeps } from "./ticketSyncDeps";
 import type { TicketCreateDependencies } from "./types";
 import { editorContentFromTicket } from "./ticketRemoteContent";
@@ -157,11 +161,14 @@ export const createTicketFromContent = async (input: {
   projectId?: number;
   baseDir?: string;
   deps: TicketCreateDependencies;
+  beforeRemoteWrite?: () => Promise<void>;
 }): Promise<{
   result: TicketSaveResult;
   createdId?: number;
   parsed?: TicketEditorContent;
   remoteIssueMayExist?: boolean;
+  remoteWriteAttempted?: boolean;
+  remoteCommitUnknown?: boolean;
 }> => {
   const projectId = resolveProjectIdForCreate(input.projectId);
   if (!projectId) {
@@ -212,6 +219,14 @@ export const createTicketFromContent = async (input: {
   };
 
   let createdId: number | undefined;
+  if (input.beforeRemoteWrite) {
+    try {
+      await input.beforeRemoteWrite();
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Sync journal persistence failed.";
+      return { result: buildResult("failed", message) };
+    }
+  }
   try {
     const dueDate =
       typeof metadataFields.dueDate === "string" ? metadataFields.dueDate : undefined;
@@ -231,7 +246,11 @@ export const createTicketFromContent = async (input: {
       assigneeId: metadataFields.assigneeId,
     });
   } catch (error) {
-    return { result: mapErrorToResult(error) };
+    return {
+      result: mapErrorToResult(error),
+      remoteWriteAttempted: true,
+      remoteCommitUnknown: isRemoteCommitUnknownError(error),
+    };
   }
 
   if (createdId && children.length > 0) {
@@ -260,6 +279,8 @@ export const createTicketFromContent = async (input: {
         createdId: parentDeleted ? undefined : createdId,
         parsed: parentDeleted ? undefined : parsed,
         remoteIssueMayExist: !parentDeleted,
+        remoteWriteAttempted: true,
+        remoteCommitUnknown: false,
       };
     }
   }
@@ -288,11 +309,14 @@ export const createTicketFromQueuedContent = async (input: {
   projectId?: number;
   baseDir?: string;
   deps?: Partial<TicketCreateDependencies>;
+  beforeRemoteWrite?: () => Promise<void>;
 }): Promise<{
   result: TicketSaveResult;
   createdId?: number;
   parsed?: TicketEditorContent;
   remoteIssueMayExist?: boolean;
+  remoteWriteAttempted?: boolean;
+  remoteCommitUnknown?: boolean;
 }> => {
   const deps = { ...defaultCreateDeps, ...input.deps };
   const output = await createTicketFromContent({
@@ -300,6 +324,7 @@ export const createTicketFromQueuedContent = async (input: {
     projectId: input.projectId,
     baseDir: input.baseDir,
     deps,
+    beforeRemoteWrite: input.beforeRemoteWrite,
   });
   if (output.result.status === "created" && output.createdId && output.parsed) {
     const remote = await getCreatedTicketDetail(deps.getIssueDetail, output.createdId);

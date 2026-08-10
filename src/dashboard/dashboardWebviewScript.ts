@@ -679,6 +679,12 @@ function renderUnsynced(){
   list.innerHTML=state.unsynced.items.map(item=>{
     const kindLabel=kindLabelMap[item.key.kind]||STRINGS.unsyncedKindFile;
     const openBtn=item.documentUri?'<button class="btn btn-secondary" data-uri="'+esc(item.documentUri)+'">'+STRINGS.openFileAction+'</button>':'';
+    const discardBtn=item.canDiscard===false
+      ? '<button class="btn btn-secondary" disabled title="'+STRINGS.discardTitle+'">'+STRINGS.discardAction+'</button>'
+      : '<button class="btn btn-secondary" data-discard-key="'+esc(JSON.stringify(item.key))+'" title="'+STRINGS.discardTitle+'">'+STRINGS.discardAction+'</button>';
+    const syncBtn=item.canSync===false
+      ? '<button class="btn btn-primary" disabled>'+STRINGS.syncAction+'</button>'
+      : '<button class="btn btn-primary" data-sync-key="'+esc(JSON.stringify(item.key))+'">'+STRINGS.syncAction+'</button>';
     return '<div class="unsynced-card">'
       +'<span class="unsynced-kind-label">'+esc(kindLabel)+'</span>'
       +'<div class="unsynced-body">'
@@ -687,8 +693,8 @@ function renderUnsynced(){
       +'</div>'
       +'<div class="unsynced-actions">'
       +openBtn
-      +'<button class="btn btn-secondary" data-discard-key="'+esc(JSON.stringify(item.key))+'" title="'+STRINGS.discardTitle+'">'+STRINGS.discardAction+'</button>'
-      +'<button class="btn btn-primary" data-sync-key="'+esc(JSON.stringify(item.key))+'">'+STRINGS.syncAction+'</button>'
+      +discardBtn
+      +syncBtn
       +'</div>'
       +'</div>';
   }).join('');
