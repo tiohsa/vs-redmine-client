@@ -108,41 +108,48 @@ const runOfflineSyncAtScope = async (
         ...ticketUpdates.map((operation) => ({ kind: "ticket" as const, operation })),
       ];
       if (ticketOperations.length > 0) {
-        const outcomes = await ticketSyncService.syncAll({
-          context: { connectionScope: operationScope },
-          newTickets: queue.newTickets,
-          tickets: ticketUpdates,
+        const syncAllOutcome = await ticketSyncService.syncAll(
+          { connectionScope: operationScope },
+          {
           shouldContinue: () => !token.isCancellationRequested,
-        });
-        for (let index = 0; index < outcomes.length; index++) {
-          const item = ticketOperations[index];
-          const outcome = outcomes[index];
+          },
+        );
+        for (const result of syncAllOutcome.results) {
+          const outcome = result.outcome;
           if (outcome.kind === "completed" || outcome.kind === "no_change") {
             synced++;
-          } else if (item.kind === "newTicket") {
+          } else if (result.key.kind === "newTicket") {
+            const queueId = result.key.queueId;
             const current = getOfflineSyncQueue(operationScope).newTickets.find(
-              (candidate) => candidate.queueId === item.operation.queueId,
+              (candidate) => candidate.queueId === queueId,
             );
-            failedNewTickets.push(current ?? item.operation);
+            const original = queue.newTickets.find(
+              (candidate) => candidate.queueId === queueId,
+            );
+            if (current ?? original) {
+              failedNewTickets.push((current ?? original)!);
+            }
           } else {
             if (outcome.kind === "conflict") {
               conflicts++;
             }
-            failedTickets.push(item.operation);
-          }
-          advance(item.kind === "newTicket"
-            ? `New ticket (${processed}/${totalItems})`
-            : `Ticket #${item.operation.ticketId} (${processed}/${totalItems})`);
-        }
-        if (outcomes.length < ticketOperations.length) {
-          wasCancelled = true;
-          for (const item of ticketOperations.slice(outcomes.length)) {
-            if (item.kind === "newTicket") {
-              failedNewTickets.push(item.operation);
-            } else {
-              failedTickets.push(item.operation);
+            const original = queue.tickets.get(result.key.ticketId);
+            if (original) {
+              failedTickets.push(original);
             }
           }
+          advance(result.key.kind === "newTicket"
+            ? `New ticket (${processed}/${totalItems})`
+            : `Ticket #${result.key.ticketId} (${processed}/${totalItems})`);
+        }
+        if (syncAllOutcome.cancelled) {
+          wasCancelled = true;
+          const processedNewTickets = syncAllOutcome.results.filter(
+            (result) => result.key.kind === "newTicket",
+          ).length;
+          const processedTickets = syncAllOutcome.results.length - processedNewTickets;
+          failedNewTickets.push(...queue.newTickets.slice(processedNewTickets));
+          failedTickets.push(...ticketUpdates.slice(processedTickets));
         }
       }
 

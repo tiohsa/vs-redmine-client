@@ -7,6 +7,7 @@ import {
   updateOfflineNewTicketAsync,
   updateOfflineTicketUpdateAsync,
   getOfflineSyncQueue,
+  getOfflineNewTicket,
 } from "../../views/offlineSyncStore";
 import { rewriteDocumentWithRegisteredFields, type RewriteDocumentDeps } from "../../views/editorDocumentRewrite";
 import { createTicketFromContent } from "../../views/ticketSync/ticketCreateSync";
@@ -21,7 +22,11 @@ import type { DocumentPort, SyncContext, SyncJournal } from "./ports";
 import type { NewTicketLocalStatePort } from "./ports";
 import { NewTicketFinalizer } from "./newTicketFinalizer";
 import { TicketReconciler } from "./ticketReconciler";
-import type { TicketSyncOutcome } from "./ticketSyncOutcome";
+import type {
+  SyncAllOutcome,
+  TicketSyncOutcome,
+  TicketSyncQueueKey,
+} from "./ticketSyncOutcome";
 import { runWithConnectionScope } from "../../redmine/client";
 import { getProjectIdForEditor } from "../../views/ticketEditorRegistry";
 import { resolveEditorBaseDir } from "../../utils/editorBaseDir";
@@ -95,6 +100,15 @@ const defaultNewTicketLocalState = (
 
 const newTicketFlights = new Map<string, Promise<TicketSyncOutcome>>();
 const ticketUpdateFlights = new Map<string, Promise<TicketSyncOutcome>>();
+
+export class TicketSyncQueueItemNotFoundError extends Error {
+  public constructor(key: TicketSyncQueueKey) {
+    super(key.kind === "ticket"
+      ? `Queue entry for ticket #${key.ticketId} was not found.`
+      : "Queue entry for the new ticket was not found.");
+    this.name = "TicketSyncQueueItemNotFoundError";
+  }
+}
 
 export interface TicketSyncServiceDependencies {
   journal?: SyncJournal;
@@ -195,19 +209,10 @@ export class TicketSyncService {
     if (input.manual || prepared.status !== "queued") {
       return this.preparationOutcome(prepared, input.ticketId);
     }
-    const operation = getOfflineSyncQueue(input.context.connectionScope).tickets.get(
-      input.ticketId,
+    return this.syncQueueItem(
+      { kind: "ticket", ticketId: input.ticketId },
+      input.context,
     );
-    if (!operation) {
-      return {
-        kind: "failed_before_commit",
-        error: new Error("Prepared ticket update was not persisted."),
-      };
-    }
-    return this.syncQueueItem({
-      context: input.context,
-      item: { kind: "ticket", operation },
-    });
   }
 
   private preparationOutcome(
@@ -341,20 +346,34 @@ export class TicketSyncService {
     });
   }
 
-  public async syncQueueItem(input: {
-    context: SyncContext;
-    item: { kind: "newTicket"; operation: OfflineNewTicket } | { kind: "ticket"; operation: OfflineTicketUpdate };
-  }): Promise<TicketSyncOutcome> {
-    if (input.item.kind === "newTicket") {
-      return this.createOrResume({ context: input.context, operation: input.item.operation });
+  public async syncQueueItem(
+    key: TicketSyncQueueKey,
+    context: SyncContext,
+  ): Promise<TicketSyncOutcome> {
+    if (key.kind === "newTicket") {
+      const operation = getOfflineNewTicket(key, context.connectionScope);
+      if (!operation) {
+        return {
+          kind: "failed_before_commit",
+          error: new TicketSyncQueueItemNotFoundError(key),
+        };
+      }
+      return this.createOrResume({ context, operation });
     }
 
-    const operationKey = `${input.context.connectionScope}::ticket::${input.item.operation.ticketId}`;
+    const operation = getOfflineSyncQueue(context.connectionScope).tickets.get(key.ticketId);
+    if (!operation) {
+      return {
+        kind: "failed_before_commit",
+        error: new TicketSyncQueueItemNotFoundError(key),
+      };
+    }
+    const operationKey = `${context.connectionScope}::ticket::${operation.ticketId}`;
     const existing = ticketUpdateFlights.get(operationKey);
     if (existing) {
       return existing;
     }
-    const flight = this.updateOrReconcile(input.context, input.item.operation);
+    const flight = this.updateOrReconcile(context, operation);
     ticketUpdateFlights.set(operationKey, flight);
     try {
       return await flight;
@@ -441,32 +460,30 @@ export class TicketSyncService {
     };
   }
 
-  public async syncAll(input: {
-    context: SyncContext;
-    newTickets: OfflineNewTicket[];
-    tickets: OfflineTicketUpdate[];
-    shouldContinue?: () => boolean;
-  }): Promise<TicketSyncOutcome[]> {
-    const outcomes: TicketSyncOutcome[] = [];
-    for (const operation of input.newTickets) {
-      if (input.shouldContinue && !input.shouldContinue()) {
-        return outcomes;
+  public async syncAll(
+    context: SyncContext,
+    options: { shouldContinue?: () => boolean } = {},
+  ): Promise<SyncAllOutcome> {
+    const queue = getOfflineSyncQueue(context.connectionScope);
+    const keys: TicketSyncQueueKey[] = [
+      ...queue.newTickets.map((operation) => ({
+        kind: "newTicket" as const,
+        queueId: operation.queueId,
+        documentUri: operation.documentUri,
+      })),
+      ...Array.from(queue.tickets.keys()).map((ticketId) => ({
+        kind: "ticket" as const,
+        ticketId,
+      })),
+    ];
+    const results: SyncAllOutcome["results"] = [];
+    for (const key of keys) {
+      if (options.shouldContinue && !options.shouldContinue()) {
+        return { results, cancelled: true };
       }
-      outcomes.push(await this.syncQueueItem({
-        context: input.context,
-        item: { kind: "newTicket", operation },
-      }));
+      results.push({ key, outcome: await this.syncQueueItem(key, context) });
     }
-    for (const operation of input.tickets) {
-      if (input.shouldContinue && !input.shouldContinue()) {
-        return outcomes;
-      }
-      outcomes.push(await this.syncQueueItem({
-        context: input.context,
-        item: { kind: "ticket", operation },
-      }));
-    }
-    return outcomes;
+    return { results, cancelled: false };
   }
 }
 

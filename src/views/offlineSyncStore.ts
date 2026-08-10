@@ -406,6 +406,15 @@ export const getOfflineSyncQueue = (scope = activeScope): OfflineSyncQueue => {
   };
 };
 
+export const getOfflineNewTicket = (
+  key: { queueId?: string; documentUri?: string },
+  scope: string,
+): OfflineNewTicket | undefined => {
+  const queue = getQueue(scope);
+  const index = findNewTicketIndex(queue, key);
+  return index === -1 ? undefined : { ...queue.newTickets[index] };
+};
+
 export const clearOfflineSyncQueue = (scope = activeScope): void => {
   const queue = getQueue(scope);
   queue.tickets.clear();

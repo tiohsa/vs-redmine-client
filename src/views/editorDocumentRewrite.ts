@@ -2,6 +2,7 @@ import * as vscode from "vscode";
 import { parseTicketEditorContent, buildTicketEditorContent, TicketEditorContent } from "./ticketEditorContent";
 import { withRegisteredTicketControlFields } from "./ticketControlFields";
 import { suppressSaveSync, releaseSaveSync } from "./saveSyncSuppression";
+import { applyEditorContent } from "./ticketPreview";
 
 const FALLBACK_METADATA = {
   tracker: "",
@@ -37,6 +38,7 @@ export const buildRegisteredDocumentContent = (
 
 export type RewriteDocumentDeps = {
   textDocuments?: vscode.TextDocument[];
+  textEditors?: vscode.TextEditor[];
   applyEdit?: (edit: vscode.WorkspaceEdit) => Promise<boolean>;
   readFile?: (uri: vscode.Uri) => Promise<Uint8Array>;
   writeFile?: (uri: vscode.Uri, content: Uint8Array) => Promise<void>;
@@ -51,6 +53,7 @@ export const rewriteDocumentWithRegisteredFields = async (
   replacement?: TicketEditorContent,
 ): Promise<boolean> => {
   const textDocuments = deps.textDocuments ?? vscode.workspace.textDocuments;
+  const textEditors = deps.textEditors ?? vscode.window.visibleTextEditors;
   const applyEdit = deps.applyEdit ?? ((edit: vscode.WorkspaceEdit) => vscode.workspace.applyEdit(edit));
   const readFile = deps.readFile ?? ((uri: vscode.Uri) => vscode.workspace.fs.readFile(uri));
   const writeFile = deps.writeFile ?? ((uri: vscode.Uri, content: Uint8Array) =>
@@ -75,19 +78,30 @@ export const rewriteDocumentWithRegisteredFields = async (
     const uri = document.uri;
     suppressSaveSync(documentUriString);
     try {
-      const currentText = document.getText();
-      const lines = currentText.split("\n");
-      const lastLineIndex = Math.max(0, lines.length - 1);
-      const lastCharIndex = lines[lastLineIndex].length;
-      const fullRange = new vscode.Range(
-        new vscode.Position(0, 0),
-        new vscode.Position(lastLineIndex, lastCharIndex),
+      const editor = textEditors.find(
+        (candidate) => candidate.document.uri.toString() === documentUriString,
       );
-      const edit = new vscode.WorkspaceEdit();
-      edit.replace(uri, fullRange, newContent);
-      const changed = await applyEdit(edit);
-      if (!changed) {
-        return false;
+      if (editor) {
+        try {
+          await applyEditorContent(editor, newContent);
+        } catch {
+          return false;
+        }
+      } else {
+        const currentText = document.getText();
+        const lines = currentText.split("\n");
+        const lastLineIndex = Math.max(0, lines.length - 1);
+        const lastCharIndex = lines[lastLineIndex].length;
+        const fullRange = new vscode.Range(
+          new vscode.Position(0, 0),
+          new vscode.Position(lastLineIndex, lastCharIndex),
+        );
+        const edit = new vscode.WorkspaceEdit();
+        edit.replace(uri, fullRange, newContent);
+        const changed = await applyEdit(edit);
+        if (!changed) {
+          return false;
+        }
       }
       if (document.isDirty && !(await saveDocument(document))) {
         return false;

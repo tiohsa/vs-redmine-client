@@ -27,3 +27,17 @@ export type TicketSyncOutcome =
       error: Error;
       saveResult?: import("../../views/ticketSaveTypes").TicketSaveResult;
     };
+
+export type TicketSyncQueueKey =
+  | { kind: "ticket"; ticketId: number }
+  | { kind: "newTicket"; queueId?: string; documentUri?: string };
+
+export type SyncAllItemOutcome = {
+  key: TicketSyncQueueKey;
+  outcome: TicketSyncOutcome;
+};
+
+export type SyncAllOutcome = {
+  results: SyncAllItemOutcome[];
+  cancelled: boolean;
+};

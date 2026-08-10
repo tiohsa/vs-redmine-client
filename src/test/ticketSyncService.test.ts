@@ -1,6 +1,8 @@
 import * as assert from "assert";
+import * as vscode from "vscode";
 import { TicketSyncService } from "../app/ticketSync";
 import {
+  addOfflineNewTicketAsync,
   addOfflineTicketUpdate,
   getOfflineSyncQueue,
   initializeOfflineSyncStore,
@@ -8,6 +10,9 @@ import {
 import { buildTicketEditorContent } from "../views/ticketEditorContent";
 import { buildIssueMetadataFixture } from "./helpers/ticketMetadataFixtures";
 import { createTestMemento } from "./helpers/vscodeMemento";
+import { syncUnsyncedFile } from "../commands/syncUnsyncedFile";
+import { runOfflineSync } from "../commands/offlineSync";
+import { getCurrentConnectionScope } from "../config/connectionScope";
 
 const SCOPE = "https://redmine.example/";
 const DOCUMENT_URI = "file:///tmp/durable-new-ticket.md";
@@ -79,10 +84,10 @@ suite("TicketSyncService durable lifecycle", () => {
     assert.strictEqual(pending.phase, "local_finalize_pending");
 
     rewriteSucceeds = true;
-    const retried = await service.syncQueueItem({
-      context: { connectionScope: SCOPE },
-      item: { kind: "newTicket", operation: pending },
-    });
+    const retried = await service.syncQueueItem(
+      { kind: "newTicket", documentUri: pending.documentUri },
+      { connectionScope: SCOPE },
+    );
 
     assert.strictEqual(retried.kind, "completed");
     assert.strictEqual(createCalls, 1);
@@ -124,6 +129,67 @@ suite("TicketSyncService durable lifecycle", () => {
     assert.deepStrictEqual(steps, ["markdown", "registry", "draft"]);
   });
 
+  for (const failure of ["editor_edit", "document_save"] as const) {
+    test(`${failure}=false は remote-created operation を completed にしない`, async () => {
+      initializeOfflineSyncStore(createTestMemento(), SCOPE);
+      let createCalls = 0;
+      let currentContent = content;
+      const document = {
+        uri: vscode.Uri.parse(DOCUMENT_URI),
+        getText: () => currentContent,
+        isDirty: true,
+      } as unknown as vscode.TextDocument;
+      const editor = {
+        document,
+        edit: async (callback: (builder: vscode.TextEditorEdit) => void) => {
+          if (failure === "editor_edit") {
+            return false;
+          }
+          callback({
+            replace: (_range: vscode.Range, replacement: string) => {
+              currentContent = replacement;
+            },
+          } as vscode.TextEditorEdit);
+          return true;
+        },
+      } as unknown as vscode.TextEditor;
+      const service = new TicketSyncService({
+        create: {
+          ...metadataDeps,
+          createIssue: async () => {
+            createCalls++;
+            return 175;
+          },
+          getIssueDetail: async () => issueDetail(175),
+        },
+        rewrite: {
+          textDocuments: [document],
+          textEditors: [editor],
+          saveDocument: async () => failure !== "document_save",
+        },
+      });
+
+      const outcome = await service.syncEditor({
+        context: { connectionScope: SCOPE },
+        editor,
+        ticketId: 0,
+        newTicket: true,
+        manual: false,
+        projectId: 12,
+      });
+
+      assert.strictEqual(outcome.kind, "remote_committed");
+      assert.strictEqual(
+        outcome.kind === "remote_committed" ? outcome.pending : undefined,
+        "local_finalize",
+      );
+      assert.strictEqual(createCalls, 1);
+      const pending = getOfflineSyncQueue(SCOPE).newTickets[0];
+      assert.strictEqual(pending.createdIssueId, 175);
+      assert.strictEqual(pending.phase, "local_finalize_pending");
+    });
+  }
+
   test("process restart 後も createdIssueId を復元し POST せず finalize する", async () => {
     const memento = createTestMemento();
     initializeOfflineSyncStore(memento, SCOPE);
@@ -163,10 +229,10 @@ suite("TicketSyncService durable lifecycle", () => {
         findOpenDocument: () => undefined,
       },
     });
-    const outcome = await resumedService.syncQueueItem({
-      context: { connectionScope: SCOPE },
-      item: { kind: "newTicket", operation: restored },
-    });
+    const outcome = await resumedService.syncQueueItem(
+      { kind: "newTicket", documentUri: restored.documentUri },
+      { connectionScope: SCOPE },
+    );
 
     assert.strictEqual(outcome.kind, "completed");
     assert.strictEqual(createCalls, 1);
@@ -197,14 +263,55 @@ suite("TicketSyncService durable lifecycle", () => {
     const pending = getOfflineSyncQueue(SCOPE).newTickets[0];
 
     rewriteSucceeds = true;
-    const outcomes = await service.syncAll({
-      context: { connectionScope: SCOPE },
-      newTickets: [pending],
-      tickets: [],
+    const outcomes = await service.syncAll({ connectionScope: SCOPE });
+
+    assert.strictEqual(outcomes.results[0].outcome.kind, "completed");
+    assert.strictEqual(createCalls, 1);
+  });
+
+  test("Sync This File rewrite失敗後の Sync All は同じ issue をfinalizeする", async () => {
+    const commandScope = getCurrentConnectionScope();
+    initializeOfflineSyncStore(createTestMemento(), commandScope);
+    await addOfflineNewTicketAsync({
+      content,
+      projectId: 12,
+      documentUri: DOCUMENT_URI,
+      connectionScope: commandScope,
+    }, commandScope);
+    let createCalls = 0;
+    let rewriteSucceeds = false;
+    const service = new TicketSyncService({
+      create: {
+        ...metadataDeps,
+        createIssue: async () => {
+          createCalls++;
+          return 260;
+        },
+        getIssueDetail: async () => issueDetail(260),
+      },
+      documents: {
+        rewriteNewTicket: async () => rewriteSucceeds,
+        findOpenDocument: () => undefined,
+      },
     });
 
-    assert.strictEqual(outcomes[0].kind, "completed");
+    const first = await syncUnsyncedFile(
+      { syncKey: { kind: "newTicket", documentUri: DOCUMENT_URI } },
+      { createTicketSyncService: () => service },
+    );
+
+    assert.strictEqual(first?.status, "failed");
     assert.strictEqual(createCalls, 1);
+    const pending = getOfflineSyncQueue(commandScope).newTickets[0];
+    assert.strictEqual(pending.createdIssueId, 260);
+    assert.strictEqual(pending.phase, "local_finalize_pending");
+
+    rewriteSucceeds = true;
+    const all = await runOfflineSync({ createTicketSyncService: () => service });
+
+    assert.strictEqual(all.status, "success");
+    assert.strictEqual(createCalls, 1);
+    assert.strictEqual(getOfflineSyncQueue(commandScope).newTickets.length, 0);
   });
 
   test("同一 operation の並行同期は single-flight で POST を1回にする", async () => {
@@ -279,10 +386,10 @@ suite("TicketSyncService durable lifecycle", () => {
     assert.strictEqual(pending.remoteUpdatedAt, undefined);
 
     getSucceeds = true;
-    const retried = await service.syncQueueItem({
-      context: { connectionScope: SCOPE },
-      item: { kind: "newTicket", operation: pending },
-    });
+    const retried = await service.syncQueueItem(
+      { kind: "newTicket", documentUri: pending.documentUri },
+      { connectionScope: SCOPE },
+    );
     assert.strictEqual(retried.kind, "completed");
     assert.strictEqual(createCalls, 1);
     assert.strictEqual(getCalls, 2);
@@ -391,20 +498,20 @@ suite("TicketSyncService durable lifecycle", () => {
     });
     const queued = getOfflineSyncQueue(SCOPE).tickets.get(404)!;
 
-    const first = await service.syncQueueItem({
-      context: { connectionScope: SCOPE },
-      item: { kind: "ticket", operation: queued },
-    });
+    const first = await service.syncQueueItem(
+      { kind: "ticket", ticketId: queued.ticketId },
+      { connectionScope: SCOPE },
+    );
     assert.strictEqual(first.kind, "remote_committed");
     const pending = getOfflineSyncQueue(SCOPE).tickets.get(404)!;
     assert.strictEqual(pending.phase, "reconciliation_pending");
     assert.strictEqual(pending.remoteUpdatedAt, undefined);
 
     getSucceeds = true;
-    const retried = await service.syncQueueItem({
-      context: { connectionScope: SCOPE },
-      item: { kind: "ticket", operation: pending },
-    });
+    const retried = await service.syncQueueItem(
+      { kind: "ticket", ticketId: pending.ticketId },
+      { connectionScope: SCOPE },
+    );
     assert.strictEqual(retried.kind, "completed");
     assert.strictEqual(updateCalls, 1);
     assert.strictEqual(getCalls, 2);

@@ -2,6 +2,7 @@ import * as assert from "assert";
 import {
   addOfflineTicketUpdate,
   clearOfflineSyncQueue,
+  getOfflineSyncQueue,
   initializeOfflineSyncStore,
 } from "../views/offlineSyncStore";
 import { runOfflineSync, type OfflineSyncRunResult } from "../commands/offlineSync";
@@ -42,10 +43,18 @@ suite("offlineSyncResult — 構造化戻り値", () => {
 
     const result = await runOfflineSync({
       createTicketSyncService: () => ({
-        syncAll: async (input) => {
+        syncAll: async (context) => {
           syncAllCalls++;
-          receivedTicketIds = input.tickets.map((ticket) => ticket.ticketId);
-          return [{ kind: "completed", ticketId: 42 }];
+          receivedTicketIds = Array.from(
+            getOfflineSyncQueue(context.connectionScope).tickets.keys(),
+          );
+          return {
+            results: [{
+              key: { kind: "ticket", ticketId: 42 },
+              outcome: { kind: "completed", ticketId: 42 },
+            }],
+            cancelled: false,
+          };
         },
       }),
     });

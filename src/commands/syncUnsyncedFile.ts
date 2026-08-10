@@ -1,7 +1,6 @@
 import * as vscode from "vscode";
 import {
   getOfflineSyncQueue,
-  updateOfflineNewTicket,
   removeOfflineCommentEntry,
 } from "../views/offlineSyncStore";
 import { applyQueuedCommentUpdate, finalizeNewCommentDraftDocument } from "../views/commentSaveSync";
@@ -11,7 +10,11 @@ import { showInfo, showWarning } from "../utils/notifications";
 import { RewriteDocumentDeps } from "../views/editorDocumentRewrite";
 import { getCurrentConnectionScope } from "../config/connectionScope";
 import { runWithConnectionScope } from "../redmine/client";
-import { createTicketSyncService } from "../app/ticketSync";
+import {
+  createTicketSyncService,
+  TicketSyncQueueItemNotFoundError,
+} from "../app/ticketSync";
+import { getTicketDraft } from "../views/ticketDraftStore";
 
 export type SyncFailureReason =
   | "parse_error"
@@ -28,6 +31,12 @@ export type SyncUnsyncedFileResult =
   | { status: "conflict"; kind: "ticket" | "newTicket" | "comment"; id?: number }
   | { status: "failed"; kind: "ticket" | "newTicket" | "comment"; message?: string; reason?: SyncFailureReason };
 
+type SyncUnsyncedFileOptions = {
+  onTicketCreated?: () => void;
+  onSubjectUpdated?: (ticketId: number, subject: string) => void;
+  createTicketSyncService?: typeof createTicketSyncService;
+};
+
 const normalizeNewTicketSyncFailureMessage = (message?: string): string => {
   if (message === "Ticket subject is required.") {
     return vscode.l10n.t("Subject is missing. Enter a subject in the Markdown heading line and sync again.");
@@ -37,7 +46,7 @@ const normalizeNewTicketSyncFailureMessage = (message?: string): string => {
 
 export const syncUnsyncedFile = async (
   item: { syncKey: UnsyncedFileSyncKey },
-  options: { onTicketCreated?: () => void; onSubjectUpdated?: (ticketId: number, subject: string) => void } = {},
+  options: SyncUnsyncedFileOptions = {},
   rewriteDeps: RewriteDocumentDeps = {},
 ): Promise<SyncUnsyncedFileResult | undefined> => {
   const operationScope = getCurrentConnectionScope();
@@ -49,26 +58,27 @@ export const syncUnsyncedFile = async (
 
 const syncUnsyncedFileAtScope = async (
   item: { syncKey: UnsyncedFileSyncKey },
-  options: { onTicketCreated?: () => void; onSubjectUpdated?: (ticketId: number, subject: string) => void },
+  options: SyncUnsyncedFileOptions,
   rewriteDeps: RewriteDocumentDeps,
   operationScope: string,
 ): Promise<SyncUnsyncedFileResult | undefined> => {
   const { syncKey } = item;
-  const queue = getOfflineSyncQueue(operationScope);
+  const serviceFactory = options.createTicketSyncService ?? createTicketSyncService;
 
   if (syncKey.kind === "ticket") {
-    const update = queue.tickets.get(syncKey.ticketId);
-    if (!update) {
-      showWarning(vscode.l10n.t("Queue entry for this ticket update not found."));
-      return undefined;
-    }
-    const outcome = await createTicketSyncService().syncQueueItem({
-      context: { connectionScope: operationScope },
-      item: { kind: "ticket", operation: update },
-    });
+    const outcome = await serviceFactory().syncQueueItem(
+      syncKey,
+      { connectionScope: operationScope },
+    );
     if (outcome.kind === "completed" || outcome.kind === "no_change") {
       if (options.onSubjectUpdated && outcome.kind === "completed") {
-        options.onSubjectUpdated(syncKey.ticketId, update.subject);
+        const canonicalSubject = getTicketDraft(
+          syncKey.ticketId,
+          operationScope,
+        )?.baseSubject;
+        if (canonicalSubject) {
+          options.onSubjectUpdated(syncKey.ticketId, canonicalSubject);
+        }
       }
       showInfo(vscode.l10n.t("Ticket update synced."));
       return {
@@ -80,6 +90,13 @@ const syncUnsyncedFileAtScope = async (
       showWarning(vscode.l10n.t("Conflicts with remote changes detected. Open the file to review."));
       return { status: "conflict", kind: "ticket", id: syncKey.ticketId };
     } else {
+      if (
+        outcome.kind === "failed_before_commit" &&
+        outcome.error instanceof TicketSyncQueueItemNotFoundError
+      ) {
+        showWarning(vscode.l10n.t("Queue entry for this ticket update not found."));
+        return undefined;
+      }
       const message = outcome.kind === "remote_committed"
         ? outcome.message
         : outcome.kind === "failed_before_commit"
@@ -91,29 +108,16 @@ const syncUnsyncedFileAtScope = async (
   }
 
   if (syncKey.kind === "newTicket") {
-    const entry = syncKey.documentUri
-      ? queue.newTickets.find((t) => t.documentUri === syncKey.documentUri)
-      : queue.newTickets[0];
-    if (!entry) {
-      showWarning(vscode.l10n.t("Queue entry for this new ticket not found."));
-      return undefined;
-    }
-
-    const outcome = await createTicketSyncService({ rewrite: rewriteDeps }).syncQueueItem({
-      context: { connectionScope: operationScope },
-      item: { kind: "newTicket", operation: entry },
-    });
+    const outcome = await serviceFactory({ rewrite: rewriteDeps }).syncQueueItem(
+      syncKey,
+      { connectionScope: operationScope },
+    );
     if (outcome.kind === "completed") {
       options.onTicketCreated?.();
       showInfo(vscode.l10n.t("New ticket created."));
       return { status: "success", kind: "newTicket", id: outcome.ticketId };
     }
     if (outcome.kind === "remote_committed") {
-      updateOfflineNewTicket(
-        { queueId: entry.queueId, documentUri: entry.documentUri },
-        { status: "created_rewrite_failed" },
-        operationScope,
-      );
       const message = outcome.message ?? vscode.l10n.t(
         "Ticket #{0} was created, but local finalization is pending.",
         outcome.ticketId,
@@ -126,6 +130,13 @@ const syncUnsyncedFileAtScope = async (
         reason: outcome.pending === "local_finalize" ? "file_rewrite_failed" : "api_error",
       };
     }
+    if (
+      outcome.kind === "failed_before_commit" &&
+      outcome.error instanceof TicketSyncQueueItemNotFoundError
+    ) {
+      showWarning(vscode.l10n.t("Queue entry for this new ticket not found."));
+      return undefined;
+    }
     const message = normalizeNewTicketSyncFailureMessage(
       outcome.kind === "failed_before_commit" ? outcome.error.message : undefined,
     );
@@ -134,6 +145,7 @@ const syncUnsyncedFileAtScope = async (
   }
 
   if (syncKey.kind === "comment") {
+    const queue = getOfflineSyncQueue(operationScope);
     const update = syncKey.commentId !== undefined
       ? queue.comments.find((c) => c.ticketId === syncKey.ticketId && c.commentId === syncKey.commentId)
       : queue.comments.find((c) => c.documentUri === syncKey.documentUri && c.commentId === undefined);
