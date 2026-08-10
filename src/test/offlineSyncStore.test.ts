@@ -233,8 +233,44 @@ suite("offlineSyncStore — workspaceState 永続化", () => {
 
     initializeOfflineSyncStore(memento, scope);
     assert.strictEqual(getOfflineSyncQueue(scope).tickets.has(5), true);
+    assert.strictEqual(getOfflineSyncQueue(scope).tickets.get(5)?.operationId, "ticket:5");
+    assert.strictEqual(getOfflineSyncQueue(scope).tickets.get(5)?.revision, 1);
+    assert.strictEqual(getOfflineSyncQueue(scope).tickets.get(5)?.phase, "queued");
     initializeOfflineSyncStore(memento, scope);
     assert.strictEqual(getOfflineSyncQueue(scope).tickets.has(5), true);
+    assert.strictEqual(getOfflineSyncQueue(scope).tickets.get(5)?.operationId, "ticket:5");
+  });
+
+  test("scoped legacy existing queue を canonical lifecycle operation として復元する", () => {
+    const memento = createTestMemento();
+    const scope = "https://scoped-legacy.example/redmine/";
+    void memento.update(`redmine.offlineSyncQueue.${encodeURIComponent(scope)}`, {
+      tickets: [[6, ticketUpdate(6)]],
+      comments: [],
+      newTickets: [],
+    });
+
+    initializeOfflineSyncStore(memento, scope);
+
+    const restored = getOfflineSyncQueue(scope).tickets.get(6);
+    assert.strictEqual(restored?.operationId, "ticket:6");
+    assert.strictEqual(restored?.revision, 1);
+    assert.strictEqual(restored?.phase, "queued");
+  });
+
+  test("明示済み existing operationId は load normalization で変更しない", () => {
+    const memento = createTestMemento();
+    void memento.update("redmine.offlineSyncQueue", {
+      tickets: [[7, { ...ticketUpdate(7), operationId: "custom-operation", revision: 3 }]],
+      comments: [],
+      newTickets: [],
+    });
+
+    initializeOfflineSyncStore(memento);
+
+    const restored = getOfflineSyncQueue().tickets.get(7);
+    assert.strictEqual(restored?.operationId, "custom-operation");
+    assert.strictEqual(restored?.revision, 3);
   });
 
   test("created_rewrite_failed の legacy entry を local_finalize_pending として復元する", () => {

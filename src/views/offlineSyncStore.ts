@@ -296,6 +296,37 @@ const promoteNewTicketIntent = (operation: OfflineNewTicket): OfflineNewTicket =
   };
 };
 
+const normalizeTicketUpdate = (
+  ticketId: number,
+  update: OfflineTicketUpdate,
+): OfflineTicketUpdate => {
+  const restored: OfflineTicketUpdate = {
+    ...update,
+    operationId: update.operationId ?? `ticket:${ticketId}`,
+    phase: update.phase === "remote_write_started" ? "commit_unknown" : update.phase ?? "queued",
+    revision: update.revision ?? 1,
+  };
+  return restored.phase === "preparing" || restored.phase === "queued"
+    ? promoteTicketIntent(restored)
+    : restored;
+};
+
+const normalizeNewTicket = (ticket: OfflineNewTicket): OfflineNewTicket => {
+  const restored: OfflineNewTicket = {
+    ...ticket,
+    operationId: ticket.operationId ?? ticket.queueId,
+    revision: ticket.revision ?? 1,
+    phase: ticket.phase === "remote_write_started" ? "commit_unknown" : ticket.phase ?? (
+      ticket.createdIssueId !== undefined || ticket.status === "created_rewrite_failed"
+        ? "local_finalize_pending"
+        : "queued"
+    ),
+  };
+  return restored.phase === "preparing" || restored.phase === "queued"
+    ? promoteNewTicketIntent(restored)
+    : restored;
+};
+
 const deserializeQueue = (raw: SerializedQueue | undefined): OfflineSyncQueue => {
   return {
     tickets: new Map(
@@ -306,19 +337,9 @@ const deserializeQueue = (raw: SerializedQueue | undefined): OfflineSyncQueue =>
             typeof e[0] === "number" &&
             e[1] !== null &&
             typeof e[1] === "object",
-        ).map(([ticketId, update]) => [
-          ticketId,
-          (() => {
-            const restored = {
-              ...update,
-              phase: update.phase === "remote_write_started" ? "commit_unknown" : update.phase ?? "queued",
-              revision: update.revision ?? 1,
-            };
-            return restored.phase === "preparing" || restored.phase === "queued"
-              ? promoteTicketIntent(restored)
-              : restored;
-          })(),
-        ] as [number, OfflineTicketUpdate])
+        ).map(([ticketId, update]) => (
+          [ticketId, normalizeTicketUpdate(ticketId, update)] as [number, OfflineTicketUpdate]
+        ))
         : [],
     ),
     comments:
@@ -329,21 +350,7 @@ const deserializeQueue = (raw: SerializedQueue | undefined): OfflineSyncQueue =>
       raw && Array.isArray(raw.newTickets)
         ? raw.newTickets
           .filter((t) => t !== null && typeof t === "object")
-          .map((ticket) => {
-            const restored = {
-              ...ticket,
-              operationId: ticket.operationId ?? ticket.queueId,
-              revision: ticket.revision ?? 1,
-              phase: ticket.phase === "remote_write_started" ? "commit_unknown" : ticket.phase ?? (
-                ticket.createdIssueId !== undefined || ticket.status === "created_rewrite_failed"
-                  ? "local_finalize_pending"
-                  : "queued"
-              ),
-            };
-            return restored.phase === "preparing" || restored.phase === "queued"
-              ? promoteNewTicketIntent(restored)
-              : restored;
-          })
+          .map(normalizeNewTicket)
         : [],
   };
 };

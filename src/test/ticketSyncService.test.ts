@@ -1076,6 +1076,45 @@ suite("TicketSyncService durable lifecycle", () => {
     assert.strictEqual(getCalls, 2);
   });
 
+  test("legacy persisted existing ticket は strict lifecycle を通り PUT 1回で完了する", async () => {
+    const memento = createTestMemento();
+    const ticketMetadata = buildIssueMetadataFixture();
+    void memento.update(`redmine.offlineSyncQueue.${encodeURIComponent(SCOPE)}`, {
+      tickets: [[411, {
+        ticketId: 411,
+        baseSubject: "Title",
+        baseDescription: "Old",
+        baseMetadata: ticketMetadata,
+        subject: "Title",
+        description: "New",
+        metadata: ticketMetadata,
+      }]],
+      comments: [],
+      newTickets: [],
+    });
+    initializeOfflineSyncStore(memento, SCOPE);
+    let updateCalls = 0;
+    const service = new TicketSyncService({
+      update: {
+        updateIssue: async () => { updateCalls++; },
+        getIssueDetail: async () => issueDetail(411),
+        listIssueStatuses: async () => [],
+        listTrackers: async () => [],
+        listIssuePriorities: async () => [],
+        searchUsers: async () => [],
+      },
+    });
+
+    const outcome = await service.syncQueueItem(
+      { kind: "ticket", ticketId: 411 },
+      { connectionScope: SCOPE },
+    );
+
+    assert.strictEqual(outcome.kind, "completed");
+    assert.strictEqual(updateCalls, 1);
+    assert.strictEqual(getOfflineSyncQueue(SCOPE).tickets.has(411), false);
+  });
+
   test("PUT timeout は commit_unknown として通常retryでPUTを再送しない", async () => {
     initializeOfflineSyncStore(createTestMemento(), SCOPE);
     const ticketMetadata = buildIssueMetadataFixture();
