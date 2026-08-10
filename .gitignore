@@ -22,7 +22,6 @@ memory/
 .venv/
 .claude/
 graphify-out/
-docs/
 .antigravitycli/
 .codegraph/
 .serena/
