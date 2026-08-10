@@ -1,6 +1,14 @@
 import type * as vscode from "vscode";
 import type { IssueDetailResult } from "../../redmine/issues";
-import type { OfflineNewTicket, OfflineTicketUpdate } from "../../views/offlineSyncStore";
+import type {
+  LifecycleTransitionExpectation,
+  NewTicketLifecycleAction,
+  NewTicketSyncPhase,
+  OfflineNewTicket,
+  OfflineTicketUpdate,
+  TicketUpdateLifecycleAction,
+  TicketUpdateSyncPhase,
+} from "../../views/offlineSyncStore";
 import type { TicketCreateDependencies, TicketSaveDependencies } from "../../views/ticketSync/types";
 import type { TicketEditorContent } from "../../views/ticketEditorContent";
 
@@ -15,16 +23,11 @@ export interface SyncJournal {
   ): OfflineNewTicket | undefined;
   getTicketUpdate(ticketId: number, scope: string): OfflineTicketUpdate | undefined;
   saveNewTicket(operation: Omit<OfflineNewTicket, "queueId"> & { queueId?: string }, scope: string): Promise<OfflineNewTicket>;
-  markNewTicket(
+  transitionNewTicket(
     key: { queueId?: string; documentUri?: string },
-    updates: Partial<Pick<OfflineNewTicket, "createdIssueId" | "status" | "phase" | "remoteUpdatedAt" | "createdChildIds">>,
+    action: NewTicketLifecycleAction,
     scope: string,
-    expectedRevision?: number,
-  ): Promise<OfflineNewTicket | undefined>;
-  abortNewTicketBeforeRemoteWrite(
-    key: { queueId?: string; documentUri?: string },
-    scope: string,
-    expectedRevision: number,
+    expected: LifecycleTransitionExpectation<NewTicketSyncPhase>,
   ): Promise<OfflineNewTicket | undefined>;
   completeNewTicket(
     key: { queueId?: string; documentUri?: string },
@@ -32,16 +35,11 @@ export interface SyncJournal {
     promotion?: OfflineTicketUpdate & { sourceRevision?: number },
     expectedRevision?: number,
   ): Promise<boolean>;
-  markTicketUpdate(
+  transitionTicketUpdate(
     ticketId: number,
-    updates: Partial<Pick<OfflineTicketUpdate, "phase" | "remoteUpdatedAt" | "createdChildIds">>,
+    action: TicketUpdateLifecycleAction,
     scope: string,
-    expectedRevision?: number,
-  ): Promise<OfflineTicketUpdate | undefined>;
-  abortTicketUpdateBeforeRemoteWrite(
-    ticketId: number,
-    scope: string,
-    expectedRevision: number,
+    expected: LifecycleTransitionExpectation<TicketUpdateSyncPhase>,
   ): Promise<OfflineTicketUpdate | undefined>;
   completeTicketUpdate(
     ticketId: number,

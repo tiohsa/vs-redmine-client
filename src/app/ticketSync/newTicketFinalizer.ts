@@ -13,6 +13,17 @@ import { rebaseTicketEditorContent } from "./ticketIntentRebase";
 import type { OfflineTicketUpdate } from "../../views/offlineSyncStore";
 import type { IssueDetailResult } from "../../redmine/issues";
 
+const lifecycleExpectation = (operation: OfflineNewTicket) => {
+  if (operation.revision === undefined || operation.phase === undefined) {
+    throw new Error("New ticket operation is missing normalized lifecycle fields.");
+  }
+  return {
+    operationId: operation.operationId ?? operation.queueId,
+    revision: operation.revision,
+    sourcePhase: operation.phase,
+  };
+};
+
 export class NewTicketFinalizer {
   public constructor(
     private readonly journal: SyncJournal,
@@ -33,11 +44,11 @@ export class NewTicketFinalizer {
     };
     if (!input.detail && !input.deps.getIssueDetail) {
       try {
-        await this.journal.markNewTicket(
+        await this.journal.transitionNewTicket(
           key,
-          { phase: "reconciliation_pending" },
+          { kind: "mark_reconciliation_pending" },
           input.context.connectionScope,
-          input.operation.revision,
+          lifecycleExpectation(input.operation),
         );
       } catch {
         // The remote commit is still the authoritative outcome.
@@ -55,11 +66,11 @@ export class NewTicketFinalizer {
       detail ??= await input.deps.getIssueDetail!(input.ticketId);
     } catch (error) {
       try {
-        await this.journal.markNewTicket(
+        await this.journal.transitionNewTicket(
           key,
-          { phase: "reconciliation_pending" },
+          { kind: "mark_reconciliation_pending" },
           input.context.connectionScope,
-          input.operation.revision,
+          lifecycleExpectation(input.operation),
         );
       } catch {
         // Preserve the remote-committed outcome even if the pending phase cannot be persisted.
@@ -74,11 +85,11 @@ export class NewTicketFinalizer {
 
     if (!detail.ticket.updatedAt) {
       try {
-        await this.journal.markNewTicket(
+        await this.journal.transitionNewTicket(
           key,
-          { phase: "reconciliation_pending", remoteUpdatedAt: undefined },
+          { kind: "mark_reconciliation_pending" },
           input.context.connectionScope,
-          input.operation.revision,
+          lifecycleExpectation(input.operation),
         );
       } catch {
         // Preserve the remote-committed outcome.
@@ -106,11 +117,11 @@ export class NewTicketFinalizer {
       });
     } catch (error) {
       try {
-        await this.journal.markNewTicket(
+        await this.journal.transitionNewTicket(
           key,
-          { phase: "local_finalize_pending", remoteUpdatedAt: detail.ticket.updatedAt },
+          { kind: "mark_local_finalize_pending", remoteUpdatedAt: detail.ticket.updatedAt },
           input.context.connectionScope,
-          input.operation.revision,
+          lifecycleExpectation(input.operation),
         );
       } catch {
         // Preserve the remote-committed outcome.
@@ -168,11 +179,11 @@ export class NewTicketFinalizer {
       }
     }
     try {
-      await this.journal.markNewTicket(
+      await this.journal.transitionNewTicket(
         key,
-        { phase: "local_finalize_pending", remoteUpdatedAt: detail.ticket.updatedAt },
+        { kind: "mark_local_finalize_pending", remoteUpdatedAt: detail.ticket.updatedAt },
         input.context.connectionScope,
-        input.operation.revision,
+        lifecycleExpectation(input.operation),
       );
     } catch (error) {
       return {

@@ -7,6 +7,17 @@ import type { DocumentPort, SyncContext, SyncJournal } from "./ports";
 import type { TicketSyncOutcome } from "./ticketSyncOutcome";
 import { rebaseTicketEditorContent } from "./ticketIntentRebase";
 
+const lifecycleExpectation = (operation: OfflineTicketUpdate) => {
+  if (operation.revision === undefined || operation.phase === undefined) {
+    throw new Error("Ticket update operation is missing normalized lifecycle fields.");
+  }
+  return {
+    operationId: operation.operationId ?? `ticket:${operation.ticketId}`,
+    revision: operation.revision,
+    sourcePhase: operation.phase,
+  };
+};
+
 export class TicketReconciler {
   public constructor(
     private readonly journal: SyncJournal,
@@ -27,11 +38,11 @@ export class TicketReconciler {
     } catch (error) {
       if (input.remoteCommitted) {
         try {
-          await this.journal.markTicketUpdate(
+          await this.journal.transitionTicketUpdate(
             input.operation.ticketId,
-            { phase: "reconciliation_pending", remoteUpdatedAt: undefined },
+            { kind: "mark_reconciliation_pending" },
             input.context.connectionScope,
-            input.operation.revision,
+            lifecycleExpectation(input.operation),
           );
         } catch {
           // Preserve the remote-committed outcome if journal persistence also fails.
@@ -52,11 +63,11 @@ export class TicketReconciler {
     if (!detail.ticket.updatedAt) {
       if (input.remoteCommitted) {
         try {
-          await this.journal.markTicketUpdate(
+          await this.journal.transitionTicketUpdate(
             input.operation.ticketId,
-            { phase: "reconciliation_pending", remoteUpdatedAt: undefined },
+            { kind: "mark_reconciliation_pending" },
             input.context.connectionScope,
-            input.operation.revision,
+            lifecycleExpectation(input.operation),
           );
         } catch {
           // Preserve the remote-committed outcome.
@@ -108,11 +119,11 @@ export class TicketReconciler {
 
     if (input.remoteCommitted) {
       try {
-        await this.journal.markTicketUpdate(
+        await this.journal.transitionTicketUpdate(
           input.operation.ticketId,
-          { phase: "local_finalize_pending", remoteUpdatedAt: detail.ticket.updatedAt },
+          { kind: "mark_local_finalize_pending", remoteUpdatedAt: detail.ticket.updatedAt },
           input.context.connectionScope,
-          input.operation.revision,
+          lifecycleExpectation(input.operation),
         );
       } catch (error) {
         return {

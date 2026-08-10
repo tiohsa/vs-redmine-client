@@ -2,7 +2,6 @@ import * as vscode from "vscode";
 import {
   addOfflineNewTicket,
   addOfflineTicketUpdate,
-  updateOfflineTicketUpdateAsync,
 } from "../offlineSyncStore";
 import { buildTicketEditorContent, parseTicketEditorContent } from "../ticketEditorContent";
 import { getTicketDraft, markDraftStatus, setTicketDraftContent, updateDraftAfterSave } from "../ticketDraftStore";
@@ -244,22 +243,10 @@ const reconcileQueuedTicketUpdate = async (input: {
   operationScope?: string;
   uploadSummary?: ReturnType<typeof resolveUploadSummary>;
 }): Promise<TicketSaveResult> => {
-  const scope = input.operationScope;
   let detail: IssueDetailResult;
   try {
     detail = await input.deps.getIssueDetail(input.update.ticketId);
   } catch (error) {
-    if (scope !== undefined) {
-      try {
-        await updateOfflineTicketUpdateAsync(
-          input.update.ticketId,
-          { phase: "reconciliation_pending", remoteUpdatedAt: undefined },
-          scope,
-        );
-      } catch {
-        // The remote commit remains authoritative even if phase persistence fails.
-      }
-    }
     const message = error instanceof Error ? error.message : "Remote read-back failed.";
     return buildResult("failed", `remote_reconcile_pending: ${message}`, {
       uploadSummary: input.uploadSummary,
@@ -267,17 +254,6 @@ const reconcileQueuedTicketUpdate = async (input: {
   }
 
   if (!detail.ticket.updatedAt) {
-    if (scope !== undefined) {
-      try {
-        await updateOfflineTicketUpdateAsync(
-          input.update.ticketId,
-          { phase: "reconciliation_pending", remoteUpdatedAt: undefined },
-          scope,
-        );
-      } catch {
-        // Preserve the pending reconciliation result.
-      }
-    }
     return buildResult(
       "failed",
       "remote_reconcile_pending: Remote read-back did not include an updated revision.",
@@ -300,17 +276,6 @@ const reconcileQueuedTicketUpdate = async (input: {
         canonical,
       );
       if (!rewritten) {
-        if (scope !== undefined) {
-          try {
-            await updateOfflineTicketUpdateAsync(
-              input.update.ticketId,
-              { phase: "local_finalize_pending", remoteUpdatedAt: detail.ticket.updatedAt },
-              scope,
-            );
-          } catch {
-            // Report pending local finalization even if phase persistence fails.
-          }
-        }
         return buildResult("failed", "local_finalize_pending", {
           uploadSummary: input.uploadSummary,
         });
@@ -322,23 +287,12 @@ const reconcileQueuedTicketUpdate = async (input: {
       canonical.description,
       canonical.metadata,
       detail.ticket.updatedAt,
-      scope,
+      input.operationScope,
     );
     return buildResult("success", "Redmine updated.", {
       uploadSummary: input.uploadSummary,
     });
   } catch (error) {
-    if (scope !== undefined) {
-      try {
-        await updateOfflineTicketUpdateAsync(
-          input.update.ticketId,
-          { phase: "local_finalize_pending", remoteUpdatedAt: detail.ticket.updatedAt },
-          scope,
-        );
-      } catch {
-        // Report pending local finalization even if phase persistence fails.
-      }
-    }
     const message = error instanceof Error ? error.message : "Local finalization failed.";
     return buildResult("failed", `local_finalize_pending: ${message}`, {
       uploadSummary: input.uploadSummary,
@@ -352,6 +306,7 @@ export const applyQueuedTicketUpdate = async (input: {
   deps?: Partial<TicketSaveDependencies>;
   deferReconciliation?: boolean;
   beforeRemoteWrite?: () => Promise<void>;
+  afterRemoteWrite?: (createdChildIds: number[]) => Promise<void>;
 }): Promise<TicketSaveResult> => {
   const deps = { ...defaultDeps, ...input.deps };
   const update = input.update;
@@ -471,13 +426,9 @@ export const applyQueuedTicketUpdate = async (input: {
     };
   }
 
-  if (input.operationScope !== undefined) {
+  if (input.afterRemoteWrite) {
     try {
-      await updateOfflineTicketUpdateAsync(
-        update.ticketId,
-        { phase: "remote_committed", remoteUpdatedAt: undefined, createdChildIds },
-        input.operationScope,
-      );
+      await input.afterRemoteWrite(createdChildIds);
     } catch (error) {
       const message = error instanceof Error ? error.message : "Sync journal persistence failed.";
       return buildResult("failed", `remote_commit_journal_failed: ${message}`, { uploadSummary });

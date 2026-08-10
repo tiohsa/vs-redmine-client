@@ -632,6 +632,239 @@ suite("TicketSyncService durable lifecycle", () => {
     assert.strictEqual(createCalls, 1);
   });
 
+  test("new-ticket Explicit Retry は nextIntent ではなく commit_unknown active revision をPOSTする", async () => {
+    initializeOfflineSyncStore(createTestMemento(), SCOPE);
+    const postedSubjects: string[] = [];
+    const service = new TicketSyncService({
+      create: {
+        ...metadataDeps,
+        createIssue: async (fields) => {
+          postedSubjects.push(fields.subject);
+          if (postedSubjects.length === 1) {
+            throw new Error("Request timed out after 30000ms");
+          }
+          return 776;
+        },
+        getIssueDetail: async () => issueDetail(776),
+      },
+      documents: {
+        rewriteNewTicket: async () => true,
+        findOpenDocument: () => undefined,
+      },
+    });
+
+    await service.syncNewTicket({
+      context: { connectionScope: SCOPE },
+      operation: { content, projectId: 12, documentUri: DOCUMENT_URI },
+    });
+    const laterContent = content.replace("Durable ticket", "Later local intent");
+    addOfflineNewTicket({
+      content: laterContent,
+      projectId: 12,
+      documentUri: DOCUMENT_URI,
+    }, SCOPE);
+
+    const outcome = await service.resolveCommitUnknown({
+      key: { kind: "newTicket", documentUri: DOCUMENT_URI },
+      context: { connectionScope: SCOPE },
+      resolution: { kind: "retry_remote_write" },
+    });
+
+    assert.strictEqual(outcome.kind, "completed");
+    assert.deepStrictEqual(postedSubjects, ["Durable ticket", "Durable ticket"]);
+    assert.strictEqual(getOfflineSyncQueue(SCOPE).tickets.get(776)?.subject, "Later local intent");
+  });
+
+  test("new-ticket Retry preflight failure は commit_unknown active と nextIntent を保持する", async () => {
+    initializeOfflineSyncStore(createTestMemento(), SCOPE);
+    let createCalls = 0;
+    let failRetryPreflight = false;
+    const service = new TicketSyncService({
+      create: {
+        ...metadataDeps,
+        listIssueStatuses: async () => {
+          if (failRetryPreflight) {
+            throw new Error("retry metadata unavailable");
+          }
+          return [{ id: 1, name: "In Progress" }];
+        },
+        createIssue: async () => {
+          createCalls++;
+          throw new Error("Request timed out after 30000ms");
+        },
+      },
+      documents: {
+        rewriteNewTicket: async () => true,
+        findOpenDocument: () => undefined,
+      },
+    });
+
+    await service.syncNewTicket({
+      context: { connectionScope: SCOPE },
+      operation: { content, projectId: 12, documentUri: DOCUMENT_URI },
+    });
+    const laterContent = content.replace("Durable ticket", "Later local intent");
+    addOfflineNewTicket({ content: laterContent, projectId: 12, documentUri: DOCUMENT_URI }, SCOPE);
+    failRetryPreflight = true;
+
+    const outcome = await service.resolveCommitUnknown({
+      key: { kind: "newTicket", documentUri: DOCUMENT_URI },
+      context: { connectionScope: SCOPE },
+      resolution: { kind: "retry_remote_write" },
+    });
+    const pending = getOfflineSyncQueue(SCOPE).newTickets[0];
+
+    assert.strictEqual(outcome.kind, "commit_unknown");
+    assert.strictEqual(createCalls, 1);
+    assert.strictEqual(pending.phase, "commit_unknown");
+    assert.strictEqual(pending.content, content);
+    assert.strictEqual(pending.nextIntent?.content, laterContent);
+  });
+
+  test("同一 new-ticket Explicit Retry の並行3回は remote write を1回にする", async () => {
+    initializeOfflineSyncStore(createTestMemento(), SCOPE);
+    let createCalls = 0;
+    let releaseRetry: (() => void) | undefined;
+    let notifyRetryStarted: (() => void) | undefined;
+    const retryStarted = new Promise<void>((resolve) => { notifyRetryStarted = resolve; });
+    const service = new TicketSyncService({
+      create: {
+        ...metadataDeps,
+        createIssue: async () => {
+          createCalls++;
+          if (createCalls === 1) {
+            throw new Error("Request timed out after 30000ms");
+          }
+          notifyRetryStarted?.();
+          await new Promise<void>((resolve) => { releaseRetry = resolve; });
+          return 778;
+        },
+        getIssueDetail: async () => issueDetail(778),
+      },
+      documents: {
+        rewriteNewTicket: async () => true,
+        findOpenDocument: () => undefined,
+      },
+    });
+    await service.syncNewTicket({
+      context: { connectionScope: SCOPE },
+      operation: { content, projectId: 12, documentUri: DOCUMENT_URI },
+    });
+    const retry = () => service.resolveCommitUnknown({
+      key: { kind: "newTicket" as const, documentUri: DOCUMENT_URI },
+      context: { connectionScope: SCOPE },
+      resolution: { kind: "retry_remote_write" as const },
+    });
+
+    const retries = [retry(), retry(), retry()];
+    await retryStarted;
+    assert.strictEqual(createCalls, 2);
+    releaseRetry?.();
+    await Promise.all(retries);
+    assert.strictEqual(createCalls, 2);
+  });
+
+  test("new-ticket Retry と Link の競合では source phase を取得した一方だけが進む", async () => {
+    initializeOfflineSyncStore(createTestMemento(), SCOPE);
+    let createCalls = 0;
+    let holdRetryPreflight = false;
+    let releasePreflight: (() => void) | undefined;
+    let notifyPreflight: (() => void) | undefined;
+    const preflightReached = new Promise<void>((resolve) => { notifyPreflight = resolve; });
+    const service = new TicketSyncService({
+      create: {
+        ...metadataDeps,
+        listIssueStatuses: async () => {
+          if (holdRetryPreflight) {
+            notifyPreflight?.();
+            await new Promise<void>((resolve) => { releasePreflight = resolve; });
+          }
+          return [{ id: 1, name: "In Progress" }];
+        },
+        createIssue: async () => {
+          createCalls++;
+          throw new Error("Request timed out after 30000ms");
+        },
+        getIssueDetail: async (ticketId) => issueDetail(ticketId),
+      },
+      documents: {
+        rewriteNewTicket: async () => true,
+        findOpenDocument: () => undefined,
+      },
+    });
+    await service.syncNewTicket({
+      context: { connectionScope: SCOPE },
+      operation: { content, projectId: 12, documentUri: DOCUMENT_URI },
+    });
+    holdRetryPreflight = true;
+    const retry = service.resolveCommitUnknown({
+      key: { kind: "newTicket", documentUri: DOCUMENT_URI },
+      context: { connectionScope: SCOPE },
+      resolution: { kind: "retry_remote_write" },
+    });
+    await preflightReached;
+    const link = service.resolveCommitUnknown({
+      key: { kind: "newTicket", documentUri: DOCUMENT_URI },
+      context: { connectionScope: SCOPE },
+      resolution: { kind: "link_created_ticket", ticketId: 779 },
+    });
+    releasePreflight?.();
+    const outcomes = await Promise.all([retry, link]);
+
+    assert.strictEqual(createCalls, 1);
+    assert.strictEqual(outcomes.filter((outcome) => outcome.kind === "completed").length, 1);
+  });
+
+  test("new-ticket Retry が remote_write_started を取得後は Link が割り込まない", async () => {
+    initializeOfflineSyncStore(createTestMemento(), SCOPE);
+    let createCalls = 0;
+    let releaseRetry: (() => void) | undefined;
+    let notifyRetryStarted: (() => void) | undefined;
+    const retryStarted = new Promise<void>((resolve) => { notifyRetryStarted = resolve; });
+    const service = new TicketSyncService({
+      create: {
+        ...metadataDeps,
+        createIssue: async () => {
+          createCalls++;
+          if (createCalls === 1) {
+            throw new Error("Request timed out after 30000ms");
+          }
+          notifyRetryStarted?.();
+          await new Promise<void>((resolve) => { releaseRetry = resolve; });
+          return 780;
+        },
+        getIssueDetail: async (ticketId) => issueDetail(ticketId),
+      },
+      documents: {
+        rewriteNewTicket: async () => true,
+        findOpenDocument: () => undefined,
+      },
+    });
+    await service.syncNewTicket({
+      context: { connectionScope: SCOPE },
+      operation: { content, projectId: 12, documentUri: DOCUMENT_URI },
+    });
+    const retry = service.resolveCommitUnknown({
+      key: { kind: "newTicket", documentUri: DOCUMENT_URI },
+      context: { connectionScope: SCOPE },
+      resolution: { kind: "retry_remote_write" },
+    });
+    await retryStarted;
+
+    const link = await service.resolveCommitUnknown({
+      key: { kind: "newTicket", documentUri: DOCUMENT_URI },
+      context: { connectionScope: SCOPE },
+      resolution: { kind: "link_created_ticket", ticketId: 781 },
+    });
+    assert.strictEqual(link.kind, "commit_unknown");
+    assert.strictEqual(getOfflineSyncQueue(SCOPE).newTickets[0].phase, "remote_write_started");
+
+    releaseRetry?.();
+    const retried = await retry;
+    assert.strictEqual(retried.kind, "completed");
+    assert.strictEqual(createCalls, 2);
+  });
+
   test("commit_unknown new ticket はverified issue IDをlinkしてPOSTなしでfinalizeできる", async () => {
     initializeOfflineSyncStore(createTestMemento(), SCOPE);
     let createCalls = 0;
@@ -885,6 +1118,199 @@ suite("TicketSyncService durable lifecycle", () => {
     assert.strictEqual(retried.kind, "commit_unknown");
     assert.strictEqual(getOfflineSyncQueue(SCOPE).tickets.get(406)?.phase, "commit_unknown");
     assert.strictEqual(updateCalls, 1);
+  });
+
+  test("existing-ticket Explicit Retry は nextIntent ではなく commit_unknown active revision をPUTする", async () => {
+    initializeOfflineSyncStore(createTestMemento(), SCOPE);
+    const ticketMetadata = buildIssueMetadataFixture();
+    addOfflineTicketUpdate(408, {
+      ticketId: 408,
+      baseSubject: "Title",
+      baseDescription: "Old",
+      baseMetadata: ticketMetadata,
+      lastKnownRemoteUpdatedAt: "t1",
+      subject: "Title",
+      description: "Active A",
+      metadata: ticketMetadata,
+      connectionScope: SCOPE,
+      phase: "queued",
+    }, SCOPE);
+    const sentDescriptions: unknown[] = [];
+    const service = new TicketSyncService({
+      update: {
+        updateIssue: async ({ fields }) => {
+          sentDescriptions.push(fields.description);
+          if (sentDescriptions.length === 1) {
+            throw new Error("Network request failed: socket closed");
+          }
+        },
+        getIssueDetail: async () => ({
+          ...issueDetail(408),
+          ticket: { ...issueDetail(408).ticket, updatedAt: "t1" },
+        }),
+        listIssueStatuses: async () => [],
+        listTrackers: async () => [],
+        listIssuePriorities: async () => [],
+        searchUsers: async () => [],
+      },
+    });
+    await service.syncQueueItem(
+      { kind: "ticket", ticketId: 408 }, { connectionScope: SCOPE },
+    );
+    addOfflineTicketUpdate(408, {
+      ticketId: 408,
+      baseSubject: "Title",
+      baseDescription: "Old",
+      baseMetadata: ticketMetadata,
+      lastKnownRemoteUpdatedAt: "t1",
+      subject: "Title",
+      description: "Later B",
+      metadata: ticketMetadata,
+      connectionScope: SCOPE,
+    }, SCOPE);
+
+    await service.resolveCommitUnknown({
+      key: { kind: "ticket", ticketId: 408 },
+      context: { connectionScope: SCOPE },
+      resolution: { kind: "retry_remote_write" },
+    });
+
+    assert.deepStrictEqual(sentDescriptions, ["Active A", "Active A"]);
+  });
+
+  test("existing-ticket Retry preflight failure は commit_unknown active と nextIntent を保持する", async () => {
+    initializeOfflineSyncStore(createTestMemento(), SCOPE);
+    const ticketMetadata = buildIssueMetadataFixture();
+    addOfflineTicketUpdate(409, {
+      ticketId: 409,
+      baseSubject: "Title",
+      baseDescription: "Old",
+      baseMetadata: ticketMetadata,
+      lastKnownRemoteUpdatedAt: "t1",
+      subject: "Title",
+      description: "Active A",
+      metadata: ticketMetadata,
+      connectionScope: SCOPE,
+      phase: "queued",
+    }, SCOPE);
+    let updateCalls = 0;
+    let failRetryPreflight = false;
+    const service = new TicketSyncService({
+      update: {
+        updateIssue: async () => {
+          updateCalls++;
+          throw new Error("Network request failed: socket closed");
+        },
+        getIssueDetail: async () => {
+          if (failRetryPreflight) {
+            throw new Error("retry remote preflight unavailable");
+          }
+          return {
+            ...issueDetail(409),
+            ticket: { ...issueDetail(409).ticket, updatedAt: "t1" },
+          };
+        },
+        listIssueStatuses: async () => [],
+        listTrackers: async () => [],
+        listIssuePriorities: async () => [],
+        searchUsers: async () => [],
+      },
+    });
+    await service.syncQueueItem(
+      { kind: "ticket", ticketId: 409 }, { connectionScope: SCOPE },
+    );
+    addOfflineTicketUpdate(409, {
+      ticketId: 409,
+      baseSubject: "Title",
+      baseDescription: "Old",
+      baseMetadata: ticketMetadata,
+      lastKnownRemoteUpdatedAt: "t1",
+      subject: "Title",
+      description: "Later B",
+      metadata: { ...ticketMetadata, status: "Changed status" },
+      connectionScope: SCOPE,
+    }, SCOPE);
+    failRetryPreflight = true;
+
+    const outcome = await service.resolveCommitUnknown({
+      key: { kind: "ticket", ticketId: 409 },
+      context: { connectionScope: SCOPE },
+      resolution: { kind: "retry_remote_write" },
+    });
+    const pending = getOfflineSyncQueue(SCOPE).tickets.get(409);
+
+    assert.strictEqual(outcome.kind, "commit_unknown");
+    assert.strictEqual(updateCalls, 1);
+    assert.strictEqual(pending?.phase, "commit_unknown");
+    assert.strictEqual(pending?.description, "Active A");
+    assert.strictEqual(pending?.nextIntent?.description, "Later B");
+  });
+
+  test("existing-ticket Retry と Assume の競合では source phase を取得した一方だけが進む", async () => {
+    initializeOfflineSyncStore(createTestMemento(), SCOPE);
+    const ticketMetadata = buildIssueMetadataFixture();
+    addOfflineTicketUpdate(410, {
+      ticketId: 410,
+      baseSubject: "Title",
+      baseDescription: "Old",
+      baseMetadata: ticketMetadata,
+      lastKnownRemoteUpdatedAt: "t1",
+      subject: "Title",
+      description: "Active A",
+      metadata: ticketMetadata,
+      connectionScope: SCOPE,
+      phase: "queued",
+    }, SCOPE);
+    let updateCalls = 0;
+    let holdRetryPreflight = false;
+    let retryPreflightBlocked = false;
+    let releasePreflight: (() => void) | undefined;
+    let notifyPreflight: (() => void) | undefined;
+    const preflightReached = new Promise<void>((resolve) => { notifyPreflight = resolve; });
+    const remoteDetail = {
+      ...issueDetail(410),
+      ticket: { ...issueDetail(410).ticket, updatedAt: "t1" },
+    };
+    const service = new TicketSyncService({
+      update: {
+        updateIssue: async () => {
+          updateCalls++;
+          throw new Error("Network request failed: socket closed");
+        },
+        getIssueDetail: async () => {
+          if (holdRetryPreflight && !retryPreflightBlocked) {
+            retryPreflightBlocked = true;
+            notifyPreflight?.();
+            await new Promise<void>((resolve) => { releasePreflight = resolve; });
+          }
+          return remoteDetail;
+        },
+        listIssueStatuses: async () => [],
+        listTrackers: async () => [],
+        listIssuePriorities: async () => [],
+        searchUsers: async () => [],
+      },
+    });
+    await service.syncQueueItem(
+      { kind: "ticket", ticketId: 410 }, { connectionScope: SCOPE },
+    );
+    holdRetryPreflight = true;
+    const retry = service.resolveCommitUnknown({
+      key: { kind: "ticket", ticketId: 410 },
+      context: { connectionScope: SCOPE },
+      resolution: { kind: "retry_remote_write" },
+    });
+    await preflightReached;
+    const assume = service.resolveCommitUnknown({
+      key: { kind: "ticket", ticketId: 410 },
+      context: { connectionScope: SCOPE },
+      resolution: { kind: "assume_update_committed" },
+    });
+    releasePreflight?.();
+    const outcomes = await Promise.all([retry, assume]);
+
+    assert.strictEqual(updateCalls, 1);
+    assert.strictEqual(outcomes.filter((outcome) => outcome.kind === "completed").length, 1);
   });
 
   test("commit_unknown existing update は明示的assume-committedでGETから再開する", async () => {

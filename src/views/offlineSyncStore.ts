@@ -113,6 +113,34 @@ export type OfflineDiscardResult =
 
 export type OfflineSyncLifecycle = "queued" | "recovery_pending" | "commit_unknown";
 
+export type NewTicketLifecycleAction =
+  | { kind: "begin_preparation" }
+  | { kind: "abort_before_remote_write" }
+  | { kind: "start_normal_remote_write" }
+  | { kind: "start_explicit_retry_remote_write" }
+  | { kind: "mark_commit_unknown" }
+  | { kind: "record_remote_created"; ticketId: number }
+  | { kind: "link_created_ticket"; ticketId: number }
+  | { kind: "mark_reconciliation_pending"; remoteUpdatedAt?: string }
+  | { kind: "mark_local_finalize_pending"; remoteUpdatedAt?: string };
+
+export type TicketUpdateLifecycleAction =
+  | { kind: "begin_preparation" }
+  | { kind: "abort_before_remote_write" }
+  | { kind: "start_normal_remote_write" }
+  | { kind: "start_explicit_retry_remote_write" }
+  | { kind: "mark_commit_unknown" }
+  | { kind: "record_remote_commit"; createdChildIds?: number[] }
+  | { kind: "assume_update_committed" }
+  | { kind: "mark_reconciliation_pending"; remoteUpdatedAt?: string }
+  | { kind: "mark_local_finalize_pending"; remoteUpdatedAt?: string };
+
+export type LifecycleTransitionExpectation<Phase extends string> = {
+  operationId: string;
+  revision: number;
+  sourcePhase: Phase;
+};
+
 export const getOfflineSyncLifecycle = (
   operation: Pick<OfflineNewTicket | OfflineTicketUpdate, "phase">,
 ): OfflineSyncLifecycle => {
@@ -664,9 +692,89 @@ export const updateOfflineNewTicketAsync = async (
   )) {
     return undefined;
   }
-  const next = updates.phase === "queued"
-    ? promoteNewTicketIntent(queue.newTickets[index])
-    : { ...queue.newTickets[index], ...updates };
+  if (updates.phase === "queued" && queue.newTickets[index].nextIntent) {
+    return undefined;
+  }
+  const next = { ...queue.newTickets[index], ...updates };
+  queue.newTickets[index] = next;
+  await persistAsync(scope);
+  return next;
+};
+
+const newTicketActionAllowsSource = (
+  action: NewTicketLifecycleAction,
+  source: NewTicketSyncPhase,
+): boolean => {
+  switch (action.kind) {
+    case "begin_preparation": return source === "queued";
+    case "abort_before_remote_write": return source === "preparing";
+    case "start_normal_remote_write": return source === "preparing";
+    case "start_explicit_retry_remote_write": return source === "commit_unknown";
+    case "mark_commit_unknown": return source === "remote_write_started";
+    case "record_remote_created": return source === "remote_write_started";
+    case "link_created_ticket": return source === "commit_unknown";
+    case "mark_reconciliation_pending":
+      return source === "remote_created" || source === "reconciliation_pending" ||
+        source === "local_finalize_pending";
+    case "mark_local_finalize_pending":
+      return source === "remote_created" || source === "reconciliation_pending" ||
+        source === "local_finalize_pending";
+  }
+};
+
+export const transitionOfflineNewTicketLifecycleAsync = async (
+  key: { queueId?: string; documentUri?: string },
+  action: NewTicketLifecycleAction,
+  scope: string,
+  expected: LifecycleTransitionExpectation<NewTicketSyncPhase>,
+): Promise<OfflineNewTicket | undefined> => {
+  const queue = getQueue(scope);
+  const index = findNewTicketIndex(queue, key);
+  const current = index === -1 ? undefined : queue.newTickets[index];
+  if (
+    !current ||
+    current.operationId !== expected.operationId ||
+    current.revision !== expected.revision ||
+    current.phase !== expected.sourcePhase ||
+    (current.connectionScope !== undefined && current.connectionScope !== scope) ||
+    !newTicketActionAllowsSource(action, expected.sourcePhase)
+  ) {
+    return undefined;
+  }
+  let next: OfflineNewTicket;
+  switch (action.kind) {
+    case "begin_preparation":
+      next = { ...current, phase: "preparing" };
+      break;
+    case "abort_before_remote_write":
+      next = promoteNewTicketIntent(current);
+      break;
+    case "start_normal_remote_write":
+    case "start_explicit_retry_remote_write":
+      next = { ...current, phase: "remote_write_started" };
+      break;
+    case "mark_commit_unknown":
+      next = { ...current, phase: "commit_unknown" };
+      break;
+    case "record_remote_created":
+    case "link_created_ticket":
+      next = { ...current, createdIssueId: action.ticketId, phase: "remote_created" };
+      break;
+    case "mark_reconciliation_pending":
+      next = {
+        ...current,
+        phase: "reconciliation_pending",
+        remoteUpdatedAt: action.remoteUpdatedAt,
+      };
+      break;
+    case "mark_local_finalize_pending":
+      next = {
+        ...current,
+        phase: "local_finalize_pending",
+        remoteUpdatedAt: action.remoteUpdatedAt,
+      };
+      break;
+  }
   queue.newTickets[index] = next;
   await persistAsync(scope);
   return next;
@@ -786,9 +894,95 @@ export const updateOfflineTicketUpdateAsync = async (
   if (!current || (expectedRevision !== undefined && current.revision !== expectedRevision)) {
     return undefined;
   }
-  const next = updates.phase === "queued"
-    ? promoteTicketIntent(current)
-    : { ...current, ...updates };
+  if (updates.phase === "queued" && current.nextIntent) {
+    return undefined;
+  }
+  const next = { ...current, ...updates };
+  queue.tickets.set(ticketId, next);
+  await persistAsync(scope);
+  return next;
+};
+
+const ticketUpdateActionAllowsSource = (
+  action: TicketUpdateLifecycleAction,
+  source: TicketUpdateSyncPhase,
+): boolean => {
+  switch (action.kind) {
+    case "begin_preparation": return source === "queued";
+    case "abort_before_remote_write": return source === "preparing";
+    case "start_normal_remote_write": return source === "preparing";
+    case "start_explicit_retry_remote_write": return source === "commit_unknown";
+    case "mark_commit_unknown": return source === "remote_write_started";
+    case "record_remote_commit": return source === "remote_write_started";
+    case "assume_update_committed": return source === "commit_unknown";
+    case "mark_reconciliation_pending":
+      return source === "remote_committed" || source === "reconciliation_pending" ||
+        source === "local_finalize_pending";
+    case "mark_local_finalize_pending":
+      return source === "remote_committed" || source === "reconciliation_pending" ||
+        source === "local_finalize_pending";
+  }
+};
+
+export const transitionOfflineTicketUpdateLifecycleAsync = async (
+  ticketId: number,
+  action: TicketUpdateLifecycleAction,
+  scope: string,
+  expected: LifecycleTransitionExpectation<TicketUpdateSyncPhase>,
+): Promise<OfflineTicketUpdate | undefined> => {
+  const queue = getQueue(scope);
+  const current = queue.tickets.get(ticketId);
+  if (
+    !current ||
+    current.operationId !== expected.operationId ||
+    current.revision !== expected.revision ||
+    current.phase !== expected.sourcePhase ||
+    (current.connectionScope !== undefined && current.connectionScope !== scope) ||
+    !ticketUpdateActionAllowsSource(action, expected.sourcePhase)
+  ) {
+    return undefined;
+  }
+  let next: OfflineTicketUpdate;
+  switch (action.kind) {
+    case "begin_preparation":
+      next = { ...current, phase: "preparing", remoteUpdatedAt: undefined };
+      break;
+    case "abort_before_remote_write":
+      next = promoteTicketIntent(current);
+      break;
+    case "start_normal_remote_write":
+    case "start_explicit_retry_remote_write":
+      next = { ...current, phase: "remote_write_started", remoteUpdatedAt: undefined };
+      break;
+    case "mark_commit_unknown":
+      next = { ...current, phase: "commit_unknown", remoteUpdatedAt: undefined };
+      break;
+    case "record_remote_commit":
+      next = {
+        ...current,
+        phase: "remote_committed",
+        remoteUpdatedAt: undefined,
+        createdChildIds: action.createdChildIds,
+      };
+      break;
+    case "assume_update_committed":
+      next = { ...current, phase: "remote_committed", remoteUpdatedAt: undefined };
+      break;
+    case "mark_reconciliation_pending":
+      next = {
+        ...current,
+        phase: "reconciliation_pending",
+        remoteUpdatedAt: action.remoteUpdatedAt,
+      };
+      break;
+    case "mark_local_finalize_pending":
+      next = {
+        ...current,
+        phase: "local_finalize_pending",
+        remoteUpdatedAt: action.remoteUpdatedAt,
+      };
+      break;
+  }
   queue.tickets.set(ticketId, next);
   await persistAsync(scope);
   return next;

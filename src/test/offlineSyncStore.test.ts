@@ -18,6 +18,8 @@ import {
   abortOfflineNewTicketBeforeRemoteWriteAsync,
   abortOfflineTicketUpdateBeforeRemoteWriteAsync,
   completeOfflineTicketUpdateAsync,
+  transitionOfflineNewTicketLifecycleAsync,
+  transitionOfflineTicketUpdateLifecycleAsync,
 } from "../views/offlineSyncStore";
 import { createTestMemento } from "./helpers/vscodeMemento";
 import { buildIssueMetadataFixture } from "./helpers/ticketMetadataFixtures";
@@ -280,6 +282,49 @@ suite("offlineSyncStore — workspaceState 永続化", () => {
     assert.strictEqual(getOfflineSyncQueue().newTickets[0].phase, "commit_unknown");
   });
 
+  test("restart 時も commit_unknown active revision と later nextIntent をそのまま保持する", () => {
+    const memento = createTestMemento();
+    void memento.update("redmine.offlineSyncQueue", {
+      tickets: [[7, {
+        ...ticketUpdate(7),
+        description: "Active A",
+        operationId: "ticket:7",
+        phase: "commit_unknown",
+        revision: 4,
+        nextIntent: {
+          revision: 5,
+          subject: "Updated",
+          description: "Later B",
+          metadata: buildIssueMetadataFixture(),
+        },
+      }]],
+      comments: [],
+      newTickets: [{
+        queueId: "restart-unknown-new",
+        operationId: "restart-unknown-new",
+        content: "Active A",
+        phase: "commit_unknown",
+        revision: 4,
+        nextIntent: { revision: 5, content: "Later B" },
+      }],
+    });
+
+    initializeOfflineSyncStore(memento);
+    const existing = getOfflineSyncQueue().tickets.get(7);
+    const created = getOfflineSyncQueue().newTickets[0];
+
+    assert.strictEqual(existing?.phase, "commit_unknown");
+    assert.strictEqual(existing?.revision, 4);
+    assert.strictEqual(existing?.description, "Active A");
+    assert.strictEqual(existing?.nextIntent?.revision, 5);
+    assert.strictEqual(existing?.nextIntent?.description, "Later B");
+    assert.strictEqual(created.phase, "commit_unknown");
+    assert.strictEqual(created.revision, 4);
+    assert.strictEqual(created.content, "Active A");
+    assert.strictEqual(created.nextIntent?.revision, 5);
+    assert.strictEqual(created.nextIntent?.content, "Later B");
+  });
+
   test("legacy migration も scope persistence lane を使い、新しい mutation より先に完了する", async () => {
     let releaseFirst: (() => void) | undefined;
     const writes: Array<{ key: string; value: unknown }> = [];
@@ -479,6 +524,142 @@ suite("offlineSyncStore — workspaceState 永続化", () => {
     assert.strictEqual(marked, undefined);
     assert.strictEqual(completed, false);
     assert.strictEqual(getOfflineSyncQueue().tickets.get(9022)?.phase, "preparing");
+  });
+
+  test("generic phase=queued mutation は nextIntent を昇格せず invariant 違反を拒否する", async () => {
+    addOfflineTicketUpdate(9024, {
+      ...ticketUpdate(9024),
+      description: "Active A",
+      phase: "commit_unknown",
+      revision: 4,
+    });
+    addOfflineTicketUpdate(9024, {
+      ...ticketUpdate(9024),
+      description: "Later B",
+    });
+    const before = getOfflineSyncQueue().tickets.get(9024)!;
+
+    const updated = await updateOfflineTicketUpdateAsync(
+      9024,
+      { phase: "queued" },
+      "",
+      before.revision,
+    );
+
+    const after = getOfflineSyncQueue().tickets.get(9024);
+    assert.strictEqual(updated, undefined);
+    assert.strictEqual(after?.phase, "commit_unknown");
+    assert.strictEqual(after?.description, "Active A");
+    assert.strictEqual(after?.nextIntent?.description, "Later B");
+  });
+
+  test("new-ticket Retry と Link の同一source CASは一方だけ成功する", async () => {
+    addOfflineNewTicket({
+      content: "Active A",
+      documentUri: "file:///tmp/recovery-race.md",
+      phase: "commit_unknown",
+      revision: 4,
+    });
+    addOfflineNewTicket({
+      content: "Later B",
+      documentUri: "file:///tmp/recovery-race.md",
+    });
+    const operation = getOfflineSyncQueue().newTickets[0];
+    const expected = {
+      operationId: operation.operationId!,
+      revision: operation.revision!,
+      sourcePhase: "commit_unknown" as const,
+    };
+
+    const results = await Promise.all([
+      transitionOfflineNewTicketLifecycleAsync(
+        { queueId: operation.queueId },
+        { kind: "start_explicit_retry_remote_write" },
+        "",
+        expected,
+      ),
+      transitionOfflineNewTicketLifecycleAsync(
+        { queueId: operation.queueId },
+        { kind: "link_created_ticket", ticketId: 99 },
+        "",
+        expected,
+      ),
+    ]);
+
+    assert.strictEqual(results.filter(Boolean).length, 1);
+    const current = getOfflineSyncQueue().newTickets[0];
+    assert.ok(current.phase === "remote_write_started" || current.phase === "remote_created");
+    assert.strictEqual(current.content, "Active A");
+    assert.strictEqual(current.nextIntent?.content, "Later B");
+  });
+
+  test("existing-ticket Retry と Assume の同一source CASは一方だけ成功する", async () => {
+    addOfflineTicketUpdate(9025, {
+      ...ticketUpdate(9025),
+      description: "Active A",
+      phase: "commit_unknown",
+      revision: 4,
+    });
+    const operation = getOfflineSyncQueue().tickets.get(9025)!;
+    const expected = {
+      operationId: operation.operationId!,
+      revision: operation.revision!,
+      sourcePhase: "commit_unknown" as const,
+    };
+
+    const results = await Promise.all([
+      transitionOfflineTicketUpdateLifecycleAsync(
+        9025,
+        { kind: "start_explicit_retry_remote_write" },
+        "",
+        expected,
+      ),
+      transitionOfflineTicketUpdateLifecycleAsync(
+        9025,
+        { kind: "assume_update_committed" },
+        "",
+        expected,
+      ),
+    ]);
+
+    assert.strictEqual(results.filter(Boolean).length, 1);
+    const phase = getOfflineSyncQueue().tickets.get(9025)?.phase;
+    assert.ok(phase === "remote_write_started" || phase === "remote_committed");
+  });
+
+  test("semantic transition は operation identity・scope・source phase の不一致を拒否する", async () => {
+    const scope = "scope-b";
+    addOfflineTicketUpdate(9026, {
+      ...ticketUpdate(9026),
+      operationId: "operation-9026",
+      connectionScope: "scope-a",
+      phase: "preparing",
+      revision: 4,
+    }, scope);
+
+    const wrongIdentity = await transitionOfflineTicketUpdateLifecycleAsync(
+      9026,
+      { kind: "start_normal_remote_write" },
+      scope,
+      { operationId: "stale-operation", revision: 4, sourcePhase: "preparing" },
+    );
+    const wrongScope = await transitionOfflineTicketUpdateLifecycleAsync(
+      9026,
+      { kind: "start_normal_remote_write" },
+      scope,
+      { operationId: "operation-9026", revision: 4, sourcePhase: "preparing" },
+    );
+    const wrongSource = await transitionOfflineTicketUpdateLifecycleAsync(
+      9026,
+      { kind: "start_normal_remote_write" },
+      scope,
+      { operationId: "operation-9026", revision: 4, sourcePhase: "queued" },
+    );
+
+    assert.strictEqual(wrongIdentity, undefined);
+    assert.strictEqual(wrongScope, undefined);
+    assert.strictEqual(wrongSource, undefined);
+    assert.strictEqual(getOfflineSyncQueue(scope).tickets.get(9026)?.phase, "preparing");
   });
 
   test("async new-ticket mutation は await 中の並べ替え後も元の operation を返す", async () => {
