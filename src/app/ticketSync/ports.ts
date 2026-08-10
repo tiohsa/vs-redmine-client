@@ -21,6 +21,11 @@ export interface SyncJournal {
     scope: string,
     expectedRevision?: number,
   ): Promise<OfflineNewTicket | undefined>;
+  abortNewTicketBeforeRemoteWrite(
+    key: { queueId?: string; documentUri?: string },
+    scope: string,
+    expectedRevision: number,
+  ): Promise<OfflineNewTicket | undefined>;
   completeNewTicket(
     key: { queueId?: string; documentUri?: string },
     scope: string,
@@ -32,6 +37,11 @@ export interface SyncJournal {
     updates: Partial<Pick<OfflineTicketUpdate, "phase" | "remoteUpdatedAt" | "createdChildIds">>,
     scope: string,
     expectedRevision?: number,
+  ): Promise<OfflineTicketUpdate | undefined>;
+  abortTicketUpdateBeforeRemoteWrite(
+    ticketId: number,
+    scope: string,
+    expectedRevision: number,
   ): Promise<OfflineTicketUpdate | undefined>;
   completeTicketUpdate(
     ticketId: number,

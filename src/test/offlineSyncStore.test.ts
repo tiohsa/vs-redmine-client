@@ -15,6 +15,8 @@ import {
   mergeOfflineTicketUpdate,
   updateOfflineNewTicketAsync,
   updateOfflineTicketUpdateAsync,
+  abortOfflineNewTicketBeforeRemoteWriteAsync,
+  abortOfflineTicketUpdateBeforeRemoteWriteAsync,
   completeOfflineTicketUpdateAsync,
 } from "../views/offlineSyncStore";
 import { createTestMemento } from "./helpers/vscodeMemento";
@@ -252,10 +254,15 @@ suite("offlineSyncStore — workspaceState 永続化", () => {
     assert.strictEqual(restored.operationId, "legacy-new-1");
   });
 
-  test("restart 時は preparing を queued、remote_write_started を commit_unknown に正規化する", () => {
+  test("restart 時は preparing の後続 intent を queued active、remote_write_started を commit_unknown に正規化する", () => {
     const memento = createTestMemento();
     void memento.update("redmine.offlineSyncQueue", {
-      tickets: [[1, { ...ticketUpdate(1), phase: "preparing" }]],
+      tickets: [[1, {
+        ...ticketUpdate(1),
+        phase: "preparing",
+        revision: 4,
+        nextIntent: { ...ticketUpdate(1), revision: 5, subject: "Latest", description: "Latest body" },
+      }]],
       comments: [],
       newTickets: [{
         queueId: "started-new-ticket",
@@ -267,6 +274,9 @@ suite("offlineSyncStore — workspaceState 永続化", () => {
     initializeOfflineSyncStore(memento);
 
     assert.strictEqual(getOfflineSyncQueue().tickets.get(1)?.phase, "queued");
+    assert.strictEqual(getOfflineSyncQueue().tickets.get(1)?.subject, "Latest");
+    assert.strictEqual(getOfflineSyncQueue().tickets.get(1)?.revision, 5);
+    assert.strictEqual(getOfflineSyncQueue().tickets.get(1)?.nextIntent, undefined);
     assert.strictEqual(getOfflineSyncQueue().newTickets[0].phase, "commit_unknown");
   });
 
@@ -410,6 +420,45 @@ suite("offlineSyncStore — workspaceState 永続化", () => {
     assert.strictEqual(operation?.description, "Revision A");
     assert.strictEqual(operation?.nextIntent?.description, "Revision B");
     assert.strictEqual(operation?.nextIntent?.revision, 5);
+  });
+
+  test("pre-remote abort は後続 intent を queued active へ昇格する", async () => {
+    addOfflineTicketUpdate(9023, {
+      ...ticketUpdate(9023),
+      description: "Revision A",
+      phase: "preparing",
+      revision: 4,
+    });
+    addOfflineTicketUpdate(9023, {
+      ...ticketUpdate(9023),
+      description: "Revision B",
+      phase: "queued",
+    });
+    addOfflineNewTicket({
+      content: "A",
+      documentUri: "file:///tmp/abort-new.md",
+      phase: "preparing",
+      revision: 4,
+    });
+    addOfflineNewTicket({
+      content: "B",
+      documentUri: "file:///tmp/abort-new.md",
+      phase: "queued",
+    });
+
+    const existing = await abortOfflineTicketUpdateBeforeRemoteWriteAsync(9023, "", 4);
+    const created = await abortOfflineNewTicketBeforeRemoteWriteAsync(
+      { documentUri: "file:///tmp/abort-new.md" }, "", 4,
+    );
+
+    assert.strictEqual(existing?.description, "Revision B");
+    assert.strictEqual(existing?.phase, "queued");
+    assert.strictEqual(existing?.nextIntent, undefined);
+    assert.strictEqual(existing?.revision, 5);
+    assert.strictEqual(created?.content, "B");
+    assert.strictEqual(created?.phase, "queued");
+    assert.strictEqual(created?.nextIntent, undefined);
+    assert.strictEqual(created?.revision, 5);
   });
 
   test("stale revision の durable mutation と completion は拒否する", async () => {

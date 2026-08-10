@@ -230,6 +230,44 @@ const persist = (scope = activeScope): void => {
   });
 };
 
+const promoteTicketIntent = (operation: OfflineTicketUpdate): OfflineTicketUpdate => {
+  const next = operation.nextIntent;
+  if (!next) {
+    return { ...operation, phase: "queued", nextIntent: undefined };
+  }
+  return {
+    ...operation,
+    subject: next.subject,
+    description: next.description,
+    metadata: next.metadata,
+    layout: next.layout,
+    metadataBlock: next.metadataBlock,
+    controlFields: next.controlFields,
+    baseDir: next.baseDir ?? operation.baseDir,
+    documentUri: next.documentUri ?? operation.documentUri,
+    phase: "queued",
+    revision: next.revision,
+    nextIntent: undefined,
+  };
+};
+
+const promoteNewTicketIntent = (operation: OfflineNewTicket): OfflineNewTicket => {
+  const next = operation.nextIntent;
+  if (!next) {
+    return { ...operation, phase: "queued", nextIntent: undefined };
+  }
+  return {
+    ...operation,
+    content: next.content,
+    projectId: next.projectId ?? operation.projectId,
+    documentUri: next.documentUri ?? operation.documentUri,
+    baseDir: next.baseDir ?? operation.baseDir,
+    phase: "queued",
+    revision: next.revision,
+    nextIntent: undefined,
+  };
+};
+
 const deserializeQueue = (raw: SerializedQueue | undefined): OfflineSyncQueue => {
   return {
     tickets: new Map(
@@ -242,13 +280,16 @@ const deserializeQueue = (raw: SerializedQueue | undefined): OfflineSyncQueue =>
             typeof e[1] === "object",
         ).map(([ticketId, update]) => [
           ticketId,
-          {
-            ...update,
-            phase: update.phase === "preparing" ? "queued" : (
-              update.phase === "remote_write_started" ? "commit_unknown" : update.phase ?? "queued"
-            ),
-            revision: update.revision ?? 1,
-          },
+          (() => {
+            const restored = {
+              ...update,
+              phase: update.phase === "remote_write_started" ? "commit_unknown" : update.phase ?? "queued",
+              revision: update.revision ?? 1,
+            };
+            return restored.phase === "preparing" || restored.phase === "queued"
+              ? promoteTicketIntent(restored)
+              : restored;
+          })(),
         ] as [number, OfflineTicketUpdate])
         : [],
     ),
@@ -260,18 +301,21 @@ const deserializeQueue = (raw: SerializedQueue | undefined): OfflineSyncQueue =>
       raw && Array.isArray(raw.newTickets)
         ? raw.newTickets
           .filter((t) => t !== null && typeof t === "object")
-          .map((ticket) => ({
-            ...ticket,
-            operationId: ticket.operationId ?? ticket.queueId,
-            revision: ticket.revision ?? 1,
-            phase: ticket.phase === "preparing" ? "queued" : (
-              ticket.phase === "remote_write_started" ? "commit_unknown" : ticket.phase ?? (
-              ticket.createdIssueId !== undefined || ticket.status === "created_rewrite_failed"
-                ? "local_finalize_pending"
-                : "queued"
-              )
-            ),
-          }))
+          .map((ticket) => {
+            const restored = {
+              ...ticket,
+              operationId: ticket.operationId ?? ticket.queueId,
+              revision: ticket.revision ?? 1,
+              phase: ticket.phase === "remote_write_started" ? "commit_unknown" : ticket.phase ?? (
+                ticket.createdIssueId !== undefined || ticket.status === "created_rewrite_failed"
+                  ? "local_finalize_pending"
+                  : "queued"
+              ),
+            };
+            return restored.phase === "preparing" || restored.phase === "queued"
+              ? promoteNewTicketIntent(restored)
+              : restored;
+          })
         : [],
   };
 };
@@ -620,7 +664,26 @@ export const updateOfflineNewTicketAsync = async (
   )) {
     return undefined;
   }
-  const next = { ...queue.newTickets[index], ...updates };
+  const next = updates.phase === "queued"
+    ? promoteNewTicketIntent(queue.newTickets[index])
+    : { ...queue.newTickets[index], ...updates };
+  queue.newTickets[index] = next;
+  await persistAsync(scope);
+  return next;
+};
+
+export const abortOfflineNewTicketBeforeRemoteWriteAsync = async (
+  key: { queueId?: string; documentUri?: string },
+  scope: string,
+  expectedRevision: number,
+): Promise<OfflineNewTicket | undefined> => {
+  const queue = getQueue(scope);
+  const index = findNewTicketIndex(queue, key);
+  const current = index === -1 ? undefined : queue.newTickets[index];
+  if (!current || current.revision !== expectedRevision || current.phase !== "preparing") {
+    return undefined;
+  }
+  const next = promoteNewTicketIntent(current);
   queue.newTickets[index] = next;
   await persistAsync(scope);
   return next;
@@ -723,7 +786,25 @@ export const updateOfflineTicketUpdateAsync = async (
   if (!current || (expectedRevision !== undefined && current.revision !== expectedRevision)) {
     return undefined;
   }
-  const next = { ...current, ...updates };
+  const next = updates.phase === "queued"
+    ? promoteTicketIntent(current)
+    : { ...current, ...updates };
+  queue.tickets.set(ticketId, next);
+  await persistAsync(scope);
+  return next;
+};
+
+export const abortOfflineTicketUpdateBeforeRemoteWriteAsync = async (
+  ticketId: number,
+  scope: string,
+  expectedRevision: number,
+): Promise<OfflineTicketUpdate | undefined> => {
+  const queue = getQueue(scope);
+  const current = queue.tickets.get(ticketId);
+  if (!current || current.revision !== expectedRevision || current.phase !== "preparing") {
+    return undefined;
+  }
+  const next = promoteTicketIntent(current);
   queue.tickets.set(ticketId, next);
   await persistAsync(scope);
   return next;

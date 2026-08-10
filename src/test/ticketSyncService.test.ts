@@ -193,6 +193,110 @@ suite("TicketSyncService durable lifecycle", () => {
     assert.strictEqual(createCalls, 1);
   });
 
+  test("new-ticket preflight abort は後続保存を queued active へ昇格し POST しない", async () => {
+    initializeOfflineSyncStore(createTestMemento(), SCOPE);
+    let releasePreflight: (() => void) | undefined;
+    let preflightReached: (() => void) | undefined;
+    let createCalls = 0;
+    const service = new TicketSyncService({
+      create: {
+        ...metadataDeps,
+        listIssueStatuses: async () => {
+          preflightReached?.();
+          await new Promise<void>((resolve) => { releasePreflight = resolve; });
+          throw new Error("metadata unavailable");
+        },
+        createIssue: async () => {
+          createCalls++;
+          return 112;
+        },
+      },
+      documents: {
+        rewriteNewTicket: async () => true,
+        findOpenDocument: () => undefined,
+      },
+    });
+    const started = service.syncNewTicket({
+      context: { connectionScope: SCOPE },
+      operation: { content, projectId: 12, documentUri: DOCUMENT_URI },
+    });
+    await new Promise<void>((resolve) => { preflightReached = resolve; });
+    const laterContent = content.replace("Durable ticket", "Latest local edit");
+    addOfflineNewTicket({
+      content: laterContent,
+      projectId: 12,
+      documentUri: DOCUMENT_URI,
+    }, SCOPE);
+
+    releasePreflight?.();
+    const outcome = await started;
+    const operation = getOfflineSyncQueue(SCOPE).newTickets[0];
+
+    assert.strictEqual(outcome.kind, "failed_before_commit");
+    assert.strictEqual(createCalls, 0);
+    assert.strictEqual(operation.content, laterContent);
+    assert.strictEqual(operation.phase, "queued");
+    assert.strictEqual(operation.nextIntent, undefined);
+  });
+
+  test("existing-ticket conflict は後続保存を queued active にして recovery pending を残さない", async () => {
+    initializeOfflineSyncStore(createTestMemento(), SCOPE);
+    const metadata = buildIssueMetadataFixture();
+    addOfflineTicketUpdate(113, {
+      ticketId: 113,
+      baseSubject: "Title",
+      baseDescription: "Old",
+      baseMetadata: metadata,
+      lastKnownRemoteUpdatedAt: "t1",
+      subject: "Title",
+      description: "A",
+      metadata,
+      connectionScope: SCOPE,
+      phase: "queued",
+    }, SCOPE);
+    let releaseRemoteRead: (() => void) | undefined;
+    let remoteReadReached: (() => void) | undefined;
+    let updateCalls = 0;
+    const service = new TicketSyncService({
+      update: {
+        updateIssue: async () => { updateCalls++; },
+        getIssueDetail: async () => {
+          remoteReadReached?.();
+          await new Promise<void>((resolve) => { releaseRemoteRead = resolve; });
+          return issueDetail(113);
+        },
+        listIssueStatuses: async () => [],
+        listTrackers: async () => [],
+        listIssuePriorities: async () => [],
+        searchUsers: async () => [],
+      },
+    });
+    const syncing = service.syncQueueItem(
+      { kind: "ticket", ticketId: 113 }, { connectionScope: SCOPE },
+    );
+    await new Promise<void>((resolve) => { remoteReadReached = resolve; });
+    addOfflineTicketUpdate(113, {
+      ticketId: 113,
+      baseSubject: "Title",
+      baseDescription: "Old",
+      baseMetadata: metadata,
+      subject: "Title",
+      description: "B",
+      metadata,
+      connectionScope: SCOPE,
+    }, SCOPE);
+
+    releaseRemoteRead?.();
+    const outcome = await syncing;
+    const operation = getOfflineSyncQueue(SCOPE).tickets.get(113);
+
+    assert.strictEqual(outcome.kind, "conflict");
+    assert.strictEqual(updateCalls, 0);
+    assert.strictEqual(operation?.description, "B");
+    assert.strictEqual(operation?.phase, "queued");
+    assert.strictEqual(operation?.nextIntent, undefined);
+  });
+
   test("new ticket local finalize は Markdown → registry → draft の順で完了する", async () => {
     initializeOfflineSyncStore(createTestMemento(), SCOPE);
     const steps: string[] = [];

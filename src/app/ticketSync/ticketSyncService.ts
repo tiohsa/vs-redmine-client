@@ -2,6 +2,8 @@ import * as vscode from "vscode";
 import type { OfflineNewTicket, OfflineTicketUpdate } from "../../views/offlineSyncStore";
 import {
   addOfflineNewTicketAsync,
+  abortOfflineNewTicketBeforeRemoteWriteAsync,
+  abortOfflineTicketUpdateBeforeRemoteWriteAsync,
   completeOfflineNewTicketAsync,
   completeOfflineTicketUpdateAsync,
   updateOfflineNewTicketAsync,
@@ -42,8 +44,10 @@ const defaultJournal: SyncJournal = {
   getTicketUpdate: (ticketId, scope) => getOfflineSyncQueue(scope).tickets.get(ticketId),
   saveNewTicket: addOfflineNewTicketAsync,
   markNewTicket: updateOfflineNewTicketAsync,
+  abortNewTicketBeforeRemoteWrite: abortOfflineNewTicketBeforeRemoteWriteAsync,
   completeNewTicket: completeOfflineNewTicketAsync,
   markTicketUpdate: updateOfflineTicketUpdateAsync,
+  abortTicketUpdateBeforeRemoteWrite: abortOfflineTicketUpdateBeforeRemoteWriteAsync,
   completeTicketUpdate: completeOfflineTicketUpdateAsync,
 };
 
@@ -364,11 +368,10 @@ export class TicketSyncService {
         (created.result.status !== "created" && !created.remoteIssueMayExist)
       ) {
         try {
-          await this.journal.markNewTicket(
+          await this.journal.abortNewTicketBeforeRemoteWrite(
             { queueId: operation.queueId, documentUri: operation.documentUri },
-            { phase: "queued" },
             input.context.connectionScope,
-            operation.revision,
+            operation.revision ?? 1,
           );
         } catch {
           // A durable remote_write_started remains safe-side if it had been reached.
@@ -486,6 +489,7 @@ export class TicketSyncService {
             input.key,
             { phase: "queued", createdIssueId: undefined },
             input.context.connectionScope,
+            operation.revision,
           );
           return queued
             ? this.createOrResume({ context: input.context, operation: queued })
@@ -532,6 +536,7 @@ export class TicketSyncService {
             phase: "remote_created",
           },
           input.context.connectionScope,
+          operation.revision,
         );
         if (!linked) {
           return {
@@ -683,6 +688,15 @@ export class TicketSyncService {
       });
     }
     if (result.status === "conflict") {
+      try {
+        await this.journal.abortTicketUpdateBeforeRemoteWrite(
+          operation.ticketId,
+          context.connectionScope,
+          operation.revision ?? 1,
+        );
+      } catch {
+        // Keep the conflict outcome even when its local cleanup cannot be persisted.
+      }
       return {
         kind: "conflict",
         ticketId: operation.ticketId,
@@ -691,11 +705,10 @@ export class TicketSyncService {
       };
     }
     try {
-      await this.journal.markTicketUpdate(
+      await this.journal.abortTicketUpdateBeforeRemoteWrite(
         operation.ticketId,
-        { phase: "queued", remoteUpdatedAt: undefined },
         context.connectionScope,
-        operation.revision,
+        operation.revision ?? 1,
       );
     } catch {
       // Preserve the safe-side remote_write_started checkpoint if it had been reached.
