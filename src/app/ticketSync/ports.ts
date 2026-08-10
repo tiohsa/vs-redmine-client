@@ -19,21 +19,25 @@ export interface SyncJournal {
     key: { queueId?: string; documentUri?: string },
     updates: Partial<Pick<OfflineNewTicket, "createdIssueId" | "status" | "phase" | "remoteUpdatedAt" | "createdChildIds">>,
     scope: string,
+    expectedRevision?: number,
   ): Promise<OfflineNewTicket | undefined>;
   completeNewTicket(
     key: { queueId?: string; documentUri?: string },
     scope: string,
     promotion?: OfflineTicketUpdate & { sourceRevision?: number },
+    expectedRevision?: number,
   ): Promise<boolean>;
   markTicketUpdate(
     ticketId: number,
     updates: Partial<Pick<OfflineTicketUpdate, "phase" | "remoteUpdatedAt" | "createdChildIds">>,
     scope: string,
+    expectedRevision?: number,
   ): Promise<OfflineTicketUpdate | undefined>;
   completeTicketUpdate(
     ticketId: number,
     scope: string,
     completion?: { canonical: TicketEditorContent; remoteUpdatedAt: string },
+    expectedRevision?: number,
   ): Promise<boolean>;
 }
 

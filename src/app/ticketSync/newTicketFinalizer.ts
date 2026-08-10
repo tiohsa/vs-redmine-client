@@ -37,6 +37,7 @@ export class NewTicketFinalizer {
           key,
           { phase: "reconciliation_pending" },
           input.context.connectionScope,
+          input.operation.revision,
         );
       } catch {
         // The remote commit is still the authoritative outcome.
@@ -58,6 +59,7 @@ export class NewTicketFinalizer {
           key,
           { phase: "reconciliation_pending" },
           input.context.connectionScope,
+          input.operation.revision,
         );
       } catch {
         // Preserve the remote-committed outcome even if the pending phase cannot be persisted.
@@ -76,6 +78,7 @@ export class NewTicketFinalizer {
           key,
           { phase: "reconciliation_pending", remoteUpdatedAt: undefined },
           input.context.connectionScope,
+          input.operation.revision,
         );
       } catch {
         // Preserve the remote-committed outcome.
@@ -107,6 +110,7 @@ export class NewTicketFinalizer {
           key,
           { phase: "local_finalize_pending", remoteUpdatedAt: detail.ticket.updatedAt },
           input.context.connectionScope,
+          input.operation.revision,
         );
       } catch {
         // Preserve the remote-committed outcome.
@@ -168,6 +172,7 @@ export class NewTicketFinalizer {
         key,
         { phase: "local_finalize_pending", remoteUpdatedAt: detail.ticket.updatedAt },
         input.context.connectionScope,
+        input.operation.revision,
       );
     } catch (error) {
       return {
@@ -234,6 +239,7 @@ export class NewTicketFinalizer {
         key,
         input.context.connectionScope,
         promotion,
+        input.operation.revision,
       );
       if (!completed) {
         return {

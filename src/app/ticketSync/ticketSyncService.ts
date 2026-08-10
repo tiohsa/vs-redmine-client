@@ -308,6 +308,21 @@ export class TicketSyncService {
 
     let ticketId = input.operation.createdIssueId;
     let operation = input.operation;
+    if (!ticketId && operation.phase === "queued") {
+      const preparing = await this.journal.markNewTicket(
+        { queueId: operation.queueId, documentUri: operation.documentUri },
+        { phase: "preparing" },
+        input.context.connectionScope,
+        operation.revision,
+      );
+      if (!preparing) {
+        return {
+          kind: "failed_before_commit",
+          error: new Error("New ticket operation changed before preparation."),
+        };
+      }
+      operation = preparing;
+    }
     if (!ticketId) {
       const created = await createTicketFromContent({
         content: operation.content,
@@ -319,6 +334,7 @@ export class TicketSyncService {
             { queueId: operation.queueId, documentUri: operation.documentUri },
             { phase: "remote_write_started" },
             input.context.connectionScope,
+            operation.revision,
           );
           if (!started) {
             throw new Error("New ticket operation disappeared before remote create.");
@@ -332,6 +348,7 @@ export class TicketSyncService {
             { queueId: operation.queueId, documentUri: operation.documentUri },
             { phase: "commit_unknown" },
             input.context.connectionScope,
+            operation.revision,
           );
         } catch {
           // remote_write_started is already durable and is treated as commit_unknown on restart.
@@ -346,16 +363,15 @@ export class TicketSyncService {
         !created.createdId ||
         (created.result.status !== "created" && !created.remoteIssueMayExist)
       ) {
-        if (created.remoteWriteAttempted) {
-          try {
-            await this.journal.markNewTicket(
-              { queueId: operation.queueId, documentUri: operation.documentUri },
-              { phase: "queued" },
-              input.context.connectionScope,
-            );
-          } catch {
-            // The failure result remains authoritative; a later remote_write_started is safe-side.
-          }
+        try {
+          await this.journal.markNewTicket(
+            { queueId: operation.queueId, documentUri: operation.documentUri },
+            { phase: "queued" },
+            input.context.connectionScope,
+            operation.revision,
+          );
+        } catch {
+          // A durable remote_write_started remains safe-side if it had been reached.
         }
         return {
           kind: "failed_before_commit",
@@ -370,6 +386,7 @@ export class TicketSyncService {
           { queueId: operation.queueId, documentUri: operation.documentUri },
           { createdIssueId: ticketId, phase: "remote_created" },
           input.context.connectionScope,
+          operation.revision,
         );
       } catch (error) {
         return {
@@ -554,6 +571,7 @@ export class TicketSyncService {
         operation.ticketId,
         { phase, remoteUpdatedAt: undefined },
         input.context.connectionScope,
+        operation.revision,
       );
       return resolved
         ? this.updateOrReconcile(input.context, resolved)
@@ -596,6 +614,21 @@ export class TicketSyncService {
         message: "The previous remote update may have committed. Resolve it before retrying.",
       };
     }
+    if (operation.phase === "queued") {
+      const preparing = await this.journal.markTicketUpdate(
+        operation.ticketId,
+        { phase: "preparing", remoteUpdatedAt: undefined },
+        context.connectionScope,
+        operation.revision,
+      );
+      if (!preparing) {
+        return {
+          kind: "failed_before_commit",
+          error: new Error("Ticket update operation changed before preparation."),
+        };
+      }
+      operation = preparing;
+    }
     const result = await applyQueuedTicketUpdate({
       operationScope: context.connectionScope,
       update: operation,
@@ -606,6 +639,7 @@ export class TicketSyncService {
           operation.ticketId,
           { phase: "remote_write_started", remoteUpdatedAt: undefined },
           context.connectionScope,
+          operation.revision,
         );
         if (!started) {
           throw new Error("Ticket update operation disappeared before remote update.");
@@ -618,6 +652,7 @@ export class TicketSyncService {
           operation.ticketId,
           { phase: "commit_unknown", remoteUpdatedAt: undefined },
           context.connectionScope,
+          operation.revision,
         );
       } catch {
         // remote_write_started remains a conservative commit-unknown checkpoint.
@@ -655,16 +690,15 @@ export class TicketSyncService {
         conflictContext: result.conflictContext,
       };
     }
-    if (result.remoteWriteAttempted) {
-      try {
-        await this.journal.markTicketUpdate(
-          operation.ticketId,
-          { phase: "queued", remoteUpdatedAt: undefined },
-          context.connectionScope,
-        );
-      } catch {
-        // Preserve the safe-side remote_write_started checkpoint.
-      }
+    try {
+      await this.journal.markTicketUpdate(
+        operation.ticketId,
+        { phase: "queued", remoteUpdatedAt: undefined },
+        context.connectionScope,
+        operation.revision,
+      );
+    } catch {
+      // Preserve the safe-side remote_write_started checkpoint if it had been reached.
     }
     const pending = getOfflineSyncQueue(context.connectionScope).tickets.get(
       operation.ticketId,

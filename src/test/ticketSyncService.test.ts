@@ -147,6 +147,52 @@ suite("TicketSyncService durable lifecycle", () => {
     assert.strictEqual(getOfflineSyncQueue(SCOPE).newTickets.length, 0);
   });
 
+  test("new-ticket preflight 中の後続保存は freeze 済み active revision を上書きしない", async () => {
+    initializeOfflineSyncStore(createTestMemento(), SCOPE);
+    let releasePreflight: (() => void) | undefined;
+    let preflightReached: (() => void) | undefined;
+    let createCalls = 0;
+    const service = new TicketSyncService({
+      create: {
+        ...metadataDeps,
+        listIssueStatuses: async () => {
+          preflightReached?.();
+          await new Promise<void>((resolve) => { releasePreflight = resolve; });
+          return [{ id: 1, name: "In Progress" }];
+        },
+        createIssue: async () => {
+          createCalls++;
+          return 111;
+        },
+        getIssueDetail: async () => issueDetail(111),
+      },
+      documents: {
+        rewriteNewTicket: async () => false,
+        findOpenDocument: () => undefined,
+      },
+    });
+    const started = service.syncNewTicket({
+      context: { connectionScope: SCOPE },
+      operation: { content, projectId: 12, documentUri: DOCUMENT_URI },
+    });
+    await new Promise<void>((resolve) => { preflightReached = resolve; });
+
+    const active = getOfflineSyncQueue(SCOPE).newTickets[0];
+    assert.strictEqual(active.phase, "preparing");
+    addOfflineNewTicket({
+      content: content.replace("Durable ticket", "Later local edit"),
+      projectId: 12,
+      documentUri: DOCUMENT_URI,
+    }, SCOPE);
+    const frozen = getOfflineSyncQueue(SCOPE).newTickets[0];
+    assert.strictEqual(frozen.content, content);
+    assert.ok(frozen.nextIntent?.content.includes("Later local edit"));
+
+    releasePreflight?.();
+    await started;
+    assert.strictEqual(createCalls, 1);
+  });
+
   test("new ticket local finalize は Markdown → registry → draft の順で完了する", async () => {
     initializeOfflineSyncStore(createTestMemento(), SCOPE);
     const steps: string[] = [];

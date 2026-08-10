@@ -13,6 +13,9 @@ import {
   discardOfflineNewTicketAsync,
   discardOfflineTicketUpdateAsync,
   mergeOfflineTicketUpdate,
+  updateOfflineNewTicketAsync,
+  updateOfflineTicketUpdateAsync,
+  completeOfflineTicketUpdateAsync,
 } from "../views/offlineSyncStore";
 import { createTestMemento } from "./helpers/vscodeMemento";
 import { buildIssueMetadataFixture } from "./helpers/ticketMetadataFixtures";
@@ -249,6 +252,61 @@ suite("offlineSyncStore — workspaceState 永続化", () => {
     assert.strictEqual(restored.operationId, "legacy-new-1");
   });
 
+  test("restart 時は preparing を queued、remote_write_started を commit_unknown に正規化する", () => {
+    const memento = createTestMemento();
+    void memento.update("redmine.offlineSyncQueue", {
+      tickets: [[1, { ...ticketUpdate(1), phase: "preparing" }]],
+      comments: [],
+      newTickets: [{
+        queueId: "started-new-ticket",
+        content: "# Ticket",
+        phase: "remote_write_started",
+      }],
+    });
+
+    initializeOfflineSyncStore(memento);
+
+    assert.strictEqual(getOfflineSyncQueue().tickets.get(1)?.phase, "queued");
+    assert.strictEqual(getOfflineSyncQueue().newTickets[0].phase, "commit_unknown");
+  });
+
+  test("legacy migration も scope persistence lane を使い、新しい mutation より先に完了する", async () => {
+    let releaseFirst: (() => void) | undefined;
+    const writes: Array<{ key: string; value: unknown }> = [];
+    let calls = 0;
+    const memento = {
+      get: <T>(key: string, defaultValue?: T): T => {
+        if (key === "redmine.offlineSyncQueue") {
+          return { tickets: [[1, ticketUpdate(1)]], comments: [], newTickets: [] } as T;
+        }
+        return defaultValue as T;
+      },
+      keys: (): readonly string[] => [],
+      update: async (key: string, value: unknown): Promise<void> => {
+        calls++;
+        writes.push({ key, value });
+        if (calls === 1) {
+          await new Promise<void>((resolve) => { releaseFirst = resolve; });
+        }
+      },
+    };
+    const scope = "migration-lane";
+    initializeOfflineSyncStore(memento as import("vscode").Memento, scope);
+    addOfflineTicketUpdate(2, ticketUpdate(2), scope);
+    await Promise.resolve();
+
+    assert.strictEqual(writes.length, 1);
+    releaseFirst?.();
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    await new Promise<void>((resolve) => setImmediate(resolve));
+
+    assert.deepStrictEqual(writes.map((write) => write.key), [
+      "redmine.offlineSyncQueue.migration-lane",
+      "redmine.offlineSyncQueue",
+      "redmine.offlineSyncQueue.migration-lane",
+    ]);
+  });
+
   test("async mutation は Memento.update 完了まで resolve しない", async () => {
     let release: (() => void) | undefined;
     const writes: unknown[] = [];
@@ -331,6 +389,82 @@ suite("offlineSyncStore — workspaceState 永続化", () => {
       "Edited while reconciliation is pending",
     );
     assert.ok((operation?.nextIntent?.revision ?? 0) > (operation?.revision ?? 0));
+  });
+
+  test("preparing 中の後続 save は active revision を変更せず nextIntent に保持する", () => {
+    addOfflineTicketUpdate(9021, {
+      ...ticketUpdate(9021),
+      description: "Revision A",
+      phase: "preparing",
+      revision: 4,
+    });
+
+    addOfflineTicketUpdate(9021, {
+      ...ticketUpdate(9021),
+      description: "Revision B",
+      phase: "queued",
+    });
+
+    const operation = getOfflineSyncQueue().tickets.get(9021);
+    assert.strictEqual(operation?.phase, "preparing");
+    assert.strictEqual(operation?.description, "Revision A");
+    assert.strictEqual(operation?.nextIntent?.description, "Revision B");
+    assert.strictEqual(operation?.nextIntent?.revision, 5);
+  });
+
+  test("stale revision の durable mutation と completion は拒否する", async () => {
+    addOfflineTicketUpdate(9022, {
+      ...ticketUpdate(9022),
+      phase: "preparing",
+      revision: 4,
+    });
+
+    const marked = await updateOfflineTicketUpdateAsync(
+      9022,
+      { phase: "remote_write_started" },
+      "",
+      3,
+    );
+    const completed = await completeOfflineTicketUpdateAsync(9022, "", undefined, 3);
+
+    assert.strictEqual(marked, undefined);
+    assert.strictEqual(completed, false);
+    assert.strictEqual(getOfflineSyncQueue().tickets.get(9022)?.phase, "preparing");
+  });
+
+  test("async new-ticket mutation は await 中の並べ替え後も元の operation を返す", async () => {
+    let release: (() => void) | undefined;
+    let writes = 0;
+    const memento = {
+      get: <T>(_key: string, defaultValue?: T): T => defaultValue as T,
+      keys: (): readonly string[] => [],
+      update: async (): Promise<void> => {
+        writes++;
+        if (writes === 1) {
+          await new Promise<void>((resolve) => { release = resolve; });
+        }
+      },
+    };
+    initializeOfflineSyncStore(memento as import("vscode").Memento, "stable-handle");
+    addOfflineNewTicket({ content: "X", documentUri: "file:///tmp/x.md" }, "stable-handle");
+    addOfflineNewTicket({ content: "B", documentUri: "file:///tmp/b.md" }, "stable-handle");
+    const b = getOfflineSyncQueue("stable-handle").newTickets.find((item) => item.content === "B")!;
+    const pending = updateOfflineNewTicketAsync(
+      { queueId: b.queueId },
+      { createdIssueId: 77 },
+      "stable-handle",
+      b.revision,
+    );
+    await Promise.resolve();
+    addOfflineNewTicket({ content: "X2", documentUri: "file:///tmp/x.md" }, "stable-handle");
+    release?.();
+    const updated = await pending;
+
+    assert.strictEqual(updated?.operationId, b.operationId);
+    assert.strictEqual(updated?.createdIssueId, 77);
+    assert.strictEqual(getOfflineSyncQueue("stable-handle").newTickets.find(
+      (item) => item.documentUri === "file:///tmp/x.md",
+    )?.createdIssueId, undefined);
   });
 
   test("remote created new ticket の active content を後続 save が上書きしない", () => {

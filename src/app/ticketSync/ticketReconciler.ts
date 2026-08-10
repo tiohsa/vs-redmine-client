@@ -31,6 +31,7 @@ export class TicketReconciler {
             input.operation.ticketId,
             { phase: "reconciliation_pending", remoteUpdatedAt: undefined },
             input.context.connectionScope,
+            input.operation.revision,
           );
         } catch {
           // Preserve the remote-committed outcome if journal persistence also fails.
@@ -55,6 +56,7 @@ export class TicketReconciler {
             input.operation.ticketId,
             { phase: "reconciliation_pending", remoteUpdatedAt: undefined },
             input.context.connectionScope,
+            input.operation.revision,
           );
         } catch {
           // Preserve the remote-committed outcome.
@@ -110,6 +112,7 @@ export class TicketReconciler {
           input.operation.ticketId,
           { phase: "local_finalize_pending", remoteUpdatedAt: detail.ticket.updatedAt },
           input.context.connectionScope,
+          input.operation.revision,
         );
       } catch (error) {
         return {
@@ -172,6 +175,7 @@ export class TicketReconciler {
         input.operation.ticketId,
         input.context.connectionScope,
         { canonical, remoteUpdatedAt: detail.ticket.updatedAt },
+        input.operation.revision,
       );
       if (!completed) {
         return {
