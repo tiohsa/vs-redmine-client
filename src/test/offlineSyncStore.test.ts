@@ -20,6 +20,7 @@ import {
   completeOfflineTicketUpdateAsync,
   transitionOfflineNewTicketLifecycleAsync,
   transitionOfflineTicketUpdateLifecycleAsync,
+  listSyncOperations,
 } from "../views/offlineSyncStore";
 import { createTestMemento } from "./helpers/vscodeMemento";
 import { buildIssueMetadataFixture } from "./helpers/ticketMetadataFixtures";
@@ -60,6 +61,39 @@ suite("offlineSyncStore — workspaceState 永続化", () => {
     assert.strictEqual(q.tickets.size, 1);
     assert.ok(q.tickets.has(123));
     assert.strictEqual(q.tickets.get(123)?.ticketId, 123);
+  });
+
+  test("v2 永続形式は単一の SyncOperation コレクションを保存する", async () => {
+    const memento = createTestMemento();
+    initializeOfflineSyncStore(memento);
+    addOfflineTicketUpdate(123, ticketUpdate(123));
+    addOfflineCommentUpdate({ ticketId: 123, commentId: 8, body: "comment" });
+
+    await new Promise<void>((resolve) => setTimeout(resolve, 0));
+
+    const persisted = memento.get<{ version?: number; operations?: unknown[] }>("redmine.offlineSyncQueue");
+    assert.strictEqual(persisted.version, 2);
+    assert.strictEqual(persisted.operations?.length, 2);
+    assert.deepStrictEqual(
+      listSyncOperations().map((operation) => operation.kind).sort(),
+      ["commentUpdate", "ticketUpdate"],
+    );
+  });
+
+  test("v1 キューを読み込むと v2 操作モデルとして復元する", async () => {
+    const memento = createTestMemento();
+    await memento.update("redmine.offlineSyncQueue", {
+      tickets: [[55, ticketUpdate(55)]],
+      comments: [{ ticketId: 55, body: "legacy comment" }],
+      newTickets: [],
+    });
+
+    initializeOfflineSyncStore(memento);
+    assert.deepStrictEqual(
+      listSyncOperations().map((operation) => operation.kind).sort(),
+      ["commentCreate", "ticketUpdate"],
+    );
+    assert.strictEqual(getOfflineSyncQueue().tickets.get(55)?.subject, "Updated");
   });
 
   test("commentId あり コメント更新を追加後に復元される", () => {

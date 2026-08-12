@@ -1,10 +1,7 @@
 import * as vscode from "vscode";
 import {
   getOfflineSyncQueue,
-  removeOfflineCommentEntry,
 } from "../views/offlineSyncStore";
-import { applyQueuedCommentUpdate, finalizeNewCommentDraftDocument } from "../views/commentSaveSync";
-import { updateCommentUpdateFileAfterSync } from "../views/commentUpdateFile";
 import { UnsyncedFileSyncKey } from "../app/unsyncedTypes";
 import { showInfo, showWarning } from "../utils/notifications";
 import { RewriteDocumentDeps } from "../views/editorDocumentRewrite";
@@ -12,12 +9,12 @@ import { getCurrentConnectionScope } from "../config/connectionScope";
 import { runWithConnectionScope } from "../redmine/client";
 import {
   createTicketSyncService,
+  createSyncEngine,
   TicketSyncQueueItemNotFoundError,
 } from "../app/ticketSync";
 import type {
   TicketSyncOutcome,
   TicketSyncQueueKey,
-  TicketSyncService,
 } from "../app/ticketSync";
 import { getTicketDraft } from "../views/ticketDraftStore";
 
@@ -50,7 +47,7 @@ const normalizeNewTicketSyncFailureMessage = (message?: string): string => {
 };
 
 const resolveCommitUnknownInteractive = async (
-  service: TicketSyncService,
+  service: ReturnType<ReturnType<typeof createSyncEngine>["ticketService"]>,
   key: TicketSyncQueueKey,
   operationScope: string,
 ): Promise<TicketSyncOutcome | undefined> => {
@@ -138,8 +135,8 @@ const syncUnsyncedFileAtScope = async (
     const previousPhase = getOfflineSyncQueue(operationScope).tickets.get(
       syncKey.ticketId,
     )?.phase;
-    const service = serviceFactory();
-    let outcome = await service.syncQueueItem(
+    const engine = createSyncEngine({ tickets: serviceFactory() });
+    let outcome = await engine.syncOne(
       syncKey,
       { connectionScope: operationScope },
     );
@@ -147,7 +144,7 @@ const syncUnsyncedFileAtScope = async (
       outcome.kind === "commit_unknown" &&
       (previousPhase === "commit_unknown" || previousPhase === "remote_write_started")
     ) {
-      outcome = await resolveCommitUnknownInteractive(service, syncKey, operationScope)
+      outcome = await resolveCommitUnknownInteractive(engine.ticketService(), syncKey, operationScope)
         ?? outcome;
     }
     if (outcome.kind === "completed" || outcome.kind === "no_change") {
@@ -194,8 +191,8 @@ const syncUnsyncedFileAtScope = async (
       (candidate) =>
         syncKey.documentUri && candidate.documentUri === syncKey.documentUri,
     )?.phase;
-    const service = serviceFactory({ rewrite: rewriteDeps });
-    let outcome = await service.syncQueueItem(
+    const engine = createSyncEngine({ tickets: serviceFactory({ rewrite: rewriteDeps }) });
+    let outcome = await engine.syncOne(
       syncKey,
       { connectionScope: operationScope },
     );
@@ -203,7 +200,7 @@ const syncUnsyncedFileAtScope = async (
       outcome.kind === "commit_unknown" &&
       (previousPhase === "commit_unknown" || previousPhase === "remote_write_started")
     ) {
-      outcome = await resolveCommitUnknownInteractive(service, syncKey, operationScope)
+      outcome = await resolveCommitUnknownInteractive(engine.ticketService(), syncKey, operationScope)
         ?? outcome;
     }
     if (outcome.kind === "completed") {
@@ -248,53 +245,30 @@ const syncUnsyncedFileAtScope = async (
   }
 
   if (syncKey.kind === "comment") {
-    const queue = getOfflineSyncQueue(operationScope);
-    const update = syncKey.commentId !== undefined
-      ? queue.comments.find((c) => c.ticketId === syncKey.ticketId && c.commentId === syncKey.commentId)
-      : queue.comments.find((c) => c.documentUri === syncKey.documentUri && c.commentId === undefined);
-    if (!update) {
-      showWarning(vscode.l10n.t("Queue entry for this comment update not found."));
-      return undefined;
-    }
-    const result = await applyQueuedCommentUpdate({ update, operationScope });
-    if (
-      result.status === "created" &&
-      update.documentUri &&
-      result.commentId &&
-      result.projectId
-    ) {
-      const document = vscode.workspace.textDocuments.find(
-        (doc) => doc.uri.toString() === update.documentUri,
-      );
-      if (document) {
-        finalizeNewCommentDraftDocument({
-          document,
-          ticketId: update.ticketId,
-          projectId: result.projectId,
-          commentId: result.commentId,
-          operationScope,
-        });
-      }
-    }
-    if (result.status === "success" && update.sourceNotesHash && update.documentUri) {
-      await updateCommentUpdateFileAfterSync(update.documentUri, update.body);
-    }
-    if (result.status === "success" || result.status === "no_change" || result.status === "created" || result.status === "created_unresolved") {
-      removeOfflineCommentEntry(
-        { commentId: syncKey.commentId, documentUri: syncKey.documentUri },
-        operationScope,
-      );
+    const outcome = await createSyncEngine().syncOne(syncKey, { connectionScope: operationScope });
+    if (outcome.kind === "completed" || outcome.kind === "no_change") {
       showInfo(vscode.l10n.t("Comment synced."));
-      if (result.status === "no_change") {
+      if (outcome.kind === "no_change") {
         return { status: "no_change", kind: "comment" };
       }
-      return { status: "success", kind: "comment", id: result.status === "created" ? result.commentId : undefined };
-    } else if (result.status === "conflict") {
+      return {
+        status: "success",
+        kind: "comment",
+        id: (outcome as { commentId?: number }).commentId,
+      };
+    } else if (outcome.kind === "conflict") {
       showWarning(vscode.l10n.t("Conflicts with remote changes detected. Open the file to review."));
       return { status: "conflict", kind: "comment" };
     } else {
-      showWarning(vscode.l10n.t("Sync failed: {0}", result.message ?? vscode.l10n.t("Unknown error")));
-      return { status: "failed", kind: "comment", message: result.message };
+      const message = outcome.kind === "failed_before_commit"
+        ? outcome.error.message
+        : vscode.l10n.t("Unknown error");
+      if (message === "Queue entry for this comment update not found.") {
+        showWarning(vscode.l10n.t("Queue entry for this comment update not found."));
+        return undefined;
+      }
+      showWarning(vscode.l10n.t("Sync failed: {0}", message));
+      return { status: "failed", kind: "comment", message };
     }
   }
 

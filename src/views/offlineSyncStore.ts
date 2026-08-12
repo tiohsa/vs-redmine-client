@@ -61,6 +61,7 @@ export type OfflineTicketUpdate = {
   createdChildIds?: number[];
   revision?: number;
   nextIntent?: TicketUpdateIntentSnapshot;
+  createdAt?: number;
 };
 
 export type OfflineCommentUpdate = {
@@ -72,6 +73,24 @@ export type OfflineCommentUpdate = {
   baseDir?: string;
   documentUri?: string;
   sourceNotesHash?: string;
+  createdAt?: number;
+};
+
+export type SyncOperationKind =
+  | "ticketCreate"
+  | "ticketUpdate"
+  | "commentCreate"
+  | "commentUpdate";
+
+export type SyncOperation = {
+  operationId: string;
+  kind: SyncOperationKind;
+  connectionScope: string;
+  revision: number;
+  phase: NewTicketSyncPhase | TicketUpdateSyncPhase | "queued";
+  documentUri?: string;
+  createdAt: number;
+  payload: OfflineNewTicket | OfflineTicketUpdate | OfflineCommentUpdate;
 };
 
 export type NewTicketIntentSnapshot = {
@@ -97,6 +116,7 @@ export type OfflineNewTicket = {
   createdChildIds?: number[];
   revision?: number;
   nextIntent?: NewTicketIntentSnapshot;
+  createdAt?: number;
 };
 
 export type OfflineSyncQueue = {
@@ -177,9 +197,12 @@ export const onOfflineSyncQueueChanged = (
 };
 
 type SerializedQueue = {
-  tickets: [number, OfflineTicketUpdate][];
-  comments: OfflineCommentUpdate[];
-  newTickets: OfflineNewTicket[];
+  version?: 2;
+  operations?: SyncOperation[];
+  /** v1 compatibility only. New snapshots persist `operations` as the source of truth. */
+  tickets?: [number, OfflineTicketUpdate][];
+  comments?: OfflineCommentUpdate[];
+  newTickets?: OfflineNewTicket[];
 };
 
 let memento: Memento | undefined;
@@ -194,6 +217,76 @@ const emptyQueue = (): OfflineSyncQueue => ({
   newTickets: [],
 });
 
+const operationFromTicketUpdate = (
+  update: OfflineTicketUpdate,
+  scope: string,
+): SyncOperation => ({
+  operationId: update.operationId ?? `ticket:${update.ticketId}`,
+  kind: "ticketUpdate",
+  connectionScope: update.connectionScope ?? scope,
+  revision: update.revision ?? 1,
+  phase: update.phase ?? "queued",
+  documentUri: update.documentUri,
+  createdAt: update.createdAt ?? 0,
+  payload: { ...update },
+});
+
+const operationFromNewTicket = (
+  ticket: OfflineNewTicket,
+  scope: string,
+): SyncOperation => ({
+  operationId: ticket.operationId ?? ticket.queueId,
+  kind: "ticketCreate",
+  connectionScope: ticket.connectionScope ?? scope,
+  revision: ticket.revision ?? 1,
+  phase: ticket.phase ?? "queued",
+  documentUri: ticket.documentUri,
+  createdAt: ticket.createdAt ?? 0,
+  payload: { ...ticket },
+});
+
+const operationFromComment = (
+  comment: OfflineCommentUpdate,
+  scope: string,
+  index: number,
+): SyncOperation => ({
+  operationId: `comment:${comment.ticketId}:${comment.commentId ?? comment.documentUri ?? index}`,
+  kind: comment.commentId === undefined ? "commentCreate" : "commentUpdate",
+  connectionScope: scope,
+  revision: 1,
+  phase: "queued",
+  documentUri: comment.documentUri,
+  createdAt: comment.createdAt ?? 0,
+  payload: { ...comment },
+});
+
+const operationsFromQueue = (queue: OfflineSyncQueue, scope: string): SyncOperation[] => [
+  ...queue.newTickets.map((ticket) => operationFromNewTicket(ticket, scope)),
+  ...Array.from(queue.tickets.values()).map((update) => operationFromTicketUpdate(update, scope)),
+  ...queue.comments.map((comment, index) => operationFromComment(comment, scope, index)),
+];
+
+const queueFromOperations = (operations: SyncOperation[]): OfflineSyncQueue => {
+  const queue = emptyQueue();
+  for (const operation of operations) {
+    switch (operation.kind) {
+      case "ticketCreate":
+        queue.newTickets.push(normalizeNewTicket(operation.payload as OfflineNewTicket));
+        break;
+      case "ticketUpdate": {
+        const update = operation.payload as OfflineTicketUpdate;
+        queue.tickets.set(update.ticketId, normalizeTicketUpdate(update.ticketId, update));
+        break;
+      }
+      case "commentCreate":
+      case "commentUpdate":
+        queue.comments.push({ ...(operation.payload as OfflineCommentUpdate) });
+        break;
+    }
+  }
+  return queue;
+};
+
 const getQueue = (scope = activeScope): OfflineSyncQueue => {
   let queue = queuesByScope.get(scope);
   if (!queue) {
@@ -206,11 +299,8 @@ const getQueue = (scope = activeScope): OfflineSyncQueue => {
 const serializeQueue = (scope: string): SerializedQueue => {
   const queue = getQueue(scope);
   return {
-    tickets: Array.from(queue.tickets.entries()).map(
-      ([ticketId, update]) => [ticketId, { ...update }] as [number, OfflineTicketUpdate],
-    ),
-    comments: queue.comments.map((comment) => ({ ...comment })),
-    newTickets: queue.newTickets.map((ticket) => ({ ...ticket })),
+    version: 2,
+    operations: operationsFromQueue(queue, scope),
   };
 };
 
@@ -328,6 +418,17 @@ const normalizeNewTicket = (ticket: OfflineNewTicket): OfflineNewTicket => {
 };
 
 const deserializeQueue = (raw: SerializedQueue | undefined): OfflineSyncQueue => {
+  if (raw && Array.isArray(raw.operations)) {
+    const valid = raw.operations.filter((operation): operation is SyncOperation =>
+      operation !== null &&
+      typeof operation === "object" &&
+      typeof operation.operationId === "string" &&
+      typeof operation.kind === "string" &&
+      operation.payload !== null &&
+      typeof operation.payload === "object",
+    );
+    return queueFromOperations(valid);
+  }
   return {
     tickets: new Map(
       raw && Array.isArray(raw.tickets)
@@ -355,6 +456,20 @@ const deserializeQueue = (raw: SerializedQueue | undefined): OfflineSyncQueue =>
   };
 };
 
+/** Returns the canonical, persisted representation of pending work. */
+export const listSyncOperations = (scope = activeScope): SyncOperation[] =>
+  operationsFromQueue(getQueue(scope), scope).map((operation) => ({
+    ...operation,
+    payload: { ...operation.payload },
+  }));
+
+export const getSyncOperation = (
+  operationId: string,
+  scope = activeScope,
+): SyncOperation | undefined => listSyncOperations(scope).find(
+  (operation) => operation.operationId === operationId,
+);
+
 function loadQueue(storage: Memento, storageKey: string): OfflineSyncQueue {
   return deserializeQueue(storage.get<SerializedQueue>(storageKey));
 }
@@ -377,8 +492,12 @@ export const initializeOfflineSyncStore = (storage: Memento, scope?: string): vo
   const legacy = scope ? storage.get<SerializedQueue>(STORAGE_KEY) : undefined;
   const queue = deserializeQueue(pendingSnapshot ?? scoped ?? legacy);
   queuesByScope.set(activeScope, queue);
-  if (!scoped && legacy) {
-    const current = schedulePersist(activeScope, serializeQueue(activeScope), true);
+  if ((!scoped?.operations && (scoped || legacy))) {
+    const current = schedulePersist(
+      activeScope,
+      serializeQueue(activeScope),
+      Boolean(scope && !scoped && legacy),
+    );
     void current.catch((err: unknown) => {
       console.error("[vs-redmine-client] offlineSyncStore: migration failed", err);
     });
@@ -435,6 +554,7 @@ export const mergeOfflineTicketUpdate = (
     remoteUpdatedAt: existing?.remoteUpdatedAt ?? update.remoteUpdatedAt,
     createdChildIds: existing?.createdChildIds ?? update.createdChildIds,
     revision: existing?.revision ?? update.revision ?? 1,
+    createdAt: existing?.createdAt ?? update.createdAt ?? Date.now(),
   };
 };
 
@@ -485,7 +605,7 @@ export const addOfflineCommentUpdate = (
       return;
     }
   }
-  queue.comments.push(update);
+  queue.comments.push({ ...update, createdAt: update.createdAt ?? Date.now() });
   persist(scope);
 };
 
@@ -572,6 +692,7 @@ export const addOfflineNewTicket = (
       phase: update.phase ?? "queued",
       connectionScope: update.connectionScope ?? scope,
       revision: update.revision ?? 1,
+      createdAt: update.createdAt ?? Date.now(),
     });
   }
   persist(scope);
@@ -599,6 +720,7 @@ export const addOfflineNewTicketAsync = async (
       phase: update.phase ?? "queued",
       connectionScope: update.connectionScope ?? scope,
       revision: update.revision ?? 1,
+      createdAt: update.createdAt ?? Date.now(),
     }
     : existing?.phase && existing.phase !== "queued" && existing.phase !== "completed"
       ? {
@@ -1100,4 +1222,60 @@ export const removeOfflineCommentEntry = (
     return true;
   });
   persist(scope);
+};
+
+/** Canonical write API for all pending synchronization operations. */
+export const upsertSyncOperation = (
+  operation: SyncOperation,
+  scope = operation.connectionScope || activeScope,
+): void => {
+  switch (operation.kind) {
+    case "ticketCreate": {
+      const ticket = operation.payload as OfflineNewTicket;
+      const { queueId: _queueId, ...update } = ticket;
+      addOfflineNewTicket(update, scope);
+      return;
+    }
+    case "ticketUpdate": {
+      const update = operation.payload as OfflineTicketUpdate;
+      addOfflineTicketUpdate(update.ticketId, update, scope);
+      return;
+    }
+    case "commentCreate":
+    case "commentUpdate":
+      addOfflineCommentUpdate(operation.payload as OfflineCommentUpdate, scope);
+      return;
+  }
+};
+
+/** Canonical deletion API. Recovery-pending ticket operations remain protected. */
+export const discardSyncOperation = async (
+  operationId: string,
+  scope = activeScope,
+): Promise<OfflineDiscardResult> => {
+  const operation = getSyncOperation(operationId, scope);
+  if (!operation) {
+    return "not_found";
+  }
+  switch (operation.kind) {
+    case "ticketCreate":
+      return discardOfflineNewTicketAsync(
+        { queueId: (operation.payload as OfflineNewTicket).queueId },
+        scope,
+      );
+    case "ticketUpdate":
+      return discardOfflineTicketUpdateAsync(
+        (operation.payload as OfflineTicketUpdate).ticketId,
+        scope,
+      );
+    case "commentCreate":
+    case "commentUpdate": {
+      const comment = operation.payload as OfflineCommentUpdate;
+      removeOfflineCommentEntry(
+        { commentId: comment.commentId, documentUri: comment.documentUri },
+        scope,
+      );
+      return "discarded";
+    }
+  }
 };
