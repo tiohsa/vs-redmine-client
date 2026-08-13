@@ -49,10 +49,12 @@ suite("offlineSyncResult — 構造化戻り値", () => {
             getOfflineSyncQueue(context.connectionScope).tickets.keys(),
           );
           return {
+            plan: [{ kind: "ticket", ticketId: 42 }],
             results: [{
               key: { kind: "ticket", ticketId: 42 },
               outcome: { kind: "completed", ticketId: 42 },
             }],
+            remaining: [],
             cancelled: false,
           };
         },
@@ -62,6 +64,44 @@ suite("offlineSyncResult — 構造化戻り値", () => {
     assert.strictEqual(syncAllCalls, 1);
     assert.deepStrictEqual(receivedTicketIds, [42]);
     assert.strictEqual(result.status, "success");
+  });
+
+  test("I-17/I-18 10件中3件処理後の cancellation は未処理7件を failed に含める", async () => {
+    for (let ticketId = 1; ticketId <= 10; ticketId++) {
+      addOfflineTicketUpdate(ticketId, {
+        ticketId,
+        baseSubject: `Base ${ticketId}`,
+        baseDescription: "Old",
+        baseMetadata: buildIssueMetadataFixture(),
+        subject: `Updated ${ticketId}`,
+        description: "New",
+        metadata: buildIssueMetadataFixture(),
+      });
+    }
+    const plan = Array.from({ length: 10 }, (_, index) => ({
+      kind: "ticket" as const,
+      ticketId: index + 1,
+    }));
+
+    const result = await runOfflineSync({
+      createSyncEngine: () => ({
+        syncAll: async () => ({
+          plan,
+          results: plan.slice(0, 3).map((key) => ({
+            key,
+            outcome: { kind: "completed" as const, ticketId: key.ticketId },
+          })),
+          remaining: plan.slice(3),
+          cancelled: true,
+        }),
+      }),
+    });
+
+    assert.strictEqual(result.status, "cancelled");
+    assert.strictEqual(result.total, 10);
+    assert.strictEqual(result.synced, 3);
+    assert.strictEqual(result.failed, 7);
+    assert.strictEqual(result.synced + result.failed, result.total);
   });
 
   test("OfflineSyncRunResult 型: nothing_to_sync の数値フィールドが 0", () => {

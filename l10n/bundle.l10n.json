@@ -4,6 +4,11 @@
     "Local Priority": "Local Priority",
     "Remote Priority": "Remote Priority",
     "View Diff": "View Diff",
+    "Merge Changes": "Merge Changes",
+    "Merged remote and local changes. Review and save to sync.": "Merged remote and local changes. Review and save to sync.",
+    "Merge conflicts were inserted. Resolve all markers before syncing.": "Merge conflicts were inserted. Resolve all markers before syncing.",
+    "Merge result is ready. Review and save to sync.": "Merge result is ready. Review and save to sync.",
+    "Resolve all merge conflict markers before syncing.": "Resolve all merge conflict markers before syncing.",
     "Cancel": "Cancel",
     "Diff editor opened. Please save again after editing.": "Diff editor opened. Please save again after editing.",
     "Conflict resolution was cancelled.": "Conflict resolution was cancelled.",
@@ -273,5 +278,10 @@
     "The previous ticket creation may have reached Redmine. Link the created ticket ID, or retry only after confirming that no ticket was created.": "The previous ticket creation may have reached Redmine. Link the created ticket ID, or retry only after confirming that no ticket was created.",
     "Enter the Redmine ticket ID created by the previous attempt.": "Enter the Redmine ticket ID created by the previous attempt.",
     "Enter a positive ticket ID.": "Enter a positive ticket ID.",
-    "The previous ticket update may have reached Redmine. Reconcile from Redmine, or retry only after confirming that the update was not applied.": "The previous ticket update may have reached Redmine. Reconcile from Redmine, or retry only after confirming that the update was not applied."
+    "The previous ticket update may have reached Redmine. Reconcile from Redmine, or retry only after confirming that the update was not applied.": "The previous ticket update may have reached Redmine. Reconcile from Redmine, or retry only after confirming that the update was not applied.",
+    "Reconcile from Redmine": "Reconcile from Redmine",
+    "The previous comment write may have reached Redmine. Check Redmine for one uniquely matching journal without sending the comment again.": "The previous comment write may have reached Redmine. Check Redmine for one uniquely matching journal without sending the comment again.",
+    "Link comment journal": "Link comment journal",
+    "Enter the Redmine comment journal ID to verify and link.": "Enter the Redmine comment journal ID to verify and link.",
+    "Enter a positive comment journal ID.": "Enter a positive comment journal ID."
 }

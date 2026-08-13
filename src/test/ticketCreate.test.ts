@@ -1,6 +1,6 @@
 import * as assert from "assert";
 import { buildIssueCreatePayload } from "../redmine/issues";
-import { createTicketFromQueuedContent, syncNewTicketDraftContent } from "../views/ticketSaveSync";
+import { createTicketFromQueuedContent, syncNewTicketDraftContent } from "../views/ticketSync/ticketCreateSync";
 import { clearTicketDrafts, getTicketDraft } from "../views/ticketDraftStore";
 import {
   buildTicketEditorMetadataContent,
@@ -207,7 +207,7 @@ suite("Ticket creation payload", () => {
     const deps = {
       createIssue: async (input: { subject: string; parentId?: number }) => {
         if (input.subject === "Child task 2") {
-          throw new Error("Child failure");
+          throw new Error("Redmine request failed (400): Child failure");
         }
         created.push(input);
         return nextId++;
@@ -235,7 +235,7 @@ suite("Ticket creation payload", () => {
 
     assert.strictEqual(result.status, "failed");
     assert.strictEqual(created.length, 2);
-    assert.deepStrictEqual(deleted, [300, 301]);
+    assert.deepStrictEqual(deleted, [301, 300]);
   });
 
   test("createTicketFromQueuedContent: 作成成功時にドラフト状態を初期化する", async () => {

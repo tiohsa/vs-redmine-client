@@ -245,7 +245,7 @@ suite("Dashboard ViewModel — 未同期アイテム変換", () => {
     assert.strictEqual(items[0].key.documentUri, "file:///new.md");
   });
 
-  test("remote checkpoint を持つitemはrecovery pendingとして通常discardを無効化する", () => {
+  test("remote checkpoint を持つitemも確認済みの破棄を許可する", () => {
     replaceOfflineSyncQueue({
       tickets: new Map([[6, {
         ticketId: 6,
@@ -258,7 +258,7 @@ suite("Dashboard ViewModel — 未同期アイテム変換", () => {
     const item = buildUnsyncedDashboardItems()[0];
 
     assert.strictEqual(item.lifecycle, "recovery_pending");
-    assert.strictEqual(item.canDiscard, false);
+    assert.strictEqual(item.canDiscard, true);
     assert.strictEqual(item.canSync, true);
   });
 

@@ -23,6 +23,18 @@ suite("Comment save notifications", () => {
     });
   });
 
+  test("maps merged to its save-required message", () => {
+    const notification = getCommentSaveNotification({
+      status: "merged",
+      message: "Review and save to sync.",
+    });
+
+    assert.deepStrictEqual(notification, {
+      type: "info",
+      message: "Review and save to sync.",
+    });
+  });
+
   test("maps created to info", () => {
     const notification = getCommentSaveNotification({
       status: "created",

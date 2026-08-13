@@ -5,6 +5,7 @@ export type TicketSaveStatus =
   | "created"
   | "success"
   | "queued"
+  | "merged"
   | "no_change"
   | "conflict"
   | "unreachable"
@@ -14,10 +15,13 @@ export type TicketSaveStatus =
 
 export interface ConflictContext {
   ticketId: number;
+  baseSubject: string;
+  baseDescription: string;
   localSubject: string;
   localDescription: string;
   remoteSubject: string;
   remoteDescription: string;
+  remoteMetadata: IssueMetadata;
   remoteUpdatedAt: string;
 }
 

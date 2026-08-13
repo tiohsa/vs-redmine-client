@@ -6,9 +6,12 @@ import {
   markDraftStatus,
   setTicketDraftContent,
 } from "../views/ticketDraftStore";
+import { addOfflineTicketUpdate, getOfflineSyncQueue } from "../views/offlineSyncStore";
 import { buildTicketEditorContent } from "../views/ticketEditorContent";
-import { applyQueuedTicketUpdate, reloadTicketEditor, syncTicketDraft } from "../views/ticketSaveSync";
-import { createEditorStub } from "./helpers/editorStubs";
+import { applyQueuedTicketUpdate } from "../views/ticketSync/ticketQueueSync";
+import { reloadTicketEditor, syncTicketDraft } from "../views/ticketSync/ticketUpdateSync";
+import { mergeTicketContent } from "../views/conflictResolver";
+import { createEditorStub, createMutableEditorStub } from "./helpers/editorStubs";
 import { buildIssueMetadataFixture } from "./helpers/ticketMetadataFixtures";
 import { buildTicketEditorMetadataContentWithChildren } from "./helpers/ticketEditorMetadataStubs";
 import * as vscode from "vscode";
@@ -170,6 +173,64 @@ suite("Ticket save sync", () => {
     });
 
     assert.strictEqual(result.status, "conflict");
+  });
+
+  test("merges local text with a remote-only status change", async () => {
+    const baseMetadata = buildIssueMetadataFixture({ status: "New" });
+    const localContent = buildTicketEditorContent({
+      subject: "Title",
+      description: "Local description",
+      metadata: baseMetadata,
+    });
+    initializeTicketDraft(102, "Title", "Body", baseMetadata, "t1");
+    addOfflineTicketUpdate(102, {
+      ticketId: 102,
+      baseSubject: "Title",
+      baseDescription: "Body",
+      baseMetadata,
+      lastKnownRemoteUpdatedAt: "t1",
+      subject: "Title",
+      description: "Local description",
+      metadata: baseMetadata,
+    });
+
+    const result = await syncTicketDraft({
+      ticketId: 102,
+      content: localContent,
+      deps: {
+        getIssueDetail: async () => ({
+          ticket: {
+            id: 102,
+            subject: "Title",
+            description: "Body",
+            projectId: 1,
+            trackerName: "Task",
+            priorityName: "Normal",
+            statusName: "Closed",
+            dueDate: "2025-12-31",
+            updatedAt: "t2",
+          },
+          comments: [],
+        }),
+        updateIssue: async () => { throw new Error("should not update"); },
+        createIssue: async () => { throw new Error("should not create child"); },
+        deleteIssue: async () => undefined,
+        listIssueStatuses: async () => [],
+        listTrackers: async () => [],
+        listIssuePriorities: async () => [],
+      },
+    });
+
+    assert.strictEqual(result.status, "conflict");
+    assert.strictEqual(result.conflictContext?.remoteMetadata.status, "Closed");
+    const editor = createMutableEditorStub(vscode.Uri.parse("untitled:ticket-102.md"), localContent);
+    const merged = await mergeTicketContent(result.conflictContext!, editor);
+
+    assert.strictEqual(merged.status, "merged");
+    assert.ok(editor.document.getText().includes("Local description"));
+    assert.ok(editor.document.getText().includes("status:    Closed"));
+    assert.strictEqual(getTicketDraft(102)?.baseMetadata.status, "Closed");
+    assert.strictEqual(getOfflineSyncQueue().tickets.has(102), false);
   });
 
   test("returns unreachable on server error", async () => {

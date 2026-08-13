@@ -197,13 +197,18 @@ export class NewTicketFinalizer {
     }
 
     if (input.operation.documentUri) {
-      let rewritten = false;
+      let rewriteResult;
       try {
-        rewritten = await this.documents.rewriteNewTicket({
+        rewriteResult = await this.documents.rewriteNewTicket({
           documentUri: input.operation.documentUri,
           ticketId: input.ticketId,
           projectId: detail.ticket.projectId ?? input.operation.projectId,
           replacement,
+          expected: {
+            content: latestOperation.nextIntent?.content ?? input.operation.content,
+            operationRevision:
+              latestOperation.nextIntent?.revision ?? input.operation.revision!,
+          },
         });
       } catch (error) {
         return {
@@ -213,12 +218,14 @@ export class NewTicketFinalizer {
           message: error instanceof Error ? error.message : "File rewrite or save failed.",
         };
       }
-      if (!rewritten) {
+      if (rewriteResult.kind !== "applied") {
         return {
           kind: "remote_committed",
           ticketId: input.ticketId,
           pending: "local_finalize",
-          message: "File rewrite or save failed.",
+          message: rewriteResult.kind === "stale_source"
+            ? "The document changed during finalization; the newer content was preserved."
+            : `Local document finalization failed: ${rewriteResult.kind}.`,
         };
       }
     }

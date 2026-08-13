@@ -27,6 +27,7 @@ import {
 } from "../views/ticketEditorRegistry";
 import { setViewContext } from "../views/viewContext";
 import type { SyncController } from "./syncController";
+import { parseCommentUpdateFile } from "../views/commentUpdateFile";
 
 export const TICKET_EDITOR_CONTEXT_KEY = "redmine-client.isTicketEditor";
 
@@ -62,6 +63,17 @@ export const buildRegisterEditorDocument = (): (
 
     const draftTicketId = parseNewCommentDraftFilename(filename);
     if (draftTicketId) {
+      const finalized = parseCommentUpdateFile(document.getText());
+      if (finalized && finalized.fields.issueId === draftTicketId) {
+        registerCommentDocument(
+          finalized.fields.issueId,
+          finalized.fields.journalId,
+          document,
+          finalized.fields.projectId,
+          resolveEditorConnectionScope(document.uri),
+        );
+        return;
+      }
       registerTicketDocument(draftTicketId, document, "commentDraft");
       return;
     }

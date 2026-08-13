@@ -3,6 +3,10 @@ import { parseTicketEditorContent, buildTicketEditorContent, TicketEditorContent
 import { withRegisteredTicketControlFields } from "./ticketControlFields";
 import { suppressSaveSync, releaseSaveSync } from "./saveSyncSuppression";
 import { applyEditorContent } from "./ticketPreview";
+import type {
+  DocumentApplyResult,
+  DocumentFreshnessExpectation,
+} from "../app/ticketSync/ports";
 
 const FALLBACK_METADATA = {
   tracker: "",
@@ -43,6 +47,77 @@ export type RewriteDocumentDeps = {
   readFile?: (uri: vscode.Uri) => Promise<Uint8Array>;
   writeFile?: (uri: vscode.Uri, content: Uint8Array) => Promise<void>;
   saveDocument?: (document: vscode.TextDocument) => Promise<boolean>;
+};
+
+export const compareAndRewriteDocumentWithRegisteredFields = async (input: {
+  documentUri: string;
+  ticketId: number;
+  deps?: RewriteDocumentDeps;
+  projectId?: number;
+  replacement: TicketEditorContent;
+  expected: DocumentFreshnessExpectation;
+}): Promise<DocumentApplyResult> => {
+  const deps = input.deps ?? {};
+  const textDocuments = deps.textDocuments ?? vscode.workspace.textDocuments;
+  const textEditors = deps.textEditors ?? vscode.window.visibleTextEditors;
+  const saveDocument = deps.saveDocument ?? ((target: vscode.TextDocument) => target.save());
+  const document = textDocuments.find((doc) => doc.uri.toString() === input.documentUri);
+
+  if (document) {
+    if (document.getText() !== input.expected.content) {
+      return { kind: "stale_source" };
+    }
+    let newContent: string;
+    try {
+      newContent = buildRegisteredDocumentContent(
+        input.expected.content,
+        input.ticketId,
+        input.projectId,
+        input.replacement,
+      );
+    } catch {
+      return { kind: "write_failed" };
+    }
+    if (newContent === input.expected.content) {
+      return { kind: "applied" };
+    }
+
+    suppressSaveSync(input.documentUri);
+    try {
+      if (document.getText() !== input.expected.content) {
+        return { kind: "stale_source" };
+      }
+      const editor = textEditors.find(
+        (candidate) => candidate.document.uri.toString() === input.documentUri,
+      );
+      if (!editor) {
+        return { kind: "not_available" };
+      }
+      try {
+        await applyEditorContent(editor, newContent);
+      } catch {
+        return document.getText() === input.expected.content
+          ? { kind: "write_failed" }
+          : { kind: "stale_source" };
+      }
+      if (document.getText() !== newContent) {
+        return { kind: "stale_source" };
+      }
+      if (document.isDirty && !(await saveDocument(document))) {
+        return { kind: "save_failed" };
+      }
+      if (document.getText() !== newContent) {
+        return { kind: "stale_source" };
+      }
+      return { kind: "applied" };
+    } finally {
+      releaseSaveSync(input.documentUri);
+    }
+  }
+
+  // VS Code does not provide a versioned compare-and-write for closed files.
+  // Defer until the document is open rather than permit a read/write TOCTOU overwrite.
+  return { kind: "not_available" };
 };
 
 export const rewriteDocumentWithRegisteredFields = async (

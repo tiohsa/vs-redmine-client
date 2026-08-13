@@ -6,6 +6,7 @@ import type { TicketSaveResult } from "../../views/ticketSaveTypes";
 import type { DocumentPort, SyncContext, SyncJournal } from "./ports";
 import type { TicketSyncOutcome } from "./ticketSyncOutcome";
 import { rebaseTicketEditorContent } from "./ticketIntentRebase";
+import { buildTicketEditorContent } from "../../views/ticketEditorContent";
 
 const lifecycleExpectation = (operation: OfflineTicketUpdate) => {
   if (operation.revision === undefined || operation.phase === undefined) {
@@ -137,24 +138,47 @@ export class TicketReconciler {
 
     try {
       if (input.operation.documentUri && this.documents.rewriteTicket) {
+        const source = next
+          ? {
+            subject: next.subject,
+            description: next.description,
+            metadata: next.metadata,
+            layout: next.layout,
+            metadataBlock: next.metadataBlock,
+            controlFields: next.controlFields,
+          }
+          : {
+            subject: input.operation.subject,
+            description: input.operation.description,
+            metadata: input.operation.metadata,
+            layout: input.operation.layout,
+            metadataBlock: input.operation.metadataBlock,
+            controlFields: input.operation.controlFields,
+          };
         const rewritten = await this.documents.rewriteTicket({
           documentUri: input.operation.documentUri,
           ticketId: input.operation.ticketId,
           projectId: detail.ticket.projectId,
           replacement,
+          expected: {
+            content: buildTicketEditorContent(source),
+            operationRevision: next?.revision ?? input.operation.revision!,
+          },
         });
-        if (!rewritten) {
+        if (rewritten.kind !== "applied") {
           if (input.remoteCommitted) {
             return {
               kind: "remote_committed",
               ticketId: input.operation.ticketId,
               pending: "local_finalize",
-              message: "File rewrite or save failed.",
+              message: rewritten.kind === "stale_source"
+                ? "The document changed during finalization; the newer content was preserved."
+                : `Local document finalization failed: ${rewritten.kind}.`,
             };
           }
           return {
             kind: "failed_before_commit",
-            error: new Error("File rewrite or save failed."),
+            error: new Error(`Local document finalization failed: ${rewritten.kind}.`),
           };
         }
       }

@@ -47,6 +47,12 @@ export const classifyDocumentSave = (
     const parsed = parseCommentUpdateFile(document.getText());
     return parsed ? { kind: "commentUpdateFile", parsed } : { kind: "none" };
   }
+  if (parseNewCommentDraftFilename(filename)) {
+    const finalizedDraft = parseCommentUpdateFile(document.getText());
+    if (finalizedDraft) {
+      return { kind: "commentUpdateFile", parsed: finalizedDraft };
+    }
+  }
 
   const commentIdForDocument =
     getCommentIdForDocument(document) ?? getCommentIdForUri(document.uri);

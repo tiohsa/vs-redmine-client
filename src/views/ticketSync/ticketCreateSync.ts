@@ -162,6 +162,28 @@ export const createTicketFromContent = async (input: {
   baseDir?: string;
   deps: TicketCreateDependencies;
   beforeRemoteWrite?: () => Promise<void>;
+  afterParentCreate?: (ticketId: number) => Promise<void>;
+  existingChildId?: (input: { ordinal: number; subject: string }) => number | undefined;
+  beforeChildCreate?: (input: { ordinal: number; subject: string }) => Promise<void>;
+  afterChildCreate?: (input: {
+    ordinal: number;
+    subject: string;
+    childId: number;
+  }) => Promise<void>;
+  afterChildCreateFailure?: (input: {
+    ordinal: number;
+    error: unknown;
+    commitUnknown: boolean;
+  }) => Promise<void>;
+  beforeChildCompensation?: (input: { ordinal: number; childId: number }) => Promise<void>;
+  afterChildCompensation?: (input: {
+    ordinal: number;
+    childId: number;
+    error?: unknown;
+  }) => Promise<void>;
+  beforeParentCompensation?: (ticketId: number) => Promise<void>;
+  afterParentCompensation?: (input: { ticketId: number; error?: unknown }) => Promise<void>;
+  afterCompensationComplete?: () => Promise<void>;
 }): Promise<{
   result: TicketSaveResult;
   createdId?: number;
@@ -253,6 +275,24 @@ export const createTicketFromContent = async (input: {
     };
   }
 
+  if (createdId && input.afterParentCreate) {
+    try {
+      await input.afterParentCreate(createdId);
+    } catch (error) {
+      const message = error instanceof Error
+        ? error.message
+        : "Created ticket journal persistence failed.";
+      return {
+        result: buildResult("failed", message, { uploadSummary }),
+        createdId,
+        parsed,
+        remoteIssueMayExist: true,
+        remoteWriteAttempted: true,
+        remoteCommitUnknown: false,
+      };
+    }
+  }
+
   if (createdId && children.length > 0) {
     const childCreateResult = await createChildTickets({
       projectId,
@@ -262,23 +302,72 @@ export const createTicketFromContent = async (input: {
       createIssue: input.deps.createIssue,
       deleteIssue: input.deps.deleteIssue,
       description: "",
+      existingChildId: input.existingChildId,
+      beforeCreate: input.beforeChildCreate,
+      afterCreate: input.afterChildCreate,
     });
     if (childCreateResult.error) {
+      const childCommitUnknown = childCreateResult.remoteWriteAttempted === true &&
+        isRemoteCommitUnknownError(childCreateResult.errorCause);
+      if (childCreateResult.remoteWriteAttempted && childCreateResult.failedOrdinal !== undefined) {
+        await input.afterChildCreateFailure?.({
+          ordinal: childCreateResult.failedOrdinal,
+          error: childCreateResult.errorCause,
+          commitUnknown: childCommitUnknown,
+        });
+      }
+      if (childCommitUnknown) {
+        return {
+          result: buildResult("failed", childCreateResult.error, { uploadSummary }),
+          createdId,
+          parsed,
+          remoteIssueMayExist: true,
+          remoteWriteAttempted: true,
+          remoteCommitUnknown: false,
+        };
+      }
+      let compensationFailed = false;
+      for (let ordinal = 0; ordinal < childCreateResult.createdChildIds.length; ordinal++) {
+        const childId = childCreateResult.createdChildIds[ordinal];
+        let compensationStarted = false;
+        try {
+          await input.beforeChildCompensation?.({ ordinal, childId });
+          compensationStarted = true;
+          await input.deps.deleteIssue(childId);
+          await input.afterChildCompensation?.({ ordinal, childId });
+        } catch (error) {
+          compensationFailed = true;
+          if (compensationStarted) {
+            await input.afterChildCompensation?.({ ordinal, childId, error });
+          }
+        }
+      }
       let parentDeleted = false;
+      let parentCompensationStarted = false;
       try {
+        await input.beforeParentCompensation?.(createdId);
+        parentCompensationStarted = true;
         await input.deps.deleteIssue(createdId);
         parentDeleted = true;
-      } catch {
-        // The parent issue may still exist and must be journaled by the caller.
+        await input.afterParentCompensation?.({ ticketId: createdId });
+      } catch (error) {
+        compensationFailed = true;
+        if (parentCompensationStarted) {
+          await input.afterParentCompensation?.({ ticketId: createdId, error });
+        }
       }
-      await Promise.allSettled(
-        childCreateResult.createdChildIds.map((issueId) => input.deps.deleteIssue(issueId)),
-      );
+      if (parentDeleted && !compensationFailed) {
+        try {
+          await input.afterCompensationComplete?.();
+        } catch {
+          compensationFailed = true;
+        }
+      }
       return {
         result: buildResult("failed", childCreateResult.error, { uploadSummary }),
         createdId: parentDeleted ? undefined : createdId,
         parsed: parentDeleted ? undefined : parsed,
-        remoteIssueMayExist: !parentDeleted,
+        remoteIssueMayExist: !parentDeleted || compensationFailed,
         remoteWriteAttempted: true,
         remoteCommitUnknown: false,
       };

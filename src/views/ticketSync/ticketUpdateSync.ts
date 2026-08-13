@@ -21,6 +21,7 @@ import { createChildTickets, splitUniqueChildren } from "./ticketChildCreateSync
 import type { TicketReloadDependencies, TicketSaveDependencies } from "./types";
 import { buildTicketPreviewContent } from "../ticketPreview";
 import { editorContentFromTicket, metadataFromTicket } from "./ticketRemoteContent";
+import { containsConflictMarkers } from "../../utils/threeWayMerge";
 
 export interface SyncTicketDraftInput {
   operationScope?: string;
@@ -49,6 +50,9 @@ export const syncTicketDraft = async (
   const draft = getTicketDraft(input.ticketId, input.operationScope);
   if (!draft) {
     return buildResult("failed", "Missing draft state for ticket.");
+  }
+  if (containsConflictMarkers(input.content)) {
+    return buildResult("failed", vscode.l10n.t("Resolve all merge conflict markers before syncing."));
   }
 
   let parsed;
@@ -149,10 +153,13 @@ export const syncTicketDraft = async (
         return buildResult("conflict", "Remote changes detected. Refresh before saving.", {
           conflictContext: {
             ticketId: input.ticketId,
+            baseSubject: draft.baseSubject,
+            baseDescription: draft.baseDescription,
             localSubject: subject,
             localDescription: description,
             remoteSubject: remoteDetail.ticket.subject,
             remoteDescription: remoteDetail.ticket.description ?? "",
+            remoteMetadata: metadataFromTicket(remoteDetail.ticket),
             remoteUpdatedAt,
           },
         });

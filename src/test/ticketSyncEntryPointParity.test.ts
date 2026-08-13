@@ -106,7 +106,7 @@ suite("TicketSyncService entry-point parity", () => {
               projectId,
               replacement,
             );
-            return true;
+            return { kind: "applied" };
           },
           findOpenDocument: () => openEditor.document,
         },
@@ -201,7 +201,7 @@ suite("TicketSyncService entry-point parity", () => {
           searchUsers: async () => [],
         },
         documents: {
-          rewriteNewTicket: async () => true,
+          rewriteNewTicket: async () => ({ kind: "applied" }),
           rewriteTicket: async ({ ticketId, projectId, replacement }) => {
             finalizedContent = buildRegisteredDocumentContent(
               openEditor.document.getText(),
@@ -209,7 +209,7 @@ suite("TicketSyncService entry-point parity", () => {
               projectId,
               replacement,
             );
-            return true;
+            return { kind: "applied" };
           },
           findOpenDocument: () => openEditor.document,
         },

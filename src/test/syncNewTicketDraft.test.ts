@@ -1,6 +1,6 @@
 import * as assert from "assert";
 import * as vscode from "vscode";
-import { syncNewTicketDraft } from "../views/ticketSaveSync";
+import { syncNewTicketDraft } from "../views/ticketSync/ticketCreateSync";
 import { clearTicketDrafts } from "../views/ticketDraftStore";
 import { clearNewTicketDrafts } from "../views/newTicketDraftStore";
 import { registerNewTicketDraft, setEditorProjectId } from "../views/ticketEditorRegistry";

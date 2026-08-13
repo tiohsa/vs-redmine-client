@@ -110,6 +110,41 @@ const resolveCommitUnknownInteractive = async (
   return undefined;
 };
 
+const resolveCommentCommitUnknownInteractive = async (
+  engine: ReturnType<typeof createSyncEngine>,
+  key: Extract<UnsyncedFileSyncKey, { kind: "comment" }>,
+  operationScope: string,
+): Promise<Awaited<ReturnType<typeof engine.syncOne>> | undefined> => {
+  const reconcileLabel = vscode.l10n.t("Reconcile from Redmine");
+  const linkLabel = vscode.l10n.t("Link comment journal");
+  const choice = await vscode.window.showWarningMessage(
+    vscode.l10n.t("The previous comment write may have reached Redmine. Check Redmine for one uniquely matching journal without sending the comment again."),
+    { modal: true },
+    reconcileLabel,
+    linkLabel,
+  );
+  if (choice === linkLabel) {
+    const rawCommentId = await vscode.window.showInputBox({
+      prompt: vscode.l10n.t("Enter the Redmine comment journal ID to verify and link."),
+      validateInput: (value) => /^\d+$/.test(value) && Number(value) > 0
+        ? undefined
+        : vscode.l10n.t("Enter a positive comment journal ID."),
+    });
+    if (!rawCommentId) { return undefined; }
+    return engine.resolveCommentCommitUnknown({
+      key,
+      context: { connectionScope: operationScope },
+      resolution: { kind: "link_remote_comment", commentId: Number(rawCommentId) },
+    });
+  }
+  if (choice !== reconcileLabel) { return undefined; }
+  return engine.resolveCommentCommitUnknown({
+    key,
+    context: { connectionScope: operationScope },
+    resolution: { kind: "reconcile_remote" },
+  });
+};
+
 export const syncUnsyncedFile = async (
   item: { syncKey: UnsyncedFileSyncKey },
   options: SyncUnsyncedFileOptions = {},
@@ -141,8 +176,10 @@ const syncUnsyncedFileAtScope = async (
       { connectionScope: operationScope },
     );
     if (
-      outcome.kind === "commit_unknown" &&
-      (previousPhase === "commit_unknown" || previousPhase === "remote_write_started")
+      (outcome.kind === "commit_unknown" &&
+        (previousPhase === "commit_unknown" || previousPhase === "remote_write_started")) ||
+      (outcome.kind === "remote_committed" && outcome.pending === "remote_reconcile" &&
+        (previousPhase === "remote_committed" || previousPhase === "reconciliation_pending"))
     ) {
       outcome = await resolveCommitUnknownInteractive(engine.ticketService(), syncKey, operationScope)
         ?? outcome;
@@ -245,7 +282,24 @@ const syncUnsyncedFileAtScope = async (
   }
 
   if (syncKey.kind === "comment") {
-    const outcome = await createSyncEngine().syncOne(syncKey, { connectionScope: operationScope });
+    const previousPhase = getOfflineSyncQueue(operationScope).comments.find((comment) =>
+      comment.ticketId === syncKey.ticketId && (
+        (syncKey.commentId !== undefined && comment.commentId === syncKey.commentId) ||
+        (syncKey.commentId === undefined && comment.documentUri === syncKey.documentUri)
+      ),
+    )?.phase;
+    const engine = createSyncEngine();
+    let outcome = await engine.syncOne(syncKey, { connectionScope: operationScope });
+    if (
+      outcome.kind === "commit_unknown" &&
+      (previousPhase === "commit_unknown" || previousPhase === "remote_write_started")
+    ) {
+      outcome = await resolveCommentCommitUnknownInteractive(
+        engine,
+        syncKey,
+        operationScope,
+      ) ?? outcome;
+    }
     if (outcome.kind === "completed" || outcome.kind === "no_change") {
       showInfo(vscode.l10n.t("Comment synced."));
       if (outcome.kind === "no_change") {
@@ -262,12 +316,14 @@ const syncUnsyncedFileAtScope = async (
     } else {
       const message = outcome.kind === "failed_before_commit"
         ? outcome.error.message
+        : outcome.kind === "commit_unknown" || outcome.kind === "remote_committed"
+          ? outcome.message
         : vscode.l10n.t("Unknown error");
       if (message === "Queue entry for this comment update not found.") {
         showWarning(vscode.l10n.t("Queue entry for this comment update not found."));
         return undefined;
       }
-      showWarning(vscode.l10n.t("Sync failed: {0}", message));
+      showWarning(vscode.l10n.t("Sync failed: {0}", message ?? vscode.l10n.t("Unknown error")));
       return { status: "failed", kind: "comment", message };
     }
   }

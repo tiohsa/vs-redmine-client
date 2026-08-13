@@ -11,12 +11,42 @@ import type {
 } from "../../views/offlineSyncStore";
 import type { TicketCreateDependencies, TicketSaveDependencies } from "../../views/ticketSync/types";
 import type { TicketEditorContent } from "../../views/ticketEditorContent";
+import type {
+  DurableSyncEffect,
+  DurableSyncEffectAction,
+  DurableSyncEffectState,
+} from "../syncEffects";
+
+export type DocumentFreshnessExpectation = {
+  content: string;
+  operationRevision: number;
+};
+
+export type DocumentApplyResult =
+  | { kind: "applied" }
+  | { kind: "stale_source" }
+  | { kind: "not_available" }
+  | { kind: "write_failed" }
+  | { kind: "save_failed" };
 
 export interface SyncContext {
   connectionScope: string;
 }
 
 export interface SyncJournal {
+  planEffect(
+    operationId: string,
+    effect: DurableSyncEffect,
+    scope: string,
+    expectedRevision: number,
+  ): Promise<DurableSyncEffect | undefined>;
+  transitionEffect(
+    operationId: string,
+    effectId: string,
+    action: DurableSyncEffectAction,
+    scope: string,
+    expected: { operationRevision: number; sourceState: DurableSyncEffectState },
+  ): Promise<DurableSyncEffect | undefined>;
   getNewTicket(
     key: { queueId?: string; documentUri?: string },
     scope: string,
@@ -55,13 +85,15 @@ export interface DocumentPort {
     ticketId: number;
     projectId?: number;
     replacement: import("../../views/ticketEditorContent").TicketEditorContent;
-  }): Promise<boolean>;
+    expected: DocumentFreshnessExpectation;
+  }): Promise<DocumentApplyResult>;
   rewriteTicket?(input: {
     documentUri: string;
     ticketId: number;
     projectId?: number;
     replacement: import("../../views/ticketEditorContent").TicketEditorContent;
-  }): Promise<boolean>;
+    expected: DocumentFreshnessExpectation;
+  }): Promise<DocumentApplyResult>;
   findOpenDocument(uri: string): vscode.TextDocument | undefined;
 }
 

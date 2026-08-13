@@ -35,8 +35,9 @@ import {
 import { isSaveSyncSuppressed } from "../saveSyncSuppression";
 import { getDefaultProjectId } from "../../config/settings";
 import { getProjectSelection } from "../../config/projectSelection";
-import { editorContentFromTicket } from "./ticketRemoteContent";
+import { editorContentFromTicket, metadataFromTicket } from "./ticketRemoteContent";
 import { rewriteDocumentWithRegisteredFields } from "../editorDocumentRewrite";
+import { containsConflictMarkers } from "../../utils/threeWayMerge";
 
 export interface QueueTicketDraftInput {
   operationScope?: string;
@@ -54,6 +55,9 @@ export const queueTicketDraft = async (
   const draft = getTicketDraft(input.ticketId, input.operationScope);
   if (!draft) {
     return buildResult("failed", "Missing draft state for ticket.");
+  }
+  if (containsConflictMarkers(input.content)) {
+    return buildResult("failed", vscode.l10n.t("Resolve all merge conflict markers before syncing."));
   }
 
   let parsed;
@@ -170,10 +174,13 @@ const detectTicketUpdatedAtConflict = async (input: {
       return buildResult("conflict", "Remote changes detected. Refresh before saving.", {
         conflictContext: {
           ticketId: input.update.ticketId,
+          baseSubject: input.update.baseSubject,
+          baseDescription: input.update.baseDescription,
           localSubject: input.update.subject,
           localDescription: input.localDescription,
           remoteSubject: remote.ticket.subject,
           remoteDescription: remote.ticket.description ?? "",
+          remoteMetadata: metadataFromTicket(remote.ticket),
           remoteUpdatedAt,
         },
       });
@@ -189,6 +196,16 @@ const createQueuedChildTickets = async (input: {
   update: OfflineTicketUpdate;
   uniqueChildren: string[];
   ensureRemoteDetail: () => Promise<IssueDetailResult>;
+  existingChildId?: (input: { ordinal: number; subject: string }) => number | undefined;
+  beforeChildCreate?: (input: { ordinal: number; subject: string }) => Promise<void>;
+  afterChildCreate?: (input: { ordinal: number; subject: string; childId: number }) => Promise<void>;
+  afterChildCreateFailure?: (input: {
+    ordinal: number;
+    error: unknown;
+    commitUnknown: boolean;
+  }) => Promise<void>;
+  beforeChildCompensation?: (input: { ordinal: number; childId: number }) => Promise<void>;
+  afterChildCompensation?: (input: { ordinal: number; childId: number; error?: unknown }) => Promise<void>;
 }): Promise<{ createdChildIds: number[]; failure?: TicketSaveResult }> => {
   if (input.uniqueChildren.length === 0) {
     return { createdChildIds: [] };
@@ -224,11 +241,44 @@ const createQueuedChildTickets = async (input: {
     createIssue: input.deps.createIssue,
     deleteIssue: input.deps.deleteIssue,
     description: "",
+    existingChildId: input.existingChildId,
+    beforeCreate: input.beforeChildCreate,
+    afterCreate: input.afterChildCreate,
   });
   if (childCreateResult.error) {
-    await Promise.allSettled(
-      childCreateResult.createdChildIds.map((issueId) => input.deps.deleteIssue(issueId)),
-    );
+    const commitUnknown = childCreateResult.remoteWriteAttempted === true &&
+      isRemoteCommitUnknownError(childCreateResult.errorCause);
+    if (childCreateResult.remoteWriteAttempted && childCreateResult.failedOrdinal !== undefined) {
+      await input.afterChildCreateFailure?.({
+        ordinal: childCreateResult.failedOrdinal,
+        error: childCreateResult.errorCause,
+        commitUnknown,
+      });
+    }
+    if (commitUnknown) {
+      return {
+        createdChildIds: childCreateResult.createdChildIds,
+        failure: {
+          ...buildResult("failed", childCreateResult.error),
+          remoteWriteAttempted: true,
+          remoteCommitUnknown: true,
+        },
+      };
+    }
+    for (let ordinal = 0; ordinal < childCreateResult.createdChildIds.length; ordinal++) {
+      const childId = childCreateResult.createdChildIds[ordinal];
+      let compensationStarted = false;
+      try {
+        await input.beforeChildCompensation?.({ ordinal, childId });
+        compensationStarted = true;
+        await input.deps.deleteIssue(childId);
+        await input.afterChildCompensation?.({ ordinal, childId });
+      } catch (error) {
+        if (compensationStarted) {
+          await input.afterChildCompensation?.({ ordinal, childId, error });
+        }
+      }
+    }
     return {
       createdChildIds: [],
       failure: buildResult("failed", childCreateResult.error),
@@ -307,6 +357,16 @@ export const applyQueuedTicketUpdate = async (input: {
   deferReconciliation?: boolean;
   beforeRemoteWrite?: () => Promise<void>;
   afterRemoteWrite?: (createdChildIds: number[]) => Promise<void>;
+  existingChildId?: (input: { ordinal: number; subject: string }) => number | undefined;
+  beforeChildCreate?: (input: { ordinal: number; subject: string }) => Promise<void>;
+  afterChildCreate?: (input: { ordinal: number; subject: string; childId: number }) => Promise<void>;
+  afterChildCreateFailure?: (input: {
+    ordinal: number;
+    error: unknown;
+    commitUnknown: boolean;
+  }) => Promise<void>;
+  beforeChildCompensation?: (input: { ordinal: number; childId: number }) => Promise<void>;
+  afterChildCompensation?: (input: { ordinal: number; childId: number; error?: unknown }) => Promise<void>;
 }): Promise<TicketSaveResult> => {
   const deps = { ...defaultDeps, ...input.deps };
   const update = input.update;
@@ -391,38 +451,56 @@ export const applyQueuedTicketUpdate = async (input: {
   });
   if (conflict) { return conflict; }
 
-  if (input.beforeRemoteWrite) {
-    try {
-      await input.beforeRemoteWrite();
-    } catch (error) {
-      const message = error instanceof Error ? error.message : "Sync journal persistence failed.";
-      return buildResult("failed", message, { uploadSummary });
-    }
-  }
-
   const childCreate = await createQueuedChildTickets({
     deps,
     update,
     uniqueChildren,
     ensureRemoteDetail,
+    existingChildId: input.existingChildId,
+    beforeChildCreate: input.beforeChildCreate,
+    afterChildCreate: input.afterChildCreate,
+    afterChildCreateFailure: input.afterChildCreateFailure,
+    beforeChildCompensation: input.beforeChildCompensation,
+    afterChildCompensation: input.afterChildCompensation,
   });
   if (childCreate.failure) { return childCreate.failure; }
   const createdChildIds = childCreate.createdChildIds;
 
+  let remoteWriteAttempted = false;
   try {
+    if (input.beforeRemoteWrite) {
+      await input.beforeRemoteWrite();
+    }
     if (Object.keys(changes).length > 0) {
+      remoteWriteAttempted = true;
       await deps.updateIssue({ issueId: update.ticketId, fields: changes });
     }
   } catch (error) {
-    if (createdChildIds.length > 0) {
-      await Promise.allSettled(
-        createdChildIds.map((issueId) => deps.deleteIssue(issueId)),
-      );
+    const remoteCommitUnknown = remoteWriteAttempted && isRemoteCommitUnknownError(error);
+    if (createdChildIds.length > 0 && !remoteCommitUnknown) {
+      for (let ordinal = 0; ordinal < createdChildIds.length; ordinal++) {
+        const childId = createdChildIds[ordinal];
+        let compensationStarted = false;
+        try {
+          await input.beforeChildCompensation?.({ ordinal, childId });
+          compensationStarted = true;
+          await deps.deleteIssue(childId);
+          await input.afterChildCompensation?.({ ordinal, childId });
+        } catch (compensationError) {
+          if (compensationStarted) {
+            await input.afterChildCompensation?.({
+              ordinal,
+              childId,
+              error: compensationError,
+            });
+          }
+        }
+      }
     }
     return {
       ...mapErrorToResult(error),
-      remoteWriteAttempted: true,
-      remoteCommitUnknown: isRemoteCommitUnknownError(error),
+      remoteWriteAttempted,
+      remoteCommitUnknown,
     };
   }
 
@@ -431,7 +509,11 @@ export const applyQueuedTicketUpdate = async (input: {
       await input.afterRemoteWrite(createdChildIds);
     } catch (error) {
       const message = error instanceof Error ? error.message : "Sync journal persistence failed.";
-      return buildResult("failed", `remote_commit_journal_failed: ${message}`, { uploadSummary });
+      return buildResult("failed", `remote_commit_journal_failed: ${message}`, {
+        uploadSummary,
+        remoteWriteAttempted: Object.keys(changes).length > 0,
+        remoteCommitUnknown: Object.keys(changes).length > 0,
+      });
     }
   }
 

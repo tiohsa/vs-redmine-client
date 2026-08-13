@@ -1,11 +1,23 @@
 import * as assert from "assert";
+import * as fs from "fs";
+import * as os from "os";
+import * as path from "path";
+import * as vscode from "vscode";
 import {
   buildCommentUpdateFilename,
   buildCommentUpdateFileContent,
+  finalizeNewCommentDraftFileAfterSync,
   isCommentUpdateFilename,
   parseCommentUpdateFile,
+  updateCommentUpdateFileAfterSync,
 } from "../views/commentUpdateFile";
 import { computeNotesHash } from "../utils/notesHash";
+import { buildRegisterEditorDocument } from "../app/editorEventController";
+import {
+  clearRegistry,
+  getCommentIdForDocument,
+  getEditorContentTypeForDocument,
+} from "../views/ticketEditorRegistry";
 
 suite("commentUpdateFile", () => {
   test("buildCommentUpdateFilename", () => {
@@ -110,5 +122,54 @@ suite("commentUpdateFile", () => {
     const h1 = computeNotesHash("text A");
     const h2 = computeNotesHash("text B");
     assert.notStrictEqual(h1, h2);
+  });
+
+  test("local finalize は期待bodyより新しいfileを一文字も変更しない", async () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "comment-finalize-race-"));
+    const file = path.join(dir, "comment.md");
+    const newer = buildCommentUpdateFileContent({
+      issueId: 39,
+      journalId: 123,
+      sourceNotesHash: computeNotesHash("old"),
+    }, "newer local edit");
+    fs.writeFileSync(file, newer);
+
+    const result = await updateCommentUpdateFileAfterSync(
+      vscode.Uri.file(file).toString(),
+      "remote canonical",
+      "old",
+    );
+
+    assert.strictEqual(result, "not_available");
+    assert.strictEqual(fs.readFileSync(file, "utf8"), newer);
+  });
+
+  test("new comment draft finalize はidentity frontmatterを保存しrestart後もcommentとして復元できる", async () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "comment-create-finalize-"));
+    const file = path.join(dir, "redmine-client-new-comment-39.md");
+    fs.writeFileSync(file, "Created body");
+    const document = await vscode.workspace.openTextDocument(vscode.Uri.file(file));
+    await vscode.window.showTextDocument(document, { preview: false });
+
+    const result = await finalizeNewCommentDraftFileAfterSync({
+      documentUri: document.uri.toString(),
+      ticketId: 39,
+      commentId: 777,
+      projectId: 4,
+      expectedDocumentBody: "Created body",
+      syncedBody: "Created body",
+    });
+
+    assert.strictEqual(result, "applied");
+    const parsed = parseCommentUpdateFile(document.getText());
+    assert.strictEqual(parsed?.fields.issueId, 39);
+    assert.strictEqual(parsed?.fields.journalId, 777);
+    assert.strictEqual(parsed?.body, "Created body");
+
+    clearRegistry();
+    buildRegisterEditorDocument()(document);
+    assert.strictEqual(getEditorContentTypeForDocument(document), "comment");
+    assert.strictEqual(getCommentIdForDocument(document), 777);
+    await vscode.commands.executeCommand("workbench.action.closeActiveEditor");
   });
 });

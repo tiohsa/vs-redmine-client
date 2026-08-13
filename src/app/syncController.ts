@@ -13,11 +13,13 @@ import type {
   UnsyncedPresentationPort,
 } from "./presentationPorts";
 
-export type SyncStatus = "uploaded" | "noChange" | "conflict" | "failed";
+export type SyncStatus = "uploaded" | "merged" | "noChange" | "conflict" | "failed";
 
 const toSyncStatus = (s: string): SyncStatus =>
   s === "updated" || s === "created"
     ? "uploaded"
+    : s === "merged"
+      ? "merged"
     : s === "noChange"
       ? "noChange"
       : s === "conflict"

@@ -20,7 +20,7 @@ export const buildUnsyncedDashboardItems = (): DashboardUnsyncedItem[] => {
       detail: subject,
       documentUri: undefined,
       lifecycle,
-      canDiscard: lifecycle === "queued" || update.nextIntent !== undefined,
+      canDiscard: true,
       canSync: true,
     });
   });

@@ -139,6 +139,23 @@ const runOfflineSyncAtScope = async (
             : "Comment";
         advance(`${label} (${processed}/${totalItems})`);
       }
+      for (const key of syncAllOutcome.remaining) {
+        if (key.kind === "newTicket") {
+          const original = queue.newTickets.find((candidate) => candidate.queueId === key.queueId);
+          if (original) { failedNewTickets.push(original); }
+        } else if (key.kind === "ticket") {
+          const original = queue.tickets.get(key.ticketId);
+          if (original) { failedTickets.push(original); }
+        } else {
+          const original = queue.comments.find((candidate) =>
+            candidate.ticketId === key.ticketId &&
+            (key.commentId !== undefined
+              ? candidate.commentId === key.commentId
+              : candidate.documentUri === key.documentUri),
+          );
+          if (original) { failedComments.push(original); }
+        }
+      }
       if (syncAllOutcome.cancelled) {
         wasCancelled = true;
       }

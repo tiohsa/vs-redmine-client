@@ -44,6 +44,8 @@ export type SyncAllItemOutcome = {
 };
 
 export type SyncAllOutcome = {
+  plan: TicketSyncQueueKey[];
   results: SyncAllItemOutcome[];
+  remaining: TicketSyncQueueKey[];
   cancelled: boolean;
 };

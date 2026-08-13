@@ -3,6 +3,7 @@ export type CommentSaveStatus =
   | "created"
   | "created_unresolved"
   | "queued"
+  | "merged"
   | "no_change"
   | "conflict"
   | "unreachable"
@@ -13,6 +14,7 @@ export type CommentSaveStatus =
 export interface CommentConflictContext {
   commentId: number;
   ticketId: number;
+  baseBody: string;
   localBody: string;
   remoteBody: string;
   remoteUpdatedAt?: string;
@@ -25,6 +27,9 @@ export interface CommentSaveResult {
   projectId?: number;
   uploadSummary?: UploadSummary;
   conflictContext?: CommentConflictContext;
+  remoteWriteAttempted?: boolean;
+  remoteCommitUnknown?: boolean;
+  remoteCommitted?: boolean;
 }
 
 export const COMMENT_TYPE_LABEL = "comment";

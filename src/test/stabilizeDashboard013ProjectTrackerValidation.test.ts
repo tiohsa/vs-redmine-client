@@ -3,7 +3,8 @@ import * as vscode from "vscode";
 import { buildTicketEditorContent } from "../views/ticketEditorContent";
 import { initializeTicketDraft, clearTicketDrafts } from "../views/ticketDraftStore";
 import { clearNewTicketDrafts } from "../views/newTicketDraftStore";
-import { syncTicketDraft, syncNewTicketDraftContent } from "../views/ticketSaveSync";
+import { syncTicketDraft } from "../views/ticketSync/ticketUpdateSync";
+import { syncNewTicketDraftContent } from "../views/ticketSync/ticketCreateSync";
 import { buildIssueMetadataFixture } from "./helpers/ticketMetadataFixtures";
 
 suite("0.1.3 安定化: プロジェクト固有トラッカー検証", () => {

@@ -14,7 +14,8 @@ import { clearRegistry, registerNewTicketDraft, setEditorProjectId, getTicketIdF
 import { clearNewTicketDrafts } from "../views/newTicketDraftStore";
 import { buildTicketEditorContent, parseTicketEditorContent } from "../views/ticketEditorContent";
 import { buildIssueMetadataFixture } from "./helpers/ticketMetadataFixtures";
-import { syncNewTicketDraft, syncTicketDraft } from "../views/ticketSaveSync";
+import { syncNewTicketDraft } from "../views/ticketSync/ticketCreateSync";
+import { syncTicketDraft } from "../views/ticketSync/ticketUpdateSync";
 import type { TicketSaveResult } from "../views/ticketSaveTypes";
 
 // ── ヘルパー ──────────────────────────────────────────────────────────────

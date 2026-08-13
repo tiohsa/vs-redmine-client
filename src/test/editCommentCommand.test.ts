@@ -3,8 +3,11 @@ import * as vscode from "vscode";
 import { editComment } from "../commands/editComment";
 import { validateComment, getCommentLimitGuidance } from "../utils/commentValidation";
 import { createTempImage } from "./helpers/markdownImageTestUtils";
+import { initializeOfflineSyncStore } from "../views/offlineSyncStore";
+import { createTestMemento } from "./helpers/vscodeMemento";
 
 suite("Edit comment command", () => {
+  setup(() => initializeOfflineSyncStore(createTestMemento()));
   test("uploads images and passes upload tokens", async () => {
     const temp = createTempImage();
     const editor = {
@@ -47,6 +50,23 @@ suite("Edit comment command", () => {
         clearCommentDraft: () => undefined,
         getTicketIdForEditor: () => 10,
         getEditorContentType: () => "comment",
+        commentSyncDeps: {
+          addComment: async () => undefined,
+          updateIssue: async () => undefined,
+          getCurrentUserId: async () => 1,
+          getIssueDetail: async () => ({
+            ticket: { id: 10, subject: "T", projectId: 1 },
+            comments: [{
+              id: 5,
+              ticketId: 10,
+              authorId: 1,
+              authorName: "User",
+              body: "Old",
+              updatedAt: "t2",
+              editableByCurrentUser: true,
+            }],
+          }),
+        },
       },
     );
 
