@@ -446,6 +446,64 @@ suite("offlineSyncStore — workspaceState 永続化", () => {
     assert.strictEqual(restored?.effects?.[2]?.state, "commit_unknown");
   });
 
+  test("restart は new-ticket の primary effect が不確定なまま queued に戻るのを防ぐ", () => {
+    const memento = createTestMemento();
+    void memento.update("redmine.offlineSyncQueue", {
+      version: 3,
+      operations: [{
+        operationId: "new-ticket-restart-unknown",
+        kind: "ticketCreate",
+        connectionScope: "",
+        revision: 2,
+        phase: "preparing",
+        createdAt: 1,
+        effects: [{
+          effectId: "ticket-create",
+          kind: "ticket_create",
+          operationRevision: 2,
+          state: "started",
+          target: {},
+        }],
+        payload: { content: "# Ticket" },
+      }],
+    });
+
+    initializeOfflineSyncStore(memento);
+
+    const restored = getOfflineSyncQueue().newTickets[0];
+    assert.strictEqual(restored.phase, "commit_unknown");
+    assert.strictEqual(restored.effects?.[0]?.state, "commit_unknown");
+  });
+
+  test("restart は new-comment の primary effect が不確定なまま queued に戻るのを防ぐ", () => {
+    const memento = createTestMemento();
+    void memento.update("redmine.offlineSyncQueue", {
+      version: 3,
+      operations: [{
+        operationId: "new-comment-restart-unknown",
+        kind: "commentCreate",
+        connectionScope: "",
+        revision: 2,
+        phase: "preparing",
+        createdAt: 1,
+        effects: [{
+          effectId: "comment-create",
+          kind: "comment_create",
+          operationRevision: 2,
+          state: "started",
+          target: { ticketId: 42 },
+        }],
+        payload: { ticketId: 42, body: "comment" },
+      }],
+    });
+
+    initializeOfflineSyncStore(memento);
+
+    const restored = getOfflineSyncQueue().comments[0];
+    assert.strictEqual(restored.phase, "commit_unknown");
+    assert.strictEqual(restored.effects?.[0]?.state, "commit_unknown");
+  });
+
   test("restart 時も commit_unknown active revision と later nextIntent をそのまま保持する", () => {
     const memento = createTestMemento();
     void memento.update("redmine.offlineSyncQueue", {

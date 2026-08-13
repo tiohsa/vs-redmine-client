@@ -52,6 +52,27 @@ export type DurableSyncEffectAction =
   | { kind: "complete_compensation" }
   | { kind: "mark_compensation_unknown"; detail?: string };
 
+const UNCERTAIN_EFFECT_STATES: ReadonlySet<DurableSyncEffectState> = new Set([
+  "started",
+  "commit_unknown",
+  "compensation_started",
+  "compensation_unknown",
+]);
+
+export const restoreDurableSyncEffect = (
+  effect: DurableSyncEffect,
+): DurableSyncEffect => ({
+  ...effect,
+  // A restart can happen after a request left the client but before its
+  // result was journaled. A durable `started` checkpoint is never retryable.
+  state: effect.state === "started" ? "commit_unknown" : effect.state,
+  target: { ...effect.target },
+});
+
+export const hasUncertainDurableSyncEffect = (
+  effects: readonly DurableSyncEffect[] | undefined,
+): boolean => effects?.some((effect) => UNCERTAIN_EFFECT_STATES.has(effect.state)) === true;
+
 const actionAllowsSource = (
   action: DurableSyncEffectAction,
   source: DurableSyncEffectState,

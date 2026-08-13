@@ -24,6 +24,15 @@ const SORT_FIELDS = new Set(["priority", "status", "tracker", "assignee"]);
 const METADATA_PATCH_FIELDS = new Set(["tracker", "priority", "status", "due_date", "start_date", "assignee"]);
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 
+const hasValidDateField = (
+  value: Record<string, unknown>,
+  field: "due_date" | "start_date",
+): boolean => {
+  if (!(field in value)) { return true; }
+  const date = value[field];
+  return isString(date) && (date.length === 0 || DATE_RE.test(date));
+};
+
 const validateUnsyncedKey = (v: unknown): v is DashboardUnsyncedKey => {
   if (!isObject(v)) { return false; }
   const kind = v["kind"];
@@ -88,16 +97,8 @@ const validateMetadataPatch = (v: unknown): boolean => {
   for (const key of ["tracker", "priority", "status"]) {
     if (key in v && !isNonEmptyString(v[key])) { return false; }
   }
-  if ("due_date" in v) {
-    const dueDate = v["due_date"];
-    if (!isString(dueDate)) { return false; }
-    if (dueDate.length > 0 && !DATE_RE.test(dueDate)) { return false; }
-  }
-  if ("start_date" in v) {
-    const startDate = v["start_date"];
-    if (!isString(startDate)) { return false; }
-    if (startDate.length > 0 && !DATE_RE.test(startDate)) { return false; }
-  }
+  if (!hasValidDateField(v, "due_date")) { return false; }
+  if (!hasValidDateField(v, "start_date")) { return false; }
   if ("assignee" in v && !isString(v["assignee"])) { return false; }
   return true;
 };

@@ -9,6 +9,8 @@ import {
 import type { FrontmatterControlFields } from "./ticketMetadataControlFields";
 import { computeNotesHash } from "../utils/notesHash";
 import {
+  hasUncertainDurableSyncEffect,
+  restoreDurableSyncEffect,
   transitionDurableSyncEffect,
   type DurableSyncEffect,
   type DurableSyncEffectAction,
@@ -339,20 +341,12 @@ const normalizeOperationEffects = (input: {
   payload: OfflineNewTicket | OfflineTicketUpdate | OfflineCommentUpdate;
   effects?: DurableSyncEffect[];
 }): DurableSyncEffect[] => {
-  const restoreEffect = (effect: DurableSyncEffect): DurableSyncEffect => ({
-    ...effect,
-    // A process restart can happen after the request left the client but before
-    // its result was journaled. A durable `started` checkpoint must therefore
-    // never become eligible for a normal retry after restoration.
-    state: effect.state === "started" ? "commit_unknown" : effect.state,
-    target: { ...effect.target },
-  });
   if (Array.isArray(input.effects)) {
-    return input.effects.map(restoreEffect);
+    return input.effects.map(restoreDurableSyncEffect);
   }
   const payloadEffects = input.payload.effects;
   if (Array.isArray(payloadEffects)) {
-    return payloadEffects.map(restoreEffect);
+    return payloadEffects.map(restoreDurableSyncEffect);
   }
   const remoteId = input.kind === "ticketCreate"
     ? (input.payload as OfflineNewTicket).createdIssueId
@@ -655,15 +649,28 @@ const normalizeTicketUpdate = (
 };
 
 const normalizeNewTicket = (ticket: OfflineNewTicket): OfflineNewTicket => {
+  const revision = ticket.revision ?? 1;
+  const phase = ticket.phase === "remote_write_started" ? "commit_unknown" : ticket.phase ?? (
+    ticket.createdIssueId !== undefined || ticket.status === "created_rewrite_failed"
+      ? "local_finalize_pending"
+      : "queued"
+  );
+  const effects = normalizeOperationEffects({
+    kind: "ticketCreate",
+    revision,
+    phase,
+    payload: ticket,
+  });
+  const restoredPhase = hasUncertainDurableSyncEffect(effects) &&
+    (phase === "preparing" || phase === "queued")
+    ? "commit_unknown"
+    : phase;
   const restored: OfflineNewTicket = {
     ...ticket,
     operationId: ticket.operationId ?? ticket.queueId,
-    revision: ticket.revision ?? 1,
-    phase: ticket.phase === "remote_write_started" ? "commit_unknown" : ticket.phase ?? (
-      ticket.createdIssueId !== undefined || ticket.status === "created_rewrite_failed"
-        ? "local_finalize_pending"
-        : "queued"
-    ),
+    revision,
+    phase: restoredPhase,
+    effects,
   };
   return restored.phase === "preparing" || restored.phase === "queued"
     ? promoteNewTicketIntent(restored)
@@ -713,14 +720,24 @@ const normalizeComment = (
   const phase = comment.phase === "remote_write_started"
     ? "commit_unknown"
     : comment.phase ?? "queued";
+  const effects = normalizeOperationEffects({
+    kind,
+    revision,
+    phase,
+    payload: comment,
+  });
+  const restoredPhase = hasUncertainDurableSyncEffect(effects) &&
+    (phase === "preparing" || phase === "queued")
+    ? "commit_unknown"
+    : phase;
   const restored: OfflineCommentUpdate = {
     ...comment,
     operationId: comment.operationId ??
       `comment:${comment.ticketId}:${comment.commentId ?? comment.documentUri ?? index}`,
     connectionScope: comment.connectionScope ?? scope,
     revision,
-    phase,
-    effects: normalizeOperationEffects({ kind, revision, phase, payload: comment }),
+    phase: restoredPhase,
+    effects,
   };
   return restored.phase === "preparing" || restored.phase === "queued"
     ? promoteCommentIntent(restored)

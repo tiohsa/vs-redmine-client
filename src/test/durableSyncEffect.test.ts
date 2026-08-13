@@ -1,5 +1,7 @@
 import * as assert from "assert";
 import {
+  hasUncertainDurableSyncEffect,
+  restoreDurableSyncEffect,
   transitionDurableSyncEffect,
   type DurableSyncEffect,
   type DurableSyncEffectAction,
@@ -15,6 +17,65 @@ const plannedEffect = (): DurableSyncEffect => ({
 });
 
 suite("DurableSyncEffect state machine", () => {
+  test("restart は started checkpoint を defensive copy した commit_unknown にする", () => {
+    const started = { ...plannedEffect(), state: "started" as const };
+
+    const restored = restoreDurableSyncEffect(started);
+
+    assert.strictEqual(restored.state, "commit_unknown");
+    assert.notStrictEqual(restored, started);
+    assert.notStrictEqual(restored.target, started.target);
+    assert.deepStrictEqual(restored.target, started.target);
+  });
+
+  test("restart は started 以外の durable state を保持する", () => {
+    const states: DurableSyncEffectState[] = [
+      "planned",
+      "failed",
+      "committed",
+      "commit_unknown",
+      "compensation_started",
+      "compensated",
+      "compensation_unknown",
+    ];
+
+    for (const state of states) {
+      assert.strictEqual(restoreDurableSyncEffect({ ...plannedEffect(), state }).state, state);
+    }
+  });
+
+  test("remote result または compensation が不確定な effect を分類する", () => {
+    const uncertainStates: DurableSyncEffectState[] = [
+      "started",
+      "commit_unknown",
+      "compensation_started",
+      "compensation_unknown",
+    ];
+    const settledStates: DurableSyncEffectState[] = [
+      "planned",
+      "failed",
+      "committed",
+      "compensated",
+    ];
+
+    for (const state of uncertainStates) {
+      assert.strictEqual(
+        hasUncertainDurableSyncEffect([{ ...plannedEffect(), state }]),
+        true,
+        state,
+      );
+    }
+    for (const state of settledStates) {
+      assert.strictEqual(
+        hasUncertainDurableSyncEffect([{ ...plannedEffect(), state }]),
+        false,
+        state,
+      );
+    }
+    assert.strictEqual(hasUncertainDurableSyncEffect(undefined), false);
+    assert.strictEqual(hasUncertainDurableSyncEffect([]), false);
+  });
+
   test("planned → started → committed を revision/state CAS で遷移する", () => {
     const started = transitionDurableSyncEffect(
       plannedEffect(),
