@@ -7,22 +7,10 @@ import {
   isTicketEditor,
   NEW_TICKET_DRAFT_ID,
 } from "../views/ticketEditorRegistry";
+import { getTicketDraft, markDraftStatus } from "../views/ticketDraftStore";
+import { TicketSaveDependencies } from "../views/ticketSaveSync";
 import {
-  removeOfflineTicketUpdate,
-  removeOfflineNewTicket,
-  removeOfflineCommentEntry,
-} from "../views/offlineSyncStore";
-import { markDraftStatus } from "../views/ticketDraftStore";
-import {
-  syncNewTicketDraft,
-  syncTicketDraft,
-  TicketSaveDependencies,
-} from "../views/ticketSaveSync";
-import {
-  finalizeNewCommentDraftDocument,
-  shouldRefreshComments,
-  syncCommentDraft,
-  syncNewCommentDraft,
+  saveCommentDraftLocally,
 } from "../views/commentSaveSync";
 import { TicketSaveResult } from "../views/ticketSaveTypes";
 import { CommentSaveResult } from "../views/commentSaveTypes";
@@ -33,6 +21,14 @@ import {
 } from "../config/connectionScope";
 import { runWithConnectionScope } from "../redmine/client";
 import { showError } from "../utils/notifications";
+import { getOfflineSyncMode } from "../config/settings";
+import {
+  createSyncEngine,
+  createTicketSyncService,
+  ticketSyncOutcomeToSaveResult,
+  type SyncEngineOutcome,
+} from "../app/ticketSync";
+import type { RewriteDocumentDeps } from "../views/editorDocumentRewrite";
 
 export { CONNECTION_SCOPE_MISMATCH_MESSAGE } from "../config/connectionScope";
 
@@ -46,7 +42,37 @@ export interface SyncToRedmineOptions {
   onTicketCreated?: () => void;
   onCommentsRefresh?: (ticketId: number) => void;
   deps?: Partial<TicketSaveDependencies & CommentSaveDependencies>;
+  rewrite?: RewriteDocumentDeps;
 }
+
+const commentSyncOutcomeToSaveResult = (
+  outcome: SyncEngineOutcome,
+  creating: boolean,
+): CommentSaveResult => {
+  switch (outcome.kind) {
+    case "completed":
+      return {
+        status: creating ? "created" : "success",
+        message: creating ? "Comment added." : "Comment updated.",
+        commentId: "commentId" in outcome ? outcome.commentId : undefined,
+      };
+    case "no_change":
+      return { status: "no_change", message: "No changes to save." };
+    case "conflict":
+      return { status: "conflict", message: outcome.message ?? "Remote changes detected." };
+    case "commit_unknown":
+      return { status: "failed", message: outcome.message };
+    case "remote_committed":
+      return {
+        status: "created_unresolved",
+        message: outcome.message ?? "Remote commit completed; reconciliation is pending.",
+      };
+    case "failed_before_commit":
+      return { status: "failed", message: outcome.error.message };
+    case "queued":
+      return { status: "queued", message: "Saved for offline sync." };
+  }
+};
 
 export const syncEditorToRedmine = async (
   editor: vscode.TextEditor,
@@ -82,14 +108,20 @@ const syncEditorToRedmineAtScope = async (
   }
 
   if (ticketId === NEW_TICKET_DRAFT_ID) {
-    const result = await syncNewTicketDraft({
+    const outcome = await createTicketSyncService({
+      create: options.deps,
+      update: options.deps,
+      rewrite: options.rewrite,
+    }).syncEditor({
+      context: { connectionScope: operationScope },
       editor,
-      deps: options.deps,
-      operationScope,
+      ticketId,
+      newTicket: true,
+      manual: getOfflineSyncMode() === "manual",
     });
-    if (result.status === "created") {
+    const result = ticketSyncOutcomeToSaveResult(outcome, true);
+    if (outcome.kind === "completed") {
       options.onTicketCreated?.();
-      removeOfflineNewTicket({ documentUri: editor.document.uri.toString() }, operationScope);
     }
     return { kind: "ticket", result };
   }
@@ -98,21 +130,30 @@ const syncEditorToRedmineAtScope = async (
     markDraftStatus(ticketId, "Syncing", operationScope);
     let result: TicketSaveResult;
     try {
-      result = await syncTicketDraft({
-        ticketId,
-        content: editor.document.getText(),
+      const outcome = await createTicketSyncService({
+        create: options.deps,
+        update: options.deps,
+        rewrite: options.rewrite,
+      }).syncEditor({
+        context: { connectionScope: operationScope },
         editor,
-        deps: options.deps,
-        onSubjectUpdated: options.onSubjectUpdated,
-        operationScope,
+        ticketId,
+        newTicket: false,
+        manual: getOfflineSyncMode() === "manual",
       });
+      result = ticketSyncOutcomeToSaveResult(outcome, false);
+      if (outcome.kind === "completed") {
+        const canonicalSubject = getTicketDraft(ticketId, operationScope)?.baseSubject;
+        if (canonicalSubject) {
+          options.onSubjectUpdated?.(ticketId, canonicalSubject);
+        }
+      }
     } catch (error) {
       markDraftStatus(ticketId, "Failed", operationScope);
       throw error;
     }
     if (result.status === "no_change" || result.status === "success") {
       markDraftStatus(ticketId, "Synced", operationScope);
-      removeOfflineTicketUpdate(ticketId, operationScope);
     } else if (result.status !== "conflict" && result.status !== "queued") {
       markDraftStatus(ticketId, "Failed", operationScope);
     }
@@ -120,28 +161,21 @@ const syncEditorToRedmineAtScope = async (
   }
 
   if (contentType === "commentDraft") {
-    const result = await syncNewCommentDraft({
-      ticketId,
-      content: editor.document.getText(),
-      editor,
-      documentUri: editor.document.uri,
-      deps: options.deps,
-      onCreated: async ({ commentId, projectId }) => {
-        finalizeNewCommentDraftDocument({
-          document: editor.document,
-          ticketId,
-          projectId,
-          commentId,
-          operationScope,
-        });
-      },
-      operationScope,
-    });
-    if (shouldRefreshComments(result.status)) {
-      options.onCommentsRefresh?.(ticketId);
+    const queued = saveCommentDraftLocally(editor, operationScope);
+    if (!queued || getOfflineSyncMode() === "manual") {
+      return queued ? { kind: "comment", result: queued, ticketId } : undefined;
     }
-    if (result.status === "created" || result.status === "no_change") {
-      removeOfflineCommentEntry({ documentUri: editor.document.uri.toString() }, operationScope);
+    const outcome = await createSyncEngine({ comments: options.deps }).syncOne(
+      {
+        kind: "comment",
+        ticketId,
+        documentUri: editor.document.uri.toString(),
+      },
+      { connectionScope: operationScope },
+    );
+    const result = commentSyncOutcomeToSaveResult(outcome, true);
+    if (result.status === "created" || result.status === "created_unresolved") {
+      options.onCommentsRefresh?.(ticketId);
     }
     return { kind: "comment", result, ticketId };
   }
@@ -151,21 +185,22 @@ const syncEditorToRedmineAtScope = async (
     if (!commentId) {
       return undefined;
     }
-    const result = await syncCommentDraft({
-      commentId,
-      content: editor.document.getText(),
-      editor,
-      documentUri: editor.document.uri,
-      operationScope,
-    });
-    if (shouldRefreshComments(result.status)) {
-      options.onCommentsRefresh?.(ticketId);
+    const queued = saveCommentDraftLocally(editor, operationScope);
+    if (!queued || getOfflineSyncMode() === "manual") {
+      return queued ? { kind: "comment", result: queued, ticketId } : undefined;
     }
-    if (result.status === "success" || result.status === "no_change") {
-      removeOfflineCommentEntry(
-        { commentId, documentUri: editor.document.uri.toString() },
-        operationScope,
-      );
+    const outcome = await createSyncEngine({ comments: options.deps }).syncOne(
+      {
+        kind: "comment",
+        ticketId,
+        commentId,
+        documentUri: editor.document.uri.toString(),
+      },
+      { connectionScope: operationScope },
+    );
+    const result = commentSyncOutcomeToSaveResult(outcome, false);
+    if (result.status === "success") {
+      options.onCommentsRefresh?.(ticketId);
     }
     return { kind: "comment", result, ticketId };
   }

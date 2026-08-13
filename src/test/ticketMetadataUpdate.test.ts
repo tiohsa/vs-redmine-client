@@ -1,7 +1,7 @@
 import * as assert from "assert";
 import { buildTicketEditorContent } from "../views/ticketEditorContent";
 import { initializeTicketDraft, clearTicketDrafts } from "../views/ticketDraftStore";
-import { syncTicketDraft } from "../views/ticketSaveSync";
+import { syncTicketDraft } from "../views/ticketSync/ticketUpdateSync";
 import { buildIssueMetadataFixture } from "./helpers/ticketMetadataFixtures";
 
 suite("Ticket metadata update", () => {

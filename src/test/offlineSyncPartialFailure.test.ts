@@ -8,7 +8,7 @@ import {
   replaceOfflineSyncQueue,
   clearOfflineSyncQueue,
 } from "../views/offlineSyncStore";
-import { applyQueuedTicketUpdate } from "../views/ticketSaveSync";
+import { applyQueuedTicketUpdate } from "../views/ticketSync/ticketQueueSync";
 import { applyQueuedCommentUpdate } from "../views/commentSaveSync";
 import { createTestMemento } from "./helpers/vscodeMemento";
 import { buildIssueMetadataFixture } from "./helpers/ticketMetadataFixtures";
@@ -50,6 +50,7 @@ suite("Offline Sync partial failure", () => {
         listTrackers: async () => [],
         listIssuePriorities: async () => [],
         searchUsers: async () => [],
+        getProjectTrackers: async () => [],
       },
     });
     assert.strictEqual(result.status, "success");
@@ -94,6 +95,41 @@ suite("Offline Sync partial failure", () => {
       },
     });
     assert.strictEqual(result.status, "conflict");
+  });
+
+  test("parent started checkpoint失敗はremote write未試行として分類する", async () => {
+    const update = {
+      ...makeTicketUpdate(14),
+      metadata: { ...buildIssueMetadataFixture(), children: ["Child"] },
+    };
+    let updateCalls = 0;
+    let deleteCalls = 0;
+    const result = await applyQueuedTicketUpdate({
+      update,
+      deferReconciliation: true,
+      beforeRemoteWrite: async () => { throw new Error("journal unavailable"); },
+      deps: {
+        createIssue: async () => 1401,
+        deleteIssue: async () => { deleteCalls++; },
+        updateIssue: async () => { updateCalls++; },
+        getIssueDetail: async () => ({
+          ticket: { id: 14, subject: "Base", description: "Base body", projectId: 1 },
+          comments: [],
+        }),
+        listIssueStatuses: async () => [{ id: 1, name: "In Progress" }],
+        listTrackers: async () => [{ id: 2, name: "Task" }],
+        listIssuePriorities: async () => [{ id: 3, name: "Normal" }],
+        searchUsers: async () => [],
+        getProjectTrackers: async () => [{ id: 2, name: "Task" }],
+        uploadFile: async () => ({ token: "t", filename: "f", contentType: "text/plain" }),
+      },
+    });
+
+    assert.strictEqual(result.status, "failed");
+    assert.strictEqual(result.remoteWriteAttempted, false, result.message);
+    assert.strictEqual(result.remoteCommitUnknown, false);
+    assert.strictEqual(updateCalls, 0);
+    assert.strictEqual(deleteCalls, 1);
   });
 
   // ── applyQueuedCommentUpdate ──────────────────────────────────────────────

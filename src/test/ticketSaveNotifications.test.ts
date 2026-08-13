@@ -23,6 +23,18 @@ suite("Ticket save notifications", () => {
     });
   });
 
+  test("maps merged to its save-required message", () => {
+    const notification = getSaveNotification({
+      status: "merged",
+      message: "Review and save to sync.",
+    });
+
+    assert.deepStrictEqual(notification, {
+      type: "info",
+      message: "Review and save to sync.",
+    });
+  });
+
   test("maps conflict to warning", () => {
     const notification = getSaveNotification({
       status: "conflict",

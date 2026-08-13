@@ -6,9 +6,12 @@ import {
   markDraftStatus,
   setTicketDraftContent,
 } from "../views/ticketDraftStore";
+import { addOfflineTicketUpdate, getOfflineSyncQueue } from "../views/offlineSyncStore";
 import { buildTicketEditorContent } from "../views/ticketEditorContent";
-import { applyQueuedTicketUpdate, reloadTicketEditor, syncTicketDraft } from "../views/ticketSaveSync";
-import { createEditorStub } from "./helpers/editorStubs";
+import { applyQueuedTicketUpdate } from "../views/ticketSync/ticketQueueSync";
+import { reloadTicketEditor, syncTicketDraft } from "../views/ticketSync/ticketUpdateSync";
+import { mergeTicketContent } from "../views/conflictResolver";
+import { createEditorStub, createMutableEditorStub } from "./helpers/editorStubs";
 import { buildIssueMetadataFixture } from "./helpers/ticketMetadataFixtures";
 import { buildTicketEditorMetadataContentWithChildren } from "./helpers/ticketEditorMetadataStubs";
 import * as vscode from "vscode";
@@ -49,7 +52,51 @@ suite("Ticket save sync", () => {
     assert.strictEqual(result.status, "no_change");
   });
 
-  test("queued no_change clears dirty draft status", async () => {
+  test("refreshes remote fields when there is no local change", async () => {
+    const metadata = buildIssueMetadataFixture({ status: "New" });
+    initializeTicketDraft(12, "Title", "Body", metadata, "t1");
+    let content = buildTicketEditorContent({ subject: "Title", description: "Body", metadata });
+    const editor = {
+      document: { getText: () => content },
+      edit: async (callback: (builder: { replace: (_range: unknown, value: string) => void }) => void) => {
+        callback({ replace: (_range, value) => { content = value; } });
+        return true;
+      },
+    } as unknown as vscode.TextEditor;
+
+    const result = await syncTicketDraft({
+      ticketId: 12,
+      content,
+      editor,
+      deps: {
+        getIssueDetail: async () => ({
+          ticket: {
+            id: 12,
+            subject: "Title",
+            description: "Body",
+            projectId: 1,
+            trackerName: "Task",
+            priorityName: "Normal",
+            statusName: "Closed",
+            updatedAt: "t2",
+          },
+          comments: [],
+        }),
+        updateIssue: async () => { throw new Error("should not update"); },
+        createIssue: async () => { throw new Error("should not create child"); },
+        deleteIssue: async () => undefined,
+        listIssueStatuses: async () => [],
+        listTrackers: async () => [],
+        listIssuePriorities: async () => [],
+      },
+    });
+
+    assert.strictEqual(result.status, "no_change");
+    assert.strictEqual(getTicketDraft(12)?.baseMetadata.status, "Closed");
+    assert.ok(content.includes("status:    Closed"));
+  });
+
+  test("queued no_change reconciles remote canonical state and clears dirty draft status", async () => {
     const metadata = buildIssueMetadataFixture();
     initializeTicketDraft(101, "Title", "Body", metadata, "t1");
     markDraftStatus(101, "Dirty");
@@ -66,9 +113,20 @@ suite("Ticket save sync", () => {
         metadata,
       },
       deps: {
-        getIssueDetail: async () => {
-          throw new Error("should not load detail");
-        },
+        getIssueDetail: async () => ({
+          ticket: {
+            id: 101,
+            subject: "Title",
+            description: "Body",
+            projectId: 1,
+            trackerName: "Task",
+            priorityName: "Normal",
+            statusName: "In Progress",
+            dueDate: "2025-12-31",
+            updatedAt: "t1",
+          },
+          comments: [],
+        }),
         updateIssue: async () => {
           throw new Error("should not update");
         },
@@ -115,6 +173,64 @@ suite("Ticket save sync", () => {
     });
 
     assert.strictEqual(result.status, "conflict");
+  });
+
+  test("merges local text with a remote-only status change", async () => {
+    const baseMetadata = buildIssueMetadataFixture({ status: "New" });
+    const localContent = buildTicketEditorContent({
+      subject: "Title",
+      description: "Local description",
+      metadata: baseMetadata,
+    });
+    initializeTicketDraft(102, "Title", "Body", baseMetadata, "t1");
+    addOfflineTicketUpdate(102, {
+      ticketId: 102,
+      baseSubject: "Title",
+      baseDescription: "Body",
+      baseMetadata,
+      lastKnownRemoteUpdatedAt: "t1",
+      subject: "Title",
+      description: "Local description",
+      metadata: baseMetadata,
+    });
+
+    const result = await syncTicketDraft({
+      ticketId: 102,
+      content: localContent,
+      deps: {
+        getIssueDetail: async () => ({
+          ticket: {
+            id: 102,
+            subject: "Title",
+            description: "Body",
+            projectId: 1,
+            trackerName: "Task",
+            priorityName: "Normal",
+            statusName: "Closed",
+            dueDate: "2025-12-31",
+            updatedAt: "t2",
+          },
+          comments: [],
+        }),
+        updateIssue: async () => { throw new Error("should not update"); },
+        createIssue: async () => { throw new Error("should not create child"); },
+        deleteIssue: async () => undefined,
+        listIssueStatuses: async () => [],
+        listTrackers: async () => [],
+        listIssuePriorities: async () => [],
+      },
+    });
+
+    assert.strictEqual(result.status, "conflict");
+    assert.strictEqual(result.conflictContext?.remoteMetadata.status, "Closed");
+    const editor = createMutableEditorStub(vscode.Uri.parse("untitled:ticket-102.md"), localContent);
+    const merged = await mergeTicketContent(result.conflictContext!, editor);
+
+    assert.strictEqual(merged.status, "merged");
+    assert.ok(editor.document.getText().includes("Local description"));
+    assert.ok(editor.document.getText().includes("status:    Closed"));
+    assert.strictEqual(getTicketDraft(102)?.baseMetadata.status, "Closed");
+    assert.strictEqual(getOfflineSyncQueue().tickets.has(102), false);
   });
 
   test("returns unreachable on server error", async () => {
@@ -182,6 +298,54 @@ suite("Ticket save sync", () => {
     assert.strictEqual(result.status, "success");
   });
 
+  test("uses remote fields after a successful update", async () => {
+    const metadata = buildIssueMetadataFixture({ status: "In Progress" });
+    initializeTicketDraft(13, "Title", "Body", metadata, "t1");
+    let content = buildTicketEditorContent({ subject: "Changed", description: "Body", metadata });
+    const editor = {
+      document: { getText: () => content },
+      edit: async (callback: (builder: { replace: (_range: unknown, value: string) => void }) => void) => {
+        callback({ replace: (_range, value) => { content = value; } });
+        return true;
+      },
+    } as unknown as vscode.TextEditor;
+    let detailCall = 0;
+
+    const result = await syncTicketDraft({
+      ticketId: 13,
+      content,
+      editor,
+      deps: {
+        getIssueDetail: async () => {
+          detailCall += 1;
+          return {
+            ticket: {
+              id: 13,
+              subject: detailCall === 1 ? "Title" : "Changed",
+              description: "Body",
+              projectId: 1,
+              trackerName: "Task",
+              priorityName: "Normal",
+              statusName: detailCall === 1 ? "In Progress" : "Closed",
+              updatedAt: detailCall === 1 ? "t1" : "t2",
+            },
+            comments: [],
+          };
+        },
+        updateIssue: async () => undefined,
+        createIssue: async () => { throw new Error("should not create child"); },
+        deleteIssue: async () => undefined,
+        listIssueStatuses: async () => [],
+        listTrackers: async () => [],
+        listIssuePriorities: async () => [],
+      },
+    });
+
+    assert.strictEqual(result.status, "success");
+    assert.strictEqual(getTicketDraft(13)?.baseMetadata.status, "Closed");
+    assert.ok(content.includes("status:    Closed"));
+  });
+
   test("notifies list updater after a subject change", async () => {
     initializeTicketDraft(5, "Title", "Body", buildIssueMetadataFixture(), "t1");
     const updated: Array<{ id: number; subject: string }> = [];
@@ -201,7 +365,7 @@ suite("Ticket save sync", () => {
         getIssueDetail: async () => ({
           ticket: {
             id: 5,
-            subject: "Title",
+            subject: updatedAtValues[0] === "t1" ? "Title" : "New Title",
             projectId: 1,
             updatedAt: updatedAtValues.shift(),
           },

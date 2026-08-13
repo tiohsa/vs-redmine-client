@@ -1,5 +1,6 @@
 import * as vscode from "vscode";
 import { computeNotesHash } from "../utils/notesHash";
+import { releaseSaveSync, suppressSaveSync } from "./saveSyncSuppression";
 
 export interface CommentUpdateFileFields {
   issueId: number;
@@ -45,6 +46,13 @@ export interface ParsedCommentUpdateFile {
   body: string;
 }
 
+export type CommentDocumentFinalizeResult =
+  | "applied"
+  | "stale_source"
+  | "not_available"
+  | "write_failed"
+  | "save_failed";
+
 export const parseCommentUpdateFile = (content: string): ParsedCommentUpdateFile | undefined => {
   const lines = content.split(/\r?\n/);
   if (lines[0]?.trim() !== "---") { return undefined; }
@@ -80,18 +88,24 @@ export const parseCommentUpdateFile = (content: string): ParsedCommentUpdateFile
 export const updateCommentUpdateFileAfterSync = async (
   documentUri: string,
   syncedBody: string,
-): Promise<void> => {
-  const uri = vscode.Uri.parse(documentUri);
-  let raw: string;
-  try {
-    const bytes = await vscode.workspace.fs.readFile(uri);
-    raw = new TextDecoder().decode(bytes);
-  } catch {
-    return;
+  expectedBody = syncedBody,
+): Promise<CommentDocumentFinalizeResult> => {
+  const openDoc = vscode.workspace.textDocuments.find(
+    (document) => document.uri.toString() === documentUri,
+  );
+  if (!openDoc) {
+    // Closed files have no TextDocument.version fence; defer instead of racing an external edit.
+    return "not_available";
   }
+  const editor = vscode.window.visibleTextEditors.find(
+    (candidate) => candidate.document.uri.toString() === documentUri,
+  );
+  if (!editor) { return "not_available"; }
+  const raw = openDoc.getText();
 
   const parsed = parseCommentUpdateFile(raw);
-  if (!parsed) { return; }
+  if (!parsed) { return "not_available"; }
+  if (parsed.body !== expectedBody) { return "stale_source"; }
 
   const newFields: CommentUpdateFileFields = {
     ...parsed.fields,
@@ -100,32 +114,76 @@ export const updateCommentUpdateFileAfterSync = async (
   };
   const updated = buildCommentUpdateFileContent(newFields, syncedBody);
 
+  suppressSaveSync(documentUri);
   try {
-    await vscode.workspace.fs.writeFile(uri, new TextEncoder().encode(updated));
-  } catch {
-    // ファイル書き戻し失敗は無視する
-  }
-
-  const openDoc = vscode.workspace.textDocuments.find(
-    (d) => d.uri.toString() === documentUri,
-  );
-  if (openDoc) {
-    const editors = vscode.window.visibleTextEditors.filter(
-      (e) => e.document.uri.toString() === documentUri,
-    );
-    for (const editor of editors) {
-      const current = editor.document.getText();
-      if (current !== updated) {
-        await editor.edit((b) => {
-          b.replace(
-            new vscode.Range(
-              editor.document.positionAt(0),
-              editor.document.positionAt(current.length),
-            ),
-            updated,
-          );
-        });
-      }
+    const version = openDoc.version;
+    if (openDoc.getText() !== raw) { return "stale_source"; }
+    const changed = await editor.edit((builder) => {
+      builder.replace(
+        new vscode.Range(openDoc.positionAt(0), openDoc.positionAt(raw.length)),
+        updated,
+      );
+    });
+    if (openDoc.version !== version + 1 || !changed || openDoc.getText() !== updated) {
+      return openDoc.version !== version ? "stale_source" : "write_failed";
     }
+    if (!await openDoc.save()) { return "save_failed"; }
+    return openDoc.getText() === updated ? "applied" : "stale_source";
+  } finally {
+    releaseSaveSync(documentUri);
+  }
+};
+
+export const finalizeNewCommentDraftFileAfterSync = async (input: {
+  documentUri: string;
+  ticketId: number;
+  commentId: number;
+  projectId?: number;
+  expectedDocumentBody: string;
+  syncedBody: string;
+}): Promise<CommentDocumentFinalizeResult> => {
+  const openDoc = vscode.workspace.textDocuments.find(
+    (document) => document.uri.toString() === input.documentUri,
+  );
+  const editor = vscode.window.visibleTextEditors.find(
+    (candidate) => candidate.document.uri.toString() === input.documentUri,
+  );
+  if (!openDoc || !editor) { return "not_available"; }
+  const raw = openDoc.getText();
+  const alreadyFinalized = parseCommentUpdateFile(raw);
+  if (alreadyFinalized) {
+    return alreadyFinalized.fields.issueId === input.ticketId &&
+      alreadyFinalized.fields.journalId === input.commentId &&
+      alreadyFinalized.body === input.expectedDocumentBody &&
+      alreadyFinalized.fields.sourceNotesHash === computeNotesHash(input.syncedBody)
+      ? "applied"
+      : "stale_source";
+  }
+  if (raw !== input.expectedDocumentBody) { return "stale_source"; }
+  const updated = buildCommentUpdateFileContent({
+    issueId: input.ticketId,
+    journalId: input.commentId,
+    projectId: input.projectId,
+    sourceNotesHash: computeNotesHash(input.syncedBody),
+    lastSyncedAt: new Date().toISOString(),
+  }, input.expectedDocumentBody);
+
+  suppressSaveSync(input.documentUri);
+  try {
+    const version = openDoc.version;
+    if (openDoc.getText() !== raw) { return "stale_source"; }
+    const changed = await editor.edit((builder) => {
+      builder.replace(
+        new vscode.Range(openDoc.positionAt(0), openDoc.positionAt(raw.length)),
+        updated,
+      );
+    });
+    if (openDoc.version !== version + 1 || !changed || openDoc.getText() !== updated) {
+      return openDoc.version !== version ? "stale_source" : "write_failed";
+    }
+    if (!await openDoc.save()) { return "save_failed"; }
+    return openDoc.getText() === updated ? "applied" : "stale_source";
+  } finally {
+    releaseSaveSync(input.documentUri);
   }
 };

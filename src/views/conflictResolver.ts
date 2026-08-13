@@ -1,27 +1,34 @@
 import * as vscode from "vscode";
 import { ConflictContext, TicketSaveResult } from "./ticketSaveTypes";
-import { reloadTicketEditor, syncTicketDraft } from "./ticketSaveSync";
+import { reloadTicketEditor } from "./ticketSaveSync";
+import {
+    createTicketSyncService,
+    ticketSyncOutcomeToSaveResult,
+} from "../app/ticketSync";
 import {
     getTicketDraft,
     markDraftStatus,
     updateDraftAfterSave,
 } from "./ticketDraftStore";
+import { removeOfflineCommentEntry, removeOfflineTicketUpdate } from "./offlineSyncStore";
 import { registerConflictContext } from "./conflictDiffProvider";
+import { buildTicketEditorContent, parseTicketEditorContent } from "./ticketEditorContent";
+import { mergeThreeWay } from "../utils/threeWayMerge";
 
-export type ConflictResolution = "local" | "remote" | "diff" | "cancel";
+export type ConflictResolution = "local" | "remote" | "merge" | "cancel";
 
 export interface ConflictResolverDeps {
     showConflictDialog: typeof showConflictDialog;
-    openDiffEditor: typeof openDiffEditor;
     applyRemoteContent: typeof applyRemoteContent;
     forceSaveLocal: typeof forceSaveLocal;
+    mergeTicketContent: typeof mergeTicketContent;
 }
 
 const defaultDeps: ConflictResolverDeps = {
     showConflictDialog,
-    openDiffEditor,
     applyRemoteContent,
     forceSaveLocal,
+    mergeTicketContent,
 };
 
 /**
@@ -32,14 +39,14 @@ export async function showConflictDialog(
 ): Promise<ConflictResolution> {
     const localLabel = vscode.l10n.t("Local Priority");
     const remoteLabel = vscode.l10n.t("Remote Priority");
-    const diffLabel = vscode.l10n.t("View Diff");
+    const mergeLabel = vscode.l10n.t("Merge Changes");
 
     const result = await vscode.window.showWarningMessage(
         vscode.l10n.t("Conflict detected in ticket #{0}. Remote has been updated.", context.ticketId),
         { modal: true },
         localLabel,
         remoteLabel,
-        diffLabel,
+        mergeLabel,
     );
 
     switch (result) {
@@ -47,8 +54,8 @@ export async function showConflictDialog(
             return "local";
         case remoteLabel:
             return "remote";
-        case diffLabel:
-            return "diff";
+        case mergeLabel:
+            return "merge";
         default:
             return "cancel";
     }
@@ -87,11 +94,17 @@ export async function applyRemoteContent(
     editor: vscode.TextEditor,
     operationScope?: string,
 ): Promise<TicketSaveResult> {
-    return reloadTicketEditor({
+    const result = await reloadTicketEditor({
         ticketId: context.ticketId,
         editor,
         operationScope,
     });
+    if (result.status === "success") {
+        // The queued local snapshot was the source of this conflict. It must not
+        // be retried after the editor has been replaced with the remote state.
+        removeOfflineTicketUpdate(context.ticketId, operationScope);
+    }
+    return result;
 }
 
 /**
@@ -119,15 +132,72 @@ export async function forceSaveLocal(
     );
     markDraftStatus(context.ticketId, "Dirty", operationScope);
 
-    // Now sync again with the updated timestamp.
-    const result = await syncTicketDraft({
-        ticketId: context.ticketId,
-        content: editor.document.getText(),
+    if (operationScope === undefined) {
+        return { status: "failed", message: "Connection scope is required." };
+    }
+    const outcome = await createTicketSyncService().syncEditor({
+        context: { connectionScope: operationScope },
         editor,
-        operationScope,
+        ticketId: context.ticketId,
+        newTicket: false,
+        manual: false,
     });
+    return ticketSyncOutcomeToSaveResult(outcome, false);
+}
 
-    return result;
+export async function mergeTicketContent(
+    context: ConflictContext,
+    editor: vscode.TextEditor,
+    operationScope?: string,
+): Promise<TicketSaveResult> {
+    const draft = getTicketDraft(context.ticketId, operationScope);
+    if (!draft) {
+        return { status: "failed", message: "Missing draft state for ticket." };
+    }
+    let current;
+    try {
+        current = parseTicketEditorContent(editor.document.getText(), {
+            allowMissingMetadata: true,
+            fallbackMetadata: draft.baseMetadata,
+        });
+    } catch (error) {
+        return { status: "failed", message: error instanceof Error ? error.message : "Invalid ticket content." };
+    }
+    const subject = mergeThreeWay(context.baseSubject, context.localSubject, context.remoteSubject);
+    const description = mergeThreeWay(
+        context.baseDescription,
+        context.localDescription,
+        context.remoteDescription,
+    );
+    updateDraftAfterSave(
+        context.ticketId,
+        context.remoteSubject,
+        context.remoteDescription,
+        context.remoteMetadata,
+        context.remoteUpdatedAt,
+        operationScope,
+    );
+    await applyEditorContent(editor, buildTicketEditorContent({
+        subject: subject.content,
+        description: description.content,
+        // Text is merged manually; metadata is taken from the latest server state.
+        // Metadata itself is not safe to automatically combine field-by-field.
+        metadata: context.remoteMetadata,
+        layout: current.layout,
+        metadataBlock: current.metadataBlock,
+        controlFields: current.controlFields,
+    }));
+    // A queued update still carries the pre-merge remote timestamp. Keeping it
+    // would cause Sync All / dashboard sync to raise the same conflict again.
+    // The user must review the editor and save, which queues a new snapshot.
+    removeOfflineTicketUpdate(context.ticketId, operationScope);
+    markDraftStatus(context.ticketId, "Dirty", operationScope);
+    return {
+        status: "merged",
+        message: subject.hasConflicts || description.hasConflicts
+            ? vscode.l10n.t("Merge conflicts were inserted. Resolve all markers before syncing.")
+            : vscode.l10n.t("Merged remote and local changes. Review and save to sync."),
+    };
 }
 
 /**
@@ -154,14 +224,8 @@ export async function handleConflict(
         case "remote":
             return deps.applyRemoteContent(context, editor, operationScope);
 
-        case "diff":
-            await deps.openDiffEditor(context, editor);
-            // After opening diff, user needs to manually save again.
-            return {
-                status: "conflict",
-                message: vscode.l10n.t("Diff editor opened. Please save again after editing."),
-                conflictContext: context,
-            };
+        case "merge":
+            return deps.mergeTicketContent(context, editor, operationScope);
 
         case "cancel":
         default:
@@ -178,10 +242,11 @@ export async function handleConflict(
 // ============================================================================
 
 import { CommentConflictContext, CommentSaveResult } from "./commentSaveTypes";
-import { reloadCommentEditor, syncCommentDraft } from "./commentSaveSync";
+import { reloadCommentEditor } from "./commentSaveSync";
 import { getCommentEdit, updateCommentEdit } from "./commentEditStore";
 import { registerCommentConflictContext } from "./conflictDiffProvider";
 import { applyEditorContent } from "./ticketPreview";
+import { commentSyncOutcomeMessage, queueAndSyncComment } from "../app/commentSyncService";
 
 /**
  * Show a dialog asking the user how to resolve a comment conflict.
@@ -191,14 +256,14 @@ export async function showCommentConflictDialog(
 ): Promise<ConflictResolution> {
     const localLabel = vscode.l10n.t("Local Priority");
     const remoteLabel = vscode.l10n.t("Remote Priority");
-    const diffLabel = vscode.l10n.t("View Diff");
+    const mergeLabel = vscode.l10n.t("Merge Changes");
 
     const result = await vscode.window.showWarningMessage(
         vscode.l10n.t("Conflict detected in comment #{0}. Remote has been updated.", context.commentId),
         { modal: true },
         localLabel,
         remoteLabel,
-        diffLabel,
+        mergeLabel,
     );
 
     switch (result) {
@@ -206,8 +271,8 @@ export async function showCommentConflictDialog(
             return "local";
         case remoteLabel:
             return "remote";
-        case diffLabel:
-            return "diff";
+        case mergeLabel:
+            return "merge";
         default:
             return "cancel";
     }
@@ -246,6 +311,7 @@ export async function applyRemoteCommentContent(
 ): Promise<CommentSaveResult> {
     await applyEditorContent(editor, context.remoteBody);
     updateCommentEdit(context.commentId, context.remoteBody, undefined, operationScope);
+    removeOfflineCommentEntry({ commentId: context.commentId }, operationScope);
     return { status: "success", message: vscode.l10n.t("Overwritten with remote content.") };
 }
 
@@ -270,15 +336,52 @@ export async function forceCommentSaveLocal(
         operationScope,
     );
 
-    // Now sync again
-    const result = await syncCommentDraft({
-        commentId: context.commentId,
-        content: editor.document.getText(),
-        editor,
-        operationScope,
+    if (operationScope === undefined) {
+        return { status: "failed", message: "Connection scope is required." };
+    }
+    const outcome = await queueAndSyncComment({
+        operation: {
+            ticketId: edit.ticketId,
+            commentId: context.commentId,
+            baseBody: context.remoteBody,
+            lastKnownRemoteUpdatedAt: context.remoteUpdatedAt,
+            body: editor.document.getText(),
+            documentUri: editor.document.uri.toString(),
+        },
+        connectionScope: operationScope,
     });
+    if (outcome.kind === "completed") {
+        return { status: "success", message: "Comment updated." };
+    }
+    if (outcome.kind === "no_change") {
+        return { status: "no_change", message: "No changes to save." };
+    }
+    return {
+        status: outcome.kind === "conflict" ? "conflict" : "failed",
+        message: commentSyncOutcomeMessage(outcome),
+    };
+}
 
-    return result;
+export async function mergeCommentContent(
+    context: CommentConflictContext,
+    editor: vscode.TextEditor,
+    operationScope?: string,
+): Promise<CommentSaveResult> {
+    const merged = mergeThreeWay(context.baseBody, context.localBody, context.remoteBody);
+    updateCommentEdit(
+        context.commentId,
+        context.remoteBody,
+        context.remoteUpdatedAt,
+        operationScope,
+    );
+    await applyEditorContent(editor, merged.content);
+    removeOfflineCommentEntry({ commentId: context.commentId }, operationScope);
+    return {
+        status: "merged",
+        message: merged.hasConflicts
+            ? vscode.l10n.t("Merge conflicts were inserted. Resolve all markers before syncing.")
+            : vscode.l10n.t("Merged remote and local changes. Review and save to sync."),
+    };
 }
 
 /**
@@ -304,13 +407,8 @@ export async function handleCommentConflict(
         case "remote":
             return applyRemoteCommentContent(context, editor, operationScope);
 
-        case "diff":
-            await openCommentDiffEditor(context, editor);
-            return {
-                status: "conflict",
-                message: vscode.l10n.t("Diff editor opened. Please save again after editing."),
-                conflictContext: context,
-            };
+        case "merge":
+            return mergeCommentContent(context, editor, operationScope);
 
         case "cancel":
         default:

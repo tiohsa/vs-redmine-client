@@ -15,6 +15,7 @@ export interface RewriteNewTicketEditorInput {
   projectId: number;
   parsed: TicketEditorContent;
   originalControlFields?: FrontmatterControlFields;
+  lastKnownRemoteUpdatedAt?: string;
   applyContent?: (editor: vscode.TextEditor, content: string) => Promise<void>;
 }
 
@@ -36,7 +37,7 @@ export const rewriteNewTicketEditorToTicketMode = async (
     input.parsed.subject,
     input.parsed.description,
     input.parsed.metadata,
-    undefined,
+    input.lastKnownRemoteUpdatedAt,
     input.operationScope,
   );
 

@@ -6,6 +6,7 @@ import { buildTicketEditorContent, parseTicketEditorContent } from "../views/tic
 import { buildIssueMetadataFixture } from "./helpers/ticketMetadataFixtures";
 import {
   buildRegisteredDocumentContent,
+  compareAndRewriteDocumentWithRegisteredFields,
   rewriteDocumentWithRegisteredFields,
 } from "../views/editorDocumentRewrite";
 
@@ -105,6 +106,54 @@ suite("syncUnsyncedFileNewTicket – rewriteDocumentWithRegisteredFields open do
 
     const success = await rewriteDocumentWithRegisteredFields(DOC_URI, 1, rewriteDeps);
     assert.strictEqual(success, false);
+  });
+
+  test("document.save failure returns false", async () => {
+    const text = buildNewTicketText();
+    const openDocument = {
+      uri: vscode.Uri.parse(DOC_URI),
+      getText: () => text,
+      isDirty: true,
+    } as vscode.TextDocument;
+
+    const success = await rewriteDocumentWithRegisteredFields(DOC_URI, 1, {
+      textDocuments: [openDocument],
+      applyEdit: async () => true,
+      saveDocument: async () => false,
+    });
+
+    assert.strictEqual(success, false);
+  });
+});
+
+suite("syncUnsyncedFileNewTicket – compare-and-apply freshness", () => {
+  test("expected content より新しい open document は一文字も変更しない", async () => {
+    const expectedContent = buildNewTicketText();
+    const newerContent = `${expectedContent}\nnewer edit`;
+    const documentUri = "untitled:revision-fenced-ticket.md";
+    const openDocument = {
+      uri: vscode.Uri.parse(documentUri),
+      getText: () => newerContent,
+    } as vscode.TextDocument;
+    let applyCalls = 0;
+
+    const result = await compareAndRewriteDocumentWithRegisteredFields({
+      documentUri,
+      ticketId: 600,
+      replacement: parseTicketEditorContent(expectedContent),
+      expected: { content: expectedContent, operationRevision: 1 },
+      deps: {
+        textDocuments: [openDocument],
+        applyEdit: async () => {
+          applyCalls++;
+          return true;
+        },
+      },
+    });
+
+    assert.deepStrictEqual(result, { kind: "stale_source" });
+    assert.strictEqual(applyCalls, 0);
+    assert.strictEqual(openDocument.getText(), newerContent);
   });
 });
 

@@ -10,14 +10,20 @@ import { updateDraftAfterSave } from "../ticketDraftStore";
 import { getProjectIdForEditor } from "../ticketEditorRegistry";
 import type { TicketSaveResult } from "../ticketSaveTypes";
 import type { TicketUpdateFields } from "../../redmine/types";
+import type { IssueDetailResult } from "../../redmine/issues";
 import { handleTicketUploadFailure, resolveUploadSummary } from "./ticketImageUploadSync";
 import { resolveMetadataForCreate } from "./ticketMetadataResolver";
 import { createChildTickets } from "./ticketChildCreateSync";
 import { rewriteNewTicketEditorToTicketMode } from "./ticketEditorRewrite";
 import { queueNewTicketDraft, queueNewTicketDraftContent } from "./ticketQueueSync";
-import { buildResult, mapErrorToResult } from "./ticketSyncResult";
+import {
+  buildResult,
+  isRemoteCommitUnknownError,
+  mapErrorToResult,
+} from "./ticketSyncResult";
 import { defaultCreateDeps } from "./ticketSyncDeps";
 import type { TicketCreateDependencies } from "./types";
+import { editorContentFromTicket } from "./ticketRemoteContent";
 
 const resolveProjectIdForCreate = (projectId?: number): number | undefined => {
   if (projectId) {
@@ -80,12 +86,18 @@ export const syncNewTicketDraft = async (input: {
     markNewTicketDraftSynced(draftId, createdId);
   }
 
+  const remote = await getCreatedTicketDetail(deps.getIssueDetail, createdId);
+  const syncedParsed = remote
+    ? editorContentFromTicket(remote.ticket, parsed)
+    : parsed;
+
   await rewriteNewTicketEditorToTicketMode({
     operationScope: input.operationScope,
     editor: input.editor,
     createdId,
     projectId,
-    parsed,
+    parsed: syncedParsed,
+    lastKnownRemoteUpdatedAt: remote?.ticket.updatedAt,
     originalControlFields,
     applyContent: input.applyContent,
   });
@@ -113,17 +125,35 @@ export const syncNewTicketDraftContent = async (input: {
     deps,
   });
   if (result.status === "created" && createdId && parsed) {
+    const remote = await getCreatedTicketDetail(deps.getIssueDetail, createdId);
+    const syncedParsed = remote
+      ? editorContentFromTicket(remote.ticket, parsed)
+      : parsed;
     updateDraftAfterSave(
       createdId,
-      parsed.subject,
-      parsed.description,
-      parsed.metadata,
-      undefined,
+      syncedParsed.subject,
+      syncedParsed.description,
+      syncedParsed.metadata,
+      remote?.ticket.updatedAt,
       input.operationScope,
     );
-    input.onCreated?.(createdId, parsed);
+    input.onCreated?.(createdId, syncedParsed);
   }
   return result;
+};
+
+const getCreatedTicketDetail = async (
+  getIssueDetail: TicketCreateDependencies["getIssueDetail"],
+  createdId: number,
+): Promise<IssueDetailResult | undefined> => {
+  if (!getIssueDetail) {
+    return undefined;
+  }
+  try {
+    return await getIssueDetail(createdId);
+  } catch {
+    return undefined;
+  }
 };
 
 export const createTicketFromContent = async (input: {
@@ -131,10 +161,36 @@ export const createTicketFromContent = async (input: {
   projectId?: number;
   baseDir?: string;
   deps: TicketCreateDependencies;
+  beforeRemoteWrite?: () => Promise<void>;
+  afterParentCreate?: (ticketId: number) => Promise<void>;
+  existingChildId?: (input: { ordinal: number; subject: string }) => number | undefined;
+  beforeChildCreate?: (input: { ordinal: number; subject: string }) => Promise<void>;
+  afterChildCreate?: (input: {
+    ordinal: number;
+    subject: string;
+    childId: number;
+  }) => Promise<void>;
+  afterChildCreateFailure?: (input: {
+    ordinal: number;
+    error: unknown;
+    commitUnknown: boolean;
+  }) => Promise<void>;
+  beforeChildCompensation?: (input: { ordinal: number; childId: number }) => Promise<void>;
+  afterChildCompensation?: (input: {
+    ordinal: number;
+    childId: number;
+    error?: unknown;
+  }) => Promise<void>;
+  beforeParentCompensation?: (ticketId: number) => Promise<void>;
+  afterParentCompensation?: (input: { ticketId: number; error?: unknown }) => Promise<void>;
+  afterCompensationComplete?: () => Promise<void>;
 }): Promise<{
   result: TicketSaveResult;
   createdId?: number;
   parsed?: TicketEditorContent;
+  remoteIssueMayExist?: boolean;
+  remoteWriteAttempted?: boolean;
+  remoteCommitUnknown?: boolean;
 }> => {
   const projectId = resolveProjectIdForCreate(input.projectId);
   if (!projectId) {
@@ -185,6 +241,14 @@ export const createTicketFromContent = async (input: {
   };
 
   let createdId: number | undefined;
+  if (input.beforeRemoteWrite) {
+    try {
+      await input.beforeRemoteWrite();
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Sync journal persistence failed.";
+      return { result: buildResult("failed", message) };
+    }
+  }
   try {
     const dueDate =
       typeof metadataFields.dueDate === "string" ? metadataFields.dueDate : undefined;
@@ -204,7 +268,29 @@ export const createTicketFromContent = async (input: {
       assigneeId: metadataFields.assigneeId,
     });
   } catch (error) {
-    return { result: mapErrorToResult(error) };
+    return {
+      result: mapErrorToResult(error),
+      remoteWriteAttempted: true,
+      remoteCommitUnknown: isRemoteCommitUnknownError(error),
+    };
+  }
+
+  if (createdId && input.afterParentCreate) {
+    try {
+      await input.afterParentCreate(createdId);
+    } catch (error) {
+      const message = error instanceof Error
+        ? error.message
+        : "Created ticket journal persistence failed.";
+      return {
+        result: buildResult("failed", message, { uploadSummary }),
+        createdId,
+        parsed,
+        remoteIssueMayExist: true,
+        remoteWriteAttempted: true,
+        remoteCommitUnknown: false,
+      };
+    }
   }
 
   if (createdId && children.length > 0) {
@@ -216,17 +302,75 @@ export const createTicketFromContent = async (input: {
       createIssue: input.deps.createIssue,
       deleteIssue: input.deps.deleteIssue,
       description: "",
+      existingChildId: input.existingChildId,
+      beforeCreate: input.beforeChildCreate,
+      afterCreate: input.afterChildCreate,
     });
     if (childCreateResult.error) {
-      try {
-        await input.deps.deleteIssue(createdId);
-      } catch {
-        // ignore rollback failure
+      const childCommitUnknown = childCreateResult.remoteWriteAttempted === true &&
+        isRemoteCommitUnknownError(childCreateResult.errorCause);
+      if (childCreateResult.remoteWriteAttempted && childCreateResult.failedOrdinal !== undefined) {
+        await input.afterChildCreateFailure?.({
+          ordinal: childCreateResult.failedOrdinal,
+          error: childCreateResult.errorCause,
+          commitUnknown: childCommitUnknown,
+        });
       }
-      await Promise.allSettled(
-        childCreateResult.createdChildIds.map((issueId) => input.deps.deleteIssue(issueId)),
-      );
-      return { result: buildResult("failed", childCreateResult.error, { uploadSummary }) };
+      if (childCommitUnknown) {
+        return {
+          result: buildResult("failed", childCreateResult.error, { uploadSummary }),
+          createdId,
+          parsed,
+          remoteIssueMayExist: true,
+          remoteWriteAttempted: true,
+          remoteCommitUnknown: false,
+        };
+      }
+      let compensationFailed = false;
+      for (let ordinal = 0; ordinal < childCreateResult.createdChildIds.length; ordinal++) {
+        const childId = childCreateResult.createdChildIds[ordinal];
+        let compensationStarted = false;
+        try {
+          await input.beforeChildCompensation?.({ ordinal, childId });
+          compensationStarted = true;
+          await input.deps.deleteIssue(childId);
+          await input.afterChildCompensation?.({ ordinal, childId });
+        } catch (error) {
+          compensationFailed = true;
+          if (compensationStarted) {
+            await input.afterChildCompensation?.({ ordinal, childId, error });
+          }
+        }
+      }
+      let parentDeleted = false;
+      let parentCompensationStarted = false;
+      try {
+        await input.beforeParentCompensation?.(createdId);
+        parentCompensationStarted = true;
+        await input.deps.deleteIssue(createdId);
+        parentDeleted = true;
+        await input.afterParentCompensation?.({ ticketId: createdId });
+      } catch (error) {
+        compensationFailed = true;
+        if (parentCompensationStarted) {
+          await input.afterParentCompensation?.({ ticketId: createdId, error });
+        }
+      }
+      if (parentDeleted && !compensationFailed) {
+        try {
+          await input.afterCompensationComplete?.();
+        } catch {
+          compensationFailed = true;
+        }
+      }
+      return {
+        result: buildResult("failed", childCreateResult.error, { uploadSummary }),
+        createdId: parentDeleted ? undefined : createdId,
+        parsed: parentDeleted ? undefined : parsed,
+        remoteIssueMayExist: !parentDeleted || compensationFailed,
+        remoteWriteAttempted: true,
+        remoteCommitUnknown: false,
+      };
     }
   }
 
@@ -254,10 +398,14 @@ export const createTicketFromQueuedContent = async (input: {
   projectId?: number;
   baseDir?: string;
   deps?: Partial<TicketCreateDependencies>;
+  beforeRemoteWrite?: () => Promise<void>;
 }): Promise<{
   result: TicketSaveResult;
   createdId?: number;
   parsed?: TicketEditorContent;
+  remoteIssueMayExist?: boolean;
+  remoteWriteAttempted?: boolean;
+  remoteCommitUnknown?: boolean;
 }> => {
   const deps = { ...defaultCreateDeps, ...input.deps };
   const output = await createTicketFromContent({
@@ -265,16 +413,22 @@ export const createTicketFromQueuedContent = async (input: {
     projectId: input.projectId,
     baseDir: input.baseDir,
     deps,
+    beforeRemoteWrite: input.beforeRemoteWrite,
   });
   if (output.result.status === "created" && output.createdId && output.parsed) {
+    const remote = await getCreatedTicketDetail(deps.getIssueDetail, output.createdId);
+    const syncedParsed = remote
+      ? editorContentFromTicket(remote.ticket, output.parsed)
+      : output.parsed;
     updateDraftAfterSave(
       output.createdId,
-      output.parsed.subject,
-      output.parsed.description,
-      output.parsed.metadata,
-      undefined,
+      syncedParsed.subject,
+      syncedParsed.description,
+      syncedParsed.metadata,
+      remote?.ticket.updatedAt,
       input.operationScope,
     );
+    return { ...output, parsed: syncedParsed };
   }
   return output;
 };

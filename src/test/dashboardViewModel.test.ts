@@ -245,6 +245,23 @@ suite("Dashboard ViewModel — 未同期アイテム変換", () => {
     assert.strictEqual(items[0].key.documentUri, "file:///new.md");
   });
 
+  test("remote checkpoint を持つitemも確認済みの破棄を許可する", () => {
+    replaceOfflineSyncQueue({
+      tickets: new Map([[6, {
+        ticketId: 6,
+        phase: "reconciliation_pending",
+      } as never]]),
+      comments: [],
+      newTickets: [],
+    });
+
+    const item = buildUnsyncedDashboardItems()[0];
+
+    assert.strictEqual(item.lifecycle, "recovery_pending");
+    assert.strictEqual(item.canDiscard, true);
+    assert.strictEqual(item.canSync, true);
+  });
+
   test("コメント更新が変換される", () => {
     replaceOfflineSyncQueue({
       tickets: new Map(),

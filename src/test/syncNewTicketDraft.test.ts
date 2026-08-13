@@ -1,6 +1,6 @@
 import * as assert from "assert";
 import * as vscode from "vscode";
-import { syncNewTicketDraft } from "../views/ticketSaveSync";
+import { syncNewTicketDraft } from "../views/ticketSync/ticketCreateSync";
 import { clearTicketDrafts } from "../views/ticketDraftStore";
 import { clearNewTicketDrafts } from "../views/newTicketDraftStore";
 import { registerNewTicketDraft, setEditorProjectId } from "../views/ticketEditorRegistry";
@@ -194,6 +194,38 @@ suite("syncNewTicketDraft – editor rewrite", () => {
     const raw = captured.content!;
     assert.ok(!raw.includes("issue_id:  "), "empty issue_id should be gone");
     assert.ok(raw.includes("issue_id: 777"), "numeric issue_id should appear");
+  });
+
+  test("uses the remote status after creation", async () => {
+    const text = buildNewTicketContent("T", "D");
+    const { editor } = makeEditorStub(text);
+    registerNewTicketDraft(editor);
+    setEditorProjectId(editor, 12);
+
+    const captured: { content?: string } = {};
+    await syncNewTicketDraft({
+      editor,
+      deps: {
+        ...defaultDeps,
+        createIssue: async () => 778,
+        getIssueDetail: async () => ({
+          ticket: {
+            id: 778,
+            subject: "T",
+            description: "D",
+            projectId: 12,
+            trackerName: "Task",
+            priorityName: "Normal",
+            statusName: "Closed",
+            updatedAt: "2026-08-09T12:00:00Z",
+          },
+          comments: [],
+        }),
+      },
+      applyContent: makeCapturingApply(captured),
+    });
+
+    assert.strictEqual(parseTicketEditorContent(captured.content!).metadata.status, "Closed");
   });
 });
 

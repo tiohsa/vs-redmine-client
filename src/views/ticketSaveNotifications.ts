@@ -28,6 +28,8 @@ export const getSaveNotification = (
       return { type: "info", message: result.message || "Redmine updated." };
     case "queued":
       return { type: "info", message: result.message || "Saved for offline sync." };
+    case "merged":
+      return { type: "info", message: result.message };
     case "no_change":
       return undefined;
     case "conflict":

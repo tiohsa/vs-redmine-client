@@ -78,6 +78,8 @@ Supported actions per item:
 
 A **Sync all** button uploads all queued items at once.
 
+After Redmine accepts a ticket, child-ticket, or comment mutation, the item remains in the Unsynced tab until remote read-back and local Markdown finalization complete. Child IDs and compensation attempts are checkpointed individually; unresolved comment IDs stay queued for read-only reconciliation and can be linked only after the ticket, journal ID, body, and author are verified. Local finalization is deferred while the source document is closed, hidden, or changed, so a newer edit is never overwritten. Such recovery items cannot be discarded because their checkpoints prevent duplicate remote writes. If the connection is lost while any write result is unknown, automatic retry is disabled and the item is shown as requiring recovery. Cancelling **Sync all** leaves every unprocessed item in the queue and includes it in the unfinished count.
+
 ## Workflows
 
 ### Basic Ticket Editing

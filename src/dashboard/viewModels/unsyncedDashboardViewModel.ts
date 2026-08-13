@@ -1,4 +1,7 @@
-import { getOfflineSyncQueue } from "../../views/offlineSyncStore";
+import {
+  getOfflineSyncLifecycle,
+  getOfflineSyncQueue,
+} from "../../views/offlineSyncStore";
 import { getTicketSummary } from "../../views/ticketSummaryStore";
 import { formatTicketLabel } from "../../views/ticketLabel";
 import type { DashboardUnsyncedItem } from "../dashboardProtocol";
@@ -8,13 +11,17 @@ export const buildUnsyncedDashboardItems = (): DashboardUnsyncedItem[] => {
   const queue = getOfflineSyncQueue(getCurrentConnectionScope());
   const items: DashboardUnsyncedItem[] = [];
 
-  queue.tickets.forEach((_update, ticketId) => {
+  queue.tickets.forEach((update, ticketId) => {
     const subject = getTicketSummary(ticketId);
+    const lifecycle = getOfflineSyncLifecycle(update);
     items.push({
       key: { kind: "ticket", ticketId },
       label: `${formatTicketLabel(ticketId)} Ticket update`,
       detail: subject,
       documentUri: undefined,
+      lifecycle,
+      canDiscard: true,
+      canSync: true,
     });
   });
 
@@ -37,11 +44,20 @@ export const buildUnsyncedDashboardItems = (): DashboardUnsyncedItem[] => {
   }
 
   for (const newTicket of queue.newTickets) {
+    const lifecycle = getOfflineSyncLifecycle(newTicket);
+    const details = [
+      newTicket.projectId ? `Project ID: ${newTicket.projectId}` : undefined,
+      lifecycle === "recovery_pending" ? "Remote commit recovery pending" : undefined,
+      lifecycle === "commit_unknown" ? "Remote commit status unknown" : undefined,
+    ].filter((value): value is string => value !== undefined);
     items.push({
       key: { kind: "newTicket", documentUri: newTicket.documentUri },
       label: "New ticket",
-      detail: newTicket.projectId ? `Project ID: ${newTicket.projectId}` : undefined,
+      detail: details.length > 0 ? details.join(" · ") : undefined,
       documentUri: newTicket.documentUri,
+      lifecycle,
+      canDiscard: lifecycle === "queued" || newTicket.nextIntent !== undefined,
+      canSync: true,
     });
   }
 

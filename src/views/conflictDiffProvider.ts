@@ -2,7 +2,6 @@ import * as vscode from "vscode";
 import { ConflictContext } from "./ticketSaveTypes";
 import { CommentConflictContext } from "./commentSaveTypes";
 import { buildTicketPreviewContent } from "./ticketPreview";
-import { getTicketDraft } from "./ticketDraftStore";
 
 export const CONFLICT_SCHEME = "redmine-conflict";
 export const COMMENT_CONFLICT_SCHEME = "redmine-comment-conflict";
@@ -76,14 +75,7 @@ export class ConflictDiffProvider implements vscode.TextDocumentContentProvider 
             return "// Conflict context not found. Please try saving again.";
         }
 
-        // Get draft metadata for formatting
-        const draft = getTicketDraft(ticketId);
-        const metadata = draft?.baseMetadata ?? {
-            tracker: "",
-            priority: "",
-            status: "",
-            due_date: "",
-        };
+        const metadata = context.remoteMetadata;
 
         // Build content in the same format as the ticket editor
         return buildTicketPreviewContent({
@@ -179,4 +171,3 @@ export function registerConflictDiffProvider(
 export function getConflictDiffProvider(): ConflictDiffProvider | undefined {
     return providerInstance;
 }
-

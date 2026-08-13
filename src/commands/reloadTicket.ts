@@ -7,6 +7,7 @@ import {
   setEditorDisplaySource,
 } from "../views/ticketEditorRegistry";
 import { reloadTicketEditor } from "../views/ticketSaveSync";
+import { confirmReloadDiscard, hasLocalTicketChanges } from "../views/reloadSafety";
 import { TicketSaveResult } from "../views/ticketSaveTypes";
 import {
   CONNECTION_SCOPE_MISMATCH_MESSAGE,
@@ -49,6 +50,14 @@ export const reloadTicketFromEditor = async (): Promise<void> => {
   const operationScope = getConnectionScopeForEditor(editor);
   if (!operationScope || operationScope !== getCurrentConnectionScope()) {
     showError(CONNECTION_SCOPE_MISMATCH_MESSAGE);
+    return;
+  }
+
+  const discardLabel = vscode.l10n.t("Reload and Discard Changes");
+  if (hasLocalTicketChanges(ticketId, editor, operationScope) && !await confirmReloadDiscard(
+    vscode.l10n.t("Reloading from Redmine will discard your local ticket changes."),
+    discardLabel,
+  )) {
     return;
   }
 

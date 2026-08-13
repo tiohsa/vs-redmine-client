@@ -42,7 +42,13 @@ export const createMutableEditorStub = (
   const document = createMutableDocumentStub(uri, text);
   return {
     document,
-  } as vscode.TextEditor & { document: MutableDocument };
+    edit: async (callback: (builder: vscode.TextEditorEdit) => void) => {
+      callback({
+        replace: (_range: vscode.Range, next: string) => document.setText(next),
+      } as vscode.TextEditorEdit);
+      return true;
+    },
+  } as unknown as vscode.TextEditor & { document: MutableDocument };
 };
 
 export const createTicketContentFixture = (

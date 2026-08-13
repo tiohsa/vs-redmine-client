@@ -7,8 +7,8 @@ import type { SyncUnsyncedFileResult } from "../../commands/syncUnsyncedFile";
 import {
   getOfflineSyncQueue,
   removeOfflineCommentEntry,
-  removeOfflineNewTicket,
-  removeOfflineTicketUpdate,
+  discardOfflineNewTicketAsync,
+  discardOfflineTicketUpdateAsync,
 } from "../../views/offlineSyncStore";
 import { buildUnsyncedDashboardItems } from "../viewModels/unsyncedDashboardViewModel";
 import type { DashboardUnsyncedKey } from "../dashboardProtocol";
@@ -39,6 +39,13 @@ export class DashboardUnsyncedService {
     }
     this.deps.context.notifyOperationStarted(requestId, vscode.l10n.t("Syncing…"));
     const result = await this.syncOne(key);
+    if (result?.status === "conflict") {
+      const status = await this.resolveConflictInEditor(key);
+      if (status) {
+        this.notifySyncStatusResult(requestId, status);
+        return;
+      }
+    }
     this.notifySyncOneResult(requestId, result);
   }
 
@@ -64,7 +71,19 @@ export class DashboardUnsyncedService {
     this.deps.context.notifyOperationStarted(requestId, vscode.l10n.t("Syncing…"));
     const results: Array<SyncUnsyncedFileResult | undefined> = [];
     for (const key of keys) {
-      results.push(await this.syncOne(key));
+      const result = await this.syncOne(key);
+      if (result?.status === "conflict") {
+        const status = await this.resolveConflictInEditor(key);
+        if (status === "uploaded") {
+          results.push({ status: "success", kind: key.kind, id: key.kind === "ticket" ? key.ticketId : undefined });
+          continue;
+        }
+        if (status === "noChange") {
+          results.push({ status: "no_change", kind: key.kind, id: key.kind === "ticket" ? key.ticketId : undefined });
+          continue;
+        }
+      }
+      results.push(result);
     }
 
     const failures = results.filter(
@@ -99,19 +118,33 @@ export class DashboardUnsyncedService {
       return;
     }
 
+    let recoveryRequired = false;
     if (key.kind === "ticket") {
-      removeOfflineTicketUpdate(key.ticketId, operationScope);
+      const result = await discardOfflineTicketUpdateAsync(key.ticketId, operationScope);
+      recoveryRequired = result === "recovery_required";
     } else if (key.kind === "newTicket") {
       if (!key.documentUri) {
         this.deps.context.notifyError(requestId, vscode.l10n.t("Cannot identify the target new ticket draft."));
         return;
       }
-      removeOfflineNewTicket({ documentUri: key.documentUri }, operationScope);
+      const result = await discardOfflineNewTicketAsync(
+        { documentUri: key.documentUri },
+        operationScope,
+      );
+      recoveryRequired = result === "recovery_required";
     } else if (key.kind === "comment") {
       removeOfflineCommentEntry(
         { commentId: key.commentId, documentUri: key.documentUri },
         operationScope,
       );
+    }
+
+    if (recoveryRequired) {
+      this.deps.context.notifyError(
+        requestId,
+        vscode.l10n.t("This item has a remote sync checkpoint and must be resumed before it can be discarded."),
+      );
+      return;
     }
 
     this.refreshUnsynced();
@@ -133,6 +166,9 @@ export class DashboardUnsyncedService {
       case "uploaded":
         this.deps.context.onTicketsRefreshed();
         this.deps.context.notifySuccess(requestId, vscode.l10n.t("Sync completed."));
+        break;
+      case "merged":
+        this.deps.context.notifySuccess(requestId, vscode.l10n.t("Merge result is ready. Review and save to sync."));
         break;
       case "noChange":
         this.deps.context.notifySuccess(requestId, vscode.l10n.t("No changes."));
@@ -243,6 +279,25 @@ export class DashboardUnsyncedService {
     this.deps.refreshTicketPresentation();
     await this.refreshSyncedComments(key, result);
     return result;
+  }
+
+  private async resolveConflictInEditor(key: DashboardUnsyncedKey): Promise<SyncStatus | undefined> {
+    if (key.kind !== "ticket" && key.kind !== "comment") {
+      return undefined;
+    }
+    const editor = getTicketEditors(key.ticketId)
+      .filter((record) => key.kind === "ticket"
+        ? record.contentType === "ticket"
+        : (record.contentType === "comment" || record.contentType === "commentDraft") &&
+          (key.documentUri === undefined || record.uri === key.documentUri))
+      .sort((a, b) => b.lastActiveAt - a.lastActiveAt)[0];
+    if (!editor) {
+      return undefined;
+    }
+    return vscode.commands.executeCommand<SyncStatus | undefined>(
+      "redmine-client.syncOpenEditor",
+      { uri: editor.uri },
+    );
   }
 
   private async refreshSyncedComments(

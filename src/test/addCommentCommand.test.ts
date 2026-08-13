@@ -3,8 +3,11 @@ import * as vscode from "vscode";
 import { addCommentForIssue } from "../commands/addComment";
 import { validateComment, getCommentLimitGuidance } from "../utils/commentValidation";
 import { createTempImage } from "./helpers/markdownImageTestUtils";
+import { initializeOfflineSyncStore } from "../views/offlineSyncStore";
+import { createTestMemento } from "./helpers/vscodeMemento";
 
 suite("Add comment command", () => {
+  setup(() => initializeOfflineSyncStore(createTestMemento()));
   test("uploads images and passes upload tokens", async () => {
     const temp = createTempImage();
     const editor = {
@@ -38,6 +41,22 @@ suite("Add comment command", () => {
         clearCommentDraft: () => undefined,
         getTicketIdForEditor: () => 10,
         getEditorContentType: () => "comment",
+        commentSyncDeps: {
+          updateComment: async () => undefined,
+          updateIssue: async () => undefined,
+          getCurrentUserId: async () => 1,
+          getIssueDetail: async () => ({
+            ticket: { id: 10, subject: "T", projectId: 1 },
+            comments: [{
+              id: 50,
+              ticketId: 10,
+              authorId: 1,
+              authorName: "User",
+              body: "![img](image.png)",
+              editableByCurrentUser: true,
+            }],
+          }),
+        },
       },
     );
 

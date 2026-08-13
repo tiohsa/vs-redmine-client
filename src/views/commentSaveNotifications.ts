@@ -30,6 +30,8 @@ export const getCommentSaveNotification = (
       return { type: "warning", message: result.message };
     case "queued":
       return { type: "info", message: result.message || "Saved for offline sync." };
+    case "merged":
+      return { type: "info", message: result.message };
     case "no_change":
       return undefined;
     case "conflict":

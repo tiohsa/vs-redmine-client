@@ -30,6 +30,8 @@ import { resolveUploadSummary } from "./ticketSync/ticketImageUploadSync";
 import { getOfflineSyncMode } from "../config/settings";
 import { addOfflineCommentUpdate, OfflineCommentUpdate } from "./offlineSyncStore";
 import { setCommentDraft } from "./commentDraftStore";
+import { isRemoteCommitUnknownError } from "./ticketSync/ticketSyncResult";
+import { containsConflictMarkers } from "../utils/threeWayMerge";
 
 export interface CommentSaveDependencies {
   addComment: typeof addComment;
@@ -115,11 +117,59 @@ const resolveCreatedCommentId = (
     return comment.authorId === currentUserId;
   });
 
-  if (candidates.length === 0) {
+  if (candidates.length !== 1) {
     return undefined;
   }
 
-  return candidates[candidates.length - 1].id;
+  return candidates[0].id;
+};
+
+export const reconcileCommentCommitUnknown = async (
+  update: OfflineCommentUpdate,
+  overrides: Partial<CommentSaveDependencies> = {},
+  candidateCommentId?: number,
+): Promise<
+  | { ok: true; commentId: number; projectId: number }
+  | { ok: false; message: string }
+> => {
+  const deps = { ...defaultDeps, ...overrides };
+  try {
+    const [detail, currentUserId] = await Promise.all([
+      deps.getIssueDetail(update.ticketId),
+      deps.getCurrentUserId().catch(() => undefined),
+    ]);
+    if (detail.ticket.id !== update.ticketId) {
+      return { ok: false, message: "The reconciliation response belongs to another ticket." };
+    }
+    const normalizedBody = normalizeCommentBody(update.body);
+    const candidates = detail.comments.filter((comment) =>
+      comment.ticketId === update.ticketId &&
+      normalizeCommentBody(comment.body) === normalizedBody &&
+      (candidateCommentId === undefined || comment.id === candidateCommentId) &&
+      (update.commentId === undefined
+        ? currentUserId !== undefined && comment.authorId === currentUserId
+        : comment.id === update.commentId &&
+          (currentUserId === undefined || comment.authorId === currentUserId)),
+    );
+    if (candidates.length !== 1) {
+      return {
+        ok: false,
+        message: candidates.length === 0
+          ? "No uniquely matching committed comment was found in Redmine."
+          : "Multiple matching comments were found; automatic linking is disabled.",
+      };
+    }
+    return {
+      ok: true,
+      commentId: candidates[0].id,
+      projectId: detail.ticket.projectId,
+    };
+  } catch (error) {
+    return {
+      ok: false,
+      message: error instanceof Error ? error.message : "Comment reconciliation failed.",
+    };
+  }
 };
 
 const buildUnresolvedResult = (
@@ -169,6 +219,7 @@ const buildConflictResult = (input: {
   message: string;
   commentId: number;
   ticketId: number;
+  baseBody: string;
   localBody: string;
   remoteComment: Comment;
 }): CommentSaveResult =>
@@ -176,6 +227,7 @@ const buildConflictResult = (input: {
     conflictContext: {
       commentId: input.commentId,
       ticketId: input.ticketId,
+      baseBody: input.baseBody,
       localBody: input.localBody,
       remoteBody: input.remoteComment.body,
       remoteUpdatedAt: input.remoteComment.updatedAt,
@@ -187,6 +239,7 @@ const detectUpdatedAtConflict = async (input: {
   commentId: number;
   ticketId: number;
   lastKnownRemoteUpdatedAt: string;
+  baseBody: string;
   localBody: string;
 }): Promise<CommentSaveResult | undefined> => {
   try {
@@ -197,6 +250,7 @@ const detectUpdatedAtConflict = async (input: {
         message: "Remote changes detected. Refresh before saving.",
         commentId: input.commentId,
         ticketId: input.ticketId,
+        baseBody: input.baseBody,
         localBody: input.localBody,
         remoteComment,
       });
@@ -212,6 +266,7 @@ const enrichConflictWithRemote = async (input: {
   result: CommentSaveResult;
   commentId: number;
   ticketId: number;
+  baseBody: string;
   localBody: string;
 }): Promise<CommentSaveResult> => {
   if (input.result.status !== "conflict") {
@@ -225,6 +280,7 @@ const enrichConflictWithRemote = async (input: {
         message: input.result.message,
         commentId: input.commentId,
         ticketId: input.ticketId,
+        baseBody: input.baseBody,
         localBody: input.localBody,
         remoteComment,
       });
@@ -284,6 +340,7 @@ export const finalizeNewCommentDraftDocument = (input: {
   ticketId: number;
   projectId: number;
   commentId: number;
+  body?: string;
 }): void => {
   registerCommentDocument(
     input.ticketId,
@@ -295,7 +352,7 @@ export const finalizeNewCommentDraftDocument = (input: {
   ensureCommentEdit(
     input.commentId,
     input.ticketId,
-    input.document.getText(),
+    input.body ?? input.document.getText(),
     undefined,
     input.operationScope,
   );
@@ -349,6 +406,9 @@ export const syncCommentDraft = async (input: {
   const processed = await processCommentContent({ content: input.content, baseDir, deps });
   if (!processed.ok) { return processed.failure; }
   const { content: nextContent, uploads, uploadSummary } = processed;
+  if (containsConflictMarkers(nextContent)) {
+    return buildResult("failed", vscode.l10n.t("Resolve all merge conflict markers before syncing."));
+  }
 
   if (nextContent === edit.baseBody) {
     return buildResult("no_change", "No changes to save.", { uploadSummary });
@@ -360,6 +420,7 @@ export const syncCommentDraft = async (input: {
       commentId: input.commentId,
       ticketId: edit.ticketId,
       lastKnownRemoteUpdatedAt: edit.lastKnownRemoteUpdatedAt,
+      baseBody: edit.baseBody,
       localBody: nextContent,
     });
     if (conflict) { return conflict; }
@@ -378,6 +439,7 @@ export const syncCommentDraft = async (input: {
       result: mapErrorToResult(error),
       commentId: input.commentId,
       ticketId: edit.ticketId,
+      baseBody: edit.baseBody,
       localBody: nextContent,
     });
   }
@@ -463,11 +525,17 @@ export const saveCommentDraftLocally = (
   const body = editor.document.getText();
   setCommentDraft(ticketId, body, operationScope);
   const commentId = getCommentIdForEditor(editor);
+  const edit = commentId === undefined
+    ? undefined
+    : getCommentEdit(commentId, operationScope);
   addOfflineCommentUpdate({
     ticketId,
     commentId,
+    baseBody: edit?.baseBody,
+    lastKnownRemoteUpdatedAt: edit?.lastKnownRemoteUpdatedAt,
     body,
     documentUri: editor.document.uri.toString(),
+    finalizeDraft: contentType === "commentDraft",
   }, operationScope);
   return buildResult("queued", vscode.l10n.t("Saved locally. Run a sync command to apply changes to Redmine."));
 };
@@ -501,6 +569,7 @@ const detectHashBasedConflict = async (input: {
   commentId: number;
   ticketId: number;
   sourceNotesHash: string;
+  baseBody: string;
   localBody: string;
 }): Promise<CommentSaveResult | undefined> => {
   try {
@@ -515,6 +584,7 @@ const detectHashBasedConflict = async (input: {
         message: vscode.l10n.t("Comment was updated in Redmine. Review the diff before syncing."),
         commentId: input.commentId,
         ticketId: input.ticketId,
+        baseBody: input.baseBody,
         localBody: input.localBody,
         remoteComment,
       });
@@ -547,11 +617,22 @@ const applyQueuedExistingComment = async (input: {
   nextContent: string;
   uploads: UploadToken[];
   uploadSummary: ReturnType<typeof resolveUploadSummary>;
+  beforeRemoteWrite?: () => Promise<void>;
+  afterRemoteWrite?: () => Promise<void>;
+  reconcileOnly?: boolean;
 }): Promise<CommentSaveResult> => {
   const { deps, update, nextContent, uploads, uploadSummary } = input;
 
+  if (containsConflictMarkers(nextContent)) {
+    return buildResult("failed", vscode.l10n.t("Resolve all merge conflict markers before syncing."));
+  }
+
   if (update.baseBody && nextContent === update.baseBody) {
     return buildResult("no_change", "No changes to save.", { uploadSummary });
+  }
+
+  if (input.reconcileOnly) {
+    return buildResult("success", "Comment update committed.", { uploadSummary });
   }
 
   if (update.sourceNotesHash) {
@@ -560,6 +641,7 @@ const applyQueuedExistingComment = async (input: {
       commentId: update.commentId,
       ticketId: update.ticketId,
       sourceNotesHash: update.sourceNotesHash,
+      baseBody: update.baseBody ?? "",
       localBody: nextContent,
     });
     if (conflict) { return conflict; }
@@ -569,11 +651,21 @@ const applyQueuedExistingComment = async (input: {
       commentId: update.commentId,
       ticketId: update.ticketId,
       lastKnownRemoteUpdatedAt: update.lastKnownRemoteUpdatedAt,
+      baseBody: update.baseBody ?? "",
       localBody: nextContent,
     });
     if (conflict) { return conflict; }
   }
 
+  try {
+    await input.beforeRemoteWrite?.();
+  } catch (error) {
+    return buildResult(
+      "failed",
+      error instanceof Error ? error.message : "Sync journal persistence failed.",
+      { uploadSummary },
+    );
+  }
   try {
     await deps.updateComment(
       update.commentId,
@@ -582,7 +674,22 @@ const applyQueuedExistingComment = async (input: {
     );
   } catch (error) {
     const mapped = mapErrorToResult(error);
-    return update.sourceNotesHash ? mapHashBasedUpdateError(mapped) : mapped;
+    const result = update.sourceNotesHash ? mapHashBasedUpdateError(mapped) : mapped;
+    return {
+      ...result,
+      remoteWriteAttempted: true,
+      remoteCommitUnknown: isRemoteCommitUnknownError(error),
+    };
+  }
+
+  try {
+    await input.afterRemoteWrite?.();
+  } catch (error) {
+    return buildResult(
+      "failed",
+      error instanceof Error ? error.message : "Remote commit journal failed.",
+      { uploadSummary, remoteWriteAttempted: true, remoteCommitted: true },
+    );
   }
 
   updateCommentEdit(
@@ -591,7 +698,11 @@ const applyQueuedExistingComment = async (input: {
     update.lastKnownRemoteUpdatedAt,
     input.operationScope,
   );
-  return buildResult("success", "Comment updated.", { uploadSummary });
+  return buildResult("success", "Comment updated.", {
+    uploadSummary,
+    remoteWriteAttempted: true,
+    remoteCommitted: true,
+  });
 };
 
 const applyQueuedNewComment = async (input: {
@@ -600,23 +711,55 @@ const applyQueuedNewComment = async (input: {
   nextContent: string;
   uploads: UploadToken[];
   uploadSummary: ReturnType<typeof resolveUploadSummary>;
+  beforeRemoteWrite?: () => Promise<void>;
+  afterRemoteWrite?: () => Promise<void>;
+  reconcileOnly?: boolean;
 }): Promise<CommentSaveResult> => {
   const { deps, ticketId, nextContent, uploads, uploadSummary } = input;
 
-  try {
-    await deps.addComment(ticketId, nextContent, uploads.length > 0 ? uploads : undefined);
-  } catch (error) {
-    return mapErrorToResult(error);
+  if (!input.reconcileOnly) {
+    try {
+      await input.beforeRemoteWrite?.();
+    } catch (error) {
+      return buildResult(
+        "failed",
+        error instanceof Error ? error.message : "Sync journal persistence failed.",
+        { uploadSummary },
+      );
+    }
+    try {
+      await deps.addComment(ticketId, nextContent, uploads.length > 0 ? uploads : undefined);
+    } catch (error) {
+      return {
+        ...mapErrorToResult(error),
+        remoteWriteAttempted: true,
+        remoteCommitUnknown: isRemoteCommitUnknownError(error),
+      };
+    }
+    try {
+      await input.afterRemoteWrite?.();
+    } catch (error) {
+      return buildUnresolvedResult(
+        error instanceof Error ? error.message : "Remote commit journal failed.",
+        { uploadSummary, remoteWriteAttempted: true, remoteCommitted: true },
+      );
+    }
   }
 
   const persisted = await fetchPersistedCommentInfo(deps, ticketId, nextContent);
   if (!persisted.ok) {
-    return buildUnresolvedResult(persisted.message, { uploadSummary });
+    return buildUnresolvedResult(persisted.message, {
+      uploadSummary,
+      remoteWriteAttempted: !input.reconcileOnly,
+      remoteCommitted: true,
+    });
   }
   return buildResult("created", "Comment added.", {
     commentId: persisted.commentId,
     projectId: persisted.projectId,
     uploadSummary,
+    remoteWriteAttempted: !input.reconcileOnly,
+    remoteCommitted: true,
   });
 };
 
@@ -624,6 +767,9 @@ export const applyQueuedCommentUpdate = async (input: {
   update: OfflineCommentUpdate;
   deps?: Partial<CommentSaveDependencies>;
   operationScope?: string;
+  beforeRemoteWrite?: () => Promise<void>;
+  afterRemoteWrite?: () => Promise<void>;
+  reconcileOnly?: boolean;
 }): Promise<CommentSaveResult> => {
   const deps = { ...defaultDeps, ...input.deps };
   const update = input.update;
@@ -643,6 +789,9 @@ export const applyQueuedCommentUpdate = async (input: {
       uploads,
       uploadSummary,
       operationScope: input.operationScope,
+      beforeRemoteWrite: input.beforeRemoteWrite,
+      afterRemoteWrite: input.afterRemoteWrite,
+      reconcileOnly: input.reconcileOnly,
     });
   }
 
@@ -652,6 +801,9 @@ export const applyQueuedCommentUpdate = async (input: {
     nextContent,
     uploads,
     uploadSummary,
+    beforeRemoteWrite: input.beforeRemoteWrite,
+    afterRemoteWrite: input.afterRemoteWrite,
+    reconcileOnly: input.reconcileOnly,
   });
 };
 

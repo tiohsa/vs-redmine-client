@@ -292,6 +292,7 @@ export const registerCommands = (
       }
       const counts: Record<SyncStatus, number> = {
         uploaded: 0,
+        merged: 0,
         noChange: 0,
         conflict: 0,
         failed: 0,
@@ -307,6 +308,7 @@ export const registerCommands = (
       }
       const parts: string[] = [];
       if (counts.uploaded > 0) { parts.push(`Uploaded ${counts.uploaded}`); }
+      if (counts.merged > 0) { parts.push(`Merged ${counts.merged}; save to sync`); }
       if (counts.noChange > 0) { parts.push(`No change: ${counts.noChange}`); }
       if (counts.failed > 0) { parts.push(`Failed: ${counts.failed}`); }
       if (counts.conflict > 0) { parts.push(`Conflict: ${counts.conflict}`); }

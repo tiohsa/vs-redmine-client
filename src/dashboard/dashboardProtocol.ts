@@ -104,6 +104,9 @@ export interface DashboardUnsyncedItem {
   label: string;
   detail?: string;
   documentUri?: string;
+  lifecycle?: "queued" | "recovery_pending" | "commit_unknown";
+  canDiscard?: boolean;
+  canSync?: boolean;
 }
 
 export interface DashboardCommentItem {

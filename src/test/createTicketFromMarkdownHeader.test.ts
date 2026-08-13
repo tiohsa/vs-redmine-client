@@ -2,7 +2,7 @@ import * as assert from "assert";
 import * as vscode from "vscode";
 import { createTicketFromMarkdownHeader } from "../commands/createTicketFromMarkdownHeader";
 import { getCurrentConnectionScope } from "../config/connectionScope";
-import { runWithConnectionScope } from "../redmine/client";
+import type { TicketSyncOutcome } from "../app/ticketSync";
 
 const editor = {
   document: {
@@ -20,204 +20,122 @@ const preview = {
   status: "New",
 };
 
+type CommandDeps = NonNullable<Parameters<typeof createTicketFromMarkdownHeader>[0]>;
+
+const buildDeps = (overrides: Partial<CommandDeps> = {}): CommandDeps => ({
+  getActiveEditor: () => editor,
+  previewCreation: () => preview,
+  confirmCreation: async () => true,
+  syncTicket: async (): Promise<TicketSyncOutcome> => ({
+    kind: "failed_before_commit",
+    error: new Error("unexpected"),
+  }),
+  showError: () => undefined,
+  showWarning: () => undefined,
+  showSuccess: () => undefined,
+  resolveBaseDir: () => undefined,
+  ...overrides,
+});
+
 suite("createTicketFromMarkdownHeader command", () => {
   test("missing active editor reports an error", async () => {
     let error: string | undefined;
 
-    await createTicketFromMarkdownHeader({
+    await createTicketFromMarkdownHeader(buildDeps({
       getActiveEditor: () => undefined,
-      previewCreation: () => preview,
-      confirmCreation: async () => true,
-      createTicket: async () => ({ status: "failed", message: "unexpected" }),
-      applyContent: async () => undefined,
-      registerTicketDocument: () => undefined,
-      showError: (message) => {
-        error = message;
-      },
-      showWarning: () => undefined,
-      showSuccess: () => undefined,
-      resolveBaseDir: () => undefined,
-    });
+      showError: (message) => { error = message; },
+    }));
 
     assert.strictEqual(error, "No active editor found.");
   });
 
-  test("cancelled confirmation does not create a Redmine ticket", async () => {
-    let createCalls = 0;
+  test("cancelled confirmation does not invoke ticket sync", async () => {
+    let syncCalls = 0;
 
-    await createTicketFromMarkdownHeader({
-      getActiveEditor: () => editor,
-      previewCreation: () => preview,
+    await createTicketFromMarkdownHeader(buildDeps({
       confirmCreation: async () => false,
-      createTicket: async () => {
-        createCalls += 1;
-        return { status: "failed", message: "unexpected" };
+      syncTicket: async () => {
+        syncCalls++;
+        return { kind: "completed", ticketId: 456 };
       },
-      applyContent: async () => undefined,
-      registerTicketDocument: () => undefined,
-      showError: () => undefined,
-      showWarning: () => undefined,
-      showSuccess: () => undefined,
-      resolveBaseDir: () => undefined,
-    });
+    }));
 
-    assert.strictEqual(createCalls, 0);
+    assert.strictEqual(syncCalls, 0);
   });
 
-  test("successful creation updates the document and registers it", async () => {
-    let appliedContent: string | undefined;
-    let registered: { issueId: number; document: vscode.TextDocument; projectId: number; scope?: string } | undefined;
+  test("successful creation delegates the operation to TicketSyncService", async () => {
+    let receivedProjectId: number | undefined;
+    let receivedScope: string | undefined;
+    let success: string | undefined;
 
-    await createTicketFromMarkdownHeader({
-      getActiveEditor: () => editor,
-      previewCreation: () => preview,
-      confirmCreation: async () => true,
-      createTicket: async () => ({
-        status: "created",
-        issueId: 456,
-        updatedContent: "updated",
-        preview,
-      }),
-      applyContent: async (_editor, content) => {
-        appliedContent = content;
+    await createTicketFromMarkdownHeader(buildDeps({
+      syncTicket: async (input) => {
+        receivedProjectId = input.projectId;
+        receivedScope = input.connectionScope;
+        return { kind: "completed", ticketId: 456 };
       },
-      registerTicketDocument: (issueId, document, _contentType, projectId, scope) => {
-        registered = { issueId, document, projectId: projectId!, scope };
-      },
-      showError: () => undefined,
-      showWarning: () => undefined,
-      showSuccess: () => undefined,
-      resolveBaseDir: () => undefined,
-    });
+      showSuccess: (message) => { success = message; },
+    }));
 
-    assert.strictEqual(appliedContent, "updated");
-    assert.deepStrictEqual(registered, {
-      issueId: 456,
-      document: editor.document,
-      projectId: 12,
-      scope: getCurrentConnectionScope(),
-    });
+    assert.strictEqual(receivedProjectId, 12);
+    assert.strictEqual(receivedScope, getCurrentConnectionScope());
+    assert.ok(success?.includes("#456"));
   });
 
-  test("非同期作成中も開始時の接続スコープでAPI処理と登録を行う", async () => {
+  test("非同期同期中も開始時の接続スコープを service へ渡す", async () => {
     const operationScope = getCurrentConnectionScope();
     let observedScope: string | undefined;
-    let registeredScope: string | undefined;
 
-    await runWithConnectionScope(operationScope, () => createTicketFromMarkdownHeader({
-      getActiveEditor: () => editor,
-      previewCreation: () => preview,
-      confirmCreation: async () => true,
-      createTicket: async () => {
-        // Simulate an await boundary where the user may change baseUrl.
+    await createTicketFromMarkdownHeader(buildDeps({
+      syncTicket: async (input) => {
         await Promise.resolve();
-        observedScope = operationScope;
-        return { status: "created", issueId: 789, updatedContent: "updated", preview };
+        observedScope = input.connectionScope;
+        return { kind: "completed", ticketId: 789 };
       },
-      applyContent: async () => undefined,
-      registerTicketDocument: (_issueId, _document, _contentType, _projectId, scope) => {
-        registeredScope = scope;
-      },
-      showError: () => undefined,
-      showWarning: () => undefined,
-      showSuccess: () => undefined,
-      resolveBaseDir: () => undefined,
     }));
 
     assert.strictEqual(observedScope, operationScope);
-    assert.strictEqual(registeredScope, operationScope);
   });
 
-  test("header update failure warns with the created issue ID and does not register", async () => {
-    let warning: string | undefined;
-    let registered = false;
-
-    await createTicketFromMarkdownHeader({
-      getActiveEditor: () => editor,
-      previewCreation: () => preview,
-      confirmCreation: async () => true,
-      createTicket: async () => ({
-        status: "created",
-        issueId: 456,
-        updatedContent: "updated",
-        preview,
-      }),
-      applyContent: async () => {
-        throw new Error("write failed");
-      },
-      registerTicketDocument: () => {
-        registered = true;
-      },
-      showError: () => undefined,
-      showWarning: (message) => {
-        warning = message;
-      },
-      showSuccess: () => undefined,
-      resolveBaseDir: () => undefined,
-    });
-
-    assert.ok(warning?.includes("#456"));
-    assert.ok(warning?.includes("issue_id: 456"));
-    assert.strictEqual(registered, false);
-  });
-
-  test("header generation failure warns with the created issue ID", async () => {
+  test("remote commit 後の local finalize pending は作成済み ID を警告する", async () => {
     let warning: string | undefined;
 
-    await createTicketFromMarkdownHeader({
-      getActiveEditor: () => editor,
-      previewCreation: () => preview,
-      confirmCreation: async () => true,
-      createTicket: async () => ({
-        status: "header-update-failed",
-        issueId: 456,
-        preview,
+    await createTicketFromMarkdownHeader(buildDeps({
+      syncTicket: async () => ({
+        kind: "remote_committed",
+        ticketId: 456,
+        pending: "local_finalize",
       }),
-      applyContent: async () => undefined,
-      registerTicketDocument: () => undefined,
-      showError: () => undefined,
-      showWarning: (message) => {
-        warning = message;
-      },
-      showSuccess: () => undefined,
-      resolveBaseDir: () => undefined,
-    });
+      showWarning: (message) => { warning = message; },
+    }));
 
     assert.ok(warning?.includes("#456"));
     assert.ok(warning?.includes("issue_id: 456"));
   });
 
-  test("failed document save warns with the created issue ID", async () => {
-    let warning: string | undefined;
-    const dirtyEditor = {
-      document: {
-        ...editor.document,
-        isDirty: true,
-        save: async () => false,
-      },
-    } as unknown as vscode.TextEditor;
+  test("remote commit 前の failure は error として表示する", async () => {
+    let error: string | undefined;
 
-    await createTicketFromMarkdownHeader({
-      getActiveEditor: () => dirtyEditor,
-      previewCreation: () => preview,
-      confirmCreation: async () => true,
-      createTicket: async () => ({
-        status: "created",
-        issueId: 456,
-        updatedContent: "updated",
-        preview,
+    await createTicketFromMarkdownHeader(buildDeps({
+      syncTicket: async () => ({
+        kind: "failed_before_commit",
+        error: new Error("Invalid metadata."),
       }),
-      applyContent: async () => undefined,
-      registerTicketDocument: () => undefined,
-      showError: () => undefined,
-      showWarning: (message) => {
-        warning = message;
-      },
-      showSuccess: () => undefined,
-      resolveBaseDir: () => undefined,
-    });
+      showError: (message) => { error = message; },
+    }));
 
-    assert.ok(warning?.includes("#456"));
+    assert.strictEqual(error, "Invalid metadata.");
+  });
+
+  test("service の予期しない例外を command error として表示する", async () => {
+    let error: string | undefined;
+
+    await createTicketFromMarkdownHeader(buildDeps({
+      syncTicket: async () => { throw new Error("service failed"); },
+      showError: (message) => { error = message; },
+    }));
+
+    assert.strictEqual(error, "service failed");
   });
 
   test("non-Markdown editor is rejected before preview", async () => {
@@ -230,23 +148,14 @@ suite("createTicketFromMarkdownHeader command", () => {
       },
     } as vscode.TextEditor;
 
-    await createTicketFromMarkdownHeader({
+    await createTicketFromMarkdownHeader(buildDeps({
       getActiveEditor: () => textEditor,
       previewCreation: () => {
-        previewCalls += 1;
+        previewCalls++;
         return preview;
       },
-      confirmCreation: async () => true,
-      createTicket: async () => ({ status: "failed", message: "unexpected" }),
-      applyContent: async () => undefined,
-      registerTicketDocument: () => undefined,
-      showError: (message) => {
-        error = message;
-      },
-      showWarning: () => undefined,
-      showSuccess: () => undefined,
-      resolveBaseDir: () => undefined,
-    });
+      showError: (message) => { error = message; },
+    }));
 
     assert.strictEqual(error, "Open a Markdown file before creating a Redmine ticket.");
     assert.strictEqual(previewCalls, 0);

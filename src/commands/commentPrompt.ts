@@ -4,12 +4,10 @@ import { uploadFileAttachment } from "../redmine/attachments";
 import { validateComment, getCommentLimitGuidance } from "../utils/commentValidation";
 import { showError, showInfo } from "../utils/notifications";
 import { clearCommentDraft, getCommentDraft, setCommentDraft } from "../views/commentDraftStore";
-import {
-  buildMarkdownImageUploadFailureMessage,
-  hasMarkdownImageUploadFailure,
-  processMarkdownImageUploads,
-} from "../utils/markdownImageUpload";
 import { resolveEditorBaseDir } from "../utils/editorBaseDir";
+import { getCurrentConnectionScope } from "../config/connectionScope";
+import type { CommentSaveDependencies } from "../views/commentSaveSync";
+import { commentSyncOutcomeMessage, queueAndSyncComment } from "../app/commentSyncService";
 
 export interface CommentPromptOptions {
   issueId: number;
@@ -28,6 +26,7 @@ export interface CommentPromptDependencies {
   setCommentDraft: typeof setCommentDraft;
   clearCommentDraft: typeof clearCommentDraft;
   resolveBaseDir: () => string | undefined;
+  commentSyncDeps?: Partial<CommentSaveDependencies>;
 }
 
 const defaultDeps: CommentPromptDependencies = {
@@ -62,20 +61,7 @@ export const promptForComment = async (
       return;
     }
 
-    const uploadResult = await processMarkdownImageUploads({
-      content: input,
-      baseDir: deps.resolveBaseDir(),
-      uploadFile: deps.uploadFile,
-    });
-    if (hasMarkdownImageUploadFailure(uploadResult.summary)) {
-      deps.showError(buildMarkdownImageUploadFailureMessage(uploadResult.summary));
-      value = input;
-      deps.setCommentDraft(options.issueId, input);
-      continue;
-    }
-
-    const nextContent = uploadResult.content;
-    const validation = deps.validateComment(nextContent);
+    const validation = deps.validateComment(input);
     if (!validation.valid) {
       deps.showError(validation.message ?? vscode.l10n.t("Invalid comment."));
       value = input;
@@ -84,11 +70,27 @@ export const promptForComment = async (
     }
 
     try {
-      await deps.addComment(
-        options.issueId,
-        nextContent,
-        uploadResult.uploads.length > 0 ? uploadResult.uploads : undefined,
-      );
+      const operationScope = getCurrentConnectionScope();
+      const outcome = await queueAndSyncComment({
+        operation: {
+          ticketId: options.issueId,
+          body: input,
+          baseDir: deps.resolveBaseDir(),
+          documentUri: `redmine-comment-prompt:${options.issueId}`,
+        },
+        connectionScope: operationScope,
+        deps: {
+          ...deps.commentSyncDeps,
+          addComment: deps.addComment,
+          uploadFile: deps.uploadFile,
+        },
+      });
+      if (outcome.kind !== "completed") {
+        deps.showError(commentSyncOutcomeMessage(outcome));
+        value = input;
+        deps.setCommentDraft(options.issueId, input);
+        continue;
+      }
       deps.showInfo(vscode.l10n.t("Comment added."));
       value = "";
       deps.clearCommentDraft(options.issueId);

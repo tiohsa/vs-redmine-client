@@ -3,7 +3,7 @@ import * as fs from "fs";
 import * as os from "os";
 import * as path from "path";
 import * as vscode from "vscode";
-import { syncTicketDraft } from "../views/ticketSaveSync";
+import { syncTicketDraft } from "../views/ticketSync/ticketUpdateSync";
 import { initializeTicketDraft } from "../views/ticketDraftStore";
 import { buildTicketEditorContent } from "../views/ticketEditorContent";
 import { buildIssueMetadataFixture } from "./helpers/ticketMetadataFixtures";

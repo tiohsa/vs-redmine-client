@@ -20,6 +20,8 @@ import { defaultDeps, defaultReloadDeps } from "./ticketSyncDeps";
 import { createChildTickets, splitUniqueChildren } from "./ticketChildCreateSync";
 import type { TicketReloadDependencies, TicketSaveDependencies } from "./types";
 import { buildTicketPreviewContent } from "../ticketPreview";
+import { editorContentFromTicket, metadataFromTicket } from "./ticketRemoteContent";
+import { containsConflictMarkers } from "../../utils/threeWayMerge";
 
 export interface SyncTicketDraftInput {
   operationScope?: string;
@@ -49,6 +51,9 @@ export const syncTicketDraft = async (
   if (!draft) {
     return buildResult("failed", "Missing draft state for ticket.");
   }
+  if (containsConflictMarkers(input.content)) {
+    return buildResult("failed", vscode.l10n.t("Resolve all merge conflict markers before syncing."));
+  }
 
   let parsed;
   try {
@@ -61,7 +66,7 @@ export const syncTicketDraft = async (
     return buildResult("failed", message);
   }
 
-  const subject = parsed.subject || draft.baseSubject;
+  let subject = parsed.subject || draft.baseSubject;
   const uploadResult = await processMarkdownImageUploads({
     content: parsed.description,
     baseDir: resolveEditorBaseDir({ editor: input.editor, documentUri: input.documentUri }),
@@ -72,8 +77,8 @@ export const syncTicketDraft = async (
     return failureResult;
   }
   const uploadSummary = resolveUploadSummary(uploadResult.summary);
-  const description = uploadResult.content;
-  const metadata = parsed.metadata;
+  let description = uploadResult.content;
+  let metadata = parsed.metadata;
   const children = metadata.children ?? [];
   const { uniqueChildren, duplicateChildren } = splitUniqueChildren(children);
   const contentChanges = computeChanges(
@@ -108,6 +113,30 @@ export const syncTicketDraft = async (
   }
 
   if (Object.keys(changes).length === 0 && children.length === 0) {
+    try {
+      remoteDetail = await deps.getIssueDetail(input.ticketId);
+    } catch (error) {
+      return mapErrorToResult(error);
+    }
+
+    const remoteContent = editorContentFromTicket(remoteDetail.ticket, parsed);
+    updateDraftAfterSave(
+      input.ticketId,
+      remoteContent.subject,
+      remoteContent.description,
+      remoteContent.metadata,
+      remoteDetail.ticket.updatedAt ?? draft.lastKnownRemoteUpdatedAt,
+      input.operationScope,
+    );
+    if (input.editor) {
+      await applyEditorContent(
+        input.editor,
+        buildTicketEditorContent(remoteContent),
+      );
+    }
+    if (remoteContent.subject !== draft.baseSubject) {
+      input.onSubjectUpdated?.(input.ticketId, remoteContent.subject);
+    }
     return buildResult("no_change", "No changes to save.", { uploadSummary });
   }
 
@@ -124,10 +153,13 @@ export const syncTicketDraft = async (
         return buildResult("conflict", "Remote changes detected. Refresh before saving.", {
           conflictContext: {
             ticketId: input.ticketId,
+            baseSubject: draft.baseSubject,
+            baseDescription: draft.baseDescription,
             localSubject: subject,
             localDescription: description,
             remoteSubject: remoteDetail.ticket.subject,
             remoteDescription: remoteDetail.ticket.description ?? "",
+            remoteMetadata: metadataFromTicket(remoteDetail.ticket),
             remoteUpdatedAt,
           },
         });
@@ -200,11 +232,24 @@ export const syncTicketDraft = async (
   }
 
   let updatedAt = draft.lastKnownRemoteUpdatedAt;
+  let savedContent = buildTicketEditorContent({
+    subject,
+    description,
+    metadata: { ...metadata, children: [] },
+    layout: parsed.layout,
+    metadataBlock: parsed.metadataBlock,
+    controlFields: parsed.controlFields,
+  });
 
-  if (Object.keys(changes).length > 0) {
+  if (Object.keys(changes).length > 0 || children.length > 0) {
     try {
       const detail = await deps.getIssueDetail(input.ticketId);
       updatedAt = detail.ticket.updatedAt ?? updatedAt;
+      const remoteContent = editorContentFromTicket(detail.ticket, parsed);
+      savedContent = buildTicketEditorContent(remoteContent);
+      subject = remoteContent.subject;
+      description = remoteContent.description;
+      metadata = remoteContent.metadata;
     } catch {
       // Ignore refresh errors after successful update.
     }
@@ -220,14 +265,7 @@ export const syncTicketDraft = async (
     input.operationScope,
   );
   if (input.editor) {
-    const nextContent = buildTicketEditorContent({
-      subject,
-      description,
-      metadata: clearedMetadata,
-      layout: parsed.layout,
-      metadataBlock: parsed.metadataBlock,
-    });
-    await applyEditorContent(input.editor, nextContent);
+    await applyEditorContent(input.editor, savedContent);
   }
   if (changes.subject && input.onSubjectUpdated) {
     input.onSubjectUpdated(input.ticketId, subject);
@@ -253,12 +291,7 @@ export const reloadTicketEditor = async (
     const detail = await deps.getIssueDetail(input.ticketId);
     const content = buildTicketPreviewContent(detail.ticket);
     await deps.applyEditorContent(input.editor, content);
-    const metadata = {
-      tracker: detail.ticket.trackerName ?? "",
-      priority: detail.ticket.priorityName ?? "",
-      status: detail.ticket.statusName ?? "",
-      due_date: detail.ticket.dueDate ?? "",
-    };
+    const metadata = metadataFromTicket(detail.ticket);
     updateDraftAfterSave(
       input.ticketId,
       detail.ticket.subject,

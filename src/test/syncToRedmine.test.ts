@@ -1,4 +1,7 @@
 import * as assert from "assert";
+import * as fs from "fs";
+import * as os from "os";
+import * as path from "path";
 import * as vscode from "vscode";
 import { syncEditorToRedmine } from "../commands/syncToRedmine";
 import {
@@ -15,7 +18,7 @@ import {
 } from "../views/ticketDraftStore";
 import { buildTicketEditorContent } from "../views/ticketEditorContent";
 import { buildIssueMetadataFixture } from "./helpers/ticketMetadataFixtures";
-import { createEditorStub } from "./helpers/editorStubs";
+import { createEditorStub, createMutableEditorStub } from "./helpers/editorStubs";
 import { getCurrentConnectionScope } from "../config/connectionScope";
 import { createInMemoryDraftStorage } from "../views/draftPersistence";
 
@@ -37,11 +40,33 @@ suite("syncEditorToRedmine — draft status management", () => {
       description: "Body",
       metadata,
     });
-    const editor = createEditorStub(vscode.Uri.parse("test://ticket-101"), content);
+    const editor = createMutableEditorStub(vscode.Uri.parse("test://ticket-101"), content);
     registerTicketEditor(ticketId, editor, "primary", "ticket");
     initializeTicketDraft(ticketId, "Title", "Body", metadata, "t1");
 
-    await syncEditorToRedmine(editor, { deps: {} });
+    await syncEditorToRedmine(editor, {
+      rewrite: {
+        textDocuments: [editor.document],
+        textEditors: [editor],
+        applyEdit: async () => true,
+        saveDocument: async () => true,
+      },
+      deps: {
+        getIssueDetail: async () => ({
+          ticket: {
+            id: ticketId,
+            projectId: 1,
+            subject: "Title",
+            description: "Body",
+            trackerName: metadata.tracker,
+            priorityName: metadata.priority,
+            statusName: metadata.status,
+            updatedAt: "t2",
+          },
+          comments: [],
+        }),
+      },
+    });
 
     assert.strictEqual(
       getTicketDraft(ticketId)?.status,
@@ -109,7 +134,11 @@ suite("syncEditorToRedmine — draft status management", () => {
     const ticketId = 104;
     const currentScope = getCurrentConnectionScope();
     const content = "New comment";
-    const editor = createEditorStub(vscode.Uri.parse("test://comment-draft-104"), content);
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "comment-draft-scope-"));
+    const file = path.join(dir, `redmine-client-new-comment-${ticketId}.md`);
+    fs.writeFileSync(file, content);
+    const document = await vscode.workspace.openTextDocument(vscode.Uri.file(file));
+    const editor = await vscode.window.showTextDocument(document, { preview: false });
     registerTicketDocument(ticketId, editor.document, "commentDraft", undefined, currentScope);
 
     const result = await syncEditorToRedmine(editor, {
@@ -138,5 +167,6 @@ suite("syncEditorToRedmine — draft status management", () => {
     assert.strictEqual(result?.kind, "comment");
     assert.strictEqual(result?.result.status, "created");
     assert.strictEqual(getConnectionScopeForDocument(editor.document), currentScope);
+    await vscode.commands.executeCommand("workbench.action.closeActiveEditor");
   });
 });

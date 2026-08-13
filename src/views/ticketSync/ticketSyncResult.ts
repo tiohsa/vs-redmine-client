@@ -30,3 +30,13 @@ export const mapErrorToResult = (error: unknown): TicketSaveResult => {
 
   return buildResult("failed", message);
 };
+
+export const isRemoteCommitUnknownError = (error: unknown): boolean => {
+  const message = error instanceof Error ? error.message : String(error);
+  const match = message.match(/\((\d{3})\)/);
+  if (!match) {
+    return true;
+  }
+  const statusCode = Number(match[1]);
+  return statusCode === 408 || statusCode === 429 || statusCode >= 500;
+};

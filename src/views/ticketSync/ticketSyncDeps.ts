@@ -28,6 +28,7 @@ export const defaultDeps: TicketSaveDependencies = {
 };
 
 export const defaultCreateDeps: TicketCreateDependencies = {
+  getIssueDetail,
   createIssue,
   deleteIssue,
   listIssueStatuses,

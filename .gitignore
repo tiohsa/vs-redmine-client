@@ -22,3 +22,8 @@ memory/
 .venv/
 .claude/
 graphify-out/
+.antigravitycli/
+.codegraph/
+.serena/
+DESIGN.md
+
