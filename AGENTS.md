@@ -1,6 +1,6 @@
 # redmine-client AGENTS Guide
 
-Last updated: 2026-08-13
+Last updated: 2026-08-14
 
 ## 1. Project Overview
 
@@ -12,8 +12,8 @@ Last updated: 2026-08-13
 ## 2. Repository Structure and Responsibilities
 
 * `src/extension.ts`: The composition root that wires together store initialization, views, synchronization, commands, and editor events.
-* `src/app/`: Application layer. Responsible for command/view registration, save classification, notifications, and synchronization orchestration.
-* `src/app/ticketSync/`: Owns ticket synchronization use cases, ports, reconciliation, and finalization after remote writes. Do not bypass this boundary when adding new write paths.
+* `src/app/`: Application layer. Responsible for command/view registration, save classification, notifications, and synchronization orchestration (`SyncEngine`).
+* `src/app/ticketSync/`: Owns generic synchronization state machine, operation handlers, repository interfaces, reconciliation, and finalization after remote writes. Do not bypass this boundary when adding new write paths.
 * `src/dashboard/`: Owns the Dashboard protocol, input validation, router, controller, state store, services, view models, HTML, CSS, and scripts.
 * `src/commands/`: Thin command handlers invoked from the Command Palette and Dashboard. Do not duplicate shared synchronization logic here.
 * `src/views/`: Responsible for the Markdown editor, drafts, persisted unsynced queue, conflict resolution, and presentation adapters. `src/views/ticketSync/` is the integration boundary between the editor/queue and the application layer.

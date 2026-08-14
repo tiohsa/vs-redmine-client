@@ -1,9 +1,14 @@
 import * as vscode from "vscode";
 import { getDefaultProjectId } from "../config/settings";
 import { uploadClipboardImage, uploadFileAttachment } from "../redmine/attachments";
-import { createIssue, IssueUploadInput } from "../redmine/issues";
+import type { IssueUploadInput } from "../redmine/issues";
 import { convertMermaidBlocks } from "../utils/mermaid";
-import { showError, showInfo } from "../utils/notifications";
+import { showError, showInfo, showWarning } from "../utils/notifications";
+import { getCurrentConnectionScope } from "../config/connectionScope";
+import { createTicketSyncService, type TicketSyncService } from "../app/ticketSync";
+import { buildTicketEditorContent } from "../views/ticketEditorContent";
+import { buildIssueMetadataFixture } from "../test/helpers/ticketMetadataFixtures";
+import { applyEditorContent } from "../views/ticketPreview";
 
 const promptForSubject = async (): Promise<string | undefined> =>
   vscode.window.showInputBox({
@@ -56,36 +61,75 @@ const promptForAttachments = async (): Promise<IssueUploadInput[]> => {
   ];
 };
 
-export const createTicketFromEditor = async (): Promise<void> => {
-  const editor = vscode.window.activeTextEditor;
+export interface CreateTicketDependencies {
+  createTicketSyncService?: () => Pick<TicketSyncService, "syncEditor">;
+  getActiveEditor?: () => vscode.TextEditor | undefined;
+  promptSubject?: () => Promise<string | undefined>;
+  promptAttachments?: () => Promise<IssueUploadInput[]>;
+  getDefaultProjectId?: () => string;
+}
+
+export const createTicketFromEditor = async (
+  deps: CreateTicketDependencies = {},
+): Promise<void> => {
+  const editor = deps.getActiveEditor?.() ?? vscode.window.activeTextEditor;
   if (!editor) {
     showError(vscode.l10n.t("No active editor found."));
     return;
   }
 
-  const projectIdRaw = getDefaultProjectId();
+  const projectIdRaw = (deps.getDefaultProjectId ?? getDefaultProjectId)();
   const projectId = Number(projectIdRaw);
   if (!projectIdRaw || Number.isNaN(projectId)) {
     showError(vscode.l10n.t("Set a default project ID before creating tickets."));
     return;
   }
 
-  const subject = await promptForSubject();
+  const subject = await (deps.promptSubject ?? promptForSubject)();
   if (!subject) {
     return;
   }
 
   const description = convertMermaidBlocks(editor.document.getText());
-  const uploads = await promptForAttachments();
+  const uploads = await (deps.promptAttachments ?? promptForAttachments)();
+
+  const formattedContent = buildTicketEditorContent({
+    subject,
+    description,
+    metadata: buildIssueMetadataFixture(),
+    controlFields: {
+      mode: "new-ticket",
+      issue_id: null,
+      project_id: projectId,
+    },
+  });
+
+  await applyEditorContent(editor, formattedContent);
+
+  const operationScope = getCurrentConnectionScope();
+  const syncService = deps.createTicketSyncService?.() ?? createTicketSyncService();
 
   try {
-    await createIssue({
+    const outcome = await syncService.syncEditor({
+      context: { connectionScope: operationScope },
+      editor,
+      ticketId: 0,
+      newTicket: true,
+      manual: false,
       projectId,
-      subject,
-      description,
-      uploads,
     });
-    showInfo(vscode.l10n.t("Ticket created successfully."));
+
+    if (outcome.kind === "completed") {
+      showInfo(vscode.l10n.t("Ticket created successfully."));
+    } else if (outcome.kind === "remote_committed") {
+      showWarning(outcome.message ?? vscode.l10n.t("Ticket was created, but local finalization is pending."));
+    } else if (outcome.kind === "commit_unknown") {
+      showWarning(outcome.message);
+    } else if (outcome.kind === "failed_before_commit") {
+      showError(outcome.error.message);
+    } else {
+      showError(vscode.l10n.t("Ticket creation did not complete."));
+    }
   } catch (error) {
     showError((error as Error).message);
   }

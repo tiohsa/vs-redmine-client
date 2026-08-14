@@ -30,6 +30,8 @@ import {
   getCurrentConnectionScope,
 } from "../config/connectionScope";
 import { showError } from "../utils/notifications";
+import { getOfflineSyncMode, type OfflineSyncMode } from "../config/settings";
+import { createSyncEngine, type SyncEngine } from "./syncEngine";
 
 export interface SaveSyncExecutorDeps {
   ticketsPresentation: TicketPresentationPort;
@@ -37,6 +39,8 @@ export interface SaveSyncExecutorDeps {
   unsyncedPresentation: UnsyncedPresentationPort;
   notifications: NotificationController;
   updateTicketListSubject: (ticketId: number, subject: string) => void;
+  offlineSyncMode?: OfflineSyncMode;
+  syncEngine?: SyncEngine;
 }
 
 export const performSyncOnSave = async (
@@ -50,9 +54,30 @@ export const performSyncOnSave = async (
     return;
   }
   const { ticketsPresentation, commentsPresentation, unsyncedPresentation, notifications } = deps;
+  const syncMode = deps.offlineSyncMode ?? getOfflineSyncMode();
+  const syncEngine = deps.syncEngine ?? createSyncEngine();
+
   const refreshQueuedComment = (ticketId: number): void => {
     unsyncedPresentation.refresh();
     commentsPresentation.refreshForTicket(ticketId);
+  };
+
+  const syncIfAuto = async (key: import("./syncEngine").SyncEngineKey): Promise<void> => {
+    if (syncMode === "auto" && key.kind !== "newTicket") {
+      try {
+        const outcome = await syncEngine.syncOne(key, { connectionScope: operationScope });
+        if (outcome.kind === "completed" || outcome.kind === "no_change") {
+          unsyncedPresentation.refresh();
+          if (key.kind === "ticket") {
+            ticketsPresentation.notifyChange();
+          } else if (key.kind === "comment") {
+            commentsPresentation.refreshForTicket(key.ticketId);
+          }
+        }
+      } catch {
+        // 同期失敗時のエラーハンドリングは syncEngine 内で durable state として記録される
+      }
+    }
   };
 
   if (editor) {
@@ -67,6 +92,11 @@ export const performSyncOnSave = async (
       notifications.notifyTicketSaveResult(ticketResult);
       if (ticketResult.status === "created") {
         ticketsPresentation.refresh();
+      } else if (ticketResult.status === "queued") {
+        const ticketId = getTicketIdForDocument(editor.document) ?? getTicketIdForUri(editor.document.uri);
+        if (ticketId && ticketId > 0) {
+          await syncIfAuto({ kind: "ticket", ticketId });
+        }
       }
       return;
     }
@@ -83,6 +113,11 @@ export const performSyncOnSave = async (
       if (ticketId) {
         if (commentResult.status === "queued") {
           refreshQueuedComment(ticketId);
+          await syncIfAuto({
+            kind: "comment",
+            ticketId,
+            documentUri: editor.document.uri.toString(),
+          });
         } else if (shouldRefreshComments(commentResult.status)) {
           commentsPresentation.refreshForTicket(ticketId);
         }
@@ -109,9 +144,15 @@ export const performSyncOnSave = async (
           documentUri: document.uri.toString(),
           sourceNotesHash: classification.parsed.fields.sourceNotesHash,
         }, operationScope);
+        unsyncedPresentation.refresh();
+        commentsPresentation.refreshForTicket(classification.parsed.fields.issueId);
+        await syncIfAuto({
+          kind: "comment",
+          ticketId: classification.parsed.fields.issueId,
+          commentId: classification.parsed.fields.journalId,
+          documentUri: document.uri.toString(),
+        });
       }
-      unsyncedPresentation.refresh();
-      commentsPresentation.refreshForTicket(classification.parsed.fields.issueId);
       return;
     }
 
@@ -125,6 +166,14 @@ export const performSyncOnSave = async (
       });
       notifications.notifyCommentSaveResult(commentResult);
       refreshQueuedComment(classification.ticketId);
+      if (commentResult.status === "queued") {
+        await syncIfAuto({
+          kind: "comment",
+          ticketId: classification.ticketId,
+          commentId: classification.commentId,
+          documentUri: document.uri.toString(),
+        });
+      }
       return;
     }
 
@@ -149,6 +198,9 @@ export const performSyncOnSave = async (
         operationScope,
       });
       notifications.notifyTicketSaveResult(result);
+      if (result.status === "queued") {
+        await syncIfAuto({ kind: "ticket", ticketId: classification.ticketId });
+      }
       return;
     }
 
@@ -181,6 +233,14 @@ export const performSyncOnSave = async (
       });
       notifications.notifyCommentSaveResult(commentResult);
       refreshQueuedComment(classification.ticketId);
+      if (commentResult.status === "queued") {
+        await syncIfAuto({
+          kind: "comment",
+          ticketId: classification.ticketId,
+          commentId: classification.commentId,
+          documentUri: document.uri.toString(),
+        });
+      }
       return;
     }
 
@@ -193,6 +253,13 @@ export const performSyncOnSave = async (
       });
       notifications.notifyCommentSaveResult(commentResult);
       refreshQueuedComment(classification.ticketId);
+      if (commentResult.status === "queued") {
+        await syncIfAuto({
+          kind: "comment",
+          ticketId: classification.ticketId,
+          documentUri: document.uri.toString(),
+        });
+      }
       return;
     }
 
@@ -206,6 +273,14 @@ export const performSyncOnSave = async (
       });
       notifications.notifyCommentSaveResult(commentResult);
       refreshQueuedComment(classification.ticketId);
+      if (commentResult.status === "queued") {
+        await syncIfAuto({
+          kind: "comment",
+          ticketId: classification.ticketId,
+          commentId: classification.commentId,
+          documentUri: document.uri.toString(),
+        });
+      }
       return;
     }
 

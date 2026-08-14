@@ -3,8 +3,10 @@ import { buildCommentDashboardItems } from "../dashboard/viewModels/commentsDash
 import {
   addOfflineCommentUpdate,
   clearOfflineSyncQueue,
+  initializeOfflineSyncStore,
 } from "../views/offlineSyncStore";
 import { Comment } from "../redmine/types";
+import { createTestMemento } from "./helpers/vscodeMemento";
 
 const makeComment = (id: number): Comment => ({
   id,
@@ -16,8 +18,13 @@ const makeComment = (id: number): Comment => ({
 });
 
 suite("commentsDashboardViewModel – hasUnsyncedEdit", () => {
-  setup(() => { clearOfflineSyncQueue(); });
-  teardown(() => { clearOfflineSyncQueue(); });
+  setup(() => {
+    initializeOfflineSyncStore(createTestMemento());
+    clearOfflineSyncQueue();
+  });
+  teardown(() => {
+    clearOfflineSyncQueue();
+  });
 
   test("未同期エントリがなければ hasUnsyncedEdit = false", () => {
     const items = buildCommentDashboardItems([makeComment(1), makeComment(2)]);
