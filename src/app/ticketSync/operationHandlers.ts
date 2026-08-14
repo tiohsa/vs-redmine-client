@@ -387,22 +387,22 @@ export class TicketUpdateHandler implements OperationHandler<TicketUpdateIntent,
 
     const metadataChanges: any = {};
     if (intent.metadata && intent.baseMetadata) {
-      if (intent.metadata.tracker !== intent.baseMetadata.tracker) metadataChanges.tracker = intent.metadata.tracker;
-      if (intent.metadata.status !== intent.baseMetadata.status) metadataChanges.status = intent.metadata.status;
-      if (intent.metadata.priority !== intent.baseMetadata.priority) metadataChanges.priority = intent.metadata.priority;
-      if (intent.metadata.assignee !== intent.baseMetadata.assignee) metadataChanges.assignee = intent.metadata.assignee;
-      if (intent.metadata.start_date !== intent.baseMetadata.start_date) metadataChanges.startDate = intent.metadata.start_date;
-      if (intent.metadata.due_date !== intent.baseMetadata.due_date) metadataChanges.dueDate = intent.metadata.due_date;
-      if (intent.metadata.done_ratio !== intent.baseMetadata.done_ratio) metadataChanges.doneRatio = intent.metadata.done_ratio;
-      if (intent.metadata.estimated_hours !== intent.baseMetadata.estimated_hours) metadataChanges.estimatedHours = intent.metadata.estimated_hours;
-      if (intent.metadata.parent !== intent.baseMetadata.parent) metadataChanges.parentId = intent.metadata.parent;
+      if (intent.metadata.tracker !== intent.baseMetadata.tracker) {metadataChanges.tracker = intent.metadata.tracker;}
+      if (intent.metadata.status !== intent.baseMetadata.status) {metadataChanges.status = intent.metadata.status;}
+      if (intent.metadata.priority !== intent.baseMetadata.priority) {metadataChanges.priority = intent.metadata.priority;}
+      if (intent.metadata.assignee !== intent.baseMetadata.assignee) {metadataChanges.assignee = intent.metadata.assignee;}
+      if (intent.metadata.start_date !== intent.baseMetadata.start_date) {metadataChanges.startDate = intent.metadata.start_date;}
+      if (intent.metadata.due_date !== intent.baseMetadata.due_date) {metadataChanges.dueDate = intent.metadata.due_date;}
+      if (intent.metadata.done_ratio !== intent.baseMetadata.done_ratio) {metadataChanges.doneRatio = intent.metadata.done_ratio;}
+      if (intent.metadata.estimated_hours !== intent.baseMetadata.estimated_hours) {metadataChanges.estimatedHours = intent.metadata.estimated_hours;}
+      if (intent.metadata.parent !== intent.baseMetadata.parent) {metadataChanges.parentId = intent.metadata.parent;}
     } else if (intent.metadata) {
-      if (intent.metadata.tracker) metadataChanges.tracker = intent.metadata.tracker;
-      if (intent.metadata.status) metadataChanges.status = intent.metadata.status;
-      if (intent.metadata.priority) metadataChanges.priority = intent.metadata.priority;
-      if (intent.metadata.assignee) metadataChanges.assignee = intent.metadata.assignee;
-      if (intent.metadata.start_date) metadataChanges.startDate = intent.metadata.start_date;
-      if (intent.metadata.due_date) metadataChanges.dueDate = intent.metadata.due_date;
+      if (intent.metadata.tracker) {metadataChanges.tracker = intent.metadata.tracker;}
+      if (intent.metadata.status) {metadataChanges.status = intent.metadata.status;}
+      if (intent.metadata.priority) {metadataChanges.priority = intent.metadata.priority;}
+      if (intent.metadata.assignee) {metadataChanges.assignee = intent.metadata.assignee;}
+      if (intent.metadata.start_date) {metadataChanges.startDate = intent.metadata.start_date;}
+      if (intent.metadata.due_date) {metadataChanges.dueDate = intent.metadata.due_date;}
     }
 
     // 2. メタデータの解決 (IDマッピング)
@@ -426,21 +426,21 @@ export class TicketUpdateHandler implements OperationHandler<TicketUpdateIntent,
 
         if (metadataChanges.tracker) {
           const match = trackers.find((t: any) => t.name === metadataChanges.tracker);
-          if (match) resolvedMetadataFields.trackerId = match.id;
+          if (match) {resolvedMetadataFields.trackerId = match.id;}
         }
         if (metadataChanges.status) {
           const match = statuses.find((s: any) => s.name === metadataChanges.status);
-          if (match) resolvedMetadataFields.statusId = match.id;
+          if (match) {resolvedMetadataFields.statusId = match.id;}
         }
         if (metadataChanges.priority) {
           const match = priorities.find((p: any) => p.name === metadataChanges.priority);
-          if (match) resolvedMetadataFields.priorityId = match.id;
+          if (match) {resolvedMetadataFields.priorityId = match.id;}
         }
-        if (metadataChanges.startDate !== undefined) resolvedMetadataFields.startDate = metadataChanges.startDate;
-        if (metadataChanges.dueDate !== undefined) resolvedMetadataFields.dueDate = metadataChanges.dueDate;
-        if (metadataChanges.doneRatio !== undefined) resolvedMetadataFields.doneRatio = metadataChanges.doneRatio;
-        if (metadataChanges.estimatedHours !== undefined) resolvedMetadataFields.estimatedHours = metadataChanges.estimatedHours;
-        if (metadataChanges.parentId !== undefined) resolvedMetadataFields.parentId = metadataChanges.parentId;
+        if (metadataChanges.startDate !== undefined) {resolvedMetadataFields.startDate = metadataChanges.startDate;}
+        if (metadataChanges.dueDate !== undefined) {resolvedMetadataFields.dueDate = metadataChanges.dueDate;}
+        if (metadataChanges.doneRatio !== undefined) {resolvedMetadataFields.doneRatio = metadataChanges.doneRatio;}
+        if (metadataChanges.estimatedHours !== undefined) {resolvedMetadataFields.estimatedHours = metadataChanges.estimatedHours;}
+        if (metadataChanges.parentId !== undefined) {resolvedMetadataFields.parentId = metadataChanges.parentId;}
       } catch (err) {
         return { ok: false, outcome: { kind: "failed_before_commit", ticketId, error: err as Error } };
       }

@@ -21,20 +21,20 @@ suite("RT-D: SyncCoordinator Phase Resume Matrix (syncCoordinatorPhaseResume.tes
       return operation;
     }
     public async transitionOperation(key: any, action: any): Promise<UnifiedSyncOperation | undefined> {
-      if (!this.op) return undefined;
+      if (!this.op) {return undefined;}
       let nextPhase = this.op.phase;
-      if (action.kind === "begin_preparation") nextPhase = "preparing";
-      if (action.kind === "start_normal_remote_write") nextPhase = "remote_write_started";
-      if (action.kind === "record_remote_commit") nextPhase = "remote_committed";
-      if (action.kind === "mark_reconciliation_pending") nextPhase = "reconciliation_pending";
-      if (action.kind === "mark_local_finalize_pending") nextPhase = "local_finalize_pending";
-      if (action.kind === "record_reconciled_identity") nextPhase = "local_finalize_pending";
-      if (action.kind === "complete") nextPhase = "completed";
+      if (action.kind === "begin_preparation") {nextPhase = "preparing";}
+      if (action.kind === "start_normal_remote_write") {nextPhase = "remote_write_started";}
+      if (action.kind === "record_remote_commit") {nextPhase = "remote_committed";}
+      if (action.kind === "mark_reconciliation_pending") {nextPhase = "reconciliation_pending";}
+      if (action.kind === "mark_local_finalize_pending") {nextPhase = "local_finalize_pending";}
+      if (action.kind === "record_reconciled_identity") {nextPhase = "local_finalize_pending";}
+      if (action.kind === "complete") {nextPhase = "completed";}
       this.op = { ...this.op, phase: nextPhase, version: (this.op.version ?? 1) + 1 };
       return this.op;
     }
     public async completeOperation(): Promise<boolean> {
-      if (this.op) this.op = { ...this.op, phase: "completed" };
+      if (this.op) {this.op = { ...this.op, phase: "completed" };}
       return true;
     }
     public async deleteOperation(): Promise<boolean> {

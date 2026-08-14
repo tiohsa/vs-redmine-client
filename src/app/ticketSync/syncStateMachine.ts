@@ -104,7 +104,7 @@ export const applyGenericTransition = (
 
     case "record_reconciled_identity": {
       next.phase = "local_finalize_pending";
-      const resolvedId = action.remoteId ?? action.commentId ?? action.createdIssueId;
+      const resolvedId = action.remoteId;
       if (resolvedId !== undefined) {
         next.createdRemoteId = resolvedId;
         if (operation.kind === "comment_create" || operation.kind === "comment_update" || operation.commentId !== undefined) {
