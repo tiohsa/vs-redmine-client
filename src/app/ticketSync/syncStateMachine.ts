@@ -9,13 +9,21 @@ import type {
  */
 const ALLOWED_TRANSITIONS: Record<GenericSyncPhase, GenericLifecycleAction["kind"][]> = {
   queued: ["begin_preparation"],
-  preparing: ["start_normal_remote_write", "abort_before_remote_write"],
+  preparing: [
+    "start_normal_remote_write",
+    "abort_before_remote_write",
+    "record_remote_commit",
+    "mark_commit_unknown",
+  ],
   remote_write_started: [
     "record_remote_commit",
     "mark_commit_unknown",
     "abort_known_remote_failure",
+    "assume_remote_commit",
+    "record_reconciled_identity",
+    "start_explicit_retry_remote_write",
   ],
-  commit_unknown: ["assume_remote_commit", "record_reconciled_identity"],
+  commit_unknown: ["assume_remote_commit", "record_reconciled_identity", "start_explicit_retry_remote_write", "record_remote_commit"],
   remote_committed: [
     "mark_reconciliation_pending",
     "mark_local_finalize_pending",
@@ -53,10 +61,27 @@ export const applyGenericTransition = (
       return next;
 
     case "start_normal_remote_write":
+    case "start_explicit_retry_remote_write": {
       next.phase = "remote_write_started";
+      const pId = operation.kind === "ticket_create" ? "ticket-create" : operation.kind === "ticket_update" ? "ticket-update" : operation.kind === "comment_create" ? "comment-create" : "comment-update";
+      const effects = next.effects ? [...next.effects] : [];
+      const idx = effects.findIndex((e) => e.effectId === pId);
+      if (idx !== -1) {
+        effects[idx] = { ...effects[idx], state: "started" };
+      } else {
+        effects.push({
+          effectId: pId,
+          kind: operation.kind === "ticket_create" ? "ticket_create" : operation.kind === "ticket_update" ? "ticket_update" : operation.kind === "comment_create" ? "comment_create" : "comment_update",
+          operationRevision: next.revision ?? 1,
+          state: "started",
+          target: {},
+        });
+      }
+      next.effects = effects;
       return next;
+    }
 
-    case "record_remote_commit":
+    case "record_remote_commit": {
       next.phase = "remote_committed";
       if (action.createdRemoteId !== undefined) {
         next.createdRemoteId = action.createdRemoteId;
@@ -67,14 +92,32 @@ export const applyGenericTransition = (
       if (action.remoteUpdatedAt !== undefined) {
         next.remoteUpdatedAt = action.remoteUpdatedAt;
       }
+      if (action.createdRemoteId !== undefined) {
+        const pId = operation.kind === "ticket_create" ? "ticket-create" : operation.kind === "ticket_update" ? "ticket-update" : operation.kind === "comment_create" ? "comment-create" : "comment-update";
+        const effects = next.effects ? [...next.effects] : [];
+        const idx = effects.findIndex((e) => e.effectId === pId);
+        if (idx !== -1) {
+          effects[idx] = { ...effects[idx], state: "committed", remoteId: action.createdRemoteId ?? effects[idx].remoteId };
+        }
+        next.effects = effects;
+      }
       return next;
+    }
 
-    case "mark_commit_unknown":
+    case "mark_commit_unknown": {
       next.phase = "commit_unknown";
       if (action.message) {
         next.errorMessage = action.message;
       }
+      const pId = operation.kind === "ticket_create" ? "ticket-create" : operation.kind === "ticket_update" ? "ticket-update" : operation.kind === "comment_create" ? "comment-create" : "comment-update";
+      const effects = next.effects ? [...next.effects] : [];
+      const idx = effects.findIndex((e) => e.effectId === pId);
+      if (idx !== -1) {
+        effects[idx] = { ...effects[idx], state: "commit_unknown" };
+      }
+      next.effects = effects;
       return next;
+    }
 
     case "abort_before_remote_write":
     case "abort_known_remote_failure":

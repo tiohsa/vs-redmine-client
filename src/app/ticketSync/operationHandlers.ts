@@ -4,16 +4,31 @@ import { getIssueDetail, updateIssue } from "../../redmine/issues";
 import { addComment, updateComment } from "../../redmine/comments";
 import { getCurrentUserId } from "../../redmine/users";
 import { uploadClipboardImage, uploadFileAttachment } from "../../redmine/attachments";
-import { parseTicketEditorContent, type TicketEditorContent } from "../../views/ticketEditorContent";
+import { buildTicketEditorContent, parseTicketEditorContent, type TicketEditorContent } from "../../views/ticketEditorContent";
 import { editorContentFromTicket } from "../../views/ticketSync/ticketRemoteContent";
-import { resolveMetadataForCreate } from "../../views/ticketSync/ticketMetadataResolver";
+import {
+  computeChanges,
+  computeMetadataChanges,
+  resolveMetadataForCreate,
+  resolveMetadataUpdates,
+} from "../../views/ticketSync/ticketMetadataResolver";
 import { rewriteNewTicketEditorToTicketMode } from "../../views/ticketSync/ticketEditorRewrite";
+import { compareAndRewriteDocumentWithRegisteredFields } from "../../views/editorDocumentRewrite";
 import { updateDraftAfterSave } from "../../views/ticketDraftStore";
 import { markNewTicketDraftSynced } from "../../views/newTicketDraftStore";
+import { rebaseTicketEditorContent } from "./ticketIntentRebase";
+import {
+  getOfflineSyncQueue,
+  planOfflineSyncEffectAsync,
+  transitionOfflineSyncEffectAsync,
+  updateOfflineNewTicketAsync,
+} from "../../views/offlineSyncStore";
+import { registerTicketDocument, removeTicketEditorByUri } from "../../views/ticketEditorRegistry";
 import type { TicketCreateDependencies, TicketSaveDependencies } from "../../views/ticketSync/types";
 import { defaultCreateDeps, defaultDeps as defaultTicketDeps } from "../../views/ticketSync/ticketSyncDeps";
 import {
   finalizeNewCommentDraftDocument,
+  normalizeCommentBody,
   reconcileCommentCommitUnknown,
   resolveCreatedCommentId,
   type CommentSaveDependencies,
@@ -56,10 +71,13 @@ export interface OperationHandlerContext {
   connectionScope: string;
 }
 
+import type { DocumentPort } from "./ports";
+
 export interface OperationHandlerDeps {
   ticketCreate?: Partial<TicketCreateDependencies>;
   ticketUpdate?: Partial<TicketSaveDependencies>;
   comment?: Partial<CommentSaveDependencies>;
+  documents?: DocumentPort;
 }
 
 export interface OperationHandler<TIntent extends SyncIntent = any, TPrepared = any> {
@@ -116,26 +134,49 @@ export interface OperationHandler<TIntent extends SyncIntent = any, TPrepared = 
   ): Promise<{ ok: true } | { ok: false; message: string; pending: "local_finalize" }>;
 }
 
-export class TicketCreateHandler implements OperationHandler<TicketCreateIntent, {
+export type PreparedTicketCreate = {
   parsed: TicketEditorContent;
   projectId: number;
   uploadTokens: IssueUploadInput[];
-}> {
+  resolved?: any;
+};
+
+export class TicketCreateHandler implements OperationHandler<TicketCreateIntent, PreparedTicketCreate> {
   public async prepare(
     operation: UnifiedSyncOperation<TicketCreateIntent>,
     context: OperationHandlerContext,
     deps?: OperationHandlerDeps,
-  ): Promise<{ ok: true; prepared: { parsed: TicketEditorContent; projectId: number; uploadTokens: IssueUploadInput[] } } | { ok: false; outcome: SyncOutcome }> {
+  ): Promise<{ ok: true; prepared: PreparedTicketCreate } | { ok: false; outcome: SyncOutcome }> {
     const intent = operation.intent;
     if (!intent) {
       return { ok: false, outcome: { kind: "failed_before_commit", error: new Error("Missing TicketCreateIntent") } };
     }
 
     let parsed: TicketEditorContent;
-    if (typeof intent.description === "string" && !intent.subject && !intent.metadata?.tracker) {
+    if (typeof intent.content === "string" && intent.content.trim().length > 0) {
+      try {
+        parsed = parseTicketEditorContent(intent.content, {
+          allowMissingMetadata: true,
+          allowMissingSubject: true,
+          fallbackMetadata: intent.metadata ?? { tracker: "", priority: "", status: "", due_date: "", children: [] },
+        });
+      } catch (err) {
+        return { ok: false, outcome: { kind: "failed_before_commit", error: err as Error } };
+      }
+      if (intent.subject && !parsed.subject) {
+        parsed.subject = intent.subject;
+      }
+      if (intent.description && !parsed.description) {
+        parsed.description = intent.description;
+      }
+      if (intent.metadata) {
+        parsed.metadata = { ...parsed.metadata, ...intent.metadata };
+      }
+    } else if (typeof intent.description === "string" && !intent.subject && !intent.metadata?.tracker) {
       try {
         parsed = parseTicketEditorContent(intent.description, {
           allowMissingMetadata: true,
+          allowMissingSubject: true,
           fallbackMetadata: intent.metadata ?? { tracker: "", priority: "", status: "", due_date: "", children: [] },
         });
       } catch (err) {
@@ -155,19 +196,37 @@ export class TicketCreateHandler implements OperationHandler<TicketCreateIntent,
     const projectId = intent.projectId || parsed.controlFields?.project_id || operation.projectId || 0;
     const uploadTokens: IssueUploadInput[] = [...(intent.uploadTokens ?? [])];
 
+    const createDeps: any = deps?.ticketCreate
+      ? { ...defaultCreateDeps, ...deps.ticketCreate, getProjectTrackers: deps.ticketCreate.getProjectTrackers }
+      : { ...defaultCreateDeps };
+    let resolved: any = undefined;
+    try {
+      resolved = await resolveMetadataForCreate(
+        parsed.metadata,
+        createDeps,
+        projectId,
+      );
+    } catch (err) {
+      return {
+        ok: false,
+        outcome: { kind: "failed_before_commit", error: err as Error },
+      };
+    }
+
     return {
       ok: true,
       prepared: {
         parsed,
         projectId,
         uploadTokens,
+        resolved,
       },
     };
   }
 
   public async executeSecondaryEffects(
     operation: UnifiedSyncOperation<TicketCreateIntent>,
-    prepared: { parsed: TicketEditorContent; projectId: number; uploadTokens: IssueUploadInput[] },
+    prepared: { parsed: TicketEditorContent; projectId: number; uploadTokens: IssueUploadInput[]; resolved?: any },
     context: OperationHandlerContext,
     deps?: OperationHandlerDeps,
   ): Promise<{ ok: true; uploadTokens?: IssueUploadInput[] } | { ok: false; error: Error; commitUnknown?: boolean }> {
@@ -177,8 +236,13 @@ export class TicketCreateHandler implements OperationHandler<TicketCreateIntent,
 
     for (const att of attachments) {
       if (att.kind === "token") {
-        tokens.push({ token: att.token, filename: att.filename ?? "attachment", content_type: att.contentType ?? "application/octet-stream" });
+        if (!tokens.some((t) => t.token === att.token)) {
+          tokens.push({ token: att.token, filename: att.filename ?? "attachment", content_type: att.contentType ?? "application/octet-stream" });
+        }
       } else if (att.kind === "file") {
+        if (tokens.some((t) => t.filename === att.filename)) {
+          continue;
+        }
         try {
           const uploadFn = (createDeps as any).uploadFile ?? uploadFileAttachment;
           const res = await uploadFn(att.filePath);
@@ -187,6 +251,9 @@ export class TicketCreateHandler implements OperationHandler<TicketCreateIntent,
           return { ok: false, error: err as Error, commitUnknown: isRemoteCommitUnknownError(err) };
         }
       } else if (att.kind === "clipboard") {
+        if (tokens.some((t) => t.filename === att.filename || (tokens.length > 0 && att.filename === undefined))) {
+          continue;
+        }
         try {
           const uploadFn = (createDeps as any).uploadClipboardImage ?? uploadClipboardImage;
           const res = await uploadFn();
@@ -203,7 +270,7 @@ export class TicketCreateHandler implements OperationHandler<TicketCreateIntent,
 
   public async executeRemoteWrite(
     operation: UnifiedSyncOperation<TicketCreateIntent>,
-    prepared: { parsed: TicketEditorContent; projectId: number; uploadTokens: IssueUploadInput[] },
+    prepared: { parsed: TicketEditorContent; projectId: number; uploadTokens: IssueUploadInput[]; resolved?: any },
     context: OperationHandlerContext,
     deps?: OperationHandlerDeps,
   ): Promise<{
@@ -217,55 +284,197 @@ export class TicketCreateHandler implements OperationHandler<TicketCreateIntent,
     error: Error;
     outcome?: SyncOutcome;
   }> {
-    const createDeps: any = { ...defaultCreateDeps, ...deps?.ticketCreate };
-    if (deps?.ticketCreate && !deps.ticketCreate.getProjectTrackers && deps.ticketCreate.listTrackers) {
-      createDeps.getProjectTrackers = undefined;
-    }
-    try {
-      const resolved = await resolveMetadataForCreate(
-        prepared.parsed.metadata,
-        createDeps,
-        prepared.projectId,
-      );
-
-      const createdId = await createDeps.createIssue({
-        projectId: prepared.projectId,
-        subject: prepared.parsed.subject,
-        description: prepared.parsed.description,
-        trackerId: resolved.trackerId,
-        priorityId: resolved.priorityId,
-        statusId: resolved.statusId,
-        startDate: prepared.parsed.metadata.start_date || undefined,
-        dueDate: prepared.parsed.metadata.due_date || undefined,
-        uploads: prepared.uploadTokens.length > 0 ? prepared.uploadTokens : undefined,
-      });
-
-      if (!createdId) {
+    const createDeps: any = deps?.ticketCreate
+      ? { ...defaultCreateDeps, ...deps.ticketCreate, getProjectTrackers: deps.ticketCreate.getProjectTrackers }
+      : { ...defaultCreateDeps };
+    let resolved: any = prepared.resolved;
+    if (!resolved) {
+      try {
+        resolved = await resolveMetadataForCreate(
+          prepared.parsed.metadata,
+          createDeps,
+          prepared.projectId,
+        );
+      } catch (err) {
         return {
           ok: false,
           commitUnknown: false,
-          error: new Error("Failed to create issue"),
-          outcome: { kind: "failed_before_commit", error: new Error("Failed to create issue") },
+          error: err as Error,
+          outcome: { kind: "failed_before_commit", error: err as Error },
         };
       }
-
-      return {
-        ok: true,
-        createdRemoteId: createdId,
-        projectId: prepared.projectId,
-        remoteUpdatedAt: new Date().toISOString(),
-      };
-    } catch (err) {
-      const commitUnknown = isRemoteCommitUnknownError(err);
-      return {
-        ok: false,
-        commitUnknown,
-        error: err as Error,
-        outcome: commitUnknown
-          ? { kind: "commit_unknown", operationId: operation.operationId, message: (err as Error).message }
-          : { kind: "failed_before_commit", error: err as Error },
-      };
     }
+
+    const operationId = operation.operationId ?? (operation.key?.kind === "newTicket" ? operation.key.queueId : "newTicket");
+    const revision = operation.intentRevision ?? operation.revision ?? 1;
+
+    let createdId = operation.createdRemoteId;
+
+    if (!createdId) {
+      if (operationId) {
+        await planOfflineSyncEffectAsync(
+          operationId,
+          {
+            effectId: "ticket-create",
+            kind: "ticket_create",
+            operationRevision: revision,
+            state: "planned",
+            target: { documentUri: operation.documentUri },
+          },
+          context.connectionScope,
+          revision,
+        );
+
+        await transitionOfflineSyncEffectAsync(
+          operationId,
+          "ticket-create",
+          { kind: "start" },
+          context.connectionScope,
+          { operationRevision: revision, sourceState: "planned" },
+        );
+      }
+
+      try {
+        createdId = await createDeps.createIssue({
+          projectId: prepared.projectId,
+          subject: prepared.parsed.subject,
+          description: prepared.parsed.description,
+          trackerId: resolved.trackerId,
+          priorityId: resolved.priorityId,
+          statusId: resolved.statusId,
+          startDate: prepared.parsed.metadata.start_date || undefined,
+          dueDate: prepared.parsed.metadata.due_date || undefined,
+          uploads: prepared.uploadTokens.length > 0 ? prepared.uploadTokens : undefined,
+        });
+
+        if (!createdId) {
+          throw new Error("Failed to create issue");
+        }
+
+        if (operationId) {
+          await transitionOfflineSyncEffectAsync(
+            operationId,
+            "ticket-create",
+            { kind: "commit", remoteId: createdId },
+            context.connectionScope,
+            { operationRevision: revision, sourceState: "started" },
+          );
+          await updateOfflineNewTicketAsync(
+            { queueId: operation.key?.kind === "newTicket" ? operation.key.queueId : operationId, documentUri: operation.documentUri },
+            { createdIssueId: createdId },
+            context.connectionScope,
+          );
+        }
+      } catch (err) {
+        const commitUnknown = isRemoteCommitUnknownError(err);
+        if (operationId) {
+          await transitionOfflineSyncEffectAsync(
+            operationId,
+            "ticket-create",
+            commitUnknown ? { kind: "mark_commit_unknown" } : { kind: "mark_failed", detail: (err as Error).message },
+            context.connectionScope,
+            { operationRevision: revision, sourceState: "started" },
+          );
+        }
+        return {
+          ok: false,
+          commitUnknown,
+          error: err as Error,
+          outcome: commitUnknown
+            ? { kind: "commit_unknown", operationId: operation.operationId, message: (err as Error).message }
+            : { kind: "failed_before_commit", error: err as Error },
+        };
+      }
+    }
+
+    // Children creation
+    const children = prepared.parsed.metadata?.children ?? [];
+    const uniqueChildren = Array.from(new Set(children.map((c) => c.trim()).filter((c) => c.length > 0)));
+
+    for (let ordinal = 0; ordinal < uniqueChildren.length; ordinal++) {
+      const subject = uniqueChildren[ordinal];
+      const effectId = `child-create:${ordinal}`;
+
+      const queueTicket = getOfflineSyncQueue(context.connectionScope).newTickets.find((t) => (operationId && t.operationId === operationId) || (operationId && t.queueId === operationId));
+      const queueEffects = queueTicket?.effects ?? [];
+      const existingEffect = queueEffects.find((e: any) => e.effectId === effectId) ?? operation.effects?.find((e: any) => e.effectId === effectId);
+      if (
+        (existingEffect?.state === "committed" && existingEffect.remoteId) ||
+        existingEffect?.state === "commit_unknown" ||
+        existingEffect?.state === "compensation_unknown" ||
+        existingEffect?.state === "compensation_started" ||
+        existingEffect?.state === "failed"
+      ) {
+        continue;
+      }
+
+      if (operationId) {
+        await planOfflineSyncEffectAsync(
+          operationId,
+          {
+            effectId,
+            kind: "child_create",
+            operationRevision: revision,
+            state: "planned",
+            target: { parentTicketId: createdId, ordinal },
+          },
+          context.connectionScope,
+          revision,
+        );
+
+        await transitionOfflineSyncEffectAsync(
+          operationId,
+          effectId,
+          { kind: "start" },
+          context.connectionScope,
+          { operationRevision: revision, sourceState: "planned" },
+        );
+      }
+
+      try {
+        const createdChildId = await createDeps.createIssue({
+          subject,
+          description: "",
+          parentId: createdId,
+          projectId: prepared.projectId,
+        });
+        if (!createdChildId) {
+          throw new Error(`Failed to create child issue: ${subject}`);
+        }
+        if (operationId) {
+          await transitionOfflineSyncEffectAsync(
+            operationId,
+            effectId,
+            { kind: "commit", remoteId: createdChildId },
+            context.connectionScope,
+            { operationRevision: revision, sourceState: "started" },
+          );
+        }
+      } catch (err) {
+        const commitUnknown = isRemoteCommitUnknownError(err);
+        if (operationId) {
+          await transitionOfflineSyncEffectAsync(
+            operationId,
+            effectId,
+            commitUnknown ? { kind: "mark_commit_unknown" } : { kind: "mark_failed", detail: (err as Error).message },
+            context.connectionScope,
+            { operationRevision: revision, sourceState: "started" },
+          );
+        }
+        return {
+          ok: false,
+          error: err as Error,
+          commitUnknown,
+        };
+      }
+    }
+
+    return {
+      ok: true,
+      createdRemoteId: createdId,
+      projectId: prepared.projectId,
+      remoteUpdatedAt: new Date().toISOString(),
+    };
   }
 
   public async reconcileRemote(
@@ -309,40 +518,141 @@ export class TicketCreateHandler implements OperationHandler<TicketCreateIntent,
     deps?: OperationHandlerDeps,
   ): Promise<{ ok: true } | { ok: false; message: string; pending: "local_finalize" }> {
     const documentUri = operation.documentUri ?? operation.intent?.documentUri;
-    const createdId = operation.createdRemoteId;
+    const createdId = operation.createdRemoteId ?? operation.ticketId;
     if (!createdId) {
       return { ok: false, message: "No createdRemoteId", pending: "local_finalize" };
     }
 
+    let detail = reconciled;
+    if (!detail) {
+      const getDetail = deps?.ticketCreate?.getIssueDetail ?? getIssueDetail;
+      try {
+        detail = await getDetail(createdId);
+      } catch {
+        // read-back optional in finalizeLocal
+      }
+    }
+
+    const canonical = detail?.ticket ? editorContentFromTicket(detail.ticket) : undefined;
+    const subject = canonical?.subject ?? operation.intent?.subject ?? "";
+    const description = canonical?.description ?? operation.intent?.description ?? "";
+    const metadata = canonical?.metadata ?? operation.intent?.metadata ?? { tracker: "", priority: "", status: "", due_date: "", children: [] };
+    const remoteUpdatedAt = detail?.ticket?.updatedAt ?? operation.remoteUpdatedAt;
+
+    updateDraftAfterSave(
+      createdId,
+      subject,
+      description,
+      metadata,
+      remoteUpdatedAt,
+      context.connectionScope,
+    );
+
     if (documentUri) {
       try {
-        const uri = vscode.Uri.parse(documentUri);
-        const editor = vscode.window.visibleTextEditors.find((e) => e.document.uri.toString() === uri.toString());
-        if (editor) {
-          const parsed = operation.intent
+        const replacement = (operation.nextIntent && canonical)
+          ? rebaseTicketEditorContent(
+              {
+                subject: operation.intent?.subject ?? "",
+                description: operation.intent?.description ?? "",
+                metadata: operation.intent?.metadata ?? { tracker: "", priority: "", status: "", due_date: "", children: [] },
+                layout: operation.intent?.layout,
+                metadataBlock: operation.intent?.metadataBlock,
+                controlFields: operation.intent?.controlFields,
+              },
+              canonical,
+              {
+                subject: operation.nextIntent.subject,
+                description: operation.nextIntent.description,
+                metadata: operation.nextIntent.metadata ?? { tracker: "", priority: "", status: "", due_date: "", children: [] },
+                layout: operation.nextIntent.layout,
+                metadataBlock: operation.nextIntent.metadataBlock,
+                controlFields: operation.nextIntent.controlFields,
+              },
+            )
+          : canonical ?? {
+              subject,
+              description,
+              metadata,
+            };
+
+        if (deps?.documents?.rewriteNewTicket) {
+          const openDoc = deps.documents.findOpenDocument?.(documentUri);
+          const source = operation.nextIntent
             ? {
-                subject: operation.intent.subject,
-                description: operation.intent.description,
-                metadata: operation.intent.metadata,
-                layout: operation.intent.layout,
-                metadataBlock: operation.intent.metadataBlock,
-                controlFields: operation.intent.controlFields,
+                subject: operation.nextIntent.subject,
+                description: operation.nextIntent.description,
+                metadata: operation.nextIntent.metadata,
+                layout: operation.nextIntent.layout,
+                metadataBlock: operation.nextIntent.metadataBlock,
+                controlFields: operation.nextIntent.controlFields,
               }
-            : parseTicketEditorContent(editor.document.getText(), {
-                allowMissingMetadata: true,
-                fallbackMetadata: { tracker: "", priority: "", status: "", due_date: "", children: [] },
-              });
-          const canonicalParsed = reconciled?.ticket
-            ? editorContentFromTicket(reconciled.ticket, parsed)
-            : parsed;
-          await rewriteNewTicketEditorToTicketMode({
-            operationScope: context.connectionScope,
-            editor,
-            createdId,
+            : operation.intent
+              ? {
+                  subject: operation.intent.subject,
+                  description: operation.intent.description,
+                  metadata: operation.intent.metadata,
+                  layout: operation.intent.layout,
+                  metadataBlock: operation.intent.metadataBlock,
+                  controlFields: operation.intent.controlFields,
+                }
+              : {
+                  subject: "",
+                  description: "",
+                  metadata: { tracker: "", priority: "", status: "", due_date: "", children: [] },
+                };
+          const rewriteRes = await deps.documents.rewriteNewTicket({
+            documentUri,
+            ticketId: createdId,
             projectId: operation.projectId ?? reconciled?.ticket?.projectId ?? 0,
-            parsed: canonicalParsed,
-            lastKnownRemoteUpdatedAt: reconciled?.ticket?.updatedAt,
+            replacement,
+            expected: {
+              content: openDoc?.getText() ?? buildTicketEditorContent(source),
+              operationRevision: (operation.nextIntent as any)?.revision ?? operation.revision,
+            },
           });
+          if (rewriteRes.kind !== "applied") {
+            return { ok: false, message: `Editor rewrite pending: ${rewriteRes.kind}`, pending: "local_finalize" };
+          }
+          if (openDoc) {
+            removeTicketEditorByUri(vscode.Uri.parse(documentUri));
+            registerTicketDocument(
+              createdId,
+              openDoc,
+              "ticket",
+              operation.projectId ?? reconciled?.ticket?.projectId,
+              context.connectionScope,
+            );
+          }
+        } else {
+          const uri = vscode.Uri.parse(documentUri);
+          const editor = vscode.window.visibleTextEditors.find((e) => e.document.uri.toString() === uri.toString());
+          if (editor) {
+            const parsed = operation.intent
+              ? {
+                  subject: operation.intent.subject,
+                  description: operation.intent.description,
+                  metadata: operation.intent.metadata,
+                  layout: operation.intent.layout,
+                  metadataBlock: operation.intent.metadataBlock,
+                  controlFields: operation.intent.controlFields,
+                }
+              : parseTicketEditorContent(editor.document.getText(), {
+                  allowMissingMetadata: true,
+                  fallbackMetadata: { tracker: "", priority: "", status: "", due_date: "", children: [] },
+                });
+            const canonicalParsed = reconciled?.ticket
+              ? editorContentFromTicket(reconciled.ticket, parsed)
+              : parsed;
+            await rewriteNewTicketEditorToTicketMode({
+              operationScope: context.connectionScope,
+              editor,
+              createdId,
+              projectId: operation.projectId ?? reconciled?.ticket?.projectId ?? 0,
+              parsed: canonicalParsed,
+              lastKnownRemoteUpdatedAt: reconciled?.ticket?.updatedAt,
+            });
+          }
         }
       } catch (err) {
         return { ok: false, message: (err as Error).message, pending: "local_finalize" };
@@ -377,33 +687,33 @@ export class TicketUpdateHandler implements OperationHandler<TicketUpdateIntent,
       return { ok: false, outcome: { kind: "failed_before_commit", error: new Error("Missing TicketUpdateIntent") } };
     }
 
-    const saveDeps = { ...defaultTicketDeps, ...deps?.ticketUpdate };
+    const saveDeps: any = deps?.ticketUpdate
+      ? {
+          ...defaultTicketDeps,
+          ...deps.ticketUpdate,
+          getProjectTrackers: deps.ticketUpdate.getProjectTrackers,
+          listProjectMembers: deps.ticketUpdate.listProjectMembers,
+          searchUsers: deps.ticketUpdate.searchUsers,
+        }
+      : { ...defaultTicketDeps };
 
     // 1. 変更計算
-    const contentChanges = {
-      ...(intent.subject !== intent.baseSubject ? { subject: intent.subject } : {}),
-      ...(intent.description !== intent.baseDescription ? { description: intent.description } : {}),
-    };
-
-    const metadataChanges: any = {};
-    if (intent.metadata && intent.baseMetadata) {
-      if (intent.metadata.tracker !== intent.baseMetadata.tracker) {metadataChanges.tracker = intent.metadata.tracker;}
-      if (intent.metadata.status !== intent.baseMetadata.status) {metadataChanges.status = intent.metadata.status;}
-      if (intent.metadata.priority !== intent.baseMetadata.priority) {metadataChanges.priority = intent.metadata.priority;}
-      if (intent.metadata.assignee !== intent.baseMetadata.assignee) {metadataChanges.assignee = intent.metadata.assignee;}
-      if (intent.metadata.start_date !== intent.baseMetadata.start_date) {metadataChanges.startDate = intent.metadata.start_date;}
-      if (intent.metadata.due_date !== intent.baseMetadata.due_date) {metadataChanges.dueDate = intent.metadata.due_date;}
-      if (intent.metadata.done_ratio !== intent.baseMetadata.done_ratio) {metadataChanges.doneRatio = intent.metadata.done_ratio;}
-      if (intent.metadata.estimated_hours !== intent.baseMetadata.estimated_hours) {metadataChanges.estimatedHours = intent.metadata.estimated_hours;}
-      if (intent.metadata.parent !== intent.baseMetadata.parent) {metadataChanges.parentId = intent.metadata.parent;}
-    } else if (intent.metadata) {
-      if (intent.metadata.tracker) {metadataChanges.tracker = intent.metadata.tracker;}
-      if (intent.metadata.status) {metadataChanges.status = intent.metadata.status;}
-      if (intent.metadata.priority) {metadataChanges.priority = intent.metadata.priority;}
-      if (intent.metadata.assignee) {metadataChanges.assignee = intent.metadata.assignee;}
-      if (intent.metadata.start_date) {metadataChanges.startDate = intent.metadata.start_date;}
-      if (intent.metadata.due_date) {metadataChanges.dueDate = intent.metadata.due_date;}
+    const contentChanges = computeChanges(
+      intent.baseSubject ?? "",
+      intent.baseDescription ?? "",
+      intent.subject ?? "",
+      intent.description ?? "",
+    );
+    if (intent.baseSubject === undefined && intent.subject !== undefined) {
+      contentChanges.subject = intent.subject;
     }
+    if (intent.baseDescription === undefined && intent.description !== undefined) {
+      contentChanges.description = intent.description;
+    }
+
+    const metadataChanges = intent.baseMetadata && intent.metadata
+      ? computeMetadataChanges(intent.baseMetadata, intent.metadata)
+      : (intent.metadata ? computeMetadataChanges({ tracker: "", priority: "", status: "", due_date: "", children: [] }, intent.metadata) : {});
 
     // 2. メタデータの解決 (IDマッピング)
     let remoteDetail: any = undefined;
@@ -418,37 +728,24 @@ export class TicketUpdateHandler implements OperationHandler<TicketUpdateIntent,
     let resolvedMetadataFields: any = {};
     if (Object.keys(metadataChanges).length > 0) {
       try {
-        const [statuses, trackers, priorities] = await Promise.all([
-          saveDeps.listIssueStatuses ? saveDeps.listIssueStatuses() : Promise.resolve([]),
-          saveDeps.listTrackers ? saveDeps.listTrackers() : Promise.resolve([]),
-          saveDeps.listIssuePriorities ? saveDeps.listIssuePriorities() : Promise.resolve([]),
-        ]);
-
-        if (metadataChanges.tracker) {
-          const match = trackers.find((t: any) => t.name === metadataChanges.tracker);
-          if (match) {resolvedMetadataFields.trackerId = match.id;}
+        let projectId = operation.projectId;
+        if (!projectId) {
+          try {
+            const remote = await ensureRemoteDetail();
+            projectId = remote?.ticket?.projectId;
+          } catch {
+            // non-fatal for project discovery
+          }
         }
-        if (metadataChanges.status) {
-          const match = statuses.find((s: any) => s.name === metadataChanges.status);
-          if (match) {resolvedMetadataFields.statusId = match.id;}
-        }
-        if (metadataChanges.priority) {
-          const match = priorities.find((p: any) => p.name === metadataChanges.priority);
-          if (match) {resolvedMetadataFields.priorityId = match.id;}
-        }
-        if (metadataChanges.startDate !== undefined) {resolvedMetadataFields.startDate = metadataChanges.startDate;}
-        if (metadataChanges.dueDate !== undefined) {resolvedMetadataFields.dueDate = metadataChanges.dueDate;}
-        if (metadataChanges.doneRatio !== undefined) {resolvedMetadataFields.doneRatio = metadataChanges.doneRatio;}
-        if (metadataChanges.estimatedHours !== undefined) {resolvedMetadataFields.estimatedHours = metadataChanges.estimatedHours;}
-        if (metadataChanges.parentId !== undefined) {resolvedMetadataFields.parentId = metadataChanges.parentId;}
+        resolvedMetadataFields = await resolveMetadataUpdates(metadataChanges, saveDeps, projectId);
       } catch (err) {
         return { ok: false, outcome: { kind: "failed_before_commit", ticketId, error: err as Error } };
       }
     }
 
     const changes = {
-      ...(contentChanges.subject ? { subject: contentChanges.subject } : (intent.subject ? { subject: intent.subject } : {})),
-      ...(contentChanges.description ? { description: contentChanges.description } : (intent.description ? { description: intent.description } : {})),
+      ...(contentChanges.subject !== undefined ? { subject: contentChanges.subject } : {}),
+      ...(contentChanges.description !== undefined ? { description: contentChanges.description } : {}),
       ...resolvedMetadataFields,
     };
 
@@ -508,7 +805,140 @@ export class TicketUpdateHandler implements OperationHandler<TicketUpdateIntent,
     context: OperationHandlerContext,
     deps?: OperationHandlerDeps,
   ): Promise<{ ok: true } | { ok: false; error: Error; commitUnknown?: boolean }> {
-    // 子チケット作成等の Saga があれば実行
+    const ticketId = prepared.ticketId;
+    const saveDeps = { ...defaultTicketDeps, ...deps?.ticketUpdate };
+    const uniqueChildren = prepared.uniqueChildren;
+    if (!uniqueChildren || uniqueChildren.length === 0) {
+      return { ok: true };
+    }
+
+    const operationId = operation.operationId ?? `ticket:${ticketId}`;
+    const revision = operation.revision ?? 1;
+
+    for (let ordinal = 0; ordinal < uniqueChildren.length; ordinal++) {
+      const subject = uniqueChildren[ordinal];
+      const effectId = `child-create:${ordinal}`;
+
+      const queueEffects = getOfflineSyncQueue(context.connectionScope).tickets.get(ticketId)?.effects ?? [];
+      const existingEffect = queueEffects.find((e: any) => e.effectId === effectId) ?? operation.effects?.find((e: any) => e.effectId === effectId);
+      if (
+        (existingEffect?.state === "committed" && existingEffect.remoteId) ||
+        existingEffect?.state === "commit_unknown" ||
+        existingEffect?.state === "compensation_unknown" ||
+        existingEffect?.state === "compensation_started" ||
+        existingEffect?.state === "failed"
+      ) {
+        continue;
+      }
+
+      await planOfflineSyncEffectAsync(
+        operationId,
+        {
+          effectId,
+          kind: "child_create",
+          operationRevision: revision,
+          state: "planned",
+          target: { parentTicketId: ticketId, ordinal },
+        },
+        context.connectionScope,
+        revision,
+      );
+
+      await transitionOfflineSyncEffectAsync(
+        operationId,
+        effectId,
+        { kind: "start" },
+        context.connectionScope,
+        { operationRevision: revision, sourceState: "planned" },
+      );
+
+      try {
+        const createdChildId = await saveDeps.createIssue?.({
+          subject,
+          description: "",
+          parentId: ticketId,
+          projectId: operation.projectId ?? 0,
+        });
+        if (!createdChildId) {
+          throw new Error(`Failed to create child issue: ${subject}`);
+        }
+        await transitionOfflineSyncEffectAsync(
+          operationId,
+          effectId,
+          { kind: "commit", remoteId: createdChildId },
+          context.connectionScope,
+          { operationRevision: revision, sourceState: "started" },
+        );
+      } catch (err) {
+        const commitUnknown = isRemoteCommitUnknownError(err);
+        await transitionOfflineSyncEffectAsync(
+          operationId,
+          effectId,
+          commitUnknown ? { kind: "mark_commit_unknown" } : { kind: "mark_failed", detail: (err as Error).message },
+          context.connectionScope,
+          { operationRevision: revision, sourceState: "started" },
+        );
+
+        if (!commitUnknown) {
+          for (let prev = 0; prev < ordinal; prev++) {
+            const prevEffectId = `child-create:${prev}`;
+            const queueEffects = getOfflineSyncQueue(context.connectionScope).tickets.get(ticketId)?.effects ?? [];
+            const prevEffect = queueEffects.find((e: any) => e.effectId === prevEffectId) ?? operation.effects?.find((e: any) => e.effectId === prevEffectId);
+            if (prevEffect && prevEffect.state === "committed" && prevEffect.remoteId) {
+              try {
+                const startComp = await transitionOfflineSyncEffectAsync(
+                  operationId,
+                  prevEffectId,
+                  { kind: "start_compensation" },
+                  context.connectionScope,
+                  { operationRevision: revision, sourceState: "committed" },
+                );
+                if (startComp) {
+                  try {
+                    await saveDeps.deleteIssue?.(prevEffect.remoteId);
+                    await transitionOfflineSyncEffectAsync(
+                      operationId,
+                      prevEffectId,
+                      { kind: "complete_compensation" },
+                      context.connectionScope,
+                      { operationRevision: revision, sourceState: "compensation_started" },
+                    );
+                  } catch (delErr) {
+                    await transitionOfflineSyncEffectAsync(
+                      operationId,
+                      prevEffectId,
+                      { kind: "mark_compensation_unknown", detail: (delErr as Error).message },
+                      context.connectionScope,
+                      { operationRevision: revision, sourceState: "compensation_started" },
+                    );
+                  }
+                }
+              } catch {
+                // Ignore checkpoint failure to preserve committed child
+              }
+            }
+          }
+        }
+
+        return {
+          ok: false,
+          error: err as Error,
+          commitUnknown,
+        };
+      }
+    }
+
+    const finalQueueEffects = getOfflineSyncQueue(context.connectionScope).tickets.get(ticketId)?.effects ?? [];
+    const hasFailedEffects = finalQueueEffects.some((e: any) => e.state === "failed");
+    const hasUnknownEffects = finalQueueEffects.some((e: any) => e.state === "commit_unknown" || e.state === "compensation_unknown" || e.state === "compensation_started");
+    if (hasUnknownEffects || hasFailedEffects) {
+      return {
+        ok: false,
+        error: new Error("Secondary effects remain unresolved or failed"),
+        commitUnknown: hasUnknownEffects,
+      };
+    }
+
     return { ok: true };
   }
 
@@ -530,11 +960,42 @@ export class TicketUpdateHandler implements OperationHandler<TicketUpdateIntent,
   }> {
     const ticketId = prepared.ticketId;
     const saveDeps = { ...defaultTicketDeps, ...deps?.ticketUpdate };
+    const operationId = operation.operationId ?? `ticket:${ticketId}`;
+    const revision = operation.intentRevision ?? operation.revision ?? 1;
+
+    await planOfflineSyncEffectAsync(
+      operationId,
+      {
+        effectId: "ticket-update",
+        kind: "ticket_update",
+        operationRevision: revision,
+        state: "planned",
+        target: { ticketId },
+      },
+      context.connectionScope,
+      revision,
+    );
+
+    await transitionOfflineSyncEffectAsync(
+      operationId,
+      "ticket-update",
+      { kind: "start" },
+      context.connectionScope,
+      { operationRevision: revision, sourceState: "planned" },
+    );
 
     try {
       if (Object.keys(prepared.changes).length > 0) {
         await saveDeps.updateIssue({ issueId: ticketId, fields: prepared.changes });
       }
+
+      await transitionOfflineSyncEffectAsync(
+        operationId,
+        "ticket-update",
+        { kind: "commit", remoteId: ticketId },
+        context.connectionScope,
+        { operationRevision: revision, sourceState: "started" },
+      );
 
       return {
         ok: true,
@@ -543,6 +1004,13 @@ export class TicketUpdateHandler implements OperationHandler<TicketUpdateIntent,
       };
     } catch (err) {
       const commitUnknown = isRemoteCommitUnknownError(err);
+      await transitionOfflineSyncEffectAsync(
+        operationId,
+        "ticket-update",
+        commitUnknown ? { kind: "mark_commit_unknown" } : { kind: "mark_failed", detail: (err as Error).message },
+        context.connectionScope,
+        { operationRevision: revision, sourceState: "started" },
+      );
       return {
         ok: false,
         commitUnknown,
@@ -598,16 +1066,110 @@ export class TicketUpdateHandler implements OperationHandler<TicketUpdateIntent,
     if (!ticketId) {
       return { ok: false, message: "Missing ticketId", pending: "local_finalize" };
     }
-    if (operation.intent) {
-      updateDraftAfterSave(
-        ticketId,
-        operation.intent.subject,
-        operation.intent.description,
-        operation.intent.metadata,
-        reconciled?.ticket?.updatedAt,
-        context.connectionScope,
-      );
+
+    let detail = reconciled;
+    if (!detail) {
+      const getDetail = deps?.ticketUpdate?.getIssueDetail ?? getIssueDetail;
+      try {
+        detail = await getDetail(ticketId);
+      } catch {
+        // read-back optional in finalizeLocal
+      }
     }
+
+    const canonical = detail?.ticket ? editorContentFromTicket(detail.ticket) : undefined;
+    const subject = canonical?.subject ?? operation.intent?.subject ?? "";
+    const description = canonical?.description ?? operation.intent?.description ?? "";
+    const metadata = canonical?.metadata ?? operation.intent?.metadata ?? { tracker: "", priority: "", status: "", due_date: "", children: [] };
+    const remoteUpdatedAt = detail?.ticket?.updatedAt ?? operation.remoteUpdatedAt;
+
+    updateDraftAfterSave(
+      ticketId,
+      subject,
+      description,
+      metadata,
+      remoteUpdatedAt,
+      context.connectionScope,
+    );
+
+    const documentUri = operation.documentUri ?? operation.intent?.documentUri;
+    if (documentUri && canonical) {
+      const replacement = (operation.nextIntent && canonical)
+        ? rebaseTicketEditorContent(
+            {
+              subject: operation.intent?.subject ?? "",
+              description: operation.intent?.description ?? "",
+              metadata: operation.intent?.metadata ?? { tracker: "", priority: "", status: "", due_date: "", children: [] },
+              layout: operation.intent?.layout,
+              metadataBlock: operation.intent?.metadataBlock,
+              controlFields: operation.intent?.controlFields,
+            },
+            canonical,
+            {
+              subject: operation.nextIntent.subject,
+              description: operation.nextIntent.description,
+              metadata: operation.nextIntent.metadata ?? { tracker: "", priority: "", status: "", due_date: "", children: [] },
+              layout: operation.nextIntent.layout,
+              metadataBlock: operation.nextIntent.metadataBlock,
+              controlFields: operation.nextIntent.controlFields,
+            },
+          )
+        : canonical;
+
+      if (deps?.documents?.rewriteTicket) {
+        const openDoc = deps.documents.findOpenDocument?.(documentUri);
+        const source = operation.nextIntent
+          ? {
+              subject: operation.nextIntent.subject,
+              description: operation.nextIntent.description,
+              metadata: operation.nextIntent.metadata,
+              layout: operation.nextIntent.layout,
+              metadataBlock: operation.nextIntent.metadataBlock,
+              controlFields: operation.nextIntent.controlFields,
+            }
+          : {
+              subject: operation.intent?.subject ?? "",
+              description: operation.intent?.description ?? "",
+              metadata: operation.intent?.metadata ?? { tracker: "", priority: "", status: "", due_date: "", children: [] },
+              layout: operation.intent?.layout,
+              metadataBlock: operation.intent?.metadataBlock,
+              controlFields: operation.intent?.controlFields,
+            };
+        const rewriteRes = await deps.documents.rewriteTicket({
+          documentUri,
+          ticketId,
+          projectId: operation.projectId ?? reconciled?.ticket?.projectId,
+          replacement,
+          expected: {
+            content: openDoc?.getText() ?? buildTicketEditorContent(source),
+            operationRevision: (operation.nextIntent as any)?.revision ?? operation.revision,
+          },
+        });
+        if (rewriteRes.kind !== "applied") {
+          return { ok: false, message: `Editor rewrite pending: ${rewriteRes.kind}`, pending: "local_finalize" };
+        }
+      } else {
+        const openDoc = vscode.workspace.textDocuments.find(
+          (doc) => doc.uri.toString() === documentUri,
+        );
+        if (openDoc) {
+          const rewriteRes = await compareAndRewriteDocumentWithRegisteredFields({
+            documentUri,
+            ticketId,
+            projectId: operation.projectId ?? reconciled?.ticket?.projectId,
+            replacement: canonical,
+            expected: {
+              content: openDoc.getText(),
+              operationRevision: operation.revision,
+            },
+          });
+          if (rewriteRes.kind !== "applied") {
+            return { ok: false, message: `Editor rewrite pending: ${rewriteRes.kind}`, pending: "local_finalize" };
+          }
+        }
+      }
+    }
+
     return { ok: true };
   }
 }
@@ -931,14 +1493,30 @@ export class CommentUpdateHandler implements OperationHandler<CommentUpdateInten
     if (!ticketId) {
       return { ok: false, message: "Missing ticketId" };
     }
+    const commentId = operation.commentId ?? operation.intent?.commentId;
+    if (!commentId) {
+      return { ok: false, message: "Missing commentId" };
+    }
     const commentDeps = { ...defaultCommentDeps, ...deps?.comment };
     try {
       const detail = await commentDeps.getIssueDetail(ticketId);
+      if (detail.ticket.id !== ticketId) {
+        return { ok: false, message: "Ticket ID mismatch in reconciliation response" };
+      }
+      const remoteComment = detail.comments.find((c) => c.id === commentId);
+      if (!remoteComment) {
+        return { ok: false, message: `Comment #${commentId} not found on ticket #${ticketId}` };
+      }
+      const expectedBody = operation.intent?.body ?? "";
+      if (operation.phase === "commit_unknown" && normalizeCommentBody(remoteComment.body) !== normalizeCommentBody(expectedBody)) {
+        return { ok: false, message: "Remote comment body does not match intended update" };
+      }
       return {
         ok: true,
-        remoteId: operation.commentId,
+        remoteId: commentId,
         projectId: detail.ticket.projectId,
         remoteUpdatedAt: detail.ticket.updatedAt,
+        canonical: detail,
       };
     } catch (err) {
       return { ok: false, message: (err as Error).message };

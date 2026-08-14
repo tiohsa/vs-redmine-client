@@ -158,12 +158,12 @@ export const resolveMetadataUpdates = async (
   }
 
   if (changes.assignee_id !== undefined) {
-    updateFields.assigneeId = changes.assignee_id === 0 ? 0 : changes.assignee_id;
+    updateFields.assignedToId = (changes.assignee_id === 0 ? "" : changes.assignee_id) as any;
   } else if (changes.assignee !== undefined) {
     if (changes.assignee.length === 0) {
-      updateFields.assigneeId = 0;
+      updateFields.assignedToId = "";
     } else {
-      updateFields.assigneeId = await resolveAssigneeId(changes.assignee, deps, projectId);
+      updateFields.assignedToId = await resolveAssigneeId(changes.assignee, deps, projectId);
     }
   }
 

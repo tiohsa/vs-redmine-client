@@ -11,6 +11,9 @@ import {
   getConnectionScopeHash,
   getCurrentConnectionScope,
 } from "../config/connectionScope";
+import { getActiveScope } from "./offlineSyncStore";
+
+const defaultScope = (): string => getActiveScope() || getCurrentConnectionScope();
 
 const editorByUri = new Map<string, TicketEditorRecord>();
 let editorByDocument = new WeakMap<vscode.TextDocument, TicketEditorRecord>();
@@ -43,15 +46,15 @@ const hasEditorFilename = (uri: vscode.Uri): boolean => {
  */
 export const resolveEditorConnectionScope = (
   uri: vscode.Uri,
-  currentScope = getCurrentConnectionScope(),
+  currentScope = defaultScope(),
 ): string => {
   const storedHash = extractEditorScopeHash(uri);
   if (!storedHash) {
     // Legacy editor files predate connection-scoped storage. Keep them
-    // unresolved until the user explicitly assigns the connection.
+    // assigned to `unresolved:unknown` until explicit user selection.
     return hasEditorFilename(uri) ? `${UNRESOLVED_CONNECTION_SCOPE_PREFIX}unknown` : currentScope;
   }
-  return storedHash === getConnectionScopeHash(currentScope)
+  return getConnectionScopeHash(currentScope) === storedHash
     ? currentScope
     : `${UNRESOLVED_CONNECTION_SCOPE_PREFIX}${storedHash}`;
 };
@@ -165,7 +168,7 @@ export const registerTicketEditor = (
 
 export const registerNewTicketDraft = (
   editor: vscode.TextEditor,
-  connectionScope = getCurrentConnectionScope(),
+  connectionScope = defaultScope(),
 ): TicketEditorRecord =>
   registerTicketEditor(
     NEW_TICKET_DRAFT_ID,
@@ -211,7 +214,7 @@ export const registerCommentDocument = (
   commentId: number,
   document: vscode.TextDocument,
   projectId?: number,
-  connectionScope = getCurrentConnectionScope(),
+  connectionScope = defaultScope(),
 ): TicketEditorRecord => {
   const record = registerTicketDocument(
     ticketId,
@@ -240,7 +243,7 @@ const getCommentDraftRecord = (ticketId: number): TicketEditorRecord | undefined
 export const registerNewCommentDraft = (
   ticketId: number,
   editor: vscode.TextEditor,
-  connectionScope = getCurrentConnectionScope(),
+  connectionScope = defaultScope(),
 ): TicketEditorRecord =>
   registerTicketEditor(
     ticketId,
@@ -262,7 +265,7 @@ export const getNewCommentDraftUri = (ticketId: number): vscode.Uri | undefined 
 
 export const getTicketEditors = (
   ticketId: number,
-  connectionScope = getCurrentConnectionScope(),
+  connectionScope = defaultScope(),
 ): TicketEditorRecord[] =>
   Array.from(editorsByTicket.get(ticketId) ?? []).map((uri) => editorByUri.get(uri))
     .filter((record): record is TicketEditorRecord =>
@@ -484,7 +487,7 @@ export const getConnectionScopeForEditor = (
 
 export const assignEditorConnectionScope = (
   editor: vscode.TextEditor,
-  connectionScope = getCurrentConnectionScope(),
+  connectionScope = defaultScope(),
 ): boolean => {
   const record = getRecord(editor);
   if (!record) {

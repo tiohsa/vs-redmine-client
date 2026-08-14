@@ -27,15 +27,16 @@ export type GenericSyncPhase =
 export type GenericLifecycleAction =
   | { kind: "begin_preparation" }
   | { kind: "start_normal_remote_write" }
+  | { kind: "start_explicit_retry_remote_write" }
   | { kind: "record_remote_commit"; createdRemoteId?: number; projectId?: number; remoteUpdatedAt?: string }
   | { kind: "mark_commit_unknown"; message?: string }
   | { kind: "mark_reconciliation_pending"; message?: string }
-  | { kind: "mark_local_finalize_pending" }
+  | { kind: "mark_local_finalize_pending"; canonical?: any }
   | { kind: "complete" }
   | { kind: "abort_before_remote_write" }
   | { kind: "abort_known_remote_failure" }
   | { kind: "assume_remote_commit"; remoteId?: number; projectId?: number; remoteUpdatedAt?: string }
-  | { kind: "record_reconciled_identity"; remoteId: number; projectId?: number; remoteUpdatedAt?: string };
+  | { kind: "record_reconciled_identity"; remoteId: number; projectId?: number; remoteUpdatedAt?: string; canonical?: any };
 
 export interface LifecycleExpectation {
   operationId: string;
@@ -58,6 +59,8 @@ export interface TicketCreateIntent {
   subject: string;
   description: string;
   metadata: IssueMetadata;
+  content?: string;
+  revision?: number;
   attachments?: IssueAttachmentSource[];
   uploadTokens?: IssueUploadInput[];
   childTickets?: Array<{ subject: string; description?: string; tracker?: string; priority?: string }>;
@@ -76,6 +79,7 @@ export interface TicketUpdateIntent {
   subject: string;
   description: string;
   metadata: IssueMetadata;
+  revision?: number;
   attachments?: IssueAttachmentSource[];
   uploadTokens?: IssueUploadInput[];
   childTickets?: Array<{ subject: string; description?: string; tracker?: string; priority?: string }>;

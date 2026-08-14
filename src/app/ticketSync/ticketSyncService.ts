@@ -46,6 +46,16 @@ import {
   registerTicketDocument,
   removeTicketEditorByUri,
 } from "../../views/ticketEditorRegistry";
+import {
+  createSyncCoordinator,
+  SyncCoordinator,
+} from "./syncCoordinator";
+import {
+  TicketCreateHandler,
+  TicketUpdateHandler,
+} from "./operationHandlers";
+import { parseTicketEditorContent } from "../../views/ticketEditorContent";
+import type { TicketCreateIntent } from "./syncOperationTypes";
 
 const defaultJournal: SyncJournal = {
   planEffect: planOfflineSyncEffectAsync,
@@ -119,7 +129,7 @@ const defaultDocumentPort = (rewriteDeps: RewriteDocumentDeps = {}): DocumentPor
       expected,
     }),
   findOpenDocument: (uri) =>
-    vscode.workspace.textDocuments.find((document) => document.uri.toString() === uri),
+    (rewriteDeps.textDocuments ?? vscode.workspace.textDocuments).find((document) => document.uri.toString() === uri),
 });
 
 const defaultNewTicketLocalState = (
@@ -186,6 +196,7 @@ export class TicketSyncService {
   private readonly updateDeps: TicketSaveDependencies;
   private readonly newTicketFinalizer: NewTicketFinalizer;
   private readonly ticketReconciler: TicketReconciler;
+  private readonly coordinator: SyncCoordinator;
   private readonly runInConnectionScope: NonNullable<
     TicketSyncServiceDependencies["runInConnectionScope"]
   >;
@@ -202,6 +213,12 @@ export class TicketSyncService {
       deps.newTicketLocalState ?? defaultNewTicketLocalState(this.documents),
     );
     this.ticketReconciler = new TicketReconciler(this.journal, this.documents);
+    this.coordinator = createSyncCoordinator({
+      handlers: {
+        ticketCreate: new TicketCreateHandler(),
+        ticketUpdate: new TicketUpdateHandler(),
+      },
+    });
   }
 
   public async syncNewTicket(input: {
@@ -247,16 +264,70 @@ export class TicketSyncService {
         });
         return this.preparationOutcome(queued, input.ticketId);
       }
-      return this.syncNewTicket({
-        context: input.context,
-        operation: {
-          content: input.editor.document.getText(),
-          projectId: input.projectId ?? getProjectIdForEditor(input.editor),
-          documentUri: input.editor.document.uri.toString(),
-          baseDir: resolveEditorBaseDir({ editor: input.editor }),
-          effects: input.uploads || input.attachments ? (input.uploads ?? input.attachments) : undefined,
-        },
+      const rawAttachments = input.attachments ?? input.uploads ?? [];
+      const attachments = rawAttachments.map((a: any) => {
+        if (a.token) {
+          return { kind: "token" as const, token: a.token, filename: a.filename, contentType: a.contentType ?? a.content_type };
+        }
+        if (a.filePath || a.fsPath) {
+          return { kind: "file" as const, filePath: a.filePath ?? a.fsPath, filename: a.filename, contentType: a.contentType };
+        }
+        return { kind: "clipboard" as const, filename: a.filename, contentType: a.contentType };
       });
+      const parsed = parseTicketEditorContent(input.editor.document.getText(), {
+        allowMissingMetadata: true,
+        fallbackMetadata: { tracker: "", priority: "", status: "", due_date: "", children: [] },
+      });
+      const projectId = input.projectId ?? parsed.controlFields?.project_id ?? getProjectIdForEditor(input.editor) ?? 0;
+      const intent: TicketCreateIntent = {
+        projectId,
+        subject: parsed.subject,
+        description: parsed.description,
+        metadata: parsed.metadata,
+        layout: parsed.layout,
+        metadataBlock: parsed.metadataBlock,
+        controlFields: parsed.controlFields,
+        baseDir: resolveEditorBaseDir({ editor: input.editor }),
+        documentUri: input.editor.document.uri.toString(),
+        attachments: attachments.length > 0 ? attachments : undefined,
+      };
+
+      const repo = this.coordinator.getRepository();
+      const docUri = input.editor.document.uri.toString();
+      const queueId = `editor:${docUri}`;
+      const existing = repo.getOperation({ kind: "newTicket", documentUri: docUri }, input.context.connectionScope);
+
+      if (!existing) {
+        await repo.saveOperation({
+          operationId: `${input.context.connectionScope}:newTicket:${queueId}`,
+          kind: "ticket_create",
+          key: { kind: "newTicket", queueId, documentUri: docUri },
+          connectionScope: input.context.connectionScope,
+          phase: "queued",
+          revision: 1,
+          intentRevision: 1,
+          version: 1,
+          persistenceVersion: 1,
+          projectId,
+          documentUri: docUri,
+          intent,
+          createdAt: Date.now(),
+          updatedAt: Date.now(),
+        }, input.context.connectionScope);
+      }
+
+      const syncKey = existing?.key ?? { kind: "newTicket", queueId, documentUri: docUri };
+      const outcome = await this.coordinator.sync(
+        syncKey,
+        input.context,
+        {
+          deps: {
+            ticketCreate: this.createDeps,
+            documents: this.documents,
+          },
+        },
+      );
+      return outcome as TicketSyncOutcome;
     }
 
     const prepared = await queueTicketDraft({
@@ -266,7 +337,31 @@ export class TicketSyncService {
       operationScope: input.context.connectionScope,
       queueUnchanged: !input.manual,
     });
-    if (input.manual || (prepared.status !== "queued" && prepared.status !== "no_change")) {
+    if (prepared.status === "no_change") {
+      const op = this.journal.getTicketUpdate(input.ticketId, input.context.connectionScope) ?? {
+        ticketId: input.ticketId,
+        baseSubject: "",
+        baseDescription: "",
+        baseMetadata: { tracker: "", priority: "", status: "", due_date: "", children: [] },
+        subject: "",
+        description: "",
+        metadata: { tracker: "", priority: "", status: "", due_date: "", children: [] },
+        connectionScope: input.context.connectionScope,
+        phase: "queued" as const,
+        revision: 1,
+        documentUri: input.editor.document.uri.toString(),
+      };
+      await this.ticketReconciler.reconcile({
+        context: input.context,
+        operation: op,
+        deps: this.updateDeps,
+        remoteCommitted: false,
+        noChange: true,
+        completionResult: prepared,
+      });
+      return { kind: "no_change", ticketId: input.ticketId, saveResult: prepared };
+    }
+    if (input.manual || prepared.status !== "queued") {
       return this.preparationOutcome(prepared, input.ticketId);
     }
     return this.syncQueueItem(
@@ -633,11 +728,15 @@ export class TicketSyncService {
       });
       if (created.remoteCommitUnknown) {
         try {
+          const currentInQueue = this.journal.getNewTicket(
+            { queueId: operation.queueId, documentUri: operation.documentUri },
+            input.context.connectionScope,
+          ) ?? operation;
           await this.journal.transitionNewTicket(
             { queueId: operation.queueId, documentUri: operation.documentUri },
             { kind: "mark_commit_unknown" },
             input.context.connectionScope,
-            newTicketExpectation(operation, "remote_write_started"),
+            newTicketExpectation(currentInQueue, "remote_write_started"),
           );
         } catch {
           // remote_write_started is already durable and is treated as commit_unknown on restart.
@@ -704,170 +803,47 @@ export class TicketSyncService {
     key: TicketSyncQueueKey,
     context: SyncContext,
   ): Promise<TicketSyncOutcome> {
-    if (key.kind === "newTicket") {
-      const operation = getOfflineNewTicket(key, context.connectionScope);
-      if (!operation) {
-        return {
-          kind: "failed_before_commit",
-          error: new TicketSyncQueueItemNotFoundError(key),
-        };
-      }
-      return this.createOrResume({ context, operation });
-    }
-
-    const operation = getOfflineSyncQueue(context.connectionScope).tickets.get(key.ticketId);
-    if (!operation) {
-      return {
-        kind: "failed_before_commit",
-        error: new TicketSyncQueueItemNotFoundError(key),
-      };
-    }
-    const operationKey = `${context.connectionScope}::ticket::${operation.ticketId}`;
-    const existing = ticketUpdateFlights.get(operationKey);
-    if (existing) {
-      return existing;
-    }
-    const flight = this.updateOrReconcile(context, operation);
-    ticketUpdateFlights.set(operationKey, flight);
-    try {
-      return await flight;
-    } finally {
-      if (ticketUpdateFlights.get(operationKey) === flight) {
-        ticketUpdateFlights.delete(operationKey);
-      }
-    }
+    const outcome = await this.coordinator.sync(
+      key as any,
+      context,
+      {
+        deps: {
+          ticketCreate: this.createDeps,
+          ticketUpdate: this.updateDeps,
+          documents: this.documents,
+        },
+      },
+    );
+    return outcome as TicketSyncOutcome;
   }
 
-  public async resolveCommitUnknown(input: {
+  public resolveCommitUnknown(input: {
     key: TicketSyncQueueKey;
     context: SyncContext;
     resolution:
       | { kind: "link_created_ticket"; ticketId: number }
+      | { kind: "link_remote_ticket"; ticketId: number }
       | { kind: "assume_update_committed" }
-      | { kind: "retry_remote_write" };
+      | { kind: "retry_remote_write" }
+      | { kind: "reconcile_remote" };
   }): Promise<TicketSyncOutcome> {
-    return this.runInConnectionScope(input.context.connectionScope, async () => {
-      if (input.key.kind === "newTicket") {
-        let operation = this.journal.getNewTicket(
-          input.key,
-          input.context.connectionScope,
-        );
-        if (!operation) {
-          return {
-            kind: "failed_before_commit",
-            error: new TicketSyncQueueItemNotFoundError(input.key),
-          };
-        }
-        if (operation.phase === "remote_write_started") {
-          return {
-            kind: "commit_unknown",
-            operationId: operation.operationId ?? operation.queueId,
-            ticketId: operation.createdIssueId,
-            message: "A remote create is already in flight or requires restart recovery.",
-          };
-        }
-        if (operation.phase !== "commit_unknown") {
-          return this.createOrResume({ context: input.context, operation });
-        }
-        if (input.resolution.kind === "retry_remote_write") {
-          return this.retryNewTicketRemoteWrite(input.context, operation);
-        }
-        if (input.resolution.kind !== "link_created_ticket") {
-          return {
-            kind: "failed_before_commit",
-            error: new Error("A new-ticket recovery requires a verified ticket ID."),
-          };
-        }
-        if (!this.createDeps.getIssueDetail) {
-          return {
-            kind: "failed_before_commit",
-            error: new Error("Remote ticket verification is unavailable."),
-          };
-        }
-        let detail;
-        try {
-          detail = await this.createDeps.getIssueDetail(input.resolution.ticketId);
-        } catch (error) {
-          return {
-            kind: "failed_before_commit",
-            error: error instanceof Error ? error : new Error("Remote ticket verification failed."),
-          };
-        }
-        if (
-          operation.projectId !== undefined &&
-          detail.ticket.projectId !== undefined &&
-          operation.projectId !== detail.ticket.projectId
-        ) {
-          return {
-            kind: "failed_before_commit",
-            error: new Error("The selected ticket belongs to a different project."),
-          };
-        }
-        const linked = await this.journal.transitionNewTicket(
-          input.key,
-          { kind: "link_created_ticket", ticketId: input.resolution.ticketId },
-          input.context.connectionScope,
-          newTicketExpectation(operation, "commit_unknown"),
-        );
-        if (!linked) {
-          return {
-            kind: "failed_before_commit",
-            error: new TicketSyncQueueItemNotFoundError(input.key),
-          };
-        }
-        return this.newTicketFinalizer.finalize({
-          context: input.context,
-          operation: linked,
-          ticketId: input.resolution.ticketId,
-          deps: this.createDeps,
-          detail,
-        });
-      }
-
-      let operation = this.journal.getTicketUpdate(
-        input.key.ticketId,
-        input.context.connectionScope,
-      );
-      if (!operation) {
-        return {
-          kind: "failed_before_commit",
-          error: new TicketSyncQueueItemNotFoundError(input.key),
-        };
-      }
-      if (input.resolution.kind === "link_created_ticket") {
-        return {
-          kind: "failed_before_commit",
-          error: new Error("An existing-ticket recovery cannot link another ticket ID."),
-        };
-      }
-      if (operation.phase === "remote_write_started") {
-        return {
-          kind: "commit_unknown",
-          operationId: operation.operationId ?? `ticket:${operation.ticketId}`,
-          ticketId: operation.ticketId,
-          message: "A remote update is already in flight or requires restart recovery.",
-        };
-      }
-      if (operation.phase !== "commit_unknown") {
-        return this.updateOrReconcile(input.context, operation);
-      }
-      if (input.resolution.kind === "retry_remote_write") {
-        return this.updateOrReconcile(input.context, operation, true);
-      }
-      const resolved = await this.journal.transitionTicketUpdate(
-        operation.ticketId,
-        { kind: "assume_update_committed" },
-        input.context.connectionScope,
-        ticketUpdateExpectation(operation, "commit_unknown"),
-      );
-      return resolved
-        ? this.updateOrReconcile(input.context, resolved)
-        : {
-          kind: "failed_before_commit",
-          error: new TicketSyncQueueItemNotFoundError(input.key),
-        };
-    });
+    const resolution: any = input.resolution.kind === "link_created_ticket"
+      ? { kind: "link_remote_ticket", ticketId: input.resolution.ticketId }
+      : (input.resolution.kind === "assume_update_committed"
+        ? { kind: "reconcile_remote" }
+        : input.resolution);
+    return this.coordinator.resolveCommitUnknown({
+      key: input.key as any,
+      context: input.context,
+      resolution,
+      deps: {
+        ticketCreate: this.createDeps,
+        ticketUpdate: this.updateDeps,
+        documents: this.documents,
+      },
+    }) as Promise<TicketSyncOutcome>;
   }
+
 
   private async retryNewTicketRemoteWrite(
     context: SyncContext,

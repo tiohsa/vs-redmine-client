@@ -250,6 +250,7 @@ type SerializedQueue = {
 
 let memento: Memento | undefined;
 let activeScope = "";
+export const getActiveScope = (): string => activeScope;
 const queuesByScope = new Map<string, OfflineSyncQueue>();
 const persistenceByScope = new Map<string, Promise<void>>();
 const pendingSnapshotByScope = new Map<string, SerializedQueue>();
@@ -322,6 +323,12 @@ const withPrimaryEffectTransition = <T extends {
     index = effects.length - 1;
   }
   if (index === -1) { return undefined; }
+  if (
+    (action.kind === "commit" && effects[index].state === "committed" && (action.remoteId === undefined || effects[index].remoteId === action.remoteId)) ||
+    (action.kind === "mark_commit_unknown" && effects[index].state === "commit_unknown")
+  ) {
+    return { ...operation, effects };
+  }
   const transitioned = transitionDurableSyncEffect(effects[index], action, {
     operationRevision: operation.revision ?? 1,
     sourceState,
@@ -419,7 +426,7 @@ const operationFromTicketUpdate = (
   phase,
   documentUri: update.documentUri,
   createdAt: update.createdAt ?? 0,
-  effects: normalizeOperationEffects({ kind: "ticketUpdate", revision, phase, payload: update }),
+  effects: normalizeOperationEffects({ kind: "ticketUpdate", revision, phase, payload: update, effects: update.effects }),
   payload: businessPayload(update),
   });
 };
@@ -438,7 +445,7 @@ const operationFromNewTicket = (
   phase,
   documentUri: ticket.documentUri,
   createdAt: ticket.createdAt ?? 0,
-  effects: normalizeOperationEffects({ kind: "ticketCreate", revision, phase, payload: ticket }),
+  effects: normalizeOperationEffects({ kind: "ticketCreate", revision, phase, payload: ticket, effects: ticket.effects }),
   payload: businessPayload(ticket),
   });
 };
@@ -449,7 +456,7 @@ const operationFromComment = (
   index: number,
 ): SyncOperation => {
   const revision = comment.revision ?? 1;
-  const phase = comment.phase ?? "queued";
+  const phase = (comment.phase ?? "queued") as SyncOperation["phase"];
   const durablePrimaryKind = comment.effects?.find((effect) =>
     effect.kind === "comment_create" || effect.kind === "comment_update"
   )?.kind;
@@ -467,7 +474,7 @@ const operationFromComment = (
   phase,
   documentUri: comment.documentUri,
   createdAt: comment.createdAt ?? 0,
-  effects: normalizeOperationEffects({ kind, revision, phase, payload: comment }),
+  effects: normalizeOperationEffects({ kind, revision, phase, payload: comment, effects: comment.effects }),
   payload: businessPayload(comment),
   });
 };
@@ -635,15 +642,18 @@ const normalizeTicketUpdate = (
     operationId: update.operationId ?? `ticket:${ticketId}`,
     phase: update.phase === "remote_write_started" ? "commit_unknown" : update.phase ?? "queued",
     revision: update.revision ?? 1,
+    effects: update.effects,
   };
-  const preparingHasRemoteChild = restored.phase === "preparing" &&
-    restored.effects?.some((effect) => effect.kind === "child_create" && [
-      "committed",
-      "commit_unknown",
-      "compensation_started",
-      "compensation_unknown",
-    ].includes(effect.state));
-  return !preparingHasRemoteChild && (restored.phase === "preparing" || restored.phase === "queued")
+  const hasRemoteChild = restored.effects?.some((effect) => effect.kind === "child_create" && [
+    "committed",
+    "commit_unknown",
+    "compensation_started",
+    "compensation_unknown",
+  ].includes(effect.state));
+  if (hasRemoteChild) {
+    return restored;
+  }
+  return restored.phase === "preparing" || restored.phase === "queued"
     ? promoteTicketIntent(restored)
     : restored;
 };
@@ -759,15 +769,17 @@ const deserializeQueue = (raw: SerializedQueue | undefined): OfflineSyncQueue =>
   return {
     tickets: new Map(
       raw && Array.isArray(raw.tickets)
-        ? raw.tickets.filter(
-          (e): e is [number, OfflineTicketUpdate] =>
-            Array.isArray(e) &&
-            typeof e[0] === "number" &&
-            e[1] !== null &&
-            typeof e[1] === "object",
-        ).map(([ticketId, update]) => (
-          [ticketId, normalizeTicketUpdate(ticketId, update)] as [number, OfflineTicketUpdate]
-        ))
+        ? raw.tickets
+          .map((e: any): [number, OfflineTicketUpdate] | undefined => {
+            if (Array.isArray(e) && typeof e[0] === "number" && e[1] && typeof e[1] === "object") {
+              return [e[0], normalizeTicketUpdate(e[0], e[1])];
+            }
+            if (e && typeof e === "object" && typeof e.ticketId === "number") {
+              return [e.ticketId, normalizeTicketUpdate(e.ticketId, e)];
+            }
+            return undefined;
+          })
+          .filter((e): e is [number, OfflineTicketUpdate] => e !== undefined)
         : [],
     ),
     comments:
@@ -802,10 +814,27 @@ export const getSyncOperation = (
 const findStoredOperation = (
   queue: OfflineSyncQueue,
   operationId: string,
-): OfflineNewTicket | OfflineTicketUpdate | OfflineCommentUpdate | undefined =>
-  queue.newTickets.find((operation) => operation.operationId === operationId) ??
-  Array.from(queue.tickets.values()).find((operation) => operation.operationId === operationId) ??
-  queue.comments.find((operation) => operation.operationId === operationId);
+): OfflineNewTicket | OfflineTicketUpdate | OfflineCommentUpdate | undefined => {
+  const newTicket = queue.newTickets.find((op) =>
+    op.operationId === operationId ||
+    (op.queueId !== undefined && op.queueId === operationId) ||
+    (op.documentUri !== undefined && (operationId.endsWith(`:${op.documentUri}`) || operationId === op.documentUri))
+  );
+  if (newTicket) { return newTicket; }
+
+  const ticket = Array.from(queue.tickets.values()).find((op) =>
+    op.operationId === operationId ||
+    `ticket:${op.ticketId}` === operationId ||
+    operationId.endsWith(`:${op.ticketId}`)
+  );
+  if (ticket) { return ticket; }
+
+  return queue.comments.find((op) =>
+    op.operationId === operationId ||
+    (op.commentId !== undefined && `comment:${op.ticketId}:${op.commentId}` === operationId) ||
+    (op.documentUri !== undefined && (operationId.endsWith(`:${op.documentUri}`) || operationId === op.documentUri))
+  );
+};
 
 export const planOfflineSyncEffectAsync = async (
   operationId: string,
@@ -1235,10 +1264,10 @@ const newTicketActionAllowsSource = (
     case "begin_preparation": return source === "queued";
     case "abort_before_remote_write": return source === "preparing";
     case "start_normal_remote_write": return source === "preparing";
-    case "start_explicit_retry_remote_write": return source === "commit_unknown";
+    case "start_explicit_retry_remote_write": return source === "commit_unknown" || source === "remote_write_started";
     case "mark_commit_unknown": return source === "remote_write_started";
     case "record_remote_created": return source === "remote_write_started";
-    case "link_created_ticket": return source === "commit_unknown";
+    case "link_created_ticket": return source === "commit_unknown" || source === "remote_write_started";
     case "mark_reconciliation_pending":
       return source === "remote_created" || source === "reconciliation_pending" ||
         source === "local_finalize_pending";
@@ -1263,7 +1292,7 @@ export const transitionOfflineNewTicketLifecycleAsync = async (
   const current = index === -1 ? undefined : queue.newTickets[index];
   if (
     !current ||
-    current.operationId !== expected.operationId ||
+    (current.operationId !== undefined && expected.operationId !== undefined && current.operationId !== expected.operationId) ||
     current.revision !== expected.revision ||
     current.phase !== expected.sourcePhase ||
     (current.connectionScope !== undefined && current.connectionScope !== scope) ||
@@ -1495,10 +1524,10 @@ const ticketUpdateActionAllowsSource = (
     case "begin_preparation": return source === "queued";
     case "abort_before_remote_write": return source === "preparing";
     case "start_normal_remote_write": return source === "preparing";
-    case "start_explicit_retry_remote_write": return source === "commit_unknown";
+    case "start_explicit_retry_remote_write": return source === "commit_unknown" || source === "remote_write_started";
     case "mark_commit_unknown": return source === "remote_write_started";
     case "record_remote_commit": return source === "remote_write_started";
-    case "assume_update_committed": return source === "commit_unknown";
+    case "assume_update_committed": return source === "commit_unknown" || source === "remote_write_started";
     case "mark_reconciliation_pending":
       return source === "remote_committed" || source === "reconciliation_pending" ||
         source === "local_finalize_pending";
@@ -1670,26 +1699,27 @@ export const completeOfflineTicketUpdateAsync = async (
   if (expectedRevision !== undefined && current.revision !== expectedRevision) {
     return false;
   }
-  if (current.nextIntent && completion) {
+  if (current.nextIntent) {
     const next = current.nextIntent;
+    const canonical = completion?.canonical;
     queue.tickets.set(ticketId, {
       ticketId,
-      baseSubject: completion.canonical.subject,
-      baseDescription: completion.canonical.description,
-      baseMetadata: completion.canonical.metadata,
-      lastKnownRemoteUpdatedAt: completion.remoteUpdatedAt,
+      baseSubject: canonical?.subject ?? current.baseSubject,
+      baseDescription: canonical?.description ?? current.baseDescription,
+      baseMetadata: canonical?.metadata ?? current.baseMetadata,
+      lastKnownRemoteUpdatedAt: completion?.remoteUpdatedAt ?? current.lastKnownRemoteUpdatedAt,
       subject: next.subject,
       description: next.description,
       metadata: next.metadata,
-      layout: next.layout ?? completion.canonical.layout,
-      metadataBlock: next.metadataBlock ?? completion.canonical.metadataBlock,
-      controlFields: next.controlFields ?? completion.canonical.controlFields,
+      layout: next.layout ?? canonical?.layout ?? current.layout,
+      metadataBlock: next.metadataBlock ?? canonical?.metadataBlock ?? current.metadataBlock,
+      controlFields: next.controlFields ?? canonical?.controlFields ?? current.controlFields,
       baseDir: next.baseDir ?? current.baseDir,
       documentUri: next.documentUri ?? current.documentUri,
       operationId: current.operationId,
       connectionScope: current.connectionScope ?? scope,
       phase: "queued",
-      revision: next.revision,
+      revision: next.revision ?? (current.revision ?? 0) + 1,
     });
   } else {
     queue.tickets.delete(ticketId);

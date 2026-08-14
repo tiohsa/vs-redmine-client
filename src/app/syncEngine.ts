@@ -39,10 +39,12 @@ export interface SyncEngineDependencies {
 export class SyncEngine {
   private readonly coordinator: SyncCoordinator;
   private readonly tickets: Pick<TicketSyncService, "syncQueueItem" | "syncAll" | "resolveCommitUnknown">;
+  private readonly explicitTickets?: Pick<TicketSyncService, "syncQueueItem" | "syncAll" | "resolveCommitUnknown">;
   private readonly comments: Partial<CommentSaveDependencies>;
 
   public constructor(deps: SyncEngineDependencies = {}) {
     this.coordinator = deps.coordinator ?? createSyncCoordinator();
+    this.explicitTickets = deps.tickets;
     this.tickets = deps.tickets ?? createTicketSyncService();
     this.comments = deps.comments ?? {};
   }
@@ -70,8 +72,8 @@ export class SyncEngine {
     key: SyncEngineKey,
     context: SyncContext,
   ): Promise<SyncEngineOutcome> {
-    if (key.kind === "ticket" || key.kind === "newTicket") {
-      return this.tickets.syncQueueItem(key as any, context);
+    if (this.explicitTickets && (key.kind === "ticket" || key.kind === "newTicket")) {
+      return this.explicitTickets.syncQueueItem(key as any, context);
     }
     return this.coordinator.sync(key as any, context, {
       deps: {

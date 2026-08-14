@@ -95,7 +95,7 @@ const mapErrorToResult = (error: unknown): CommentSaveResult => {
   return buildResult("failed", message);
 };
 
-const normalizeCommentBody = (body: string): string => body.trim();
+export const normalizeCommentBody = (body: string): string => body.trim();
 
 export const resolveCreatedCommentId = (
   comments: Comment[],

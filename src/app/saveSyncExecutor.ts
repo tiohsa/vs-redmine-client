@@ -16,7 +16,11 @@ import {
   getTicketIdForDocument,
   getTicketIdForUri,
 } from "../views/ticketEditorRegistry";
-import { addOfflineCommentUpdate, removeOfflineCommentEntry } from "../views/offlineSyncStore";
+import {
+  addOfflineCommentUpdate,
+  getActiveScope,
+  removeOfflineCommentEntry,
+} from "../views/offlineSyncStore";
 import { computeNotesHash } from "../utils/notesHash";
 import type { NotificationController } from "./notificationController";
 import { classifyDocumentSave } from "./saveSyncClassifier";
@@ -31,8 +35,7 @@ import {
 } from "../config/connectionScope";
 import { showError } from "../utils/notifications";
 import { getOfflineSyncMode, type OfflineSyncMode } from "../config/settings";
-import { createSyncEngine, type SyncEngine } from "./syncEngine";
-
+import type { SyncEngine } from "./syncEngine";
 import { createOutcomePresenter } from "./outcomePresenter";
 
 export interface SaveSyncExecutorDeps {
@@ -50,14 +53,17 @@ export const performSyncOnSave = async (
   editor: vscode.TextEditor | undefined,
   deps: SaveSyncExecutorDeps,
 ): Promise<void> => {
-  const operationScope = getConnectionScopeForDocument(document) ?? getCurrentConnectionScope();
-  if (operationScope !== getCurrentConnectionScope()) {
+  const currentScope = getActiveScope() || getCurrentConnectionScope();
+  const operationScope = getConnectionScopeForDocument(document) ?? currentScope;
+  if (
+    getConnectionScopeForDocument(document) &&
+    getConnectionScopeForDocument(document) !== currentScope
+  ) {
     showError(CONNECTION_SCOPE_MISMATCH_MESSAGE);
     return;
   }
   const { ticketsPresentation, commentsPresentation, unsyncedPresentation, notifications } = deps;
-  const syncMode = deps.offlineSyncMode ?? getOfflineSyncMode();
-  const syncEngine = deps.syncEngine ?? createSyncEngine();
+  const syncMode = deps.offlineSyncMode ?? (deps.syncEngine ? "auto" : getOfflineSyncMode());
   const presenter = createOutcomePresenter({
     ticketsPresentation,
     commentsPresentation,
@@ -70,9 +76,9 @@ export const performSyncOnSave = async (
   };
 
   const syncIfAuto = async (key: import("./syncEngine").SyncEngineKey): Promise<void> => {
-    if (syncMode === "auto" && key.kind !== "newTicket") {
+    if (syncMode === "auto" && deps.syncEngine && key.kind !== "newTicket") {
       try {
-        const outcome = await syncEngine.syncOne(key, { connectionScope: operationScope });
+        const outcome = await deps.syncEngine.syncOne(key, { connectionScope: operationScope });
         presenter.present(outcome as any, {
           ticketId: key.kind === "ticket" ? key.ticketId : (key.kind === "comment" ? key.ticketId : undefined),
           commentId: key.kind === "comment" ? key.commentId : undefined,
@@ -88,6 +94,8 @@ export const performSyncOnSave = async (
           },
         );
       }
+    } else {
+      unsyncedPresentation.refresh();
     }
   };
 
@@ -103,10 +111,13 @@ export const performSyncOnSave = async (
       notifications.notifyTicketSaveResult(ticketResult);
       if (ticketResult.status === "created") {
         ticketsPresentation.refresh();
+        unsyncedPresentation.refresh();
       } else if (ticketResult.status === "queued") {
         const ticketId = getTicketIdForDocument(editor.document) ?? getTicketIdForUri(editor.document.uri);
         if (ticketId && ticketId > 0) {
           await syncIfAuto({ kind: "ticket", ticketId });
+        } else {
+          unsyncedPresentation.refresh();
         }
       }
       return;
@@ -131,6 +142,7 @@ export const performSyncOnSave = async (
           });
         } else if (shouldRefreshComments(commentResult.status)) {
           commentsPresentation.refreshForTicket(ticketId);
+          unsyncedPresentation.refresh();
         }
       }
       return;
@@ -158,16 +170,12 @@ export const performSyncOnSave = async (
           sourceNotesHash: classification.parsed.fields.sourceNotesHash,
         }, operationScope);
         commentsPresentation.refreshForTicket(classification.parsed.fields.issueId);
-        if (syncMode === "auto") {
-          await syncIfAuto({
-            kind: "comment",
-            ticketId: classification.parsed.fields.issueId,
-            commentId: classification.parsed.fields.journalId,
-            documentUri: document.uri.toString(),
-          });
-        } else {
-          unsyncedPresentation.refresh();
-        }
+        await syncIfAuto({
+          kind: "comment",
+          ticketId: classification.parsed.fields.issueId,
+          commentId: classification.parsed.fields.journalId,
+          documentUri: document.uri.toString(),
+        });
       }
       return;
     }
@@ -189,6 +197,8 @@ export const performSyncOnSave = async (
           commentId: classification.commentId,
           documentUri: document.uri.toString(),
         });
+      } else {
+        unsyncedPresentation.refresh();
       }
       return;
     }
@@ -201,6 +211,7 @@ export const performSyncOnSave = async (
         operationScope,
       });
       notifications.notifyTicketSaveResult(result);
+      unsyncedPresentation.refresh();
       return;
     }
 
@@ -216,6 +227,8 @@ export const performSyncOnSave = async (
       notifications.notifyTicketSaveResult(result);
       if (result.status === "queued") {
         await syncIfAuto({ kind: "ticket", ticketId: classification.ticketId });
+      } else {
+        unsyncedPresentation.refresh();
       }
       return;
     }
@@ -226,6 +239,7 @@ export const performSyncOnSave = async (
       }
       const result = await queueNewTicketDraft({ editor, operationScope });
       notifications.notifyTicketSaveResult(result);
+      unsyncedPresentation.refresh();
       return;
     }
 
@@ -236,6 +250,7 @@ export const performSyncOnSave = async (
         operationScope,
       });
       notifications.notifyTicketSaveResult(result);
+      unsyncedPresentation.refresh();
       return;
     }
 
@@ -256,6 +271,8 @@ export const performSyncOnSave = async (
           commentId: classification.commentId,
           documentUri: document.uri.toString(),
         });
+      } else {
+        unsyncedPresentation.refresh();
       }
       return;
     }
@@ -275,6 +292,8 @@ export const performSyncOnSave = async (
           ticketId: classification.ticketId,
           documentUri: document.uri.toString(),
         });
+      } else {
+        unsyncedPresentation.refresh();
       }
       return;
     }
@@ -296,6 +315,8 @@ export const performSyncOnSave = async (
           commentId: classification.commentId,
           documentUri: document.uri.toString(),
         });
+      } else {
+        unsyncedPresentation.refresh();
       }
       return;
     }
