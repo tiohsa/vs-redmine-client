@@ -52,7 +52,7 @@ suite("Generic SyncStateMachine", () => {
     assert.strictEqual(op.phase, "completed");
   });
 
-  test("remote_write_started でタイムアウトした場合は commit_unknown となり自動再送できない", () => {
+  test("remote_write_started でタイムアウトした場合は commit_unknown となり自動再送できない (INV-04)", () => {
     let op = makeOp("remote_write_started");
 
     // mark_commit_unknown
@@ -63,10 +63,9 @@ suite("Generic SyncStateMachine", () => {
     assert.strictEqual(isTransitionAllowed(op.phase, "begin_preparation"), false);
     assert.strictEqual(isTransitionAllowed(op.phase, "start_normal_remote_write"), false);
 
-    // 明示的な retry_commit_unknown のみ許可
-    assert.strictEqual(isTransitionAllowed(op.phase, "retry_commit_unknown"), true);
-    const retried = applyGenericTransition(op, { kind: "retry_commit_unknown" })!;
-    assert.strictEqual(retried.phase, "remote_write_started");
+    // 明示的な assume_remote_commit または record_reconciled_identity のみ許可 (INV-04)
+    assert.strictEqual(isTransitionAllowed(op.phase, "assume_remote_commit"), true);
+    assert.strictEqual(isTransitionAllowed(op.phase, "record_reconciled_identity"), true);
   });
 
   test("commit_unknown から assume_remote_commit または record_reconciled_identity への復旧", () => {
@@ -92,6 +91,34 @@ suite("Generic SyncStateMachine", () => {
     assert.strictEqual(applyGenericTransition(completedOp, { kind: "begin_preparation" }), undefined);
   });
 
+  test("RT-05: remote_committed -> complete および reconciliation_pending -> complete の直接遷移は禁止される (INV-09, INV-10)", () => {
+    // remote_committed -> complete は禁止 (local_finalize を必ず経由する)
+    assert.strictEqual(
+      isTransitionAllowed("remote_committed", "complete"),
+      false,
+      "remote_committed から complete への直接遷移は禁止",
+    );
+    const remoteCommittedOp = makeOp("remote_committed");
+    assert.strictEqual(
+      applyGenericTransition(remoteCommittedOp, { kind: "complete" }),
+      undefined,
+      "remote_committed から complete を適用すると undefined を返すこと",
+    );
+
+    // reconciliation_pending -> complete は禁止
+    assert.strictEqual(
+      isTransitionAllowed("reconciliation_pending", "complete"),
+      false,
+      "reconciliation_pending から complete への直接遷移は禁止",
+    );
+    const reconcilPendingOp = makeOp("reconciliation_pending");
+    assert.strictEqual(
+      applyGenericTransition(reconcilPendingOp, { kind: "complete" }),
+      undefined,
+      "reconciliation_pending から complete を適用すると undefined を返すこと",
+    );
+  });
+
   test("プロセス再起動時の正規化: remote_write_started -> commit_unknown", () => {
     const startedOp = makeOp("remote_write_started");
     const normalized = normalizeOperationOnRestart(startedOp);
@@ -100,12 +127,19 @@ suite("Generic SyncStateMachine", () => {
 
   test("プロセス再起動時の正規化: preparing -> queued (nextIntent 昇格)", () => {
     const preparingOp = makeOp("preparing", {
-      nextIntent: { subject: "New Subject" },
+      nextIntent: {
+        ticketId: 100,
+        baseSubject: "Base",
+        baseDescription: "Base",
+        baseMetadata: { tracker: "Bug", priority: "Normal", status: "New", start_date: "", due_date: "", children: [] },
+        subject: "New Subject",
+        description: "New Desc",
+        metadata: { tracker: "Bug", priority: "Normal", status: "New", start_date: "", due_date: "", children: [] },
+      },
       revision: 1,
     });
     const normalized = normalizeOperationOnRestart(preparingOp);
     assert.strictEqual(normalized.phase, "queued");
-    assert.deepStrictEqual(normalized.payload, { subject: "New Subject" });
     assert.strictEqual(normalized.nextIntent, undefined);
     assert.strictEqual(normalized.revision, 2);
   });

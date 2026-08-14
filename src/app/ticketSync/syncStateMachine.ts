@@ -5,7 +5,7 @@ import type {
 } from "./syncOperationTypes";
 
 /**
- * 許可される状態遷移テーブル
+ * 許可される状態遷移テーブル (INV-04, INV-09, INV-10, INV-11)
  */
 const ALLOWED_TRANSITIONS: Record<GenericSyncPhase, GenericLifecycleAction["kind"][]> = {
   queued: ["begin_preparation"],
@@ -15,13 +15,12 @@ const ALLOWED_TRANSITIONS: Record<GenericSyncPhase, GenericLifecycleAction["kind
     "mark_commit_unknown",
     "abort_known_remote_failure",
   ],
-  commit_unknown: ["retry_commit_unknown", "assume_remote_commit", "record_reconciled_identity"],
+  commit_unknown: ["assume_remote_commit", "record_reconciled_identity"],
   remote_committed: [
     "mark_reconciliation_pending",
     "mark_local_finalize_pending",
-    "complete",
   ],
-  reconciliation_pending: ["mark_local_finalize_pending", "record_reconciled_identity", "complete"],
+  reconciliation_pending: ["mark_local_finalize_pending", "record_reconciled_identity"],
   local_finalize_pending: ["complete"],
   completed: [],
 };
@@ -42,8 +41,9 @@ export const applyGenericTransition = (
     return undefined;
   }
 
-  const next = { ...operation };
-  next.persistenceVersion = (operation.persistenceVersion || 0) + 1;
+  const next: UnifiedSyncOperation = { ...operation };
+  next.version = (operation.version ?? operation.persistenceVersion ?? 0) + 1;
+  next.persistenceVersion = next.version;
   next.updatedAt = new Date().toISOString();
 
   switch (action.kind) {
@@ -70,21 +70,22 @@ export const applyGenericTransition = (
 
     case "mark_commit_unknown":
       next.phase = "commit_unknown";
+      if (action.message) {
+        next.errorMessage = action.message;
+      }
       return next;
 
     case "abort_before_remote_write":
     case "abort_known_remote_failure":
       next.phase = "queued";
       if (next.nextIntent) {
-        // 次の intent があれば昇格
+        // 次の intent があれば昇格 (INV-07)
+        next.intent = next.nextIntent;
         next.payload = next.nextIntent;
         next.nextIntent = undefined;
-        next.revision = (next.revision || 0) + 1;
+        next.intentRevision = (next.intentRevision ?? next.revision ?? 0) + 1;
+        next.revision = next.intentRevision;
       }
-      return next;
-
-    case "retry_commit_unknown":
-      next.phase = "remote_write_started";
       return next;
 
     case "assume_remote_commit":
@@ -113,6 +114,9 @@ export const applyGenericTransition = (
 
     case "mark_reconciliation_pending":
       next.phase = "reconciliation_pending";
+      if (action.message) {
+        next.errorMessage = action.message;
+      }
       return next;
 
     case "mark_local_finalize_pending":
@@ -131,20 +135,40 @@ export const applyGenericTransition = (
 export const normalizeOperationOnRestart = (
   operation: UnifiedSyncOperation,
 ): UnifiedSyncOperation => {
-  const normalized = { ...operation };
+  const normalized: UnifiedSyncOperation = { ...operation };
+  normalized.version = (operation.version ?? operation.persistenceVersion ?? 0) + 1;
+  normalized.persistenceVersion = normalized.version;
+  normalized.updatedAt = new Date().toISOString();
+
   if (normalized.phase === "remote_write_started") {
-    // 実行中だった remote write は不確定 (commit_unknown) に正規化
+    // 実行中だった remote write は不確定 (commit_unknown) に正規化 (INV-03)
     normalized.phase = "commit_unknown";
-    normalized.updatedAt = new Date().toISOString();
   } else if (normalized.phase === "preparing") {
     // 準備中だったものは queued に巻き戻し、nextIntent があれば昇格
     normalized.phase = "queued";
     if (normalized.nextIntent) {
+      normalized.intent = normalized.nextIntent;
       normalized.payload = normalized.nextIntent;
       normalized.nextIntent = undefined;
-      normalized.revision = (normalized.revision || 0) + 1;
+      normalized.intentRevision = (normalized.intentRevision ?? normalized.revision ?? 0) + 1;
+      normalized.revision = normalized.intentRevision;
     }
-    normalized.updatedAt = new Date().toISOString();
   }
+
+  // secondary effect の started は commit_unknown に正規化 (INV-14)
+  if (normalized.effects && normalized.effects.length > 0) {
+    normalized.effects = normalized.effects.map((effect) => {
+      if (effect.state === "started" || effect.state === "compensation_started") {
+        return {
+          ...effect,
+          state: effect.state === "started" ? "commit_unknown" : "compensation_unknown",
+          updatedAt: Date.now(),
+        };
+      }
+      return effect;
+    });
+  }
+
   return normalized;
 };
+

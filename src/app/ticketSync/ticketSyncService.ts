@@ -236,6 +236,8 @@ export class TicketSyncService {
     newTicket: boolean;
     manual: boolean;
     projectId?: number;
+    uploads?: any[];
+    attachments?: any[];
   }): Promise<TicketSyncOutcome> {
     if (input.newTicket) {
       if (input.manual) {
@@ -252,6 +254,7 @@ export class TicketSyncService {
           projectId: input.projectId ?? getProjectIdForEditor(input.editor),
           documentUri: input.editor.document.uri.toString(),
           baseDir: resolveEditorBaseDir({ editor: input.editor }),
+          effects: input.uploads || input.attachments ? (input.uploads ?? input.attachments) : undefined,
         },
       });
     }

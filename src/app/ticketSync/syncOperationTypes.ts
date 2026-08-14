@@ -1,3 +1,10 @@
+import type { IssueUploadInput } from "../../redmine/issues";
+import type { FrontmatterControlFields } from "../../views/ticketMetadataControlFields";
+import type { IssueMetadata } from "../../views/ticketMetadataTypes";
+import type {
+  TicketEditorLayout,
+  TicketEditorMetadataBlock,
+} from "../../views/ticketEditorContent";
 import type { ConflictContext, TicketSaveResult } from "../../views/ticketSaveTypes";
 import type { DurableSyncEffect } from "../syncEffects";
 
@@ -27,7 +34,6 @@ export type GenericLifecycleAction =
   | { kind: "complete" }
   | { kind: "abort_before_remote_write" }
   | { kind: "abort_known_remote_failure" }
-  | { kind: "retry_commit_unknown" }
   | { kind: "assume_remote_commit"; remoteId?: number; projectId?: number; remoteUpdatedAt?: string }
   | { kind: "record_reconciled_identity"; remoteId: number; projectId?: number; remoteUpdatedAt?: string };
 
@@ -41,6 +47,75 @@ export type SyncOperationKey =
   | { kind: "ticket"; ticketId: number }
   | { kind: "newTicket"; queueId?: string; documentUri?: string }
   | { kind: "comment"; ticketId: number; commentId?: number; documentUri?: string };
+
+export type IssueAttachmentSource =
+  | { kind: "file"; filePath: string; filename?: string; contentType?: string }
+  | { kind: "clipboard"; filename?: string; contentType?: string }
+  | { kind: "token"; token: string; filename?: string; contentType?: string };
+
+export interface TicketCreateIntent {
+  projectId: number;
+  subject: string;
+  description: string;
+  metadata: IssueMetadata;
+  attachments?: IssueAttachmentSource[];
+  uploadTokens?: IssueUploadInput[];
+  childTickets?: Array<{ subject: string; description?: string; tracker?: string; priority?: string }>;
+  layout?: TicketEditorLayout;
+  metadataBlock?: TicketEditorMetadataBlock;
+  controlFields?: FrontmatterControlFields;
+  baseDir?: string;
+  documentUri?: string;
+}
+
+export interface TicketUpdateIntent {
+  ticketId: number;
+  baseSubject: string;
+  baseDescription: string;
+  baseMetadata: IssueMetadata;
+  subject: string;
+  description: string;
+  metadata: IssueMetadata;
+  attachments?: IssueAttachmentSource[];
+  uploadTokens?: IssueUploadInput[];
+  childTickets?: Array<{ subject: string; description?: string; tracker?: string; priority?: string }>;
+  layout?: TicketEditorLayout;
+  metadataBlock?: TicketEditorMetadataBlock;
+  controlFields?: FrontmatterControlFields;
+  baseDir?: string;
+  documentUri?: string;
+  lastKnownRemoteUpdatedAt?: string;
+}
+
+export interface CommentCreateIntent {
+  ticketId: number;
+  body: string;
+  attachments?: IssueAttachmentSource[];
+  uploadTokens?: IssueUploadInput[];
+  baseDir?: string;
+  documentUri?: string;
+  sourceNotesHash?: string;
+  finalizeDraft?: boolean;
+}
+
+export interface CommentUpdateIntent {
+  ticketId: number;
+  commentId: number;
+  baseBody?: string;
+  body: string;
+  attachments?: IssueAttachmentSource[];
+  uploadTokens?: IssueUploadInput[];
+  baseDir?: string;
+  documentUri?: string;
+  sourceNotesHash?: string;
+  lastKnownRemoteUpdatedAt?: string;
+}
+
+export type SyncIntent =
+  | TicketCreateIntent
+  | TicketUpdateIntent
+  | CommentCreateIntent
+  | CommentUpdateIntent;
 
 export type SyncOutcome =
   | {
@@ -89,13 +164,18 @@ export type SyncOutcome =
       saveResult?: TicketSaveResult;
     };
 
-export interface UnifiedSyncOperation {
+export interface UnifiedSyncOperation<I extends SyncIntent = SyncIntent> {
   operationId: string;
   kind: SyncOperationKind;
+  key?: SyncOperationKey;
   connectionScope: string;
   phase: GenericSyncPhase;
   revision: number;
+  intentRevision?: number;
+  version?: number;
   persistenceVersion: number;
+  intent?: I;
+  nextIntent?: I;
   ticketId?: number;
   commentId?: number;
   projectId?: number;
@@ -105,7 +185,8 @@ export interface UnifiedSyncOperation {
   createdChildIds?: number[];
   effects?: DurableSyncEffect[];
   payload?: any;
-  nextIntent?: any;
   createdAt?: number | string;
   updatedAt?: number | string;
+  errorMessage?: string;
 }
+

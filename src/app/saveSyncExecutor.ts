@@ -33,6 +33,8 @@ import { showError } from "../utils/notifications";
 import { getOfflineSyncMode, type OfflineSyncMode } from "../config/settings";
 import { createSyncEngine, type SyncEngine } from "./syncEngine";
 
+import { createOutcomePresenter } from "./outcomePresenter";
+
 export interface SaveSyncExecutorDeps {
   ticketsPresentation: TicketPresentationPort;
   commentsPresentation: CommentPresentationPort;
@@ -56,9 +58,14 @@ export const performSyncOnSave = async (
   const { ticketsPresentation, commentsPresentation, unsyncedPresentation, notifications } = deps;
   const syncMode = deps.offlineSyncMode ?? getOfflineSyncMode();
   const syncEngine = deps.syncEngine ?? createSyncEngine();
+  const presenter = createOutcomePresenter({
+    ticketsPresentation,
+    commentsPresentation,
+    unsyncedPresentation,
+    notifications,
+  });
 
   const refreshQueuedComment = (ticketId: number): void => {
-    unsyncedPresentation.refresh();
     commentsPresentation.refreshForTicket(ticketId);
   };
 
@@ -66,16 +73,20 @@ export const performSyncOnSave = async (
     if (syncMode === "auto" && key.kind !== "newTicket") {
       try {
         const outcome = await syncEngine.syncOne(key, { connectionScope: operationScope });
-        if (outcome.kind === "completed" || outcome.kind === "no_change") {
-          unsyncedPresentation.refresh();
-          if (key.kind === "ticket") {
-            ticketsPresentation.notifyChange();
-          } else if (key.kind === "comment") {
-            commentsPresentation.refreshForTicket(key.ticketId);
-          }
-        }
-      } catch {
-        // 同期失敗時のエラーハンドリングは syncEngine 内で durable state として記録される
+        presenter.present(outcome as any, {
+          ticketId: key.kind === "ticket" ? key.ticketId : (key.kind === "comment" ? key.ticketId : undefined),
+          commentId: key.kind === "comment" ? key.commentId : undefined,
+          isAuto: true,
+        });
+      } catch (error) {
+        presenter.present(
+          { kind: "failed_before_commit", error: error as Error },
+          {
+            ticketId: key.kind === "ticket" ? key.ticketId : (key.kind === "comment" ? key.ticketId : undefined),
+            commentId: key.kind === "comment" ? key.commentId : undefined,
+            isAuto: true,
+          },
+        );
       }
     }
   };
@@ -136,6 +147,8 @@ export const performSyncOnSave = async (
           commentId: classification.parsed.fields.journalId,
           documentUri: document.uri.toString(),
         }, operationScope);
+        unsyncedPresentation.refresh();
+        commentsPresentation.refreshForTicket(classification.parsed.fields.issueId);
       } else {
         addOfflineCommentUpdate({
           ticketId: classification.parsed.fields.issueId,
@@ -144,14 +157,17 @@ export const performSyncOnSave = async (
           documentUri: document.uri.toString(),
           sourceNotesHash: classification.parsed.fields.sourceNotesHash,
         }, operationScope);
-        unsyncedPresentation.refresh();
         commentsPresentation.refreshForTicket(classification.parsed.fields.issueId);
-        await syncIfAuto({
-          kind: "comment",
-          ticketId: classification.parsed.fields.issueId,
-          commentId: classification.parsed.fields.journalId,
-          documentUri: document.uri.toString(),
-        });
+        if (syncMode === "auto") {
+          await syncIfAuto({
+            kind: "comment",
+            ticketId: classification.parsed.fields.issueId,
+            commentId: classification.parsed.fields.journalId,
+            documentUri: document.uri.toString(),
+          });
+        } else {
+          unsyncedPresentation.refresh();
+        }
       }
       return;
     }

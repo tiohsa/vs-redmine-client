@@ -1,14 +1,14 @@
 import * as vscode from "vscode";
 import { getDefaultProjectId } from "../config/settings";
-import { uploadClipboardImage, uploadFileAttachment } from "../redmine/attachments";
 import type { IssueUploadInput } from "../redmine/issues";
 import { convertMermaidBlocks } from "../utils/mermaid";
 import { showError, showInfo, showWarning } from "../utils/notifications";
 import { getCurrentConnectionScope } from "../config/connectionScope";
 import { createTicketSyncService, type TicketSyncService } from "../app/ticketSync";
 import { buildTicketEditorContent } from "../views/ticketEditorContent";
-import { buildIssueMetadataFixture } from "../test/helpers/ticketMetadataFixtures";
+import { getTicketEditorDefaults } from "../views/ticketEditorDefaultsStore";
 import { applyEditorContent } from "../views/ticketPreview";
+import type { IssueAttachmentSource } from "../app/ticketSync/syncOperationTypes";
 
 const promptForSubject = async (): Promise<string | undefined> =>
   vscode.window.showInputBox({
@@ -16,7 +16,7 @@ const promptForSubject = async (): Promise<string | undefined> =>
     placeHolder: vscode.l10n.t("Short summary"),
   });
 
-const promptForAttachments = async (): Promise<IssueUploadInput[]> => {
+const promptForAttachments = async (): Promise<IssueAttachmentSource[]> => {
   const choice = await vscode.window.showQuickPick(
     [
       { label: vscode.l10n.t("Attach files"), value: "files" },
@@ -40,23 +40,15 @@ const promptForAttachments = async (): Promise<IssueUploadInput[]> => {
       return [];
     }
 
-    const uploads = await Promise.all(
-      files.map((file) => uploadFileAttachment(file.fsPath)),
-    );
-
-    return uploads.map((upload) => ({
-      token: upload.token,
-      filename: upload.filename,
-      content_type: upload.contentType,
+    return files.map((file) => ({
+      kind: "file" as const,
+      filePath: file.fsPath,
     }));
   }
 
-  const upload = await uploadClipboardImage();
   return [
     {
-      token: upload.token,
-      filename: upload.filename,
-      content_type: upload.contentType,
+      kind: "clipboard" as const,
     },
   ];
 };
@@ -65,7 +57,7 @@ export interface CreateTicketDependencies {
   createTicketSyncService?: () => Pick<TicketSyncService, "syncEditor">;
   getActiveEditor?: () => vscode.TextEditor | undefined;
   promptSubject?: () => Promise<string | undefined>;
-  promptAttachments?: () => Promise<IssueUploadInput[]>;
+  promptAttachments?: () => Promise<Array<IssueAttachmentSource | IssueUploadInput>>;
   getDefaultProjectId?: () => string;
 }
 
@@ -91,12 +83,13 @@ export const createTicketFromEditor = async (
   }
 
   const description = convertMermaidBlocks(editor.document.getText());
-  const uploads = await (deps.promptAttachments ?? promptForAttachments)();
+  const attachments = await (deps.promptAttachments ?? promptForAttachments)();
 
+  const editorDefaults = getTicketEditorDefaults();
   const formattedContent = buildTicketEditorContent({
     subject,
     description,
-    metadata: buildIssueMetadataFixture(),
+    metadata: editorDefaults.metadata,
     controlFields: {
       mode: "new-ticket",
       issue_id: null,
@@ -117,6 +110,8 @@ export const createTicketFromEditor = async (
       newTicket: true,
       manual: false,
       projectId,
+      uploads: attachments as any,
+      attachments: attachments as any,
     });
 
     if (outcome.kind === "completed") {
@@ -134,3 +129,4 @@ export const createTicketFromEditor = async (
     showError((error as Error).message);
   }
 };
+
