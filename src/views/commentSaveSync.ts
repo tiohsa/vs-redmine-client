@@ -97,12 +97,12 @@ const mapErrorToResult = (error: unknown): CommentSaveResult => {
 
 const normalizeCommentBody = (body: string): string => body.trim();
 
-const resolveCreatedCommentId = (
+export const resolveCreatedCommentId = (
   comments: Comment[],
-  body: string,
+  submittedBody: string,
   currentUserId?: number,
 ): number | undefined => {
-  const normalized = normalizeCommentBody(body);
+  const normalized = normalizeCommentBody(submittedBody);
   if (!normalized) {
     return undefined;
   }

@@ -54,8 +54,9 @@ export class OutcomePresenter {
         const message = outcome.message ?? vscode.l10n.t("A conflict was detected while synchronizing.");
         if (notifications) {
           notifications.notifyTicketSaveResult({ status: "conflict", message });
+        } else {
+          showWarning(message);
         }
-        showWarning(message);
         break;
       }
 
@@ -64,8 +65,9 @@ export class OutcomePresenter {
         const message = outcome.message || vscode.l10n.t("The sync request timed out. The remote status is unknown. Please reconcile before retrying.");
         if (notifications) {
           notifications.notifyTicketSaveResult({ status: "failed", message, remoteCommitUnknown: true });
+        } else {
+          showWarning(message);
         }
-        showWarning(message);
         break;
       }
 
@@ -83,8 +85,9 @@ export class OutcomePresenter {
         );
         if (notifications) {
           notifications.notifyTicketSaveResult({ status: "failed", message });
+        } else {
+          showWarning(message);
         }
-        showWarning(message);
         break;
       }
 
@@ -93,8 +96,9 @@ export class OutcomePresenter {
         const message = outcome.error.message || vscode.l10n.t("Sync failed before remote commit.");
         if (notifications) {
           notifications.notifyTicketSaveResult({ status: "failed", message });
+        } else {
+          showError(message);
         }
-        showError(message);
         break;
       }
     }

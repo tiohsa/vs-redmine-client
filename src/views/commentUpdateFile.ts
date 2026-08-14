@@ -159,14 +159,13 @@ export const finalizeNewCommentDraftFileAfterSync = async (input: {
       ? "applied"
       : "stale_source";
   }
-  if (raw !== input.expectedDocumentBody) { return "stale_source"; }
   const updated = buildCommentUpdateFileContent({
     issueId: input.ticketId,
     journalId: input.commentId,
     projectId: input.projectId,
     sourceNotesHash: computeNotesHash(input.syncedBody),
     lastSyncedAt: new Date().toISOString(),
-  }, input.expectedDocumentBody);
+  }, raw);
 
   suppressSaveSync(input.documentUri);
   try {

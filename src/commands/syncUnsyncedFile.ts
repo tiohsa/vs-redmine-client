@@ -206,7 +206,8 @@ const syncUnsyncedFileAtScope = async (
     } else {
       if (
         outcome.kind === "failed_before_commit" &&
-        outcome.error instanceof TicketSyncQueueItemNotFoundError
+        (outcome.error instanceof TicketSyncQueueItemNotFoundError ||
+          outcome.error.message.includes("Queue entry for this ticket update not found"))
       ) {
         showWarning(vscode.l10n.t("Queue entry for this ticket update not found."));
         return undefined;
@@ -269,7 +270,8 @@ const syncUnsyncedFileAtScope = async (
     }
     if (
       outcome.kind === "failed_before_commit" &&
-      outcome.error instanceof TicketSyncQueueItemNotFoundError
+      (outcome.error instanceof TicketSyncQueueItemNotFoundError ||
+        outcome.error.message.includes("Queue entry for this new ticket not found"))
     ) {
       showWarning(vscode.l10n.t("Queue entry for this new ticket not found."));
       return undefined;

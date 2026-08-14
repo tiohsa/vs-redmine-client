@@ -16,6 +16,7 @@ import {
   completeOfflineNewTicketAsync,
   completeOfflineTicketUpdateAsync,
   getOfflineSyncQueue,
+  replaceOfflineSyncQueue,
   removeOfflineCommentEntry,
   removeOfflineNewTicketAsync,
   removeOfflineTicketUpdateAsync,
@@ -55,10 +56,10 @@ export const toUnifiedOperationFromTicket = (
   key: { kind: "ticket", ticketId: ticket.ticketId },
   connectionScope: scope,
   phase: (ticket.phase ?? "queued") as GenericSyncPhase,
-  revision: ticket.revision ?? 1,
-  intentRevision: ticket.revision ?? 1,
-  version: ticket.revision ?? 1,
-  persistenceVersion: ticket.revision ?? 1,
+  revision: (ticket as any).intentRevision ?? ticket.revision ?? 1,
+  intentRevision: (ticket as any).intentRevision ?? ticket.revision ?? 1,
+  version: (ticket as any).version ?? (ticket as any).persistenceVersion ?? ticket.revision ?? 1,
+  persistenceVersion: (ticket as any).persistenceVersion ?? (ticket as any).version ?? ticket.revision ?? 1,
   ticketId: ticket.ticketId,
   documentUri: ticket.documentUri,
   createdChildIds: ticket.createdChildIds,
@@ -108,10 +109,10 @@ export const toUnifiedOperationFromNewTicket = (
   key: { kind: "newTicket", queueId: ticket.queueId, documentUri: ticket.documentUri },
   connectionScope: scope,
   phase: (ticket.phase ?? "queued") as GenericSyncPhase,
-  revision: ticket.revision ?? 1,
-  intentRevision: ticket.revision ?? 1,
-  version: ticket.revision ?? 1,
-  persistenceVersion: ticket.revision ?? 1,
+  revision: (ticket as any).intentRevision ?? ticket.revision ?? 1,
+  intentRevision: (ticket as any).intentRevision ?? ticket.revision ?? 1,
+  version: (ticket as any).version ?? (ticket as any).persistenceVersion ?? ticket.revision ?? 1,
+  persistenceVersion: (ticket as any).persistenceVersion ?? (ticket as any).version ?? ticket.revision ?? 1,
   projectId: ticket.projectId,
   documentUri: ticket.documentUri,
   createdRemoteId: ticket.createdIssueId,
@@ -147,10 +148,10 @@ export const toUnifiedOperationFromComment = (
   key: { kind: "comment", ticketId: comment.ticketId, commentId: comment.commentId, documentUri: comment.documentUri },
   connectionScope: scope,
   phase: (comment.phase ?? "queued") as GenericSyncPhase,
-  revision: comment.revision ?? 1,
-  intentRevision: comment.revision ?? 1,
-  version: comment.revision ?? 1,
-  persistenceVersion: comment.revision ?? 1,
+  revision: (comment as any).intentRevision ?? comment.revision ?? 1,
+  intentRevision: (comment as any).intentRevision ?? comment.revision ?? 1,
+  version: (comment as any).version ?? (comment as any).persistenceVersion ?? comment.revision ?? 1,
+  persistenceVersion: (comment as any).persistenceVersion ?? (comment as any).version ?? comment.revision ?? 1,
   ticketId: comment.ticketId,
   commentId: comment.commentId,
   documentUri: comment.documentUri,
@@ -192,16 +193,20 @@ export class DefaultSyncOperationRepository implements SyncOperationRepository {
     }
     if (key.kind === "newTicket") {
       const ticket = queue.newTickets.find(
-        (t) => (key.queueId && t.queueId === key.queueId) || (key.documentUri && t.documentUri === key.documentUri),
+        (t) =>
+          (key.queueId !== undefined && t.queueId === key.queueId) ||
+          (key.documentUri !== undefined && t.documentUri === key.documentUri) ||
+          (key.queueId === undefined && key.documentUri === undefined),
       );
       return ticket ? toUnifiedOperationFromNewTicket(ticket, scope) : undefined;
     }
     if (key.kind === "comment") {
       const comment = queue.comments.find(
         (c) =>
-          c.ticketId === key.ticketId &&
-          ((key.commentId !== undefined && c.commentId === key.commentId) ||
-            (key.documentUri && c.documentUri === key.documentUri)),
+          (key.documentUri !== undefined && c.documentUri !== undefined && c.documentUri === key.documentUri) ||
+          (c.ticketId === key.ticketId &&
+            ((key.commentId !== undefined && c.commentId === key.commentId) ||
+              (key.commentId === undefined && c.commentId === undefined))),
       );
       return comment ? toUnifiedOperationFromComment(comment, scope) : undefined;
     }
@@ -230,7 +235,14 @@ export class DefaultSyncOperationRepository implements SyncOperationRepository {
     scope: string,
     expectedPersistenceVersion?: number,
   ): Promise<UnifiedSyncOperation | undefined> {
-    const current = this.getOperation(operation.key ?? { kind: "ticket", ticketId: operation.ticketId ?? 0 }, scope);
+    const queue = getOfflineSyncQueue(scope);
+    const key = operation.key ?? {
+      kind: operation.kind === "ticket_create" ? "newTicket" : operation.kind === "comment_create" || operation.kind === "comment_update" ? "comment" : "ticket",
+      ticketId: operation.ticketId ?? 0,
+      commentId: operation.commentId,
+      documentUri: operation.documentUri,
+    } as SyncOperationKey;
+    const current = this.getOperation(key, scope);
 
     // CAS チェック (INV-06)
     if (expectedPersistenceVersion !== undefined && current) {
@@ -240,9 +252,13 @@ export class DefaultSyncOperationRepository implements SyncOperationRepository {
       }
     }
 
-    const nextVersion = (operation.version ?? operation.persistenceVersion ?? (current?.version ?? 0)) + 1;
+    const nextVersion = operation.version !== undefined && operation.version > (current?.version ?? 0)
+      ? operation.version
+      : (current?.version ?? current?.persistenceVersion ?? 0) + 1;
+    const intentRevision = operation.intentRevision ?? current?.intentRevision ?? 1;
     const updated: UnifiedSyncOperation = {
       ...operation,
+      intentRevision,
       version: nextVersion,
       persistenceVersion: nextVersion,
       updatedAt: Date.now(),
@@ -254,25 +270,43 @@ export class DefaultSyncOperationRepository implements SyncOperationRepository {
         ticketId: operation.ticketId,
         operationId: operation.operationId,
         phase: operation.phase as any,
-        revision: updated.version,
+        revision: intentRevision,
+        intentRevision,
+        version: nextVersion,
+        persistenceVersion: nextVersion,
         createdChildIds: operation.createdChildIds,
         effects: operation.effects,
-      };
-      addOfflineTicketUpdate(operation.ticketId, payload, scope);
+      } as any;
+      queue.tickets.set(operation.ticketId, payload);
+      updated.payload = payload;
     } else if (operation.kind === "ticket_create") {
       const payload: OfflineNewTicket = {
         ...(operation.payload ?? {}),
         queueId: (operation.key?.kind === "newTicket" ? operation.key.queueId : undefined) ?? operation.operationId,
         operationId: operation.operationId,
         phase: operation.phase as any,
-        revision: updated.version,
+        revision: intentRevision,
+        intentRevision,
+        version: nextVersion,
+        persistenceVersion: nextVersion,
         projectId: operation.projectId,
         documentUri: operation.documentUri,
         createdIssueId: operation.createdRemoteId,
         createdChildIds: operation.createdChildIds,
         effects: operation.effects,
-      };
-      await addOfflineNewTicketAsync(payload, scope);
+      } as any;
+      const idx = queue.newTickets.findIndex((t) =>
+        (payload.operationId && t.operationId && t.operationId === payload.operationId) ||
+        (payload.queueId !== undefined && t.queueId === payload.queueId) ||
+        (payload.documentUri !== undefined && t.documentUri === payload.documentUri) ||
+        (payload.queueId === undefined && payload.documentUri === undefined && t.queueId === undefined && t.documentUri === undefined),
+      );
+      if (idx !== -1) {
+        queue.newTickets[idx] = payload;
+      } else {
+        queue.newTickets.push(payload);
+      }
+      updated.payload = payload;
     } else if (operation.kind === "comment_create" || operation.kind === "comment_update") {
       const payload: OfflineCommentUpdate = {
         ...(operation.payload ?? {}),
@@ -280,13 +314,29 @@ export class DefaultSyncOperationRepository implements SyncOperationRepository {
         commentId: operation.commentId ?? (operation.key?.kind === "comment" ? operation.key.commentId : undefined),
         operationId: operation.operationId,
         phase: operation.phase as any,
-        revision: updated.version,
+        revision: intentRevision,
+        intentRevision,
+        version: nextVersion,
+        persistenceVersion: nextVersion,
         documentUri: operation.documentUri,
         effects: operation.effects,
-      };
-      addOfflineCommentUpdate(payload, scope);
+      } as any;
+      const idx = queue.comments.findIndex((c) =>
+        (payload.operationId && c.operationId && c.operationId === payload.operationId) ||
+        (payload.documentUri !== undefined && c.documentUri !== undefined && c.documentUri === payload.documentUri) ||
+        (c.ticketId === payload.ticketId &&
+          ((payload.commentId !== undefined && c.commentId === payload.commentId) ||
+            (payload.commentId === undefined && c.commentId === undefined))),
+      );
+      if (idx !== -1) {
+        queue.comments[idx] = payload;
+      } else {
+        queue.comments.push(payload);
+      }
+      updated.payload = payload;
     }
 
+    replaceOfflineSyncQueue(queue, scope);
     return updated;
   }
 
@@ -330,40 +380,27 @@ export class DefaultSyncOperationRepository implements SyncOperationRepository {
     expectedRevision?: number,
   ): Promise<boolean> {
     const current = this.getOperation(key, scope);
-    if (!current) {
-      return true;
-    }
+    const revision = expectedRevision ?? current?.revision ?? 1;
 
-    if (expectedRevision !== undefined && current.revision !== expectedRevision) {
-      return false;
+    if (key.kind === "ticket") {
+      return completeOfflineTicketUpdateAsync(key.ticketId, scope, undefined, revision);
     }
-
-    // nextIntent があれば新世代 operation として昇格 (INV-07)
-    if (current.nextIntent) {
-      const promoted: UnifiedSyncOperation = {
-        ...current,
-        operationId: `${scope}:${current.kind}:${Date.now()}`,
-        phase: "queued",
-        intent: current.nextIntent,
-        payload: current.nextIntent,
-        nextIntent: undefined,
-        intentRevision: (current.intentRevision ?? current.revision ?? 0) + 1,
-        revision: (current.intentRevision ?? current.revision ?? 0) + 1,
-        version: (current.version ?? current.persistenceVersion ?? 0) + 1,
-        persistenceVersion: (current.version ?? current.persistenceVersion ?? 0) + 1,
-        effects: [],
-        createdRemoteId: undefined,
-        remoteUpdatedAt: undefined,
-        createdChildIds: undefined,
-        createdAt: Date.now(),
-        updatedAt: Date.now(),
-      };
-      await this.saveOperation(promoted, scope);
-      return true;
+    if (key.kind === "newTicket") {
+      return completeOfflineNewTicketAsync(
+        { queueId: key.queueId, documentUri: key.documentUri },
+        scope,
+        undefined,
+        revision,
+      );
     }
-
-    // 削除
-    return this.deleteOperation(key, scope);
+    if (key.kind === "comment") {
+      return completeOfflineCommentAsync(
+        { commentId: key.commentId, documentUri: key.documentUri, ticketId: key.ticketId },
+        scope,
+        revision,
+      );
+    }
+    return true;
   }
 
   public async deleteOperation(key: SyncOperationKey, scope: string): Promise<boolean> {

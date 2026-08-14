@@ -19,6 +19,7 @@ const ALLOWED_TRANSITIONS: Record<GenericSyncPhase, GenericLifecycleAction["kind
   remote_committed: [
     "mark_reconciliation_pending",
     "mark_local_finalize_pending",
+    "record_reconciled_identity",
   ],
   reconciliation_pending: ["mark_local_finalize_pending", "record_reconciled_identity"],
   local_finalize_pending: ["complete"],
@@ -101,9 +102,15 @@ export const applyGenericTransition = (
       }
       return next;
 
-    case "record_reconciled_identity":
+    case "record_reconciled_identity": {
       next.phase = "local_finalize_pending";
-      next.createdRemoteId = action.remoteId;
+      const resolvedId = action.remoteId ?? action.commentId ?? action.createdIssueId;
+      if (resolvedId !== undefined) {
+        next.createdRemoteId = resolvedId;
+        if (operation.kind === "comment_create" || operation.kind === "comment_update" || operation.commentId !== undefined) {
+          next.commentId = resolvedId;
+        }
+      }
       if (action.projectId !== undefined) {
         next.projectId = action.projectId;
       }
@@ -111,6 +118,7 @@ export const applyGenericTransition = (
         next.remoteUpdatedAt = action.remoteUpdatedAt;
       }
       return next;
+    }
 
     case "mark_reconciliation_pending":
       next.phase = "reconciliation_pending";
