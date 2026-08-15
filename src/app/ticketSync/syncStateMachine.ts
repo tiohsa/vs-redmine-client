@@ -29,8 +29,8 @@ const ALLOWED_TRANSITIONS: Record<GenericSyncPhase, GenericLifecycleAction["kind
     "mark_local_finalize_pending",
     "record_reconciled_identity",
   ],
-  reconciliation_pending: ["mark_local_finalize_pending", "record_reconciled_identity"],
-  local_finalize_pending: ["complete"],
+  reconciliation_pending: ["mark_reconciliation_pending", "mark_local_finalize_pending", "record_reconciled_identity"],
+  local_finalize_pending: ["mark_local_finalize_pending", "complete"],
   completed: [],
 };
 
@@ -92,8 +92,8 @@ export const applyGenericTransition = (
       if (action.remoteUpdatedAt !== undefined) {
         next.remoteUpdatedAt = action.remoteUpdatedAt;
       }
-      if (action.createdRemoteId !== undefined) {
-        const pId = operation.kind === "ticket_create" ? "ticket-create" : operation.kind === "ticket_update" ? "ticket-update" : operation.kind === "comment_create" ? "comment-create" : "comment-update";
+      if (action.createdRemoteId !== undefined && operation.kind === "ticket_create") {
+        const pId = "ticket-create";
         const effects = next.effects ? [...next.effects] : [];
         const idx = effects.findIndex((e) => e.effectId === pId);
         if (idx !== -1) {
@@ -112,7 +112,7 @@ export const applyGenericTransition = (
       const pId = operation.kind === "ticket_create" ? "ticket-create" : operation.kind === "ticket_update" ? "ticket-update" : operation.kind === "comment_create" ? "comment-create" : "comment-update";
       const effects = next.effects ? [...next.effects] : [];
       const idx = effects.findIndex((e) => e.effectId === pId);
-      if (idx !== -1) {
+      if (idx !== -1 && effects[idx].state !== "committed") {
         effects[idx] = { ...effects[idx], state: "commit_unknown" };
       }
       next.effects = effects;
@@ -122,10 +122,12 @@ export const applyGenericTransition = (
     case "abort_before_remote_write":
     case "abort_known_remote_failure":
       next.phase = "queued";
+      next.createdRemoteId = undefined;
+      next.createdChildIds = undefined;
+      next.effects = [];
       if (next.nextIntent) {
         // 次の intent があれば昇格 (INV-07)
         next.intent = next.nextIntent;
-        next.payload = next.nextIntent;
         next.nextIntent = undefined;
         next.intentRevision = (next.intentRevision ?? next.revision ?? 0) + 1;
         next.revision = next.intentRevision;
@@ -160,6 +162,9 @@ export const applyGenericTransition = (
       if (action.remoteUpdatedAt !== undefined) {
         next.remoteUpdatedAt = action.remoteUpdatedAt;
       }
+      if ((action as any).canonical !== undefined) {
+        (next as any).canonical = (action as any).canonical;
+      }
       return next;
     }
 
@@ -172,6 +177,9 @@ export const applyGenericTransition = (
 
     case "mark_local_finalize_pending":
       next.phase = "local_finalize_pending";
+      if ((action as any).canonical !== undefined) {
+        (next as any).canonical = (action as any).canonical;
+      }
       return next;
 
     case "complete":
@@ -199,7 +207,6 @@ export const normalizeOperationOnRestart = (
     normalized.phase = "queued";
     if (normalized.nextIntent) {
       normalized.intent = normalized.nextIntent;
-      normalized.payload = normalized.nextIntent;
       normalized.nextIntent = undefined;
       normalized.intentRevision = (normalized.intentRevision ?? normalized.revision ?? 0) + 1;
       normalized.revision = normalized.intentRevision;

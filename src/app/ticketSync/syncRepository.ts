@@ -2,13 +2,23 @@ import {
   GenericLifecycleAction,
   GenericSyncPhase,
   LifecycleExpectation,
+  SyncIntent,
   SyncOperationKey,
   TicketCreateIntent,
+  TicketUpdateIntent,
+  CommentCreateIntent,
+  CommentUpdateIntent,
   UnifiedSyncOperation,
 } from "./syncOperationTypes";
 import {
   applyGenericTransition,
 } from "./syncStateMachine";
+import {
+  DurableSyncEffect,
+  DurableSyncEffectAction,
+  DurableSyncEffectState,
+  transitionDurableSyncEffect,
+} from "../syncEffects";
 import {
   addOfflineCommentUpdate,
   addOfflineNewTicketAsync,
@@ -18,9 +28,11 @@ import {
   completeOfflineTicketUpdateAsync,
   getOfflineSyncQueue,
   replaceOfflineSyncQueue,
+  replaceOfflineSyncQueueAsync,
   removeOfflineCommentEntry,
   removeOfflineNewTicketAsync,
   removeOfflineTicketUpdateAsync,
+  sameDocumentIdentity,
   type OfflineCommentUpdate,
   type OfflineNewTicket,
   type OfflineTicketUpdate,
@@ -28,7 +40,7 @@ import {
 import { buildTicketEditorContent, parseTicketEditorContent } from "../../views/ticketEditorContent";
 
 export interface SyncOperationRepository {
-  getOperation(key: SyncOperationKey, scope: string): UnifiedSyncOperation | undefined;
+  getOperation<I extends SyncIntent = SyncIntent>(key: SyncOperationKey, scope: string): UnifiedSyncOperation<I> | undefined;
   listOperations(scope: string): UnifiedSyncOperation[];
   saveOperation(
     operation: UnifiedSyncOperation,
@@ -40,6 +52,19 @@ export interface SyncOperationRepository {
     action: GenericLifecycleAction,
     scope: string,
     expected?: LifecycleExpectation,
+  ): Promise<UnifiedSyncOperation | undefined>;
+  planEffect(
+    key: SyncOperationKey,
+    effect: DurableSyncEffect,
+    scope: string,
+    expectedRevision?: number,
+  ): Promise<UnifiedSyncOperation | undefined>;
+  transitionEffect(
+    key: SyncOperationKey,
+    effectId: string,
+    action: DurableSyncEffectAction,
+    scope: string,
+    expected?: { operationRevision?: number; sourceState: DurableSyncEffectState },
   ): Promise<UnifiedSyncOperation | undefined>;
   completeOperation(
     key: SyncOperationKey,
@@ -53,7 +78,7 @@ export interface SyncOperationRepository {
 export const toUnifiedOperationFromTicket = (
   ticket: OfflineTicketUpdate,
   scope: string,
-): UnifiedSyncOperation => ({
+): UnifiedSyncOperation<TicketUpdateIntent> => ({
   operationId: ticket.operationId ?? `${scope}:ticket:${ticket.ticketId}`,
   kind: "ticket_update",
   key: { kind: "ticket", ticketId: ticket.ticketId },
@@ -64,10 +89,10 @@ export const toUnifiedOperationFromTicket = (
   version: (ticket as any).version ?? (ticket as any).persistenceVersion ?? ticket.revision ?? 1,
   persistenceVersion: (ticket as any).persistenceVersion ?? (ticket as any).version ?? ticket.revision ?? 1,
   ticketId: ticket.ticketId,
+  projectId: (ticket as any).projectId ?? (ticket as any).metadata?.project_id,
   documentUri: ticket.documentUri,
   createdChildIds: ticket.createdChildIds,
   effects: ticket.effects,
-  payload: ticket,
   intent: {
     ticketId: ticket.ticketId,
     baseSubject: ticket.baseSubject,
@@ -131,15 +156,14 @@ export const toUnifiedOperationFromNewTicket = (
     key: { kind: "newTicket", queueId: ticket.queueId, documentUri: ticket.documentUri },
     connectionScope: scope,
     phase: (ticket.phase ?? "queued") as GenericSyncPhase,
-    revision: (ticket as any).intentRevision ?? ticket.revision ?? 1,
-    intentRevision: (ticket as any).intentRevision ?? ticket.revision ?? 1,
+    revision: (ticket as any).intentRevision ?? (ticket.revision !== undefined && ticket.revision > 0 ? ticket.revision : 1),
+    intentRevision: (ticket as any).intentRevision ?? (ticket.revision !== undefined && ticket.revision > 0 ? ticket.revision : 1),
     version: (ticket as any).version ?? (ticket as any).persistenceVersion ?? ticket.revision ?? 1,
     persistenceVersion: (ticket as any).persistenceVersion ?? (ticket as any).version ?? ticket.revision ?? 1,
     projectId: ticket.projectId,
     documentUri: ticket.documentUri,
     createdRemoteId: ticket.createdIssueId,
     effects: ticket.effects,
-    payload: ticket,
     intent: {
       projectId: ticket.projectId ?? 0,
       content: ticket.content ?? "",
@@ -148,6 +172,9 @@ export const toUnifiedOperationFromNewTicket = (
       subject: parsed?.subject ?? (ticket as any).subject ?? "",
       description: parsed?.description ?? ticket.content ?? "",
       metadata: parsed?.metadata ?? (ticket as any).metadata ?? { tracker: "", priority: "", status: "", due_date: "", children: [] },
+      attachments: (ticket as any).attachments,
+      uploadTokens: (ticket as any).uploadTokens,
+      childTickets: (ticket as any).childTickets,
       layout: parsed?.layout ?? (ticket as any).layout,
       metadataBlock: parsed?.metadataBlock ?? (ticket as any).metadataBlock,
       controlFields: parsed?.controlFields ?? (ticket as any).controlFields,
@@ -173,7 +200,7 @@ export const toUnifiedOperationFromNewTicket = (
 export const toUnifiedOperationFromComment = (
   comment: OfflineCommentUpdate,
   scope: string,
-): UnifiedSyncOperation => ({
+): UnifiedSyncOperation<CommentCreateIntent | CommentUpdateIntent> => ({
   operationId: comment.operationId ?? `${scope}:comment:${comment.ticketId}:${comment.commentId ?? comment.documentUri}`,
   kind: comment.commentId !== undefined ? "comment_update" : "comment_create",
   key: { kind: "comment", ticketId: comment.ticketId, commentId: comment.commentId, documentUri: comment.documentUri },
@@ -189,10 +216,9 @@ export const toUnifiedOperationFromComment = (
   createdRemoteId: comment.commentId,
   projectId: comment.remoteProjectId,
   effects: comment.effects,
-  payload: comment,
-  intent: {
+  intent: (comment.commentId !== undefined ? {
     ticketId: comment.ticketId,
-    commentId: comment.commentId ?? 0,
+    commentId: comment.commentId,
     baseBody: comment.baseBody,
     body: comment.body ?? "",
     baseDir: comment.baseDir,
@@ -200,36 +226,48 @@ export const toUnifiedOperationFromComment = (
     sourceNotesHash: comment.sourceNotesHash,
     finalizeDraft: comment.finalizeDraft,
     lastKnownRemoteUpdatedAt: comment.lastKnownRemoteUpdatedAt,
-  },
-  nextIntent: comment.nextIntent ? {
+  } : {
     ticketId: comment.ticketId,
-    commentId: comment.commentId ?? 0,
+    body: comment.body ?? "",
+    baseDir: comment.baseDir,
+    documentUri: comment.documentUri,
+    sourceNotesHash: comment.sourceNotesHash,
+    finalizeDraft: comment.finalizeDraft,
+  }) as any,
+  nextIntent: comment.nextIntent ? (comment.commentId !== undefined ? {
+    ticketId: comment.ticketId,
+    commentId: comment.commentId,
     baseBody: comment.baseBody,
     body: comment.nextIntent.body,
     baseDir: comment.nextIntent.baseDir,
     documentUri: comment.nextIntent.documentUri,
     sourceNotesHash: comment.sourceNotesHash,
     lastKnownRemoteUpdatedAt: comment.lastKnownRemoteUpdatedAt,
-  } : undefined,
+  } : {
+    ticketId: comment.ticketId,
+    body: comment.nextIntent.body,
+    baseDir: comment.nextIntent.baseDir,
+    documentUri: comment.nextIntent.documentUri,
+    sourceNotesHash: comment.sourceNotesHash,
+  }) as any : undefined,
   createdAt: comment.createdAt ?? Date.now(),
   updatedAt: comment.createdAt ?? Date.now(),
 });
 
 export class DefaultSyncOperationRepository implements SyncOperationRepository {
-  public getOperation(key: SyncOperationKey, scope: string): UnifiedSyncOperation | undefined {
+  public getOperation<I extends SyncIntent = SyncIntent>(key: SyncOperationKey, scope: string): UnifiedSyncOperation<I> | undefined {
     const queue = getOfflineSyncQueue(scope);
     if (key.kind === "ticket") {
       const ticket = queue.tickets.get(key.ticketId);
-      return ticket ? toUnifiedOperationFromTicket(ticket, scope) : undefined;
+      return ticket ? (toUnifiedOperationFromTicket(ticket, scope) as any) : undefined;
     }
     if (key.kind === "newTicket") {
-      const ticket = queue.newTickets.find(
-        (t) =>
-          (key.queueId !== undefined && t.queueId === key.queueId) ||
-          (key.documentUri !== undefined && t.documentUri === key.documentUri) ||
-          (key.queueId === undefined && key.documentUri === undefined),
-      );
-      return ticket ? toUnifiedOperationFromNewTicket(ticket, scope) : undefined;
+      const ticket = key.documentUri
+        ? queue.newTickets.find((t) => t.documentUri !== undefined && sameDocumentIdentity(t.documentUri, key.documentUri))
+        : (key.queueId !== undefined
+            ? queue.newTickets.find((t) => t.queueId === key.queueId)
+            : queue.newTickets[0]);
+      return ticket ? (toUnifiedOperationFromNewTicket(ticket, scope) as any) : undefined;
     }
     if (key.kind === "comment") {
       const comment = queue.comments.find(
@@ -239,7 +277,7 @@ export class DefaultSyncOperationRepository implements SyncOperationRepository {
             ((key.commentId !== undefined && c.commentId === key.commentId) ||
               (key.commentId === undefined && c.commentId === undefined))),
       );
-      return comment ? toUnifiedOperationFromComment(comment, scope) : undefined;
+      return comment ? (toUnifiedOperationFromComment(comment, scope) as any) : undefined;
     }
     return undefined;
   }
@@ -296,8 +334,9 @@ export class DefaultSyncOperationRepository implements SyncOperationRepository {
     };
 
     if (operation.kind === "ticket_update" && operation.ticketId !== undefined) {
+      const intent = operation.intent as TicketUpdateIntent | undefined;
+      const nextIntent = operation.nextIntent as TicketUpdateIntent | undefined;
       const payload: OfflineTicketUpdate = {
-        ...(operation.payload ?? {}),
         ticketId: operation.ticketId,
         operationId: operation.operationId,
         phase: operation.phase as any,
@@ -307,23 +346,33 @@ export class DefaultSyncOperationRepository implements SyncOperationRepository {
         persistenceVersion: nextVersion,
         createdChildIds: operation.createdChildIds,
         effects: operation.effects,
-        subject: (operation.intent as any)?.subject ?? (operation.payload as any)?.subject,
-        description: (operation.intent as any)?.description ?? (operation.payload as any)?.description,
-        baseSubject: (operation.intent as any)?.baseSubject ?? (operation.payload as any)?.baseSubject,
-        baseDescription: (operation.intent as any)?.baseDescription ?? (operation.payload as any)?.baseDescription,
-        metadata: (operation.intent as any)?.metadata ?? (operation.payload as any)?.metadata,
-        baseMetadata: (operation.intent as any)?.baseMetadata ?? (operation.payload as any)?.baseMetadata,
-        nextIntent: operation.nextIntent ? {
-          subject: (operation.nextIntent as any).subject,
-          description: (operation.nextIntent as any).description,
-          metadata: (operation.nextIntent as any).metadata,
-          documentUri: (operation.nextIntent as any).documentUri,
+        subject: intent?.subject ?? "",
+        description: intent?.description ?? "",
+        baseSubject: intent?.baseSubject ?? "",
+        baseDescription: intent?.baseDescription ?? "",
+        metadata: intent?.metadata ?? { tracker: "", priority: "", status: "", due_date: "", children: [] },
+        baseMetadata: intent?.baseMetadata ?? { tracker: "", priority: "", status: "", due_date: "", children: [] },
+        layout: intent?.layout,
+        metadataBlock: intent?.metadataBlock,
+        controlFields: intent?.controlFields,
+        baseDir: intent?.baseDir,
+        documentUri: intent?.documentUri ?? operation.documentUri,
+        lastKnownRemoteUpdatedAt: intent?.lastKnownRemoteUpdatedAt ?? operation.remoteUpdatedAt,
+        nextIntent: nextIntent ? {
+          revision: nextIntent.revision ?? (intentRevision + 1),
+          subject: nextIntent.subject,
+          description: nextIntent.description,
+          metadata: nextIntent.metadata,
+          layout: nextIntent.layout,
+          metadataBlock: nextIntent.metadataBlock,
+          controlFields: nextIntent.controlFields,
+          baseDir: nextIntent.baseDir,
+          documentUri: nextIntent.documentUri,
         } : undefined,
       } as any;
       queue.tickets.set(operation.ticketId, payload);
-      updated.payload = payload;
     } else if (operation.kind === "ticket_create") {
-      const intentObj = operation.intent as any;
+      const intentObj = operation.intent as TicketCreateIntent | undefined;
       const content = intentObj?.content
         ? intentObj.content
         : ((intentObj?.subject !== undefined || intentObj?.metadata !== undefined)
@@ -335,9 +384,9 @@ export class DefaultSyncOperationRepository implements SyncOperationRepository {
                 metadataBlock: intentObj?.metadataBlock,
                 controlFields: intentObj?.controlFields,
               })
-            : (operation.payload as any)?.content ?? "");
+            : "");
 
-      const nextIntentObj = operation.nextIntent as any;
+      const nextIntentObj = operation.nextIntent as TicketCreateIntent | undefined;
       const nextContent = nextIntentObj
         ? (nextIntentObj.content
             ? nextIntentObj.content
@@ -354,32 +403,35 @@ export class DefaultSyncOperationRepository implements SyncOperationRepository {
         : undefined;
 
       const payload: OfflineNewTicket = {
-        ...(operation.payload ?? {}),
-        queueId: (operation.key?.kind === "newTicket" ? operation.key.queueId : undefined) ?? (operation.payload as any)?.queueId ?? operation.operationId,
+        queueId: (operation.key?.kind === "newTicket" ? operation.key.queueId : undefined) ?? operation.operationId,
         operationId: operation.operationId,
         phase: operation.phase as any,
         revision: intentRevision,
         intentRevision,
         version: nextVersion,
         persistenceVersion: nextVersion,
-        projectId: operation.projectId ?? (operation.payload as any)?.projectId,
+        projectId: operation.projectId ?? intentObj?.projectId,
         content,
-        documentUri: operation.documentUri ?? (operation.payload as any)?.documentUri,
-        createdIssueId: operation.createdRemoteId ?? (operation.payload as any)?.createdIssueId,
-        createdChildIds: operation.createdChildIds ?? (operation.payload as any)?.createdChildIds,
-        effects: operation.effects ?? (operation.payload as any)?.effects,
-        canonical: (operation as any).canonical ?? (operation.payload as any)?.canonical,
+        documentUri: operation.documentUri ?? intentObj?.documentUri,
+        baseDir: intentObj?.baseDir,
+        createdIssueId: operation.createdRemoteId,
+        createdChildIds: operation.createdChildIds,
+        effects: operation.effects,
+        attachments: intentObj?.attachments,
+        uploadTokens: intentObj?.uploadTokens,
+        childTickets: intentObj?.childTickets,
         nextIntent: nextIntentObj ? {
           content: nextContent ?? nextIntentObj.content ?? "",
-          projectId: nextIntentObj.projectId ?? operation.projectId ?? (operation.payload as any)?.projectId,
-          documentUri: nextIntentObj.documentUri ?? operation.documentUri ?? (operation.payload as any)?.documentUri,
-          revision: nextIntentObj.revision,
+          projectId: nextIntentObj.projectId ?? operation.projectId ?? intentObj?.projectId,
+          documentUri: nextIntentObj.documentUri ?? operation.documentUri,
+          baseDir: nextIntentObj.baseDir ?? intentObj?.baseDir,
+          revision: nextIntentObj.revision ?? (intentRevision + 1),
         } : undefined,
       } as any;
       const idx = queue.newTickets.findIndex((t) =>
         (payload.operationId && t.operationId && t.operationId === payload.operationId) ||
         (payload.queueId !== undefined && t.queueId === payload.queueId) ||
-        (payload.documentUri !== undefined && t.documentUri === payload.documentUri) ||
+        (payload.documentUri !== undefined && t.documentUri !== undefined && sameDocumentIdentity(t.documentUri, payload.documentUri)) ||
         (payload.queueId === undefined && payload.documentUri === undefined && t.queueId === undefined && t.documentUri === undefined),
       );
       if (idx !== -1) {
@@ -387,26 +439,31 @@ export class DefaultSyncOperationRepository implements SyncOperationRepository {
       } else {
         queue.newTickets.push(payload);
       }
-      updated.payload = payload;
     } else if (operation.kind === "comment_create" || operation.kind === "comment_update") {
+      const intentObj = operation.intent as (CommentCreateIntent | CommentUpdateIntent) | undefined;
+      const nextIntentObj = operation.nextIntent as (CommentCreateIntent | CommentUpdateIntent) | undefined;
       const payload: OfflineCommentUpdate = {
-        ...(operation.payload ?? {}),
-        ticketId: operation.ticketId ?? (operation.key?.kind === "comment" ? operation.key.ticketId : 0) ?? (operation.payload as any)?.ticketId,
-        commentId: operation.commentId ?? (operation.key?.kind === "comment" ? operation.key.commentId : undefined) ?? (operation.payload as any)?.commentId,
+        ticketId: operation.ticketId ?? (operation.key?.kind === "comment" ? operation.key.ticketId : 0) ?? intentObj?.ticketId ?? 0,
+        commentId: operation.commentId ?? (operation.key?.kind === "comment" ? operation.key.commentId : undefined) ?? (intentObj as CommentUpdateIntent)?.commentId,
         operationId: operation.operationId,
         phase: operation.phase as any,
         revision: intentRevision,
         intentRevision,
         version: nextVersion,
         persistenceVersion: nextVersion,
-        documentUri: operation.documentUri ?? (operation.payload as any)?.documentUri,
-        body: (operation.intent as any)?.body ?? (operation.payload as any)?.body,
-        baseBody: (operation.intent as any)?.baseBody ?? (operation.payload as any)?.baseBody,
-        effects: operation.effects ?? (operation.payload as any)?.effects,
-        canonical: (operation as any).canonical ?? (operation.payload as any)?.canonical,
-        nextIntent: operation.nextIntent ? {
-          body: (operation.nextIntent as any).body,
-          documentUri: (operation.nextIntent as any).documentUri ?? operation.documentUri,
+        documentUri: operation.documentUri ?? intentObj?.documentUri,
+        body: intentObj?.body ?? "",
+        baseBody: (intentObj as CommentUpdateIntent)?.baseBody,
+        baseDir: intentObj?.baseDir,
+        sourceNotesHash: (intentObj as any)?.sourceNotesHash,
+        finalizeDraft: (intentObj as any)?.finalizeDraft ?? (operation as any).finalizeDraft,
+        lastKnownRemoteUpdatedAt: (intentObj as any)?.lastKnownRemoteUpdatedAt ?? operation.remoteUpdatedAt,
+        effects: operation.effects,
+        nextIntent: nextIntentObj ? {
+          revision: (nextIntentObj as any).revision ?? (intentRevision + 1),
+          body: nextIntentObj.body,
+          baseDir: nextIntentObj.baseDir,
+          documentUri: nextIntentObj.documentUri ?? operation.documentUri,
         } : undefined,
       } as any;
       const idx = queue.comments.findIndex((c) =>
@@ -421,10 +478,9 @@ export class DefaultSyncOperationRepository implements SyncOperationRepository {
       } else {
         queue.comments.push(payload);
       }
-      updated.payload = payload;
     }
 
-    replaceOfflineSyncQueue(queue, scope);
+    await replaceOfflineSyncQueueAsync(queue, scope);
     return updated;
   }
 
@@ -460,6 +516,90 @@ export class DefaultSyncOperationRepository implements SyncOperationRepository {
     }
 
     return this.saveOperation(next, scope, current.version ?? current.persistenceVersion);
+  }
+
+  public async planEffect(
+    key: SyncOperationKey,
+    effect: DurableSyncEffect,
+    scope: string,
+    expectedRevision?: number,
+  ): Promise<UnifiedSyncOperation | undefined> {
+    const current = this.getOperation(key, scope);
+    if (!current) {
+      return undefined;
+    }
+    const revision = expectedRevision ?? current.intentRevision ?? current.revision ?? 1;
+
+    const effects = [...(current.effects ?? [])];
+    const existingIndex = effects.findIndex((e) => e.effectId === effect.effectId);
+    if (existingIndex !== -1) {
+      effects[existingIndex] = {
+        ...effect,
+        operationRevision: revision,
+      };
+    } else {
+      effects.push({
+        ...effect,
+        operationRevision: revision,
+      });
+    }
+
+    const updated: UnifiedSyncOperation = {
+      ...current,
+      effects,
+    };
+    try {
+      return await this.saveOperation(updated, scope, current.version ?? current.persistenceVersion);
+    } catch {
+      return undefined;
+    }
+  }
+
+  public async transitionEffect(
+    key: SyncOperationKey,
+    effectId: string,
+    action: DurableSyncEffectAction,
+    scope: string,
+    expected?: { operationRevision?: number; sourceState: DurableSyncEffectState },
+  ): Promise<UnifiedSyncOperation | undefined> {
+    const current = this.getOperation(key, scope);
+    if (!current) {
+      return undefined;
+    }
+
+    const effects = [...(current.effects ?? [])];
+    const existingIndex = effects.findIndex((e) => e.effectId === effectId);
+    if (existingIndex === -1) {
+      return undefined;
+    }
+
+    const effect = effects[existingIndex];
+    if (expected?.sourceState !== undefined && effect.state !== expected.sourceState) {
+      return undefined;
+    }
+
+    const targetRevision = effect.operationRevision ?? expected?.operationRevision ?? 1;
+    const nextEffect = transitionDurableSyncEffect(effect, action, {
+      operationRevision: targetRevision,
+      sourceState: expected?.sourceState ?? effect.state,
+    });
+    if (!nextEffect) {
+      return undefined;
+    }
+
+    effects[existingIndex] = nextEffect;
+    const updated: UnifiedSyncOperation = {
+      ...current,
+      effects,
+      createdRemoteId: (nextEffect.kind === "ticket_create" && nextEffect.state === "committed" && nextEffect.remoteId !== undefined)
+        ? nextEffect.remoteId
+        : current.createdRemoteId,
+    };
+    try {
+      return await this.saveOperation(updated, scope, current.version ?? current.persistenceVersion);
+    } catch {
+      return undefined;
+    }
   }
 
   public async completeOperation(

@@ -3,7 +3,7 @@ import * as vscode from "vscode";
 import { SyncCoordinator } from "../app/ticketSync/syncCoordinator";
 import { TicketCreateHandler } from "../app/ticketSync/operationHandlers";
 import { SyncOperationRepository } from "../app/ticketSync/syncRepository";
-import { UnifiedSyncOperation, TicketCreateIntent } from "../app/ticketSync/syncOperationTypes";
+import { UnifiedSyncOperation, TicketCreateIntent, SyncIntent } from "../app/ticketSync/syncOperationTypes";
 
 suite("RT-A: Attachment E2E Pipeline (syncAttachmentE2E.test.ts)", () => {
   const scope = "test-scope-rt-a";
@@ -11,8 +11,8 @@ suite("RT-A: Attachment E2E Pipeline (syncAttachmentE2E.test.ts)", () => {
   class InMemoryRepository implements SyncOperationRepository {
     private ops = new Map<string, UnifiedSyncOperation>();
 
-    public getOperation(key: any, scope: string): UnifiedSyncOperation | undefined {
-      return Array.from(this.ops.values()).find((o) => o.connectionScope === scope && o.key?.kind === key.kind && (o.key as any).queueId === (key as any).queueId);
+    public getOperation<I extends SyncIntent = SyncIntent>(key: any, scope: string): UnifiedSyncOperation<I> | undefined {
+      return Array.from(this.ops.values()).find((o) => o.connectionScope === scope && o.key?.kind === key.kind && (o.key as any).queueId === (key as any).queueId) as any;
     }
     public listOperations(scope: string): UnifiedSyncOperation[] {
       return Array.from(this.ops.values()).filter((o) => o.connectionScope === scope);
@@ -35,6 +35,43 @@ suite("RT-A: Attachment E2E Pipeline (syncAttachmentE2E.test.ts)", () => {
       if (action.kind === "mark_local_finalize_pending") {nextPhase = "local_finalize_pending";}
       if (action.kind === "complete") {nextPhase = "completed";}
       const updated = { ...op, phase: nextPhase, version: (op.version ?? 1) + 1 };
+      this.ops.set(op.operationId, updated);
+      return updated;
+    }
+    public async planEffect(key: any, effect: any, scope: string): Promise<UnifiedSyncOperation | undefined> {
+      const op = this.getOperation(key, scope);
+      if (!op) {return undefined;}
+      const effects = [...(op.effects ?? [])];
+      const idx = effects.findIndex((e) => e.effectId === effect.effectId);
+      if (idx !== -1) {
+        effects[idx] = effect;
+      } else {
+        effects.push(effect);
+      }
+      const updated = { ...op, effects };
+      this.ops.set(op.operationId, updated);
+      return updated;
+    }
+    public async transitionEffect(key: any, effectId: string, action: any, scope: string): Promise<UnifiedSyncOperation | undefined> {
+      const op = this.getOperation(key, scope);
+      if (!op) {return undefined;}
+      const effects = [...(op.effects ?? [])];
+      const idx = effects.findIndex((e) => e.effectId === effectId);
+      if (idx === -1) {return undefined;}
+      const eff = effects[idx];
+      let state = eff.state;
+      let token = eff.token;
+      let remoteId = eff.remoteId;
+      if (action.kind === "start") {state = "started";}
+      if (action.kind === "commit") {
+        state = "committed";
+        token = action.token ?? eff.token;
+        remoteId = action.remoteId ?? eff.remoteId;
+      }
+      if (action.kind === "mark_commit_unknown") {state = "commit_unknown";}
+      if (action.kind === "mark_failed") {state = "failed";}
+      effects[idx] = { ...eff, state, token, remoteId };
+      const updated = { ...op, effects };
       this.ops.set(op.operationId, updated);
       return updated;
     }

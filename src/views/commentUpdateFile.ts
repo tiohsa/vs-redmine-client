@@ -85,11 +85,19 @@ export const parseCommentUpdateFile = (content: string): ParsedCommentUpdateFile
   return { fields, body };
 };
 
+export interface UpdateCommentUpdateFileInput {
+  documentUri: string;
+  syncedBody: string;
+  expectedBody?: string;
+  remoteUpdatedAt?: string;
+  canonical?: any;
+}
+
 export const updateCommentUpdateFileAfterSync = async (
-  documentUri: string,
-  syncedBody: string,
-  expectedBody = syncedBody,
+  input: UpdateCommentUpdateFileInput,
 ): Promise<CommentDocumentFinalizeResult> => {
+  const { documentUri, syncedBody } = input;
+  const expectedBody = input.expectedBody ?? syncedBody;
   const openDoc = vscode.workspace.textDocuments.find(
     (document) => document.uri.toString() === documentUri,
   );

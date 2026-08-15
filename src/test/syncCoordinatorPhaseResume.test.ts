@@ -2,7 +2,7 @@ import * as assert from "assert";
 import { SyncCoordinator } from "../app/ticketSync/syncCoordinator";
 import { OperationHandler } from "../app/ticketSync/operationHandlers";
 import { SyncOperationRepository } from "../app/ticketSync/syncRepository";
-import { UnifiedSyncOperation, TicketUpdateIntent } from "../app/ticketSync/syncOperationTypes";
+import { UnifiedSyncOperation, TicketUpdateIntent, SyncIntent } from "../app/ticketSync/syncOperationTypes";
 
 suite("RT-D: SyncCoordinator Phase Resume Matrix (syncCoordinatorPhaseResume.test.ts)", () => {
   const scope = "test-scope-rt-d";
@@ -10,8 +10,8 @@ suite("RT-D: SyncCoordinator Phase Resume Matrix (syncCoordinatorPhaseResume.tes
   class MockRepository implements SyncOperationRepository {
     public op: UnifiedSyncOperation | undefined;
 
-    public getOperation(): UnifiedSyncOperation | undefined {
-      return this.op;
+    public getOperation<I extends SyncIntent = SyncIntent>(): UnifiedSyncOperation<I> | undefined {
+      return this.op as any;
     }
     public listOperations(): UnifiedSyncOperation[] {
       return this.op ? [this.op] : [];
@@ -31,6 +31,39 @@ suite("RT-D: SyncCoordinator Phase Resume Matrix (syncCoordinatorPhaseResume.tes
       if (action.kind === "record_reconciled_identity") {nextPhase = "local_finalize_pending";}
       if (action.kind === "complete") {nextPhase = "completed";}
       this.op = { ...this.op, phase: nextPhase, version: (this.op.version ?? 1) + 1 };
+      return this.op;
+    }
+    public async planEffect(key: any, effect: any): Promise<UnifiedSyncOperation | undefined> {
+      if (!this.op) {return undefined;}
+      const effects = [...(this.op.effects ?? [])];
+      const idx = effects.findIndex((e) => e.effectId === effect.effectId);
+      if (idx !== -1) {
+        effects[idx] = effect;
+      } else {
+        effects.push(effect);
+      }
+      this.op = { ...this.op, effects };
+      return this.op;
+    }
+    public async transitionEffect(key: any, effectId: string, action: any): Promise<UnifiedSyncOperation | undefined> {
+      if (!this.op) {return undefined;}
+      const effects = [...(this.op.effects ?? [])];
+      const idx = effects.findIndex((e) => e.effectId === effectId);
+      if (idx === -1) {return undefined;}
+      const eff = effects[idx];
+      let state = eff.state;
+      let token = eff.token;
+      let remoteId = eff.remoteId;
+      if (action.kind === "start") {state = "started";}
+      if (action.kind === "commit") {
+        state = "committed";
+        token = action.token ?? eff.token;
+        remoteId = action.remoteId ?? eff.remoteId;
+      }
+      if (action.kind === "mark_commit_unknown") {state = "commit_unknown";}
+      if (action.kind === "mark_failed") {state = "failed";}
+      effects[idx] = { ...eff, state, token, remoteId };
+      this.op = { ...this.op, effects };
       return this.op;
     }
     public async completeOperation(): Promise<boolean> {

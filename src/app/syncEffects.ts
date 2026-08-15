@@ -4,6 +4,8 @@ export type DurableSyncEffectKind =
   | "child_create"
   | "comment_create"
   | "comment_update"
+  | "attachment_upload"
+  | "image_upload"
   | "ticket_delete"
   | "local_finalize";
 
@@ -24,6 +26,11 @@ export type DurableSyncEffectTarget = {
   documentUri?: string;
   ordinal?: number;
   subjectHash?: string;
+  filePath?: string;
+  filename?: string;
+  token?: string;
+  imageUri?: string;
+  replacementUri?: string;
 };
 
 export type DurableSyncEffect = {
@@ -33,6 +40,7 @@ export type DurableSyncEffect = {
   state: DurableSyncEffectState;
   target: DurableSyncEffectTarget;
   remoteId?: number;
+  token?: string;
   detail?: string;
 };
 
@@ -44,8 +52,8 @@ export type DurableSyncEffectExpectation = {
 export type DurableSyncEffectAction =
   | { kind: "start" }
   | { kind: "start_explicit_retry" }
-  | { kind: "commit"; remoteId?: number }
-  | { kind: "assume_committed"; remoteId?: number }
+  | { kind: "commit"; remoteId?: number; token?: string; target?: DurableSyncEffectTarget }
+  | { kind: "assume_committed"; remoteId?: number; token?: string; target?: DurableSyncEffectTarget }
   | { kind: "mark_commit_unknown"; detail?: string }
   | { kind: "mark_failed"; detail?: string }
   | { kind: "start_compensation" }
@@ -112,6 +120,8 @@ export const transitionDurableSyncEffect = (
         ...effect,
         state: "committed",
         remoteId: action.remoteId ?? effect.remoteId,
+        token: action.token ?? effect.token,
+        target: action.target ? { ...effect.target, ...action.target } : effect.target,
         detail: undefined,
       };
     case "mark_commit_unknown":

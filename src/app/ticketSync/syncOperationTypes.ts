@@ -168,6 +168,27 @@ export type SyncOutcome =
       saveResult?: TicketSaveResult;
     };
 
+export type VerifiedRemote<TCanonical = any> =
+  | {
+      verified: true;
+      remoteId?: number;
+      projectId?: number;
+      remoteUpdatedAt?: string;
+      canonical: TCanonical;
+    }
+  | {
+      verified: false;
+      reason: string;
+    };
+
+export interface FinalizeInput<TCanonical = any> {
+  documentUri?: string;
+  syncedBody?: string;
+  expectedBody?: string;
+  remoteUpdatedAt?: string;
+  canonical?: TCanonical;
+}
+
 export interface UnifiedSyncOperation<I extends SyncIntent = SyncIntent> {
   operationId: string;
   kind: SyncOperationKind;
@@ -188,7 +209,6 @@ export interface UnifiedSyncOperation<I extends SyncIntent = SyncIntent> {
   remoteUpdatedAt?: string;
   createdChildIds?: number[];
   effects?: DurableSyncEffect[];
-  payload?: any;
   createdAt?: number | string;
   updatedAt?: number | string;
   errorMessage?: string;

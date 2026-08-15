@@ -194,6 +194,7 @@ export class TicketSyncService {
   private readonly documents: DocumentPort;
   private readonly createDeps: TicketCreateDependencies;
   private readonly updateDeps: TicketSaveDependencies;
+  private readonly newTicketLocalState?: NewTicketLocalStatePort;
   private readonly newTicketFinalizer: NewTicketFinalizer;
   private readonly ticketReconciler: TicketReconciler;
   private readonly coordinator: SyncCoordinator;
@@ -206,6 +207,7 @@ export class TicketSyncService {
     this.documents = deps.documents ?? defaultDocumentPort(deps.rewrite);
     this.createDeps = { ...defaultCreateDeps, ...deps.create };
     this.updateDeps = { ...defaultDeps, ...deps.update };
+    this.newTicketLocalState = deps.newTicketLocalState;
     this.runInConnectionScope = deps.runInConnectionScope ?? runWithConnectionScope;
     this.newTicketFinalizer = new NewTicketFinalizer(
       this.journal,
@@ -240,10 +242,20 @@ export class TicketSyncService {
         error: error instanceof Error ? error : new Error("Sync journal persistence failed."),
       };
     }
-    return this.createOrResume({
-      context: input.context,
-      operation,
-    });
+    const outcome = await this.coordinator.sync(
+      { kind: "newTicket", queueId: operation.queueId, documentUri: operation.documentUri },
+      input.context,
+      {
+        deps: {
+          ticketCreate: this.createDeps,
+          ticketUpdate: this.updateDeps,
+          documents: this.documents,
+          localState: this.newTicketLocalState,
+        },
+        runInConnectionScope: this.runInConnectionScope,
+      },
+    );
+    return outcome as TicketSyncOutcome;
   }
 
   public async syncEditor(input: {
@@ -811,7 +823,9 @@ export class TicketSyncService {
           ticketCreate: this.createDeps,
           ticketUpdate: this.updateDeps,
           documents: this.documents,
+          localState: this.newTicketLocalState,
         },
+        runInConnectionScope: this.runInConnectionScope,
       },
     );
     return outcome as TicketSyncOutcome;
@@ -828,9 +842,9 @@ export class TicketSyncService {
       | { kind: "reconcile_remote" };
   }): Promise<TicketSyncOutcome> {
     const resolution: any = input.resolution.kind === "link_created_ticket"
-      ? { kind: "link_remote_ticket", ticketId: input.resolution.ticketId }
+      ? { kind: "link_remote_ticket", ticketId: input.resolution.ticketId, explicitLink: true }
       : (input.resolution.kind === "assume_update_committed"
-        ? { kind: "reconcile_remote" }
+        ? { kind: "assume_remote_commit" }
         : input.resolution);
     return this.coordinator.resolveCommitUnknown({
       key: input.key as any,
@@ -840,8 +854,10 @@ export class TicketSyncService {
         ticketCreate: this.createDeps,
         ticketUpdate: this.updateDeps,
         documents: this.documents,
+        localState: this.newTicketLocalState,
       },
-    }) as Promise<TicketSyncOutcome>;
+      runInConnectionScope: this.runInConnectionScope,
+    } as any) as Promise<TicketSyncOutcome>;
   }
 
 

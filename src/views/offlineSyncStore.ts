@@ -578,7 +578,7 @@ const schedulePersist = (
   return current;
 };
 
-const persistAsync = async (scope = activeScope): Promise<void> => {
+export const persistAsync = async (scope = activeScope): Promise<void> => {
   const serialized = serializeQueue(scope);
   await schedulePersist(scope, serialized);
   notifyQueueChanged();
@@ -692,16 +692,19 @@ const promoteCommentIntent = (operation: OfflineCommentUpdate): OfflineCommentUp
   if (!next) {
     return { ...operation, phase: "queued", nextIntent: undefined, effects: [] };
   }
+  const commentId = operation.commentId ?? (operation as any).createdRemoteId;
+  const hasCommentId = commentId !== undefined;
   return {
     ...operation,
+    commentId,
     body: next.body,
-    baseBody: operation.finalizeDraft && operation.commentId !== undefined
+    baseBody: operation.finalizeDraft && hasCommentId
       ? operation.body
       : operation.baseBody,
-    sourceNotesHash: operation.finalizeDraft && operation.commentId !== undefined
+    sourceNotesHash: operation.finalizeDraft && hasCommentId
       ? computeNotesHash(operation.body)
       : operation.sourceNotesHash,
-    finalizeDraft: operation.finalizeDraft && operation.commentId !== undefined
+    finalizeDraft: operation.finalizeDraft && hasCommentId
       ? false
       : operation.finalizeDraft,
     baseDir: next.baseDir ?? operation.baseDir,
@@ -1067,7 +1070,7 @@ const documentIdentity = (uri: string | undefined): string | undefined => {
   return uri;
 };
 
-const sameDocumentIdentity = (
+export const sameDocumentIdentity = (
   left: string | undefined,
   right: string | undefined,
 ): boolean => left !== undefined && right !== undefined &&
@@ -1213,6 +1216,17 @@ export const replaceOfflineSyncQueue = (
   queue.comments = [...next.comments];
   queue.newTickets = [...next.newTickets];
   persist(scope);
+};
+
+export const replaceOfflineSyncQueueAsync = async (
+  next: OfflineSyncQueue,
+  scope = activeScope,
+): Promise<void> => {
+  const queue = getQueue(scope);
+  queue.tickets = new Map(next.tickets);
+  queue.comments = [...next.comments];
+  queue.newTickets = [...next.newTickets];
+  await persistAsync(scope);
 };
 
 export const removeOfflineTicketUpdate = (ticketId: number, scope = activeScope): void => {
@@ -1733,9 +1747,9 @@ type CommentQueueKey = { ticketId: number; commentId?: number; documentUri?: str
 const findCommentIndex = (queue: OfflineSyncQueue, key: CommentQueueKey): number =>
   queue.comments.findIndex((comment) =>
     comment.ticketId === key.ticketId && (
+      (key.documentUri !== undefined && comment.documentUri !== undefined && comment.documentUri === key.documentUri) ||
       (key.commentId !== undefined && comment.commentId === key.commentId) ||
-      (key.commentId === undefined && key.documentUri !== undefined &&
-        comment.documentUri === key.documentUri)
+      (key.commentId === undefined && comment.commentId === undefined)
     ),
   );
 

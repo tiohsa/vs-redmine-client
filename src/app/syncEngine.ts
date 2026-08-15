@@ -10,6 +10,7 @@ import type { SyncContext } from "./ticketSync/ports";
 import type { TicketSyncOutcome, TicketSyncQueueKey } from "./ticketSync/ticketSyncOutcome";
 import type { CommentSaveDependencies } from "../views/commentSaveSync";
 import type { SyncOutcome } from "./ticketSync/syncOperationTypes";
+import { TicketCreateHandler, TicketUpdateHandler } from "./ticketSync/operationHandlers";
 
 export type SyncEngineKey =
   | TicketSyncQueueKey
@@ -31,7 +32,15 @@ export type SyncAllEngineOutcome = {
 };
 
 export interface SyncEngineDependencies {
-  tickets?: Pick<TicketSyncService, "syncQueueItem" | "syncAll" | "resolveCommitUnknown">;
+  tickets?: Pick<TicketSyncService, "syncQueueItem" | "syncAll" | "resolveCommitUnknown"> | {
+    getIssueDetail?: (id: number) => Promise<any>;
+    updateIssue?: (input: any) => Promise<any>;
+    createIssue?: (input: any) => Promise<any>;
+    getProjectTrackers?: () => Promise<any>;
+    listIssueStatuses?: () => Promise<any>;
+    listIssuePriorities?: () => Promise<any>;
+    [key: string]: any;
+  };
   comments?: Partial<CommentSaveDependencies>;
   coordinator?: SyncCoordinator;
 }
@@ -41,11 +50,29 @@ export class SyncEngine {
   private readonly tickets: Pick<TicketSyncService, "syncQueueItem" | "syncAll" | "resolveCommitUnknown">;
   private readonly explicitTickets?: Pick<TicketSyncService, "syncQueueItem" | "syncAll" | "resolveCommitUnknown">;
   private readonly comments: Partial<CommentSaveDependencies>;
+  private readonly rawTicketDeps?: any;
 
   public constructor(deps: SyncEngineDependencies = {}) {
-    this.coordinator = deps.coordinator ?? createSyncCoordinator();
-    this.explicitTickets = deps.tickets;
-    this.tickets = deps.tickets ?? createTicketSyncService();
+    const rawTickets = deps.tickets as any;
+    const isServiceLike = rawTickets && typeof rawTickets.syncQueueItem === "function";
+
+    if (rawTickets && !isServiceLike) {
+      this.rawTicketDeps = rawTickets;
+      this.coordinator = deps.coordinator ?? createSyncCoordinator({
+        handlers: {
+          ticketCreate: new TicketCreateHandler(),
+          ticketUpdate: new TicketUpdateHandler(),
+        },
+      });
+      this.tickets = createTicketSyncService({
+        create: rawTickets,
+        update: rawTickets,
+      });
+    } else {
+      this.coordinator = deps.coordinator ?? createSyncCoordinator();
+      this.explicitTickets = isServiceLike ? rawTickets : undefined;
+      this.tickets = (isServiceLike ? rawTickets : undefined) ?? createTicketSyncService();
+    }
     this.comments = deps.comments ?? {};
   }
 
@@ -68,6 +95,23 @@ export class SyncEngine {
     });
   }
 
+  public async resolveTicketCommitUnknown(input: {
+    key: Extract<SyncEngineKey, { kind: "ticket" | "newTicket" }>;
+    context: SyncContext;
+    resolution?: { kind: "reconcile_remote" } | { kind: "link_remote_ticket"; ticketId: number } | { kind: "retry_remote_write" };
+  }): Promise<SyncEngineOutcome> {
+    return this.coordinator.resolveCommitUnknown({
+      key: input.key,
+      context: input.context,
+      resolution: input.resolution,
+      deps: {
+        ticketCreate: this.rawTicketDeps,
+        ticketUpdate: this.rawTicketDeps,
+        comment: this.comments,
+      },
+    });
+  }
+
   public async syncOne(
     key: SyncEngineKey,
     context: SyncContext,
@@ -77,6 +121,8 @@ export class SyncEngine {
     }
     return this.coordinator.sync(key as any, context, {
       deps: {
+        ticketCreate: this.rawTicketDeps,
+        ticketUpdate: this.rawTicketDeps,
         comment: this.comments,
       },
     }) as any;

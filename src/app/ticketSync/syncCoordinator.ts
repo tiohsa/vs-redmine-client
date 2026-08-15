@@ -10,6 +10,8 @@ import {
   TicketCreateHandler,
   TicketUpdateHandler,
 } from "./operationHandlers";
+import { defaultDeps as defaultTicketDeps } from "../../views/ticketSync/ticketSyncDeps";
+import { getIssueDetail } from "../../redmine/issues";
 import { reconcileCommentCommitUnknown } from "../../views/commentSaveSync";
 import {
   createSyncOperationRepository,
@@ -26,6 +28,7 @@ import type { SyncContext } from "./ports";
 export interface SyncCoordinatorOptions {
   deps?: OperationHandlerDeps;
   applyContent?: (editor: vscode.TextEditor, content: string) => Promise<void>;
+  runInConnectionScope?: <T>(scope: string, operation: () => Promise<T>) => Promise<T>;
 }
 
 export interface SyncCoordinatorDependencies {
@@ -95,8 +98,29 @@ export class SyncCoordinator {
       return { kind: "failed_before_commit", error };
     }
 
-    // INV-04: commit_unknown は通常の sync() から自動再送できない
-    if (operation.phase === "commit_unknown") {
+    // 1. 親がコミット済みで、未解決・不確実な child effect が存在する場合のみ remote_committed を返す
+    const hasUnresolvedChildEffect = (operation.effects ?? []).some(
+      (e) => (e.kind === "child_create" || (typeof e.effectId === "string" && e.effectId.startsWith("child-create"))) &&
+        (e.state === "commit_unknown" || e.state === "compensation_unknown" || e.state === "compensation_started" || (e.state === "committed" && (operation.effects ?? []).some((o) => o.effectId.startsWith("child-create") && o.state === "failed"))),
+    );
+    const primary = (operation.effects ?? []).find((e) => e.kind === "ticket_create" || e.kind === "ticket_update" || (typeof e.effectId === "string" && (e.effectId.startsWith("ticket-") || e.effectId.startsWith("comment-"))));
+    const isParentCommitted = operation.kind === "ticket_update"
+      ? (primary?.state !== "commit_unknown" && hasUnresolvedChildEffect)
+      : (primary?.state === "committed" || operation.createdRemoteId !== undefined);
+
+    if (hasUnresolvedChildEffect && isParentCommitted) {
+      const committedParentId = operation.createdRemoteId ?? (operation.effects?.find((e) => e.effectId === "ticket-create" && e.state === "committed")?.remoteId) ?? operation.ticketId ?? 0;
+      return {
+        kind: "remote_committed",
+        ticketId: committedParentId,
+        commentId: operation.commentId,
+        pending: "remote_reconcile",
+        message: "Secondary child effects remain unresolved or uncertain",
+      };
+    }
+
+    // INV-04: 純粋な commit_unknown / remote_write_started は通常の sync() から自動再送できない
+    if (operation.phase === "commit_unknown" || operation.phase === "remote_write_started") {
       return {
         kind: "commit_unknown",
         operationId: operation.operationId,
@@ -113,7 +137,8 @@ export class SyncCoordinator {
       return activeFlight;
     }
 
-    const flightPromise = runWithConnectionScope(scope, async () => {
+    const runner = options.runInConnectionScope ?? runWithConnectionScope;
+    const flightPromise = runner(scope, async () => {
       try {
         return await this.executeSyncLifecycle(operation, context, options);
       } finally {
@@ -140,39 +165,17 @@ export class SyncCoordinator {
     }
 
     const handlerCtx: OperationHandlerContext = { connectionScope: scope };
+    const depsWithRepo = { repository: this.repository, ...options.deps };
     let currentOp = initialOp;
+
+    const getOpKey = (op: UnifiedSyncOperation): SyncOperationKey =>
+      op.key ?? initialOp.key ?? (op.kind === "ticket_create"
+        ? { kind: "newTicket", queueId: op.operationId, documentUri: op.documentUri }
+        : { kind: "ticket", ticketId: op.ticketId ?? 0 });
 
     // 0. Phase チェック
     if (currentOp.phase === "completed") {
       return { kind: "no_change", ticketId: currentOp.ticketId ?? 0 };
-    }
-
-    if (currentOp.phase === "commit_unknown" || currentOp.phase === "remote_write_started") {
-      const allEffects: any[] = currentOp.effects ?? (currentOp.payload as any)?.effects ?? [];
-      const primary = allEffects.find((e) => e.kind === "ticket_create" || e.kind === "ticket_update" || (typeof e.effectId === "string" && e.effectId.startsWith("ticket-")));
-      const hasUnresolvedChild = allEffects.some((e) =>
-        (e.kind === "child_create" || e.kind === "child-create" || (typeof e.effectId === "string" && e.effectId.startsWith("child-create"))) &&
-        (e.state === "committed" || e.state === "commit_unknown" || e.state === "compensation_unknown" || e.state === "compensation_started")
-      );
-      const isParentCommitted = currentOp.kind === "ticket_update"
-        ? primary?.state !== "commit_unknown"
-        : (primary?.state === "committed" || currentOp.createdRemoteId !== undefined);
-
-      if (hasUnresolvedChild && isParentCommitted) {
-        return {
-          kind: "remote_committed",
-          ticketId: currentOp.createdRemoteId ?? currentOp.ticketId ?? 0,
-          pending: "remote_reconcile",
-          message: currentOp.errorMessage ?? "Unresolved child effects require explicit recovery",
-        };
-      }
-      return {
-        kind: "commit_unknown",
-        operationId: currentOp.operationId,
-        ticketId: currentOp.ticketId,
-        commentId: currentOp.commentId,
-        message: currentOp.errorMessage ?? vscode.l10n.t("A previous remote write outcome is unknown. Please resolve or reconcile before retrying."),
-      };
     }
 
     // Step A: Preparation & Remote Write (queued / preparing の場合のみ)
@@ -181,7 +184,7 @@ export class SyncCoordinator {
       // 1. begin_preparation (queued の場合のみ)
       if (currentOp.phase === "queued") {
         const prepOp = await this.repository.transitionOperation(
-          currentOp.key ?? { kind: "ticket", ticketId: currentOp.ticketId ?? 0 },
+          getOpKey(currentOp),
           { kind: "begin_preparation" },
           scope,
         );
@@ -192,10 +195,10 @@ export class SyncCoordinator {
       }
 
       // 2. handler.prepare
-      prepResult = await handler.prepare(currentOp, handlerCtx, options.deps);
+      prepResult = await handler.prepare(currentOp, handlerCtx, depsWithRepo);
       if (!prepResult.ok) {
         await this.repository.transitionOperation(
-          currentOp.key ?? { kind: "ticket", ticketId: currentOp.ticketId ?? 0 },
+          getOpKey(currentOp),
           { kind: "abort_before_remote_write" },
           scope,
         );
@@ -204,47 +207,61 @@ export class SyncCoordinator {
 
       // 3. Secondary Effects (attachment upload 等)
       if (handler.executeSecondaryEffects) {
-        const secResult = await handler.executeSecondaryEffects(currentOp, prepResult.prepared, handlerCtx, options.deps);
+        const secResult = await handler.executeSecondaryEffects(currentOp, prepResult.prepared, handlerCtx, depsWithRepo);
         if (!secResult.ok) {
-          const freshOp = this.repository.getOperation(currentOp.key ?? { kind: "ticket", ticketId: currentOp.ticketId ?? 0 }, scope);
+          const failedSec = secResult;
+          const freshOp = this.repository.getOperation(getOpKey(currentOp), scope);
           const hasCommittedOrUnknownEffects = (freshOp?.effects ?? []).some(
             (e) => e.state === "committed" || e.state === "commit_unknown" || e.state === "compensation_unknown" || e.state === "compensation_started",
           );
           if (hasCommittedOrUnknownEffects) {
-            await this.repository.transitionOperation(
-              currentOp.key ?? { kind: "ticket", ticketId: currentOp.ticketId ?? 0 },
-              { kind: "record_remote_commit" },
-              scope,
-            );
+            const committedParentId = freshOp?.createdRemoteId ?? (freshOp?.effects?.find((e) => e.effectId === "ticket-create" && e.state === "committed")?.remoteId) ?? currentOp.ticketId ?? 0;
+            try {
+              await this.repository.transitionOperation(
+                getOpKey(currentOp),
+                { kind: "record_remote_commit", createdRemoteId: committedParentId > 0 ? committedParentId : undefined },
+                scope,
+              );
+            } catch {
+              // ignore persistence failure
+            }
             return {
               kind: "remote_committed",
-              ticketId: currentOp.ticketId ?? 0,
+              ticketId: committedParentId,
               pending: "remote_reconcile",
-              message: secResult.error.message,
+              message: failedSec.error.message,
             };
           }
-          if (secResult.commitUnknown) {
-            await this.repository.transitionOperation(
-              currentOp.key ?? { kind: "ticket", ticketId: currentOp.ticketId ?? 0 },
-              { kind: "mark_commit_unknown", message: secResult.error.message },
-              scope,
-            );
+          if (failedSec.commitUnknown) {
+            try {
+              await this.repository.transitionOperation(
+                getOpKey(currentOp),
+                { kind: "mark_commit_unknown", message: failedSec.error.message },
+                scope,
+              );
+            } catch {
+              // ignore persistence failure
+            }
             return {
               kind: "commit_unknown",
               operationId: currentOp.operationId,
               ticketId: currentOp.ticketId,
               commentId: currentOp.commentId,
-              message: secResult.error.message,
+              message: failedSec.error.message,
             };
           }
-          await this.repository.transitionOperation(
-            currentOp.key ?? { kind: "ticket", ticketId: currentOp.ticketId ?? 0 },
-            { kind: "abort_before_remote_write" },
-            scope,
-          );
+          try {
+            await this.repository.transitionOperation(
+              getOpKey(currentOp),
+              { kind: "abort_before_remote_write" },
+              scope,
+            );
+          } catch {
+            // ignore persistence failure
+          }
           return {
             kind: "failed_before_commit",
-            error: secResult.error,
+            error: failedSec.error,
             ticketId: currentOp.ticketId,
             commentId: currentOp.commentId,
           };
@@ -253,7 +270,7 @@ export class SyncCoordinator {
 
       // 4. start_normal_remote_write (INV-01: durable checkpoint before mutation)
       const writeStartOp = await this.repository.transitionOperation(
-        currentOp.key ?? { kind: "ticket", ticketId: currentOp.ticketId ?? 0 },
+        getOpKey(currentOp),
         { kind: "start_normal_remote_write" },
         scope,
       );
@@ -263,11 +280,33 @@ export class SyncCoordinator {
       currentOp = writeStartOp;
 
       // 5. executeRemoteWrite
-      const remoteResult = await handler.executeRemoteWrite(currentOp, prepResult.prepared, handlerCtx, options.deps);
+      const remoteResult = await handler.executeRemoteWrite(currentOp, prepResult.prepared, handlerCtx, depsWithRepo);
       if (!remoteResult.ok) {
+        const latestOp = this.repository.getOperation(getOpKey(currentOp), scope) ?? currentOp;
+        const hasUnresolvedChild = (latestOp.effects ?? []).some((e) =>
+          (e.kind === "child_create" || (typeof e.effectId === "string" && e.effectId.startsWith("child-create"))) &&
+          (e.state === "committed" || e.state === "commit_unknown" || e.state === "compensation_unknown" || e.state === "compensation_started")
+        );
+        const isParentCreateCommitted = currentOp.kind === "ticket_create" && (latestOp.createdRemoteId !== undefined || (latestOp.effects ?? []).some((e) => e.effectId === "ticket-create" && e.state === "committed"));
+        const committedParentId = latestOp.createdRemoteId ?? (latestOp.effects?.find((e) => e.effectId === "ticket-create" && e.state === "committed")?.remoteId) ?? 0;
+
+        if (isParentCreateCommitted && hasUnresolvedChild && committedParentId > 0) {
+          await this.repository.transitionOperation(
+            getOpKey(currentOp),
+            { kind: "record_remote_commit", createdRemoteId: committedParentId },
+            scope,
+          );
+          return {
+            kind: "remote_committed",
+            ticketId: committedParentId,
+            pending: "remote_reconcile",
+            message: remoteResult.error?.message,
+          };
+        }
+
         if (remoteResult.commitUnknown) {
           await this.repository.transitionOperation(
-            currentOp.key ?? { kind: "ticket", ticketId: currentOp.ticketId ?? 0 },
+            getOpKey(currentOp),
             { kind: "mark_commit_unknown", message: remoteResult.error.message },
             scope,
           );
@@ -280,26 +319,8 @@ export class SyncCoordinator {
           };
         }
 
-        const latestOp = this.repository.getOperation(currentOp.key ?? { kind: "ticket", ticketId: currentOp.ticketId ?? 0 }, scope) ?? currentOp;
-        const hasUnresolvedChild = (latestOp.effects ?? []).some((e) =>
-          e.kind === "child_create" && (e.state === "committed" || e.state === "commit_unknown" || e.state === "compensation_unknown" || e.state === "compensation_started")
-        );
-        if (hasUnresolvedChild) {
-          await this.repository.transitionOperation(
-            currentOp.key ?? { kind: "ticket", ticketId: currentOp.ticketId ?? 0 },
-            { kind: "record_remote_commit" },
-            scope,
-          );
-          return {
-            kind: "remote_committed",
-            ticketId: latestOp.createdRemoteId ?? latestOp.ticketId ?? 0,
-            pending: "remote_reconcile",
-            message: remoteResult.error?.message,
-          };
-        }
-
         await this.repository.transitionOperation(
-          currentOp.key ?? { kind: "ticket", ticketId: currentOp.ticketId ?? 0 },
+          getOpKey(currentOp),
           { kind: "abort_known_remote_failure" },
           scope,
         );
@@ -313,7 +334,7 @@ export class SyncCoordinator {
 
       // 6. record_remote_commit
       const committedOp = await this.repository.transitionOperation(
-        currentOp.key ?? { kind: "ticket", ticketId: currentOp.ticketId ?? 0 },
+        getOpKey(currentOp),
         {
           kind: "record_remote_commit",
           createdRemoteId: remoteResult.createdRemoteId,
@@ -334,16 +355,16 @@ export class SyncCoordinator {
       currentOp = committedOp;
     }
 
-    // Step B: Reconciliation (remote_committed / reconciliation_pending からの再開または後続)
+    // Step B: Reconciliation & Read-back
     let reconcileCanonical: any = undefined;
     if (currentOp.phase === "remote_committed" || currentOp.phase === "reconciliation_pending") {
       const hasUnresolvedChildEffects = (currentOp.effects ?? []).some((e) =>
-        e.kind === "child_create" && (
+        (e.kind === "child_create" || (typeof e.effectId === "string" && e.effectId.startsWith("child-create"))) && (
           e.state === "commit_unknown" ||
           e.state === "compensation_unknown" ||
           e.state === "compensation_started" ||
           e.state === "failed" ||
-          (e.state === "committed" && (currentOp.effects ?? []).some((other) => other.kind === "child_create" && other.state !== "committed" && other.state !== "compensated"))
+          (e.state === "committed" && (currentOp.effects ?? []).some((other) => (other.kind === "child_create" || (typeof other.effectId === "string" && other.effectId.startsWith("child-create"))) && other.state !== "committed" && other.state !== "compensated"))
         )
       );
       if (hasUnresolvedChildEffects) {
@@ -355,7 +376,7 @@ export class SyncCoordinator {
         };
       }
 
-      // 7. mark_reconciliation_pending & reconcileRemote
+      const isRecovery = currentOp.phase === "reconciliation_pending";
       const reconcilOp = await this.repository.transitionOperation(
         currentOp.key ?? { kind: "ticket", ticketId: currentOp.ticketId ?? 0 },
         { kind: "mark_reconciliation_pending" },
@@ -364,6 +385,7 @@ export class SyncCoordinator {
       if (reconcilOp) {
         currentOp = reconcilOp;
       }
+
       const reconcileResult = await handler.reconcileRemote(currentOp, handlerCtx, options.deps);
       if (!reconcileResult.ok) {
         return {
@@ -379,7 +401,7 @@ export class SyncCoordinator {
       // 8. mark_local_finalize_pending or record_reconciled_identity
       const finalizeOp = await this.repository.transitionOperation(
         currentOp.key ?? { kind: "ticket", ticketId: currentOp.ticketId ?? 0 },
-        reconcileResult.remoteId
+        reconcileResult.ok && reconcileResult.remoteId
           ? {
               kind: "record_reconciled_identity",
               remoteId: reconcileResult.remoteId,
@@ -397,7 +419,8 @@ export class SyncCoordinator {
 
     // Step C: Local Finalize (local_finalize_pending からの再開または後続)
     if (currentOp.phase === "local_finalize_pending") {
-      const finalizeResult = await handler.finalizeLocal(currentOp, reconcileCanonical, handlerCtx, options.deps);
+      const canonical = reconcileCanonical ?? (currentOp as any).canonical;
+      const finalizeResult = await handler.finalizeLocal(currentOp, canonical, handlerCtx, options.deps);
       if (!finalizeResult.ok) {
         return {
           kind: "remote_committed",
@@ -438,7 +461,7 @@ export class SyncCoordinator {
   public async resolveCommitUnknown(input: {
     key: SyncOperationKey;
     context: SyncContext;
-    resolution?: { kind: "reconcile_remote" } | { kind: "link_remote_comment"; commentId: number } | { kind: "link_remote_ticket"; ticketId: number } | { kind: "retry_remote_write" };
+    resolution?: { kind: "reconcile_remote" } | { kind: "link_remote_comment"; commentId: number; explicitLink?: boolean } | { kind: "link_remote_ticket"; ticketId: number; explicitLink?: boolean } | { kind: "retry_remote_write" };
     deps?: OperationHandlerDeps;
   }): Promise<SyncOutcome> {
     const scope = input.context.connectionScope;
@@ -460,18 +483,30 @@ export class SyncCoordinator {
       return activeFlight;
     }
 
-    const flightPromise = (async (): Promise<SyncOutcome> => {
-      const handler = this.handlers[op.kind];
+    const runner = (input as any).runInConnectionScope ?? runWithConnectionScope;
+    const flightPromise = runner(scope, async (): Promise<SyncOutcome> => {
+      const freshOp = this.repository.getOperation(input.key, scope);
+      if (!freshOp || freshOp.phase !== "commit_unknown") {
+        return {
+          kind: "commit_unknown",
+          operationId: freshOp?.operationId ?? op.operationId,
+          ticketId: freshOp?.ticketId ?? op.ticketId,
+          commentId: freshOp?.commentId ?? op.commentId,
+          message: freshOp?.errorMessage ?? "Operation is no longer in commit_unknown phase",
+        };
+      }
+
+      const handler = this.handlers[freshOp.kind];
       const handlerCtx: OperationHandlerContext = { connectionScope: scope };
 
       if (input.resolution?.kind === "retry_remote_write") {
-        const prepResult = await handler.prepare(op, handlerCtx, input.deps);
+        const prepResult = await handler.prepare(freshOp, handlerCtx, input.deps);
         if (!prepResult.ok) {
           return {
             kind: "commit_unknown",
-            operationId: op.operationId,
-            ticketId: op.ticketId,
-            commentId: op.commentId,
+            operationId: freshOp.operationId,
+            ticketId: freshOp.ticketId,
+            commentId: freshOp.commentId,
             message: "Preflight preparation failed",
           };
         }
@@ -480,19 +515,19 @@ export class SyncCoordinator {
           input.key,
           { kind: "start_explicit_retry_remote_write" },
           scope,
-          { operationId: op.operationId, sourcePhase: op.phase, revision: op.intentRevision ?? op.revision },
+          { operationId: freshOp.operationId, sourcePhase: "commit_unknown", revision: freshOp.intentRevision ?? freshOp.revision },
         );
         if (!writeStartOp) {
           return {
             kind: "commit_unknown",
-            operationId: op.operationId,
-            ticketId: op.ticketId,
-            commentId: op.commentId,
-            message: "Failed to transition to remote_write_started",
+            operationId: freshOp.operationId,
+            ticketId: freshOp.ticketId,
+            commentId: freshOp.commentId,
+            message: "Failed to transition to remote_write_started due to conflict",
           };
         }
 
-        const remoteResult = await handler.executeRemoteWrite(op, prepResult.prepared, handlerCtx, input.deps);
+        const remoteResult = await handler.executeRemoteWrite(writeStartOp, prepResult.prepared, handlerCtx, input.deps);
         if (!remoteResult.ok) {
           await this.repository.transitionOperation(
             input.key,
@@ -501,9 +536,9 @@ export class SyncCoordinator {
           );
           return {
             kind: "commit_unknown",
-            operationId: op.operationId,
-            ticketId: op.ticketId,
-            commentId: op.commentId,
+            operationId: writeStartOp.operationId,
+            ticketId: writeStartOp.ticketId,
+            commentId: writeStartOp.commentId,
             message: remoteResult.error.message,
           };
         }
@@ -559,17 +594,18 @@ export class SyncCoordinator {
         const isComment = input.resolution.kind === "link_remote_comment";
         const remoteId = input.resolution.kind === "link_remote_comment" ? input.resolution.commentId : input.resolution.ticketId;
 
+        let detail: any = undefined;
         if (isComment) {
           const commentDeps = { ...defaultCommentDeps, ...input.deps?.comment };
           const verified = await reconcileCommentCommitUnknown(
             {
-              ticketId: op.ticketId ?? (op.intent as any)?.ticketId ?? 0,
-              commentId: op.commentId,
-              body: (op.intent as any)?.body ?? "",
-              documentUri: op.documentUri,
-              operationId: op.operationId,
-              phase: op.phase as any,
-              revision: op.revision,
+              ticketId: freshOp.ticketId ?? (freshOp.intent as any)?.ticketId ?? 0,
+              commentId: freshOp.commentId,
+              body: (freshOp.intent as any)?.body ?? "",
+              documentUri: freshOp.documentUri,
+              operationId: freshOp.operationId,
+              phase: freshOp.phase as any,
+              revision: freshOp.revision,
             },
             commentDeps,
             remoteId,
@@ -577,10 +613,51 @@ export class SyncCoordinator {
           if (!verified.ok) {
             return {
               kind: "commit_unknown",
-              operationId: op.operationId,
-              ticketId: op.ticketId,
-              commentId: op.commentId,
+              operationId: freshOp.operationId,
+              ticketId: freshOp.ticketId,
+              commentId: freshOp.commentId,
               message: verified.message,
+            };
+          }
+        } else {
+          const getDetail = (freshOp.kind === "ticket_create" ? input.deps?.ticketCreate?.getIssueDetail : input.deps?.ticketUpdate?.getIssueDetail)
+            ?? input.deps?.ticketCreate?.getIssueDetail
+            ?? input.deps?.ticketUpdate?.getIssueDetail
+            ?? getIssueDetail;
+          try {
+            detail = await getDetail(remoteId);
+            if (!detail || !detail.ticket) {
+              return {
+                kind: "commit_unknown",
+                operationId: freshOp.operationId,
+                ticketId: freshOp.ticketId,
+                message: `Remote ticket #${remoteId} not found`,
+              };
+            }
+            const expectedProjectId = freshOp.projectId ?? (freshOp.intent as any)?.projectId;
+            const expectedSubject = (freshOp.intent as any)?.subject ?? (freshOp.intent as any)?.baseSubject ?? "";
+            if (expectedProjectId !== undefined && expectedProjectId > 0 && detail.ticket.projectId !== expectedProjectId) {
+              return {
+                kind: "commit_unknown",
+                operationId: freshOp.operationId,
+                ticketId: freshOp.ticketId,
+                message: `Remote ticket #${remoteId} projectId (${detail.ticket.projectId}) does not match expected (${expectedProjectId})`,
+              };
+            }
+            if (!input.resolution?.explicitLink && expectedSubject && detail.ticket.subject.trim() !== expectedSubject.trim()) {
+              return {
+                kind: "commit_unknown",
+                operationId: freshOp.operationId,
+                ticketId: freshOp.ticketId,
+                message: `Remote ticket #${remoteId} subject ("${detail.ticket.subject}") does not match expected ("${expectedSubject}")`,
+              };
+            }
+          } catch (err) {
+            return {
+              kind: "commit_unknown",
+              operationId: freshOp.operationId,
+              ticketId: freshOp.ticketId,
+              message: (err as Error).message,
             };
           }
         }
@@ -589,21 +666,21 @@ export class SyncCoordinator {
           input.key,
           { kind: "record_reconciled_identity", remoteId },
           scope,
-          { operationId: op.operationId, sourcePhase: op.phase, revision: op.intentRevision ?? op.revision },
+          { operationId: freshOp.operationId, sourcePhase: "commit_unknown", revision: freshOp.intentRevision ?? freshOp.revision },
         );
         if (!transitioned) {
           return {
             kind: "commit_unknown",
-            operationId: op.operationId,
-            ticketId: op.ticketId,
-            commentId: op.commentId,
+            operationId: freshOp.operationId,
+            ticketId: freshOp.ticketId,
+            commentId: freshOp.commentId,
             message: "Failed to record reconciled identity due to conflict",
           };
         }
-        const fin = await handler.finalizeLocal(transitioned, undefined, handlerCtx, input.deps);
+        const fin = await handler.finalizeLocal(transitioned, detail, handlerCtx, input.deps);
         if (fin.ok) {
           await this.repository.transitionOperation(input.key, { kind: "complete" }, scope);
-          await this.repository.completeOperation(input.key, scope);
+          await this.repository.completeOperation(input.key, scope, undefined, { canonical: detail, remoteUpdatedAt: transitioned.remoteUpdatedAt });
           return {
             kind: "completed",
             ticketId: transitioned.createdRemoteId ?? transitioned.ticketId ?? 0,
@@ -613,14 +690,49 @@ export class SyncCoordinator {
         return { kind: "remote_committed", ticketId: transitioned.createdRemoteId ?? 0, commentId: isComment ? remoteId : undefined, pending: "local_finalize", message: fin.message };
       }
 
+      if ((input.resolution as any)?.kind === "assume_remote_commit" || (input.resolution as any)?.kind === "assume_update_committed") {
+        const assumed = await this.repository.transitionOperation(
+          input.key,
+          { kind: "assume_remote_commit" },
+          scope,
+          { operationId: freshOp.operationId, sourcePhase: "commit_unknown", revision: freshOp.intentRevision ?? freshOp.revision },
+        );
+        if (!assumed) {
+          return {
+            kind: "commit_unknown",
+            operationId: freshOp.operationId,
+            ticketId: freshOp.ticketId,
+            commentId: freshOp.commentId,
+            message: "Failed to transition to assume_remote_commit due to conflict",
+          };
+        }
+        const reconciled = await handler.reconcileRemote(assumed, handlerCtx, input.deps);
+        const fin = await handler.finalizeLocal(assumed, reconciled.ok ? reconciled.canonical : undefined, handlerCtx, input.deps);
+        if (fin.ok) {
+          await this.repository.transitionOperation(input.key, { kind: "complete" }, scope);
+          await this.repository.completeOperation(input.key, scope, undefined, { canonical: reconciled.ok ? reconciled.canonical : undefined, remoteUpdatedAt: assumed.remoteUpdatedAt });
+          return {
+            kind: "completed",
+            ticketId: assumed.createdRemoteId ?? assumed.ticketId ?? 0,
+            commentId: assumed.commentId,
+          };
+        }
+        return {
+          kind: "remote_committed",
+          ticketId: assumed.createdRemoteId ?? assumed.ticketId ?? 0,
+          pending: "local_finalize",
+          message: fin.message,
+        };
+      }
+
       // reconcile_remote
-      const reconciled = await handler.reconcileRemote(op, handlerCtx, input.deps);
+      const reconciled = await handler.reconcileRemote(freshOp, handlerCtx, input.deps);
       if (reconciled.ok && reconciled.remoteId) {
         const transitioned = await this.repository.transitionOperation(
           input.key,
           { kind: "record_reconciled_identity", remoteId: reconciled.remoteId, projectId: reconciled.projectId, remoteUpdatedAt: reconciled.remoteUpdatedAt },
           scope,
-          { operationId: op.operationId, sourcePhase: "commit_unknown", revision: op.intentRevision ?? op.revision },
+          { operationId: freshOp.operationId, sourcePhase: "commit_unknown", revision: freshOp.intentRevision ?? freshOp.revision },
         );
         if (!transitioned) {
           return { kind: "failed_before_commit", error: new Error("Failed to record reconciled identity") };
@@ -628,7 +740,7 @@ export class SyncCoordinator {
         const fin = await handler.finalizeLocal(transitioned, reconciled.canonical, handlerCtx, input.deps);
         if (fin.ok) {
           await this.repository.transitionOperation(input.key, { kind: "complete" }, scope);
-          await this.repository.completeOperation(input.key, scope);
+          await this.repository.completeOperation(input.key, scope, undefined, { canonical: reconciled.canonical, remoteUpdatedAt: transitioned.remoteUpdatedAt });
           return {
             kind: "completed",
             ticketId: transitioned.createdRemoteId ?? transitioned.ticketId ?? 0,
@@ -646,12 +758,12 @@ export class SyncCoordinator {
 
       return {
         kind: "commit_unknown",
-        operationId: op.operationId,
-        ticketId: op.ticketId,
-        commentId: op.commentId,
+        operationId: freshOp.operationId,
+        ticketId: freshOp.ticketId,
+        commentId: freshOp.commentId,
         message: reconciled.ok ? "Reconciliation failed" : reconciled.message,
       };
-    })();
+    });
 
     this.inFlight.set(flightKey, flightPromise);
     try {

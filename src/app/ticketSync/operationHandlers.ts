@@ -18,11 +18,9 @@ import { updateDraftAfterSave } from "../../views/ticketDraftStore";
 import { markNewTicketDraftSynced } from "../../views/newTicketDraftStore";
 import { rebaseTicketEditorContent } from "./ticketIntentRebase";
 import {
-  getOfflineSyncQueue,
-  planOfflineSyncEffectAsync,
-  transitionOfflineSyncEffectAsync,
-  updateOfflineNewTicketAsync,
-} from "../../views/offlineSyncStore";
+  createSyncOperationRepository,
+  type SyncOperationRepository,
+} from "./syncRepository";
 import { registerTicketDocument, removeTicketEditorByUri } from "../../views/ticketEditorRegistry";
 import type { TicketCreateDependencies, TicketSaveDependencies } from "../../views/ticketSync/types";
 import { defaultCreateDeps, defaultDeps as defaultTicketDeps } from "../../views/ticketSync/ticketSyncDeps";
@@ -51,6 +49,7 @@ import type {
   CommentCreateIntent,
   CommentUpdateIntent,
   SyncIntent,
+  SyncOperationKey,
   SyncOutcome,
   TicketCreateIntent,
   TicketUpdateIntent,
@@ -67,6 +66,56 @@ export const defaultCommentDeps: CommentSaveDependencies = {
   uploadFile: uploadFileAttachment,
 };
 
+export const normalizeTicketText = (text: string | undefined | null): string => {
+  if (text === undefined || text === null) {
+    return "";
+  }
+  return text.replace(/\r\n/g, "\n").replace(/\r/g, "\n").trim();
+};
+
+export const reconcileTicketCandidate = async (
+  candidateTicketId: number,
+  expected: { projectId?: number; subject?: string; description?: string },
+  getIssueDetailFn: (id: number) => Promise<any>,
+): Promise<
+  | { ok: true; ticketId: number; projectId: number; remoteUpdatedAt: string; canonical: any }
+  | { ok: false; message: string }
+> => {
+  try {
+    const detail = await getIssueDetailFn(candidateTicketId);
+    if (!detail || !detail.ticket) {
+      return { ok: false, message: `Ticket #${candidateTicketId} not found.` };
+    }
+    const ticket = detail.ticket;
+    if (expected.projectId !== undefined && expected.projectId > 0 && ticket.projectId !== expected.projectId) {
+      return {
+        ok: false,
+        message: `Project mismatch: candidate ticket #${candidateTicketId} belongs to project #${ticket.projectId}, expected #${expected.projectId}.`,
+      };
+    }
+    if (expected.subject !== undefined && expected.subject.trim().length > 0) {
+      if (normalizeTicketText(ticket.subject) !== normalizeTicketText(expected.subject)) {
+        return {
+          ok: false,
+          message: `Subject mismatch: candidate ticket #${candidateTicketId} subject does not match intended subject.`,
+        };
+      }
+    }
+    return {
+      ok: true,
+      ticketId: ticket.id,
+      projectId: ticket.projectId,
+      remoteUpdatedAt: ticket.updatedAt,
+      canonical: detail,
+    };
+  } catch (err) {
+    return {
+      ok: false,
+      message: (err as Error).message ?? `Failed to fetch candidate ticket #${candidateTicketId}`,
+    };
+  }
+};
+
 export interface OperationHandlerContext {
   connectionScope: string;
 }
@@ -78,6 +127,8 @@ export interface OperationHandlerDeps {
   ticketUpdate?: Partial<TicketSaveDependencies>;
   comment?: Partial<CommentSaveDependencies>;
   documents?: DocumentPort;
+  repository?: SyncOperationRepository;
+  localState?: any;
 }
 
 export interface OperationHandler<TIntent extends SyncIntent = any, TPrepared = any> {
@@ -233,33 +284,125 @@ export class TicketCreateHandler implements OperationHandler<TicketCreateIntent,
     const attachments = operation.intent?.attachments ?? [];
     const tokens: IssueUploadInput[] = [...prepared.uploadTokens];
     const createDeps = { ...defaultCreateDeps, ...deps?.ticketCreate };
+    const repo = deps?.repository ?? createSyncOperationRepository();
+    const opKey: SyncOperationKey = operation.key ?? { kind: "newTicket", documentUri: operation.documentUri };
+    const revision = operation.intentRevision ?? operation.revision ?? 1;
 
-    for (const att of attachments) {
+    for (let i = 0; i < attachments.length; i++) {
+      const att = attachments[i];
       if (att.kind === "token") {
         if (!tokens.some((t) => t.token === att.token)) {
           tokens.push({ token: att.token, filename: att.filename ?? "attachment", content_type: att.contentType ?? "application/octet-stream" });
         }
       } else if (att.kind === "file") {
-        if (tokens.some((t) => t.filename === att.filename)) {
+        const effectId = `attachment:file:${i}:${att.filePath}`;
+        const currentOp = repo.getOperation(opKey, context.connectionScope) ?? operation;
+        const existingEffect = currentOp.effects?.find((e) => e.effectId === effectId);
+
+        if (existingEffect?.state === "committed" && existingEffect.token) {
+          if (!tokens.some((t) => t.token === existingEffect.token)) {
+            tokens.push({ token: existingEffect.token, filename: att.filename ?? existingEffect.target?.filename ?? "attachment", content_type: att.contentType ?? "application/octet-stream" });
+          }
           continue;
         }
+
+        await repo.planEffect(
+          opKey,
+          {
+            effectId,
+            kind: "attachment_upload",
+            operationRevision: revision,
+            state: "planned",
+            target: { filePath: att.filePath, filename: att.filename },
+          },
+          context.connectionScope,
+          revision,
+        );
+
+        await repo.transitionEffect(
+          opKey,
+          effectId,
+          { kind: "start" },
+          context.connectionScope,
+          { operationRevision: revision, sourceState: "planned" },
+        );
+
         try {
           const uploadFn = (createDeps as any).uploadFile ?? uploadFileAttachment;
           const res = await uploadFn(att.filePath);
+          await repo.transitionEffect(
+            opKey,
+            effectId,
+            { kind: "commit", token: res.token, target: { filePath: att.filePath, filename: att.filename ?? res.filename } },
+            context.connectionScope,
+            { operationRevision: revision, sourceState: "started" },
+          );
           tokens.push({ token: res.token, filename: att.filename ?? res.filename, content_type: att.contentType ?? res.contentType });
         } catch (err) {
-          return { ok: false, error: err as Error, commitUnknown: isRemoteCommitUnknownError(err) };
+          const commitUnknown = isRemoteCommitUnknownError(err);
+          await repo.transitionEffect(
+            opKey,
+            effectId,
+            commitUnknown ? { kind: "mark_commit_unknown" } : { kind: "mark_failed", detail: (err as Error).message },
+            context.connectionScope,
+            { operationRevision: revision, sourceState: "started" },
+          );
+          return { ok: false, error: err as Error, commitUnknown };
         }
       } else if (att.kind === "clipboard") {
-        if (tokens.some((t) => t.filename === att.filename || (tokens.length > 0 && att.filename === undefined))) {
+        const effectId = `attachment:clipboard:${i}`;
+        const currentOp = repo.getOperation(opKey, context.connectionScope) ?? operation;
+        const existingEffect = currentOp.effects?.find((e) => e.effectId === effectId);
+
+        if (existingEffect?.state === "committed" && existingEffect.token) {
+          if (!tokens.some((t) => t.token === existingEffect.token)) {
+            tokens.push({ token: existingEffect.token, filename: att.filename ?? "clipboard.png", content_type: att.contentType ?? "image/png" });
+          }
           continue;
         }
+
+        await repo.planEffect(
+          opKey,
+          {
+            effectId,
+            kind: "attachment_upload",
+            operationRevision: revision,
+            state: "planned",
+            target: { filename: att.filename },
+          },
+          context.connectionScope,
+          revision,
+        );
+
+        await repo.transitionEffect(
+          opKey,
+          effectId,
+          { kind: "start" },
+          context.connectionScope,
+          { operationRevision: revision, sourceState: "planned" },
+        );
+
         try {
           const uploadFn = (createDeps as any).uploadClipboardImage ?? uploadClipboardImage;
           const res = await uploadFn();
+          await repo.transitionEffect(
+            opKey,
+            effectId,
+            { kind: "commit", token: res.token, target: { filename: att.filename ?? res.filename } },
+            context.connectionScope,
+            { operationRevision: revision, sourceState: "started" },
+          );
           tokens.push({ token: res.token, filename: att.filename ?? res.filename, content_type: att.contentType ?? res.contentType });
         } catch (err) {
-          return { ok: false, error: err as Error, commitUnknown: isRemoteCommitUnknownError(err) };
+          const commitUnknown = isRemoteCommitUnknownError(err);
+          await repo.transitionEffect(
+            opKey,
+            effectId,
+            commitUnknown ? { kind: "mark_commit_unknown" } : { kind: "mark_failed", detail: (err as Error).message },
+            context.connectionScope,
+            { operationRevision: revision, sourceState: "started" },
+          );
+          return { ok: false, error: err as Error, commitUnknown };
         }
       }
     }
@@ -287,6 +430,14 @@ export class TicketCreateHandler implements OperationHandler<TicketCreateIntent,
     const createDeps: any = deps?.ticketCreate
       ? { ...defaultCreateDeps, ...deps.ticketCreate, getProjectTrackers: deps.ticketCreate.getProjectTrackers }
       : { ...defaultCreateDeps };
+    const repo = deps?.repository ?? createSyncOperationRepository();
+    const opKey: SyncOperationKey = operation.key ?? {
+      kind: "newTicket",
+      queueId: operation.operationId,
+      documentUri: operation.documentUri,
+    };
+    const revision = operation.intentRevision ?? operation.revision ?? 1;
+
     let resolved: any = prepared.resolved;
     if (!resolved) {
       try {
@@ -305,34 +456,29 @@ export class TicketCreateHandler implements OperationHandler<TicketCreateIntent,
       }
     }
 
-    const operationId = operation.operationId ?? (operation.key?.kind === "newTicket" ? operation.key.queueId : "newTicket");
-    const revision = operation.intentRevision ?? operation.revision ?? 1;
-
     let createdId = operation.createdRemoteId;
 
     if (!createdId) {
-      if (operationId) {
-        await planOfflineSyncEffectAsync(
-          operationId,
-          {
-            effectId: "ticket-create",
-            kind: "ticket_create",
-            operationRevision: revision,
-            state: "planned",
-            target: { documentUri: operation.documentUri },
-          },
-          context.connectionScope,
-          revision,
-        );
+      await repo.planEffect(
+        opKey,
+        {
+          effectId: "ticket-create",
+          kind: "ticket_create",
+          operationRevision: revision,
+          state: "planned",
+          target: { documentUri: operation.documentUri },
+        },
+        context.connectionScope,
+        revision,
+      );
 
-        await transitionOfflineSyncEffectAsync(
-          operationId,
-          "ticket-create",
-          { kind: "start" },
-          context.connectionScope,
-          { operationRevision: revision, sourceState: "planned" },
-        );
-      }
+      await repo.transitionEffect(
+        opKey,
+        "ticket-create",
+        { kind: "start" },
+        context.connectionScope,
+        { operationRevision: revision, sourceState: "planned" },
+      );
 
       try {
         createdId = await createDeps.createIssue({
@@ -351,31 +497,22 @@ export class TicketCreateHandler implements OperationHandler<TicketCreateIntent,
           throw new Error("Failed to create issue");
         }
 
-        if (operationId) {
-          await transitionOfflineSyncEffectAsync(
-            operationId,
-            "ticket-create",
-            { kind: "commit", remoteId: createdId },
-            context.connectionScope,
-            { operationRevision: revision, sourceState: "started" },
-          );
-          await updateOfflineNewTicketAsync(
-            { queueId: operation.key?.kind === "newTicket" ? operation.key.queueId : operationId, documentUri: operation.documentUri },
-            { createdIssueId: createdId },
-            context.connectionScope,
-          );
-        }
+        await repo.transitionEffect(
+          opKey,
+          "ticket-create",
+          { kind: "commit", remoteId: createdId },
+          context.connectionScope,
+          { operationRevision: revision, sourceState: "started" },
+        );
       } catch (err) {
         const commitUnknown = isRemoteCommitUnknownError(err);
-        if (operationId) {
-          await transitionOfflineSyncEffectAsync(
-            operationId,
-            "ticket-create",
-            commitUnknown ? { kind: "mark_commit_unknown" } : { kind: "mark_failed", detail: (err as Error).message },
-            context.connectionScope,
-            { operationRevision: revision, sourceState: "started" },
-          );
-        }
+        await repo.transitionEffect(
+          opKey,
+          "ticket-create",
+          commitUnknown ? { kind: "mark_commit_unknown" } : { kind: "mark_failed", detail: (err as Error).message },
+          context.connectionScope,
+          { operationRevision: revision, sourceState: "started" },
+        );
         return {
           ok: false,
           commitUnknown,
@@ -395,41 +532,44 @@ export class TicketCreateHandler implements OperationHandler<TicketCreateIntent,
       const subject = uniqueChildren[ordinal];
       const effectId = `child-create:${ordinal}`;
 
-      const queueTicket = getOfflineSyncQueue(context.connectionScope).newTickets.find((t) => (operationId && t.operationId === operationId) || (operationId && t.queueId === operationId));
-      const queueEffects = queueTicket?.effects ?? [];
-      const existingEffect = queueEffects.find((e: any) => e.effectId === effectId) ?? operation.effects?.find((e: any) => e.effectId === effectId);
-      if (
-        (existingEffect?.state === "committed" && existingEffect.remoteId) ||
-        existingEffect?.state === "commit_unknown" ||
-        existingEffect?.state === "compensation_unknown" ||
-        existingEffect?.state === "compensation_started" ||
-        existingEffect?.state === "failed"
-      ) {
+      const currentOp = repo.getOperation(opKey, context.connectionScope) ?? operation;
+      const existingEffect = currentOp.effects?.find((e) => e.effectId === effectId);
+
+      if (existingEffect?.state === "committed" && existingEffect.remoteId) {
         continue;
       }
-
-      if (operationId) {
-        await planOfflineSyncEffectAsync(
-          operationId,
-          {
-            effectId,
-            kind: "child_create",
-            operationRevision: revision,
-            state: "planned",
-            target: { parentTicketId: createdId, ordinal },
-          },
-          context.connectionScope,
-          revision,
-        );
-
-        await transitionOfflineSyncEffectAsync(
-          operationId,
-          effectId,
-          { kind: "start" },
-          context.connectionScope,
-          { operationRevision: revision, sourceState: "planned" },
-        );
+      if (
+        existingEffect?.state === "commit_unknown" ||
+        existingEffect?.state === "compensation_unknown" ||
+        existingEffect?.state === "compensation_started"
+      ) {
+        return {
+          ok: false,
+          commitUnknown: true,
+          error: new Error(`Child effect ${effectId} is in uncertain state`),
+        };
       }
+
+      await repo.planEffect(
+        opKey,
+        {
+          effectId,
+          kind: "child_create",
+          operationRevision: revision,
+          state: "planned",
+          target: { parentTicketId: createdId, ordinal },
+        },
+        context.connectionScope,
+        revision,
+      );
+
+      await repo.transitionEffect(
+        opKey,
+        effectId,
+        { kind: "start" },
+        context.connectionScope,
+        { operationRevision: revision, sourceState: "planned" },
+      );
 
       try {
         const createdChildId = await createDeps.createIssue({
@@ -441,32 +581,122 @@ export class TicketCreateHandler implements OperationHandler<TicketCreateIntent,
         if (!createdChildId) {
           throw new Error(`Failed to create child issue: ${subject}`);
         }
-        if (operationId) {
-          await transitionOfflineSyncEffectAsync(
-            operationId,
-            effectId,
-            { kind: "commit", remoteId: createdChildId },
-            context.connectionScope,
-            { operationRevision: revision, sourceState: "started" },
-          );
-        }
+        await repo.transitionEffect(
+          opKey,
+          effectId,
+          { kind: "commit", remoteId: createdChildId },
+          context.connectionScope,
+          { operationRevision: revision, sourceState: "started" },
+        );
       } catch (err) {
         const commitUnknown = isRemoteCommitUnknownError(err);
-        if (operationId) {
-          await transitionOfflineSyncEffectAsync(
-            operationId,
-            effectId,
-            commitUnknown ? { kind: "mark_commit_unknown" } : { kind: "mark_failed", detail: (err as Error).message },
-            context.connectionScope,
-            { operationRevision: revision, sourceState: "started" },
-          );
+        await repo.transitionEffect(
+          opKey,
+          effectId,
+          commitUnknown ? { kind: "mark_commit_unknown" } : { kind: "mark_failed", detail: (err as Error).message },
+          context.connectionScope,
+          { operationRevision: revision, sourceState: "started" },
+        );
+        if (!commitUnknown) {
+          for (let prev = ordinal - 1; prev >= 0; prev--) {
+            const prevEffectId = `child-create:${prev}`;
+            const opAfterFail = repo.getOperation(opKey, context.connectionScope) ?? operation;
+            const prevEffect = opAfterFail.effects?.find((e) => e.effectId === prevEffectId);
+            if (prevEffect && prevEffect.state === "committed" && prevEffect.remoteId) {
+              try {
+                const startComp = await repo.transitionEffect(
+                  opKey,
+                  prevEffectId,
+                  { kind: "start_compensation" },
+                  context.connectionScope,
+                  { operationRevision: revision, sourceState: "committed" },
+                );
+                if (startComp) {
+                  try {
+                    await createDeps.deleteIssue?.(prevEffect.remoteId);
+                    await repo.transitionEffect(
+                      opKey,
+                      prevEffectId,
+                      { kind: "complete_compensation" },
+                      context.connectionScope,
+                      { operationRevision: revision, sourceState: "compensation_started" },
+                    );
+                  } catch (delErr) {
+                    await repo.transitionEffect(
+                      opKey,
+                      prevEffectId,
+                      { kind: "mark_compensation_unknown", detail: (delErr as Error).message },
+                      context.connectionScope,
+                      { operationRevision: revision, sourceState: "compensation_started" },
+                    );
+                  }
+                }
+              } catch {
+                // Ignore checkpoint failure to preserve committed child
+              }
+            }
+          }
+
+          const opAfterChildren = repo.getOperation(opKey, context.connectionScope) ?? operation;
+          const parentEffect = opAfterChildren.effects?.find((e) => e.effectId === "ticket-create");
+          if (parentEffect && parentEffect.state === "committed" && parentEffect.remoteId) {
+            try {
+              const startParentComp = await repo.transitionEffect(
+                opKey,
+                "ticket-create",
+                { kind: "start_compensation" },
+                context.connectionScope,
+                { operationRevision: revision, sourceState: "committed" },
+              );
+              if (startParentComp) {
+                try {
+                  await createDeps.deleteIssue?.(parentEffect.remoteId);
+                  await repo.transitionEffect(
+                    opKey,
+                    "ticket-create",
+                    { kind: "complete_compensation" },
+                    context.connectionScope,
+                    { operationRevision: revision, sourceState: "compensation_started" },
+                  );
+                } catch (parentDelErr) {
+                  await repo.transitionEffect(
+                    opKey,
+                    "ticket-create",
+                    { kind: "mark_compensation_unknown", detail: (parentDelErr as Error).message },
+                    context.connectionScope,
+                    { operationRevision: revision, sourceState: "compensation_started" },
+                  );
+                }
+              }
+            } catch {
+              // Ignore checkpoint failure
+            }
+          }
         }
+
         return {
           ok: false,
           error: err as Error,
           commitUnknown,
         };
       }
+    }
+
+    const finalOp = repo.getOperation(opKey, context.connectionScope) ?? operation;
+    const finalEffects = finalOp.effects ?? [];
+    const hasFailedEffects = finalEffects.some((e) => e.state === "failed");
+    const hasUnknownEffects = finalEffects.some(
+      (e) =>
+        e.state === "commit_unknown" ||
+        e.state === "compensation_unknown" ||
+        e.state === "compensation_started",
+    );
+    if (hasUnknownEffects || hasFailedEffects) {
+      return {
+        ok: false,
+        error: new Error("Secondary effects remain unresolved or failed"),
+        commitUnknown: hasUnknownEffects,
+      };
     }
 
     return {
@@ -539,15 +769,6 @@ export class TicketCreateHandler implements OperationHandler<TicketCreateIntent,
     const metadata = canonical?.metadata ?? operation.intent?.metadata ?? { tracker: "", priority: "", status: "", due_date: "", children: [] };
     const remoteUpdatedAt = detail?.ticket?.updatedAt ?? operation.remoteUpdatedAt;
 
-    updateDraftAfterSave(
-      createdId,
-      subject,
-      description,
-      metadata,
-      remoteUpdatedAt,
-      context.connectionScope,
-    );
-
     if (documentUri) {
       try {
         const replacement = (operation.nextIntent && canonical)
@@ -614,7 +835,9 @@ export class TicketCreateHandler implements OperationHandler<TicketCreateIntent,
           if (rewriteRes.kind !== "applied") {
             return { ok: false, message: `Editor rewrite pending: ${rewriteRes.kind}`, pending: "local_finalize" };
           }
-          if (openDoc) {
+          if (deps?.localState?.register) {
+            deps.localState.register(createdId, openDoc);
+          } else if (openDoc) {
             removeTicketEditorByUri(vscode.Uri.parse(documentUri));
             registerTicketDocument(
               createdId,
@@ -659,6 +882,19 @@ export class TicketCreateHandler implements OperationHandler<TicketCreateIntent,
       }
     }
 
+    if (deps?.localState?.updateDraft) {
+      deps.localState.updateDraft(createdId, subject, description, metadata, remoteUpdatedAt);
+    } else {
+      updateDraftAfterSave(
+        createdId,
+        subject,
+        description,
+        metadata,
+        remoteUpdatedAt,
+        context.connectionScope,
+      );
+    }
+
     const draftId = operation.key?.kind === "newTicket" ? operation.key.queueId : undefined;
     if (draftId) {
       markNewTicketDraftSynced(draftId, createdId);
@@ -669,6 +905,7 @@ export class TicketCreateHandler implements OperationHandler<TicketCreateIntent,
 
 export interface PreparedTicketUpdate {
   ticketId: number;
+  projectId?: number;
   changes: any;
   uniqueChildren: string[];
   uploadSummary?: any;
@@ -715,7 +952,7 @@ export class TicketUpdateHandler implements OperationHandler<TicketUpdateIntent,
       ? computeMetadataChanges(intent.baseMetadata, intent.metadata)
       : (intent.metadata ? computeMetadataChanges({ tracker: "", priority: "", status: "", due_date: "", children: [] }, intent.metadata) : {});
 
-    // 2. メタデータの解決 (IDマッピング)
+    // 2. メタデータの解決 (IDマッピング) & projectId 確定
     let remoteDetail: any = undefined;
     const ensureRemoteDetail = async () => {
       if (!remoteDetail) {
@@ -725,18 +962,22 @@ export class TicketUpdateHandler implements OperationHandler<TicketUpdateIntent,
       return remoteDetail;
     };
 
+    const children = intent.metadata?.children ?? [];
+    const uniqueChildren = Array.from(new Set(children.map((c) => c.trim()).filter((c) => c.length > 0)));
+
+    let projectId = operation.projectId;
+    if (!projectId && (Object.keys(metadataChanges).length > 0 || uniqueChildren.length > 0)) {
+      try {
+        const remote = await ensureRemoteDetail();
+        projectId = remote?.ticket?.projectId;
+      } catch {
+        // non-fatal for project discovery
+      }
+    }
+
     let resolvedMetadataFields: any = {};
     if (Object.keys(metadataChanges).length > 0) {
       try {
-        let projectId = operation.projectId;
-        if (!projectId) {
-          try {
-            const remote = await ensureRemoteDetail();
-            projectId = remote?.ticket?.projectId;
-          } catch {
-            // non-fatal for project discovery
-          }
-        }
         resolvedMetadataFields = await resolveMetadataUpdates(metadataChanges, saveDeps, projectId);
       } catch (err) {
         return { ok: false, outcome: { kind: "failed_before_commit", ticketId, error: err as Error } };
@@ -786,13 +1027,11 @@ export class TicketUpdateHandler implements OperationHandler<TicketUpdateIntent,
       }
     }
 
-    const children = intent.metadata?.children ?? [];
-    const uniqueChildren = Array.from(new Set(children.map((c) => c.trim()).filter((c) => c.length > 0)));
-
     return {
       ok: true,
       prepared: {
         ticketId,
+        projectId,
         changes,
         uniqueChildren,
       },
@@ -807,32 +1046,40 @@ export class TicketUpdateHandler implements OperationHandler<TicketUpdateIntent,
   ): Promise<{ ok: true } | { ok: false; error: Error; commitUnknown?: boolean }> {
     const ticketId = prepared.ticketId;
     const saveDeps = { ...defaultTicketDeps, ...deps?.ticketUpdate };
+    const repo = deps?.repository ?? createSyncOperationRepository();
+    const opKey: SyncOperationKey = operation.key ?? { kind: "ticket", ticketId };
+    const revision = operation.intentRevision ?? operation.revision ?? 1;
     const uniqueChildren = prepared.uniqueChildren;
     if (!uniqueChildren || uniqueChildren.length === 0) {
       return { ok: true };
     }
 
-    const operationId = operation.operationId ?? `ticket:${ticketId}`;
-    const revision = operation.revision ?? 1;
+    const childProjectId = prepared.projectId ?? operation.projectId;
 
     for (let ordinal = 0; ordinal < uniqueChildren.length; ordinal++) {
       const subject = uniqueChildren[ordinal];
       const effectId = `child-create:${ordinal}`;
 
-      const queueEffects = getOfflineSyncQueue(context.connectionScope).tickets.get(ticketId)?.effects ?? [];
-      const existingEffect = queueEffects.find((e: any) => e.effectId === effectId) ?? operation.effects?.find((e: any) => e.effectId === effectId);
-      if (
-        (existingEffect?.state === "committed" && existingEffect.remoteId) ||
-        existingEffect?.state === "commit_unknown" ||
-        existingEffect?.state === "compensation_unknown" ||
-        existingEffect?.state === "compensation_started" ||
-        existingEffect?.state === "failed"
-      ) {
+      const currentOp = repo.getOperation(opKey, context.connectionScope) ?? operation;
+      const existingEffect = currentOp.effects?.find((e) => e.effectId === effectId);
+
+      if (existingEffect?.state === "committed" && existingEffect.remoteId) {
         continue;
       }
+      if (
+        existingEffect?.state === "commit_unknown" ||
+        existingEffect?.state === "compensation_unknown" ||
+        existingEffect?.state === "compensation_started"
+      ) {
+        return {
+          ok: false,
+          commitUnknown: true,
+          error: new Error(`Child effect ${effectId} is in uncertain state`),
+        };
+      }
 
-      await planOfflineSyncEffectAsync(
-        operationId,
+      await repo.planEffect(
+        opKey,
         {
           effectId,
           kind: "child_create",
@@ -844,26 +1091,30 @@ export class TicketUpdateHandler implements OperationHandler<TicketUpdateIntent,
         revision,
       );
 
-      await transitionOfflineSyncEffectAsync(
-        operationId,
+      await repo.transitionEffect(
+        opKey,
         effectId,
         { kind: "start" },
         context.connectionScope,
         { operationRevision: revision, sourceState: "planned" },
       );
 
+      if (!childProjectId || childProjectId <= 0) {
+        throw new Error(`Missing projectId for child issue creation: ${subject}`);
+      }
+
       try {
         const createdChildId = await saveDeps.createIssue?.({
           subject,
           description: "",
           parentId: ticketId,
-          projectId: operation.projectId ?? 0,
+          projectId: childProjectId,
         });
         if (!createdChildId) {
           throw new Error(`Failed to create child issue: ${subject}`);
         }
-        await transitionOfflineSyncEffectAsync(
-          operationId,
+        await repo.transitionEffect(
+          opKey,
           effectId,
           { kind: "commit", remoteId: createdChildId },
           context.connectionScope,
@@ -871,8 +1122,8 @@ export class TicketUpdateHandler implements OperationHandler<TicketUpdateIntent,
         );
       } catch (err) {
         const commitUnknown = isRemoteCommitUnknownError(err);
-        await transitionOfflineSyncEffectAsync(
-          operationId,
+        await repo.transitionEffect(
+          opKey,
           effectId,
           commitUnknown ? { kind: "mark_commit_unknown" } : { kind: "mark_failed", detail: (err as Error).message },
           context.connectionScope,
@@ -882,12 +1133,12 @@ export class TicketUpdateHandler implements OperationHandler<TicketUpdateIntent,
         if (!commitUnknown) {
           for (let prev = 0; prev < ordinal; prev++) {
             const prevEffectId = `child-create:${prev}`;
-            const queueEffects = getOfflineSyncQueue(context.connectionScope).tickets.get(ticketId)?.effects ?? [];
-            const prevEffect = queueEffects.find((e: any) => e.effectId === prevEffectId) ?? operation.effects?.find((e: any) => e.effectId === prevEffectId);
+            const opAfterFail = repo.getOperation(opKey, context.connectionScope) ?? operation;
+            const prevEffect = opAfterFail.effects?.find((e) => e.effectId === prevEffectId);
             if (prevEffect && prevEffect.state === "committed" && prevEffect.remoteId) {
               try {
-                const startComp = await transitionOfflineSyncEffectAsync(
-                  operationId,
+                const startComp = await repo.transitionEffect(
+                  opKey,
                   prevEffectId,
                   { kind: "start_compensation" },
                   context.connectionScope,
@@ -896,16 +1147,16 @@ export class TicketUpdateHandler implements OperationHandler<TicketUpdateIntent,
                 if (startComp) {
                   try {
                     await saveDeps.deleteIssue?.(prevEffect.remoteId);
-                    await transitionOfflineSyncEffectAsync(
-                      operationId,
+                    await repo.transitionEffect(
+                      opKey,
                       prevEffectId,
                       { kind: "complete_compensation" },
                       context.connectionScope,
                       { operationRevision: revision, sourceState: "compensation_started" },
                     );
                   } catch (delErr) {
-                    await transitionOfflineSyncEffectAsync(
-                      operationId,
+                    await repo.transitionEffect(
+                      opKey,
                       prevEffectId,
                       { kind: "mark_compensation_unknown", detail: (delErr as Error).message },
                       context.connectionScope,
@@ -928,9 +1179,15 @@ export class TicketUpdateHandler implements OperationHandler<TicketUpdateIntent,
       }
     }
 
-    const finalQueueEffects = getOfflineSyncQueue(context.connectionScope).tickets.get(ticketId)?.effects ?? [];
-    const hasFailedEffects = finalQueueEffects.some((e: any) => e.state === "failed");
-    const hasUnknownEffects = finalQueueEffects.some((e: any) => e.state === "commit_unknown" || e.state === "compensation_unknown" || e.state === "compensation_started");
+    const finalOp = repo.getOperation(opKey, context.connectionScope) ?? operation;
+    const finalEffects = finalOp.effects ?? [];
+    const hasFailedEffects = finalEffects.some((e) => e.state === "failed");
+    const hasUnknownEffects = finalEffects.some(
+      (e) =>
+        e.state === "commit_unknown" ||
+        e.state === "compensation_unknown" ||
+        e.state === "compensation_started",
+    );
     if (hasUnknownEffects || hasFailedEffects) {
       return {
         ok: false,
@@ -960,11 +1217,12 @@ export class TicketUpdateHandler implements OperationHandler<TicketUpdateIntent,
   }> {
     const ticketId = prepared.ticketId;
     const saveDeps = { ...defaultTicketDeps, ...deps?.ticketUpdate };
-    const operationId = operation.operationId ?? `ticket:${ticketId}`;
+    const repo = deps?.repository ?? createSyncOperationRepository();
+    const opKey: SyncOperationKey = operation.key ?? { kind: "ticket", ticketId };
     const revision = operation.intentRevision ?? operation.revision ?? 1;
 
-    await planOfflineSyncEffectAsync(
-      operationId,
+    await repo.planEffect(
+      opKey,
       {
         effectId: "ticket-update",
         kind: "ticket_update",
@@ -976,8 +1234,8 @@ export class TicketUpdateHandler implements OperationHandler<TicketUpdateIntent,
       revision,
     );
 
-    await transitionOfflineSyncEffectAsync(
-      operationId,
+    await repo.transitionEffect(
+      opKey,
       "ticket-update",
       { kind: "start" },
       context.connectionScope,
@@ -989,8 +1247,8 @@ export class TicketUpdateHandler implements OperationHandler<TicketUpdateIntent,
         await saveDeps.updateIssue({ issueId: ticketId, fields: prepared.changes });
       }
 
-      await transitionOfflineSyncEffectAsync(
-        operationId,
+      await repo.transitionEffect(
+        opKey,
         "ticket-update",
         { kind: "commit", remoteId: ticketId },
         context.connectionScope,
@@ -1004,8 +1262,8 @@ export class TicketUpdateHandler implements OperationHandler<TicketUpdateIntent,
       };
     } catch (err) {
       const commitUnknown = isRemoteCommitUnknownError(err);
-      await transitionOfflineSyncEffectAsync(
-        operationId,
+      await repo.transitionEffect(
+        opKey,
         "ticket-update",
         commitUnknown ? { kind: "mark_commit_unknown" } : { kind: "mark_failed", detail: (err as Error).message },
         context.connectionScope,
@@ -1028,10 +1286,10 @@ export class TicketUpdateHandler implements OperationHandler<TicketUpdateIntent,
     deps?: OperationHandlerDeps,
   ): Promise<{
     ok: true;
-    remoteId?: number;
-    projectId?: number;
-    remoteUpdatedAt?: string;
-    canonical?: any;
+    remoteId: number;
+    projectId: number;
+    remoteUpdatedAt: string;
+    canonical: any;
   } | {
     ok: false;
     message: string;
@@ -1044,11 +1302,110 @@ export class TicketUpdateHandler implements OperationHandler<TicketUpdateIntent,
     try {
       const getDetail = saveDeps.getIssueDetail ?? getIssueDetail;
       const detail = await getDetail(ticketId);
+      if (!detail || !detail.ticket) {
+        return { ok: false, message: `Ticket #${ticketId} not found.` };
+      }
+
+      const ticket = detail.ticket;
+      const intent = operation.intent;
+
+      if (operation.phase === "commit_unknown" && intent) {
+        // commit_unknown からの recovery 時のみ、意図した変更デルタが反映されているかを厳密に検証
+        const contentChanges = computeChanges(
+          intent.baseSubject ?? "",
+          intent.baseDescription ?? "",
+          intent.subject ?? "",
+          intent.description ?? "",
+        );
+        if (intent.baseSubject === undefined && intent.subject !== undefined) {
+          contentChanges.subject = intent.subject;
+        }
+        if (intent.baseDescription === undefined && intent.description !== undefined) {
+          contentChanges.description = intent.description;
+        }
+
+        // 1. subject 変更の検証
+        if (contentChanges.subject !== undefined) {
+          if (normalizeTicketText(ticket.subject) !== normalizeTicketText(contentChanges.subject)) {
+            return {
+              ok: false,
+              message: `Remote ticket #${ticketId} subject does not match intended update. Expected "${contentChanges.subject}", got "${ticket.subject}".`,
+            };
+          }
+        }
+
+        // 2. description 変更の検証
+        if (contentChanges.description !== undefined) {
+          if (normalizeTicketText(ticket.description) !== normalizeTicketText(contentChanges.description)) {
+            return {
+              ok: false,
+              message: `Remote ticket #${ticketId} description does not match intended update.`,
+            };
+          }
+        }
+
+        // 3. metadata 変更の検証
+        if (intent.metadata) {
+          const metadataChanges = intent.baseMetadata
+            ? computeMetadataChanges(intent.baseMetadata, intent.metadata)
+            : computeMetadataChanges({ tracker: "", priority: "", status: "", due_date: "", children: [] }, intent.metadata);
+
+          if (metadataChanges.tracker !== undefined && metadataChanges.tracker.trim().length > 0) {
+            if (normalizeTicketText(ticket.trackerName) !== normalizeTicketText(metadataChanges.tracker)) {
+              return {
+                ok: false,
+                message: `Remote ticket #${ticketId} tracker does not match intended update. Expected "${metadataChanges.tracker}", got "${ticket.trackerName}".`,
+              };
+            }
+          }
+
+          if (metadataChanges.status !== undefined && metadataChanges.status.trim().length > 0) {
+            if (normalizeTicketText(ticket.statusName) !== normalizeTicketText(metadataChanges.status)) {
+              return {
+                ok: false,
+                message: `Remote ticket #${ticketId} status does not match intended update. Expected "${metadataChanges.status}", got "${ticket.statusName}".`,
+              };
+            }
+          }
+
+          if (metadataChanges.priority !== undefined && metadataChanges.priority.trim().length > 0) {
+            if (normalizeTicketText(ticket.priorityName) !== normalizeTicketText(metadataChanges.priority)) {
+              return {
+                ok: false,
+                message: `Remote ticket #${ticketId} priority does not match intended update. Expected "${metadataChanges.priority}", got "${ticket.priorityName}".`,
+              };
+            }
+          }
+
+          if (metadataChanges.due_date !== undefined) {
+            const expectedDueDate = metadataChanges.due_date.trim();
+            const remoteDueDate = (ticket.dueDate ?? "").trim();
+            if (expectedDueDate !== remoteDueDate) {
+              return {
+                ok: false,
+                message: `Remote ticket #${ticketId} due_date does not match intended update. Expected "${expectedDueDate}", got "${remoteDueDate}".`,
+              };
+            }
+          }
+
+          if (metadataChanges.start_date !== undefined) {
+            const expectedStartDate = metadataChanges.start_date.trim();
+            const remoteStartDate = (ticket.startDate ?? "").trim();
+            if (expectedStartDate !== remoteStartDate) {
+              return {
+                ok: false,
+                message: `Remote ticket #${ticketId} start_date does not match intended update. Expected "${expectedStartDate}", got "${remoteStartDate}".`,
+              };
+            }
+          }
+        }
+      }
+
       return {
         ok: true,
         remoteId: ticketId,
-        projectId: detail.ticket.projectId,
-        remoteUpdatedAt: detail.ticket.updatedAt,
+        projectId: ticket.projectId,
+        remoteUpdatedAt: ticket.updatedAt ?? "",
         canonical: detail,
       };
     } catch (err) {
@@ -1174,60 +1531,207 @@ export class TicketUpdateHandler implements OperationHandler<TicketUpdateIntent,
   }
 }
 
-export class CommentCreateHandler implements OperationHandler<CommentCreateIntent, {
+import * as path from "path";
+import {
+  extractMarkdownImageLinks,
+  applyMarkdownImageReplacements,
+  isExternalMarkdownImagePath,
+} from "../../utils/markdownImageLinks";
+import { validateLocalImagePath } from "../../utils/markdownImageValidation";
+
+export interface PreparedCommentData {
   ticketId: number;
+  commentId?: number;
+  rawBody: string;
   body: string;
+  imageLinks: Array<{ path: string; range: { start: number; end: number }; resolvedPath?: string }>;
   uploads: UploadToken[];
   uploadSummary?: any;
-}> {
+}
+
+export class CommentCreateHandler implements OperationHandler<CommentCreateIntent, PreparedCommentData> {
   public async prepare(
     operation: UnifiedSyncOperation<CommentCreateIntent>,
     context: OperationHandlerContext,
     deps?: OperationHandlerDeps,
-  ): Promise<{ ok: true; prepared: { ticketId: number; body: string; uploads: UploadToken[]; uploadSummary?: any } } | { ok: false; outcome: SyncOutcome }> {
+  ): Promise<{ ok: true; prepared: PreparedCommentData } | { ok: false; outcome: SyncOutcome }> {
     const intent = operation.intent;
     const ticketId = operation.ticketId ?? intent?.ticketId;
     if (!ticketId || !intent) {
       return { ok: false, outcome: { kind: "failed_before_commit", error: new Error("Missing CommentCreateIntent") } };
     }
 
-    const commentDeps = { ...defaultCommentDeps, ...deps?.comment };
     const rawBody = intent.body ?? "";
 
     if (containsConflictMarkers(rawBody)) {
       return { ok: false, outcome: { kind: "failed_before_commit", ticketId, error: new Error(vscode.l10n.t("Resolve all merge conflict markers before syncing.")) } };
     }
 
-    const uploadResult = await processMarkdownImageUploads({
-      content: rawBody,
-      baseDir: intent.baseDir,
-      uploadFile: commentDeps.uploadFile,
-    });
-
-    if (hasMarkdownImageUploadFailure(uploadResult.summary)) {
-      const message = buildMarkdownImageUploadFailureMessage(uploadResult.summary) ?? vscode.l10n.t("Failed to upload attached image.");
-      return { ok: false, outcome: { kind: "failed_before_commit", ticketId, error: new Error(message) } };
-    }
-
-    const validation = validateComment(uploadResult.content);
+    const validation = validateComment(rawBody);
     if (!validation.valid) {
       return { ok: false, outcome: { kind: "failed_before_commit", ticketId, error: new Error(validation.message ?? "Invalid comment.") } };
+    }
+
+    // Markdown 画像リンクのローカル解析のみ実行 (リモート mutation は prepare で行わない)
+    const links = extractMarkdownImageLinks(rawBody);
+    const imageLinks: PreparedCommentData["imageLinks"] = [];
+
+    for (const link of links) {
+      if (isExternalMarkdownImagePath(link.path)) {
+        continue;
+      }
+      let resolvedPath: string | undefined = undefined;
+      if (path.isAbsolute(link.path)) {
+        resolvedPath = link.path;
+      } else if (intent.baseDir) {
+        resolvedPath = path.resolve(intent.baseDir, link.path);
+      }
+
+      if (!resolvedPath) {
+        return {
+          ok: false,
+          outcome: { kind: "failed_before_commit", ticketId, error: new Error(`Relative path cannot be resolved: ${link.path}`) },
+        };
+      }
+
+      const val = await validateLocalImagePath({ filePath: resolvedPath });
+      if (!val.valid) {
+        // fallback to baseDir/images/filename
+        if (intent.baseDir) {
+          const fallbackPath = path.resolve(intent.baseDir, "images", link.path);
+          const fallbackVal = await validateLocalImagePath({ filePath: fallbackPath });
+          if (fallbackVal.valid) {
+            resolvedPath = fallbackPath;
+          } else {
+            return {
+              ok: false,
+              outcome: { kind: "failed_before_commit", ticketId, error: new Error(val.reason ?? `Invalid image path: ${link.path}`) },
+            };
+          }
+        } else {
+          return {
+            ok: false,
+            outcome: { kind: "failed_before_commit", ticketId, error: new Error(val.reason ?? `Invalid image path: ${link.path}`) },
+          };
+        }
+      }
+
+      imageLinks.push({ path: link.path, range: link.range, resolvedPath });
     }
 
     return {
       ok: true,
       prepared: {
         ticketId,
-        body: uploadResult.content,
-        uploads: uploadResult.uploads,
-        uploadSummary: resolveUploadSummary(uploadResult.summary),
+        rawBody,
+        body: rawBody,
+        imageLinks,
+        uploads: [],
       },
+    };
+  }
+
+  public async executeSecondaryEffects(
+    operation: UnifiedSyncOperation<CommentCreateIntent>,
+    prepared: PreparedCommentData,
+    context: OperationHandlerContext,
+    deps?: OperationHandlerDeps,
+  ): Promise<{ ok: true; uploadTokens?: IssueUploadInput[] } | { ok: false; error: Error; commitUnknown?: boolean }> {
+    const commentDeps = { ...defaultCommentDeps, ...deps?.comment };
+    const repo = deps?.repository ?? createSyncOperationRepository();
+    const opKey: SyncOperationKey = operation.key ?? { kind: "comment", ticketId: prepared.ticketId, documentUri: operation.documentUri };
+    const revision = operation.intentRevision ?? operation.revision ?? 1;
+
+    const resolvedMap = new Map<string, UploadToken>();
+
+    for (let ordinal = 0; ordinal < prepared.imageLinks.length; ordinal++) {
+      const link = prepared.imageLinks[ordinal];
+      const filePath = link.resolvedPath;
+      if (!filePath) {
+        continue;
+      }
+
+      const effectId = `image:markdown:${ordinal}:${filePath}`;
+      const currentOp = repo.getOperation(opKey, context.connectionScope) ?? operation;
+      const existingEffect = currentOp.effects?.find((e) => e.effectId === effectId);
+
+      if (existingEffect?.state === "committed" && existingEffect.token) {
+        resolvedMap.set(filePath, {
+          token: existingEffect.token,
+          filename: existingEffect.target?.filename ?? path.basename(filePath),
+          content_type: "image/png",
+        });
+        continue;
+      }
+
+      await repo.planEffect(
+        opKey,
+        {
+          effectId,
+          kind: "image_upload",
+          operationRevision: revision,
+          state: "planned",
+          target: { filePath, filename: path.basename(filePath) },
+        },
+        context.connectionScope,
+        revision,
+      );
+
+      await repo.transitionEffect(
+        opKey,
+        effectId,
+        { kind: "start" },
+        context.connectionScope,
+        { operationRevision: revision, sourceState: "planned" },
+      );
+
+      try {
+        const upload = await commentDeps.uploadFile(filePath);
+        await repo.transitionEffect(
+          opKey,
+          effectId,
+          { kind: "commit", token: upload.token, target: { filePath, filename: upload.filename } },
+          context.connectionScope,
+          { operationRevision: revision, sourceState: "started" },
+        );
+        resolvedMap.set(filePath, {
+          token: upload.token,
+          filename: upload.filename,
+          content_type: upload.contentType,
+        });
+      } catch (err) {
+        const commitUnknown = isRemoteCommitUnknownError(err);
+        await repo.transitionEffect(
+          opKey,
+          effectId,
+          commitUnknown ? { kind: "mark_commit_unknown" } : { kind: "mark_failed", detail: (err as Error).message },
+          context.connectionScope,
+          { operationRevision: revision, sourceState: "started" },
+        );
+        return { ok: false, error: err as Error, commitUnknown };
+      }
+    }
+
+    const replacements = prepared.imageLinks.flatMap((link) => {
+      const entry = link.resolvedPath ? resolvedMap.get(link.resolvedPath) : undefined;
+      if (!entry) {
+        return [];
+      }
+      return [{ range: link.range, value: entry.filename }];
+    });
+
+    prepared.body = applyMarkdownImageReplacements(prepared.rawBody, replacements);
+    prepared.uploads = Array.from(resolvedMap.values());
+
+    return {
+      ok: true,
+      uploadTokens: prepared.uploads.map((u) => ({ token: u.token, filename: u.filename, content_type: u.content_type })),
     };
   }
 
   public async executeRemoteWrite(
     operation: UnifiedSyncOperation<CommentCreateIntent>,
-    prepared: { ticketId: number; body: string; uploads: UploadToken[]; uploadSummary?: any },
+    prepared: PreparedCommentData,
     context: OperationHandlerContext,
     deps?: OperationHandlerDeps,
   ): Promise<{
@@ -1242,11 +1746,44 @@ export class CommentCreateHandler implements OperationHandler<CommentCreateInten
     outcome?: SyncOutcome;
   }> {
     const commentDeps = { ...defaultCommentDeps, ...deps?.comment };
+    const repo = deps?.repository ?? createSyncOperationRepository();
+    const opKey: SyncOperationKey = operation.key ?? { kind: "comment", ticketId: prepared.ticketId, documentUri: operation.documentUri };
+    const revision = operation.intentRevision ?? operation.revision ?? 1;
+
+    await repo.planEffect(
+      opKey,
+      {
+        effectId: "comment-create",
+        kind: "comment_create",
+        operationRevision: revision,
+        state: "planned",
+        target: { ticketId: prepared.ticketId },
+      },
+      context.connectionScope,
+      revision,
+    );
+
+    await repo.transitionEffect(
+      opKey,
+      "comment-create",
+      { kind: "start" },
+      context.connectionScope,
+      { operationRevision: revision, sourceState: "planned" },
+    );
+
     try {
       await commentDeps.addComment(
         prepared.ticketId,
         prepared.body,
         prepared.uploads.length > 0 ? prepared.uploads : undefined,
+      );
+
+      await repo.transitionEffect(
+        opKey,
+        "comment-create",
+        { kind: "commit" },
+        context.connectionScope,
+        { operationRevision: revision, sourceState: "started" },
       );
 
       return {
@@ -1256,6 +1793,13 @@ export class CommentCreateHandler implements OperationHandler<CommentCreateInten
       };
     } catch (err) {
       const commitUnknown = isRemoteCommitUnknownError(err);
+      await repo.transitionEffect(
+        opKey,
+        "comment-create",
+        commitUnknown ? { kind: "mark_commit_unknown" } : { kind: "mark_failed", detail: (err as Error).message },
+        context.connectionScope,
+        { operationRevision: revision, sourceState: "started" },
+      );
       return {
         ok: false,
         commitUnknown,
@@ -1337,7 +1881,7 @@ export class CommentCreateHandler implements OperationHandler<CommentCreateInten
           operationScope: context.connectionScope,
         });
       }
-      if ((operation.intent as any)?.finalizeDraft || (operation.payload as any)?.finalizeDraft) {
+      if (operation.intent?.finalizeDraft) {
         const res = await finalizeNewCommentDraftFileAfterSync({
           documentUri,
           ticketId,
@@ -1356,18 +1900,12 @@ export class CommentCreateHandler implements OperationHandler<CommentCreateInten
   }
 }
 
-export class CommentUpdateHandler implements OperationHandler<CommentUpdateIntent, {
-  ticketId: number;
-  commentId: number;
-  body: string;
-  uploads: UploadToken[];
-  uploadSummary?: any;
-}> {
+export class CommentUpdateHandler implements OperationHandler<CommentUpdateIntent, PreparedCommentData> {
   public async prepare(
     operation: UnifiedSyncOperation<CommentUpdateIntent>,
     context: OperationHandlerContext,
     deps?: OperationHandlerDeps,
-  ): Promise<{ ok: true; prepared: { ticketId: number; commentId: number; body: string; uploads: UploadToken[]; uploadSummary?: any } } | { ok: false; outcome: SyncOutcome }> {
+  ): Promise<{ ok: true; prepared: PreparedCommentData } | { ok: false; outcome: SyncOutcome }> {
     const intent = operation.intent;
     const ticketId = operation.ticketId ?? intent?.ticketId;
     const commentId = operation.commentId ?? intent?.commentId;
@@ -1384,17 +1922,6 @@ export class CommentUpdateHandler implements OperationHandler<CommentUpdateInten
 
     if (intent.baseBody && nextContent === intent.baseBody) {
       return { ok: false, outcome: { kind: "no_change", ticketId, commentId } };
-    }
-
-    const uploadResult = await processMarkdownImageUploads({
-      content: nextContent,
-      baseDir: intent.baseDir,
-      uploadFile: commentDeps.uploadFile,
-    });
-
-    if (hasMarkdownImageUploadFailure(uploadResult.summary)) {
-      const message = buildMarkdownImageUploadFailureMessage(uploadResult.summary) ?? vscode.l10n.t("Failed to upload attached image.");
-      return { ok: false, outcome: { kind: "failed_before_commit", ticketId, commentId, error: new Error(message) } };
     }
 
     // コンフリクト検出
@@ -1416,9 +1943,55 @@ export class CommentUpdateHandler implements OperationHandler<CommentUpdateInten
             };
           }
         }
-      } catch (err) {
+      } catch {
         // non-fatal
       }
+    }
+
+    // Markdown 画像リンクのローカル解析のみ実行 (リモート mutation は prepare で行わない)
+    const links = extractMarkdownImageLinks(nextContent);
+    const imageLinks: PreparedCommentData["imageLinks"] = [];
+
+    for (const link of links) {
+      if (isExternalMarkdownImagePath(link.path)) {
+        continue;
+      }
+      let resolvedPath: string | undefined = undefined;
+      if (path.isAbsolute(link.path)) {
+        resolvedPath = link.path;
+      } else if (intent.baseDir) {
+        resolvedPath = path.resolve(intent.baseDir, link.path);
+      }
+
+      if (!resolvedPath) {
+        return {
+          ok: false,
+          outcome: { kind: "failed_before_commit", ticketId, commentId, error: new Error(`Relative path cannot be resolved: ${link.path}`) },
+        };
+      }
+
+      const val = await validateLocalImagePath({ filePath: resolvedPath });
+      if (!val.valid) {
+        if (intent.baseDir) {
+          const fallbackPath = path.resolve(intent.baseDir, "images", link.path);
+          const fallbackVal = await validateLocalImagePath({ filePath: fallbackPath });
+          if (fallbackVal.valid) {
+            resolvedPath = fallbackPath;
+          } else {
+            return {
+              ok: false,
+              outcome: { kind: "failed_before_commit", ticketId, commentId, error: new Error(val.reason ?? `Invalid image path: ${link.path}`) },
+            };
+          }
+        } else {
+          return {
+            ok: false,
+            outcome: { kind: "failed_before_commit", ticketId, commentId, error: new Error(val.reason ?? `Invalid image path: ${link.path}`) },
+          };
+        }
+      }
+
+      imageLinks.push({ path: link.path, range: link.range, resolvedPath });
     }
 
     return {
@@ -1426,16 +1999,115 @@ export class CommentUpdateHandler implements OperationHandler<CommentUpdateInten
       prepared: {
         ticketId,
         commentId,
-        body: uploadResult.content,
-        uploads: uploadResult.uploads,
-        uploadSummary: resolveUploadSummary(uploadResult.summary),
+        rawBody: nextContent,
+        body: nextContent,
+        imageLinks,
+        uploads: [],
       },
+    };
+  }
+
+  public async executeSecondaryEffects(
+    operation: UnifiedSyncOperation<CommentUpdateIntent>,
+    prepared: PreparedCommentData,
+    context: OperationHandlerContext,
+    deps?: OperationHandlerDeps,
+  ): Promise<{ ok: true; uploadTokens?: IssueUploadInput[] } | { ok: false; error: Error; commitUnknown?: boolean }> {
+    const commentDeps = { ...defaultCommentDeps, ...deps?.comment };
+    const repo = deps?.repository ?? createSyncOperationRepository();
+    const opKey: SyncOperationKey = operation.key ?? { kind: "comment", ticketId: prepared.ticketId, commentId: prepared.commentId, documentUri: operation.documentUri };
+    const revision = operation.intentRevision ?? operation.revision ?? 1;
+
+    const resolvedMap = new Map<string, UploadToken>();
+
+    for (let ordinal = 0; ordinal < prepared.imageLinks.length; ordinal++) {
+      const link = prepared.imageLinks[ordinal];
+      const filePath = link.resolvedPath;
+      if (!filePath) {
+        continue;
+      }
+
+      const effectId = `image:markdown:${ordinal}:${filePath}`;
+      const currentOp = repo.getOperation(opKey, context.connectionScope) ?? operation;
+      const existingEffect = currentOp.effects?.find((e) => e.effectId === effectId);
+
+      if (existingEffect?.state === "committed" && existingEffect.token) {
+        resolvedMap.set(filePath, {
+          token: existingEffect.token,
+          filename: existingEffect.target?.filename ?? path.basename(filePath),
+          content_type: "image/png",
+        });
+        continue;
+      }
+
+      await repo.planEffect(
+        opKey,
+        {
+          effectId,
+          kind: "image_upload",
+          operationRevision: revision,
+          state: "planned",
+          target: { filePath, filename: path.basename(filePath) },
+        },
+        context.connectionScope,
+        revision,
+      );
+
+      await repo.transitionEffect(
+        opKey,
+        effectId,
+        { kind: "start" },
+        context.connectionScope,
+        { operationRevision: revision, sourceState: "planned" },
+      );
+
+      try {
+        const upload = await commentDeps.uploadFile(filePath);
+        await repo.transitionEffect(
+          opKey,
+          effectId,
+          { kind: "commit", token: upload.token, target: { filePath, filename: upload.filename } },
+          context.connectionScope,
+          { operationRevision: revision, sourceState: "started" },
+        );
+        resolvedMap.set(filePath, {
+          token: upload.token,
+          filename: upload.filename,
+          content_type: upload.contentType,
+        });
+      } catch (err) {
+        const commitUnknown = isRemoteCommitUnknownError(err);
+        await repo.transitionEffect(
+          opKey,
+          effectId,
+          commitUnknown ? { kind: "mark_commit_unknown" } : { kind: "mark_failed", detail: (err as Error).message },
+          context.connectionScope,
+          { operationRevision: revision, sourceState: "started" },
+        );
+        return { ok: false, error: err as Error, commitUnknown };
+      }
+    }
+
+    const replacements = prepared.imageLinks.flatMap((link) => {
+      const entry = link.resolvedPath ? resolvedMap.get(link.resolvedPath) : undefined;
+      if (!entry) {
+        return [];
+      }
+      return [{ range: link.range, value: entry.filename }];
+    });
+
+    prepared.body = applyMarkdownImageReplacements(prepared.rawBody, replacements);
+    prepared.uploads = Array.from(resolvedMap.values());
+
+    return {
+      ok: true,
+      uploadTokens: prepared.uploads.map((u) => ({ token: u.token, filename: u.filename, content_type: u.content_type })),
     };
   }
 
   public async executeRemoteWrite(
     operation: UnifiedSyncOperation<CommentUpdateIntent>,
-    prepared: { ticketId: number; commentId: number; body: string; uploads: UploadToken[]; uploadSummary?: any },
+    prepared: PreparedCommentData,
     context: OperationHandlerContext,
     deps?: OperationHandlerDeps,
   ): Promise<{
@@ -1450,11 +2122,44 @@ export class CommentUpdateHandler implements OperationHandler<CommentUpdateInten
     outcome?: SyncOutcome;
   }> {
     const commentDeps = { ...defaultCommentDeps, ...deps?.comment };
+    const repo = deps?.repository ?? createSyncOperationRepository();
+    const opKey: SyncOperationKey = operation.key ?? { kind: "comment", ticketId: prepared.ticketId, commentId: prepared.commentId, documentUri: operation.documentUri };
+    const revision = operation.intentRevision ?? operation.revision ?? 1;
+
+    await repo.planEffect(
+      opKey,
+      {
+        effectId: "comment-update",
+        kind: "comment_update",
+        operationRevision: revision,
+        state: "planned",
+        target: { ticketId: prepared.ticketId, commentId: prepared.commentId },
+      },
+      context.connectionScope,
+      revision,
+    );
+
+    await repo.transitionEffect(
+      opKey,
+      "comment-update",
+      { kind: "start" },
+      context.connectionScope,
+      { operationRevision: revision, sourceState: "planned" },
+    );
+
     try {
       await commentDeps.updateComment(
-        prepared.commentId,
+        prepared.commentId!,
         prepared.body,
         prepared.uploads.length > 0 ? prepared.uploads : undefined,
+      );
+
+      await repo.transitionEffect(
+        opKey,
+        "comment-update",
+        { kind: "commit", remoteId: prepared.commentId },
+        context.connectionScope,
+        { operationRevision: revision, sourceState: "started" },
       );
 
       return {
@@ -1464,6 +2169,13 @@ export class CommentUpdateHandler implements OperationHandler<CommentUpdateInten
       };
     } catch (err) {
       const commitUnknown = isRemoteCommitUnknownError(err);
+      await repo.transitionEffect(
+        opKey,
+        "comment-update",
+        commitUnknown ? { kind: "mark_commit_unknown" } : { kind: "mark_failed", detail: (err as Error).message },
+        context.connectionScope,
+        { operationRevision: revision, sourceState: "started" },
+      );
       return {
         ok: false,
         commitUnknown,
@@ -1532,11 +2244,13 @@ export class CommentUpdateHandler implements OperationHandler<CommentUpdateInten
     const documentUri = operation.documentUri ?? operation.intent?.documentUri;
     const body = operation.intent?.body ?? "";
     if (documentUri) {
-      const res = await updateCommentUpdateFileAfterSync(
+      const res = await updateCommentUpdateFileAfterSync({
         documentUri,
-        body,
-        reconciled?.ticket?.updatedAt,
-      );
+        syncedBody: body,
+        expectedBody: operation.intent?.body ?? "",
+        remoteUpdatedAt: reconciled?.ticket?.updatedAt,
+        canonical: reconciled,
+      });
       if (res !== "applied") {
         return { ok: false, message: `Local finalization pending: ${res}`, pending: "local_finalize" };
       }
