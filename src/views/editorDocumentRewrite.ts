@@ -34,8 +34,9 @@ export const buildRegisteredDocumentContent = (
   );
   return buildTicketEditorContent({
     ...(replacement ?? parsed),
+    metadata: replacement?.metadata ?? parsed.metadata,
     layout: replacement?.layout ?? parsed.layout,
-    metadataBlock: replacement?.metadataBlock ?? parsed.metadataBlock,
+    metadataBlock: replacement?.metadataBlock ?? "present",
     controlFields: newControlFields,
   });
 };

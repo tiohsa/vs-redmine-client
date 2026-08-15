@@ -31,7 +31,71 @@ export type DurableSyncEffectTarget = {
   token?: string;
   imageUri?: string;
   replacementUri?: string;
+  submittedBody?: string;
 };
+
+export type CommentCreateRequestSnapshot = {
+  kind: "comment_create";
+  ticketId: number;
+  submittedBody: string;
+  submittedUploads?: Array<{ token: string; filename?: string; contentType?: string }>;
+};
+
+export type CommentUpdateRequestSnapshot = {
+  kind: "comment_update";
+  ticketId: number;
+  commentId: number;
+  submittedBody: string;
+  submittedUploads?: Array<{ token: string; filename?: string; contentType?: string }>;
+};
+
+export type TicketCreateRequestSnapshot = {
+  kind: "ticket_create";
+  projectId: number;
+  subject: string;
+  description: string;
+  parentTicketId?: number;
+  uploadTokens?: Array<{ token: string; filename?: string; contentType?: string }>;
+  childTickets?: Array<{ subject: string; description?: string; tracker?: string; priority?: string }>;
+};
+
+export type TicketUpdateRequestSnapshot = {
+  kind: "ticket_update";
+  ticketId: number;
+  subject?: string;
+  description?: string;
+  notes?: string;
+  projectId?: number;
+  uploadTokens?: Array<{ token: string; filename?: string; contentType?: string }>;
+  childTickets?: Array<{ subject: string; description?: string; tracker?: string; priority?: string }>;
+};
+
+export type ChildTicketCreateRequestSnapshot = {
+  kind: "child_create";
+  parentTicketId: number;
+  projectId: number;
+  subject: string;
+  description?: string;
+  tracker?: string;
+  priority?: string;
+  ordinal?: number;
+};
+
+export type UploadRequestSnapshot = {
+  kind: "upload";
+  filePath?: string;
+  filename?: string;
+  contentType?: string;
+  imageUri?: string;
+};
+
+export type SyncEffectRequestSnapshot =
+  | CommentCreateRequestSnapshot
+  | CommentUpdateRequestSnapshot
+  | TicketCreateRequestSnapshot
+  | TicketUpdateRequestSnapshot
+  | ChildTicketCreateRequestSnapshot
+  | UploadRequestSnapshot;
 
 export type DurableSyncEffect = {
   effectId: string;
@@ -39,6 +103,7 @@ export type DurableSyncEffect = {
   operationRevision: number;
   state: DurableSyncEffectState;
   target: DurableSyncEffectTarget;
+  requestSnapshot?: SyncEffectRequestSnapshot;
   remoteId?: number;
   token?: string;
   detail?: string;
@@ -50,10 +115,10 @@ export type DurableSyncEffectExpectation = {
 };
 
 export type DurableSyncEffectAction =
-  | { kind: "start" }
-  | { kind: "start_explicit_retry" }
-  | { kind: "commit"; remoteId?: number; token?: string; target?: DurableSyncEffectTarget }
-  | { kind: "assume_committed"; remoteId?: number; token?: string; target?: DurableSyncEffectTarget }
+  | { kind: "start"; requestSnapshot?: SyncEffectRequestSnapshot }
+  | { kind: "start_explicit_retry"; requestSnapshot?: SyncEffectRequestSnapshot }
+  | { kind: "commit"; remoteId?: number; token?: string; target?: DurableSyncEffectTarget; requestSnapshot?: SyncEffectRequestSnapshot }
+  | { kind: "assume_committed"; remoteId?: number; token?: string; target?: DurableSyncEffectTarget; requestSnapshot?: SyncEffectRequestSnapshot }
   | { kind: "mark_commit_unknown"; detail?: string }
   | { kind: "mark_failed"; detail?: string }
   | { kind: "start_compensation" }
@@ -69,13 +134,19 @@ const UNCERTAIN_EFFECT_STATES: ReadonlySet<DurableSyncEffectState> = new Set([
 
 export const restoreDurableSyncEffect = (
   effect: DurableSyncEffect,
-): DurableSyncEffect => ({
-  ...effect,
-  // A restart can happen after a request left the client but before its
-  // result was journaled. A durable `started` checkpoint is never retryable.
-  state: effect.state === "started" ? "commit_unknown" : effect.state,
-  target: { ...effect.target },
-});
+): DurableSyncEffect => {
+  const restored: DurableSyncEffect = {
+    ...effect,
+    state: effect.state === "started" ? "commit_unknown" : effect.state,
+    target: { ...effect.target },
+  };
+  if (effect.requestSnapshot) {
+    restored.requestSnapshot = { ...effect.requestSnapshot };
+  } else {
+    delete (restored as any).requestSnapshot;
+  }
+  return restored;
+};
 
 export const hasUncertainDurableSyncEffect = (
   effects: readonly DurableSyncEffect[] | undefined,
@@ -92,9 +163,9 @@ const actionAllowsSource = (
     case "assume_committed": return source === "commit_unknown";
     case "mark_commit_unknown": return source === "started";
     case "mark_failed": return source === "started";
-    case "start_compensation": return source === "committed";
-    case "complete_compensation": return source === "compensation_started";
-    case "mark_compensation_unknown": return source === "compensation_started";
+    case "start_compensation": return source === "committed" || source === "compensation_unknown";
+    case "complete_compensation": return source === "compensation_started" || source === "compensation_unknown";
+    case "mark_compensation_unknown": return source === "compensation_started" || source === "compensation_unknown";
   }
 };
 
@@ -113,7 +184,12 @@ export const transitionDurableSyncEffect = (
   switch (action.kind) {
     case "start":
     case "start_explicit_retry":
-      return { ...effect, state: "started", detail: undefined };
+      return {
+        ...effect,
+        state: "started",
+        requestSnapshot: action.requestSnapshot ?? effect.requestSnapshot,
+        detail: undefined,
+      };
     case "commit":
     case "assume_committed":
       return {
@@ -122,6 +198,7 @@ export const transitionDurableSyncEffect = (
         remoteId: action.remoteId ?? effect.remoteId,
         token: action.token ?? effect.token,
         target: action.target ? { ...effect.target, ...action.target } : effect.target,
+        requestSnapshot: action.requestSnapshot ?? effect.requestSnapshot,
         detail: undefined,
       };
     case "mark_commit_unknown":

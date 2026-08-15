@@ -1875,14 +1875,16 @@ suite("T-01 〜 T-24: Sync Lifecycle Integration, Remote Certainty & Completion 
     void outcome;
   });
 
-  // T-33: Compensation completion checkpoint failure → recovery-required state (INV-N12)
+  // T-33: Compensation completion checkpoint failure → recovery-required state (INV-N12, INV-07)
   test("T-33: compensation の complete_compensation persistence 失敗後は再CREATE・再DELETE しない (INV-N12)", async () => {
-    const ticketId = 3300;
+    const parentTicketId = 3300;
     const key = { kind: "newTicket" as const, queueId: "t33-queue" };
 
+    let completeCompCalls = 0;
     class FlakyCompensationRepo extends DefaultSyncOperationRepository {
       public override async transitionEffect(k: any, effectId: string, action: any, scope: string, expected?: any) {
         if (effectId === "ticket-create" && action.kind === "complete_compensation") {
+          completeCompCalls++;
           return undefined; // complete_compensation persistence 失敗
         }
         return super.transitionEffect(k, effectId, action, scope, expected);
@@ -1902,25 +1904,27 @@ suite("T-01 〜 T-24: Sync Lifecycle Integration, Remote Certainty & Completion 
         projectId: 1,
         subject: "T33 create",
         description: "",
-        metadata: { tracker: "Bug", priority: "Normal", status: "New", due_date: "" },
+        metadata: { tracker: "Bug", priority: "Normal", status: "New", due_date: "", children: ["Child Failure Trigger"] },
       } as any,
     }, SCOPE);
 
     let createIssueCalls = 0;
     let deleteIssueCalls = 0;
-    let hookAfterCreate = false;
 
     const engine = createSyncEngine({
       coordinator: createSyncCoordinator({ repository: repo }),
       tickets: {
-        createIssue: async () => {
+        createIssue: async (input: any) => {
           createIssueCalls++;
-          hookAfterCreate = true;
-          return ticketId;
+          if (input.parentId) {
+            // Child create failure triggers parent compensation
+            throw new Error("400 Bad Request: Child creation validation failure in T-33");
+          }
+          return parentTicketId;
         },
-        deleteIssue: async () => {
+        deleteIssue: async (id: number) => {
           deleteIssueCalls++;
-          throw new Error("Should not delete in T-33 scenario if compensation_unknown");
+          assert.strictEqual(id, parentTicketId, "Parent issue ID must match for compensation DELETE");
         },
         getIssueDetail: async (id: number) => ({
           ticket: { id, projectId: 1, subject: "T33 create", description: "", trackerId: 1, trackerName: "Bug", priorityId: 1, priorityName: "Normal", statusId: 1, statusName: "New", updatedAt: "2026-08-15T00:00:00Z" } as any,
@@ -1932,19 +1936,19 @@ suite("T-01 〜 T-24: Sync Lifecycle Integration, Remote Certainty & Completion 
       },
     });
 
-    // 1回目sync: create成功後にchild failureが起きてcompensation試行
-    // → complete_compensation persistence 失敗 → compensation_unknown
+    // 1回目sync: parent create(成功) → child create(失敗) → start_compensation → DELETE parent(成功) → complete_compensation persistence failure
     const outcome1 = await engine.syncOne(key, { connectionScope: SCOPE });
-    void outcome1;
-    void hookAfterCreate;
+    assert.notStrictEqual(outcome1.kind, "completed");
+    assert.strictEqual(completeCompCalls, 1, "complete_compensation transition was attempted");
+    assert.strictEqual(deleteIssueCalls, 1, "Parent issue was deleted on remote");
 
     // 2回目sync: compensation_unknown 状態からは自動再CREATE・再DELETE しない
     const outcome2 = await engine.syncOne(key, { connectionScope: SCOPE });
     assert.notStrictEqual(outcome2.kind, "completed", "compensation_unknown 後は completed を返さない (INV-N12)");
-    // createIssue は1回目のみ（2回目では呼ばれない）
-    assert.strictEqual(createIssueCalls, 1, "compensation_unknown 後は再CREATE しない (INV-N12)");
-    // deleteIssue も呼ばれない
-    assert.strictEqual(deleteIssueCalls, 0, "compensation_unknown 後は再DELETE しない (INV-N12)");
+    // createIssue は1回目のみ（parent + child attempt = 2、2回目では呼ばれない）
+    assert.strictEqual(createIssueCalls, 2, "compensation_unknown 後は再CREATE しない (INV-N12)");
+    // deleteIssue も1回目のみ（2回目では呼ばれない）
+    assert.strictEqual(deleteIssueCalls, 1, "compensation_unknown 後は再DELETE しない (INV-N12)");
   });
 });
 

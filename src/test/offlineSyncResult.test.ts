@@ -93,6 +93,7 @@ suite("offlineSyncResult — 構造化戻り値", () => {
           })),
           remaining: plan.slice(3),
           cancelled: true,
+          stopReason: "user_cancelled",
         }),
       }),
     });

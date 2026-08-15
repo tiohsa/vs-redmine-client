@@ -1241,7 +1241,7 @@ suite("TicketSyncService durable lifecycle", () => {
       },
     });
 
-    const outcome = await service.createOrResume({
+    const outcome = await service.syncNewTicket({
       context: { connectionScope: "https://b.example/" },
       operation: {
         queueId: "q1",

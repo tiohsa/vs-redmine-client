@@ -187,6 +187,9 @@ suite("DurableSyncEffect state machine", () => {
       "committed:start_compensation",
       "compensation_started:complete_compensation",
       "compensation_started:mark_compensation_unknown",
+      "compensation_unknown:start_compensation",
+      "compensation_unknown:complete_compensation",
+      "compensation_unknown:mark_compensation_unknown",
     ]);
 
     for (const state of states) {

@@ -1,6 +1,7 @@
 import {
   createSyncCoordinator,
   SyncCoordinator,
+  type SyncAllStopReason,
 } from "./ticketSync/syncCoordinator";
 import {
   createTicketSyncService,
@@ -24,11 +25,16 @@ export type CommentSyncOutcome =
 
 export type SyncEngineOutcome = TicketSyncOutcome | CommentSyncOutcome | SyncOutcome;
 
+export interface SyncAllEngineOptions {
+  shouldContinue?: () => boolean;
+}
+
 export type SyncAllEngineOutcome = {
   plan: SyncEngineKey[];
   results: Array<{ key: SyncEngineKey; outcome: SyncEngineOutcome }>;
   remaining: SyncEngineKey[];
   cancelled: boolean;
+  stopReason: SyncAllStopReason;
 };
 
 export interface SyncEngineDependencies {
@@ -128,10 +134,13 @@ export class SyncEngine {
     }) as any;
   }
 
-  public async syncAll(context: SyncContext): Promise<SyncAllEngineOutcome> {
+  public async syncAll(context: SyncContext, options?: SyncAllEngineOptions): Promise<SyncAllEngineOutcome> {
     const outcome = await this.coordinator.syncAll(context, {
+      shouldContinue: options?.shouldContinue,
       deps: {
         comment: this.comments,
+        ticketCreate: this.rawTicketDeps,
+        ticketUpdate: this.rawTicketDeps,
       },
     });
     return {
@@ -139,6 +148,7 @@ export class SyncEngine {
       results: outcome.results as any,
       remaining: outcome.remaining as any,
       cancelled: outcome.cancelled,
+      stopReason: outcome.stopReason,
     };
   }
 }

@@ -37,7 +37,11 @@ import {
   type OfflineNewTicket,
   type OfflineTicketUpdate,
 } from "../../views/offlineSyncStore";
-import { buildTicketEditorContent, parseTicketEditorContent } from "../../views/ticketEditorContent";
+import {
+  parseTicketEditorContent,
+  buildTicketEditorContent,
+  type TicketEditorContent,
+} from "../../views/ticketEditorContent";
 
 export interface SyncOperationRepository {
   getOperation<I extends SyncIntent = SyncIntent>(key: SyncOperationKey, scope: string): UnifiedSyncOperation<I> | undefined;
@@ -135,20 +139,39 @@ export const toUnifiedOperationFromNewTicket = (
   ticket: OfflineNewTicket,
   scope: string,
 ): UnifiedSyncOperation<TicketCreateIntent> => {
-  const parsed = ticket.content
-    ? parseTicketEditorContent(ticket.content, {
+  let parsed: TicketEditorContent | undefined;
+  if (ticket.content) {
+    try {
+      parsed = parseTicketEditorContent(ticket.content, {
         allowMissingMetadata: true,
         allowMissingSubject: true,
         fallbackMetadata: { tracker: "", priority: "", status: "", due_date: "", children: [] },
-      })
-    : undefined;
-  const nextParsed = ticket.nextIntent?.content
-    ? parseTicketEditorContent(ticket.nextIntent.content, {
+      });
+    } catch {
+      parsed = {
+        subject: (ticket as any).subject ?? "",
+        description: ticket.content,
+        metadata: (ticket as any).metadata ?? { tracker: "", priority: "", status: "", due_date: "", children: [] },
+      };
+    }
+  }
+
+  let nextParsed: TicketEditorContent | undefined;
+  if (ticket.nextIntent?.content) {
+    try {
+      nextParsed = parseTicketEditorContent(ticket.nextIntent.content, {
         allowMissingMetadata: true,
         allowMissingSubject: true,
         fallbackMetadata: { tracker: "", priority: "", status: "", due_date: "", children: [] },
-      })
-    : undefined;
+      });
+    } catch {
+      nextParsed = {
+        subject: (ticket.nextIntent as any).subject ?? "",
+        description: ticket.nextIntent.content,
+        metadata: (ticket.nextIntent as any).metadata ?? { tracker: "", priority: "", status: "", due_date: "", children: [] },
+      };
+    }
+  }
 
   const rawPhase = ticket.phase ?? "queued";
   const phase: GenericSyncPhase = rawPhase === "remote_created" ? "remote_committed" : (rawPhase as GenericSyncPhase);

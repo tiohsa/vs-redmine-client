@@ -25,10 +25,13 @@ import {
 } from "./syncOperationTypes";
 import type { SyncContext } from "./ports";
 
+export type SyncAllStopReason = "completed" | "user_cancelled" | "blocked_by_recovery" | "failed";
+
 export interface SyncCoordinatorOptions {
   deps?: OperationHandlerDeps;
   applyContent?: (editor: vscode.TextEditor, content: string) => Promise<void>;
   runInConnectionScope?: <T>(scope: string, operation: () => Promise<T>) => Promise<T>;
+  shouldContinue?: () => boolean;
 }
 
 export interface SyncCoordinatorDependencies {
@@ -46,6 +49,7 @@ export interface SyncAllCoordinatorOutcome {
   results: Array<{ key: SyncOperationKey; outcome: SyncOutcome }>;
   remaining: SyncOperationKey[];
   cancelled: boolean;
+  stopReason: SyncAllStopReason;
 }
 
 export class SyncCoordinator {
@@ -929,7 +933,11 @@ export class SyncCoordinator {
       const assumed = await this.repository.transitionEffect(
         input.key,
         input.effectId,
-        { kind: "assume_committed", remoteId: input.resolution.remoteId } as any,
+        {
+          kind: "assume_committed",
+          remoteId: input.resolution.remoteId,
+          token: input.resolution.token,
+        },
         scope,
         { sourceState: effect.state },
       );
@@ -941,7 +949,12 @@ export class SyncCoordinator {
     }
 
     // retry_effect
-    if (isPrimaryEffect) {
+    const isPrimaryMutationRetry =
+      isPrimaryEffect &&
+      effect.state !== "compensation_unknown" &&
+      effect.state !== "compensation_started";
+
+    if (isPrimaryMutationRetry) {
       // Primary mutation の retry は resolveCommitUnknown(retry_remote_write) に委譲
       return this.resolveCommitUnknown({
         key: input.key,
@@ -952,7 +965,7 @@ export class SyncCoordinator {
     }
 
     // Secondary effect (attachment/image/child) の retry
-    if (effect.state !== "commit_unknown" && effect.state !== "failed") {
+    if (effect.state !== "commit_unknown" && effect.state !== "failed" && effect.state !== "compensation_unknown" && effect.state !== "compensation_started") {
       return {
         kind: "failed_before_commit",
         error: new Error(`Effect ${input.effectId} is in state "${effect.state}", expected "commit_unknown" or "failed" for retry`),
@@ -986,22 +999,33 @@ export class SyncCoordinator {
     const results: Array<{ key: SyncOperationKey; outcome: SyncOutcome }> = [];
     const remaining: SyncOperationKey[] = [];
     let cancelled = false;
+    let stopReason: SyncAllStopReason = "completed";
 
-    for (const key of plan) {
-      if (cancelled) {
-        remaining.push(key);
-        continue;
+    for (let i = 0; i < plan.length; i++) {
+      const key = plan[i];
+      if (options.shouldContinue && !options.shouldContinue()) {
+        cancelled = true;
+        stopReason = "user_cancelled";
+        remaining.push(...plan.slice(i));
+        break;
       }
       try {
         const outcome = await this.sync(key, context, options);
         results.push({ key, outcome });
-        if (outcome.kind === "commit_unknown" || outcome.kind === "failed_before_commit") {
-          // エラーまたは未知時は後続の処理をキャンセル
-          cancelled = true;
+        if (outcome.kind === "commit_unknown") {
+          stopReason = "blocked_by_recovery";
+          remaining.push(...plan.slice(i + 1));
+          break;
+        } else if (outcome.kind === "failed_before_commit") {
+          stopReason = "failed";
+          remaining.push(...plan.slice(i + 1));
+          break;
         }
       } catch (err) {
         results.push({ key, outcome: { kind: "failed_before_commit", error: err as Error } });
-        cancelled = true;
+        stopReason = "failed";
+        remaining.push(...plan.slice(i + 1));
+        break;
       }
     }
 
@@ -1010,6 +1034,7 @@ export class SyncCoordinator {
       results,
       remaining,
       cancelled,
+      stopReason,
     };
   }
 }
