@@ -183,6 +183,17 @@ export interface OperationHandler<TIntent extends SyncIntent = any, TPrepared = 
     context: OperationHandlerContext,
     deps?: OperationHandlerDeps,
   ): Promise<{ ok: true } | { ok: false; message: string; pending: "local_finalize" }>;
+  /**
+   * INV-N13: effectId単位でPrimary mutationから独立してSecondary Effect recoveryを実行する。
+   * attachment/image/child effect の retry_effect をサポートする Handler が実装する。
+   */
+  resolveEffect?(input: {
+    key: SyncOperationKey;
+    effectId: string;
+    operation: UnifiedSyncOperation;
+    context: OperationHandlerContext;
+    deps: OperationHandlerDeps & { repository: SyncOperationRepository };
+  }): Promise<SyncOutcome>;
 }
 
 export type PreparedTicketCreate = {
@@ -682,76 +693,93 @@ export class TicketCreateHandler implements OperationHandler<TicketCreateIntent,
             const opAfterFail = repo.getOperation(opKey, context.connectionScope) ?? operation;
             const prevEffect = opAfterFail.effects?.find((e) => e.effectId === prevEffectId);
             if (prevEffect && prevEffect.state === "committed" && prevEffect.remoteId) {
-              try {
-                const startComp = await repo.transitionEffect(
-                  opKey,
-                  prevEffectId,
-                  { kind: "start_compensation" },
-                  context.connectionScope,
-                  { operationRevision: revision, sourceState: "committed" },
-                );
-                if (startComp) {
-                  try {
-                    await createDeps.deleteIssue?.(prevEffect.remoteId);
-                    await repo.transitionEffect(
-                      opKey,
-                      prevEffectId,
-                      { kind: "complete_compensation" },
-                      context.connectionScope,
-                      { operationRevision: revision, sourceState: "compensation_started" },
-                    );
-                  } catch (delErr) {
-                    await repo.transitionEffect(
-                      opKey,
-                      prevEffectId,
-                      { kind: "mark_compensation_unknown", detail: (delErr as Error).message },
-                      context.connectionScope,
-                      { operationRevision: revision, sourceState: "compensation_started" },
-                    );
-                  }
-                }
-              } catch {
-                // Ignore checkpoint failure to preserve committed child
-              }
-            }
-          }
-
-          // 親チケットの補償
-          const opAfterChildren = repo.getOperation(opKey, context.connectionScope) ?? operation;
-          const parentEffect = opAfterChildren.effects?.find((e) => e.effectId === "ticket-create");
-          if (parentEffect && parentEffect.state === "committed" && parentEffect.remoteId) {
-            try {
-              const startParentComp = await repo.transitionEffect(
+              // 子チケット補償 (fail-closed: start_compensation 失敗ならDELETEしない)
+              const startComp = await repo.transitionEffect(
                 opKey,
-                "ticket-create",
+                prevEffectId,
                 { kind: "start_compensation" },
                 context.connectionScope,
                 { operationRevision: revision, sourceState: "committed" },
               );
-              if (startParentComp) {
+              if (startComp) {
                 try {
-                  await createDeps.deleteIssue?.(parentEffect.remoteId);
-                  operation.createdRemoteId = undefined;
-                  await repo.transitionEffect(
+                  await createDeps.deleteIssue?.(prevEffect.remoteId);
+                  const childCompResult = await repo.transitionEffect(
                     opKey,
-                    "ticket-create",
+                    prevEffectId,
                     { kind: "complete_compensation" },
                     context.connectionScope,
                     { operationRevision: revision, sourceState: "compensation_started" },
                   );
-                } catch (parentDelErr) {
+                  if (!childCompResult) {
+                    // persistence failure: compensation_unknown として保持
+                    await repo.transitionEffect(
+                      opKey,
+                      prevEffectId,
+                      { kind: "mark_compensation_unknown", detail: "complete_compensation persistence failed after child DELETE" },
+                      context.connectionScope,
+                      { operationRevision: revision, sourceState: "compensation_started" },
+                    );
+                  }
+                } catch (delErr) {
                   await repo.transitionEffect(
                     opKey,
-                    "ticket-create",
-                    { kind: "mark_compensation_unknown", detail: (parentDelErr as Error).message },
+                    prevEffectId,
+                    { kind: "mark_compensation_unknown", detail: (delErr as Error).message },
                     context.connectionScope,
                     { operationRevision: revision, sourceState: "compensation_started" },
                   );
                 }
               }
-            } catch {
-              // Ignore checkpoint failure
+              // start_compensation 失敗時はDELETEしない（fail-closed）
             }
+          }
+
+          // 親チケットの補償 (fail-closed: INV-N12, INV-N15)
+          const opAfterChildren = repo.getOperation(opKey, context.connectionScope) ?? operation;
+          const parentEffect = opAfterChildren.effects?.find((e) => e.effectId === "ticket-create");
+          if (parentEffect && parentEffect.state === "committed" && parentEffect.remoteId) {
+            // DELETE前: start_compensation checkpoint 失敗ならDELETEしない
+            const startParentComp = await repo.transitionEffect(
+              opKey,
+              "ticket-create",
+              { kind: "start_compensation" },
+              context.connectionScope,
+              { operationRevision: revision, sourceState: "committed" },
+            );
+            if (startParentComp) {
+              try {
+                await createDeps.deleteIssue?.(parentEffect.remoteId);
+                // DELETE成功後: complete_compensation の persistence failure は compensation_unknown 相当
+                // createdRemoteId = undefined は transitionEffect 内でatomicに処理されるため不要
+                const compResult = await repo.transitionEffect(
+                  opKey,
+                  "ticket-create",
+                  { kind: "complete_compensation" },
+                  context.connectionScope,
+                  { operationRevision: revision, sourceState: "compensation_started" },
+                );
+                if (!compResult) {
+                  // persistence failure: compensation_unknown として保持 (safe-side)
+                  await repo.transitionEffect(
+                    opKey,
+                    "ticket-create",
+                    { kind: "mark_compensation_unknown", detail: "complete_compensation persistence failed after DELETE" },
+                    context.connectionScope,
+                    { operationRevision: revision, sourceState: "compensation_started" },
+                  );
+                }
+              } catch (parentDelErr) {
+                await repo.transitionEffect(
+                  opKey,
+                  "ticket-create",
+                  { kind: "mark_compensation_unknown", detail: (parentDelErr as Error).message },
+                  context.connectionScope,
+                  { operationRevision: revision, sourceState: "compensation_started" },
+                );
+              }
+            }
+            // start_compensation 失敗時はDELETEしない（fail-closed）
           }
         }
 

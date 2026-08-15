@@ -3,6 +3,24 @@ import type {
   GenericSyncPhase,
   UnifiedSyncOperation,
 } from "./syncOperationTypes";
+import type { DurableSyncEffect } from "../syncEffects";
+
+/**
+ * abort/retry rollback時にdurableなSecondary Effectを保持するフィルター (INV-N11)
+ * committed/commit_unknown/compensation_* は次回retry時に再利用可能なため保持する。
+ * Primaryがcommit前にabortする場合でも、アップロード済みtoken等を失わない。
+ */
+export const retainDurableEffectsForRetry = (
+  effects: DurableSyncEffect[],
+): DurableSyncEffect[] =>
+  effects.filter(
+    (e) =>
+      e.state === "committed" ||
+      e.state === "commit_unknown" ||
+      e.state === "compensation_started" ||
+      e.state === "compensation_unknown",
+  );
+
 
 /**
  * 許可される状態遷移テーブル (INV-04, INV-09, INV-10, INV-11)
@@ -138,7 +156,9 @@ export const applyGenericTransition = (
       next.phase = "queued";
       next.createdRemoteId = undefined;
       next.createdChildIds = undefined;
-      next.effects = [];
+      // INV-N11: committed/commit_unknown/compensation_* なSecondary Effectは保持する
+      // Primary未commitでもアップロード済みtoken等を失わない
+      next.effects = retainDurableEffectsForRetry(next.effects ?? []);
       if (next.nextIntent) {
         next.intent = next.nextIntent;
         next.nextIntent = undefined;
@@ -168,7 +188,8 @@ export const applyGenericTransition = (
       next.phase = "queued";
       next.createdRemoteId = undefined;
       next.createdChildIds = undefined;
-      next.effects = [];
+      // INV-N11: committed/commit_unknown/compensation_* なSecondary Effectは保持する
+      next.effects = retainDurableEffectsForRetry(next.effects ?? []);
       if (next.nextIntent) {
         // 次の intent があれば昇格 (INV-07)
         next.intent = next.nextIntent;

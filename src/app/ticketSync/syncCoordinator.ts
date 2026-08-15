@@ -112,9 +112,19 @@ export class SyncCoordinator {
         e.kind === "comment_update" ||
         (typeof e.effectId === "string" && (e.effectId.startsWith("ticket-") || e.effectId.startsWith("comment-"))),
     );
-    const isParentCommitted = operation.kind === "ticket_create"
-      ? (primary?.state === "committed" || (operation.createdRemoteId !== undefined && operation.createdRemoteId > 0 && operation.phase !== "queued" && operation.phase !== "preparing"))
-      : (primary?.state === "committed");
+    // INV-N12: compensated な Primary Effect は committed として誤判定しない
+    const isPrimaryCompensated = primary?.state === "compensated";
+    const isParentCommitted = !isPrimaryCompensated && (
+      operation.kind === "ticket_create"
+        ? (primary?.state === "committed" || (
+            primary === undefined &&  // legacy entry: effects記録なし
+            operation.createdRemoteId !== undefined &&
+            operation.createdRemoteId > 0 &&
+            operation.phase !== "queued" &&
+            operation.phase !== "preparing"
+          ))
+        : (primary?.state === "committed")
+    );
 
     if (hasUnresolvedChildEffect && isParentCommitted) {
       const committedParentId = operation.createdRemoteId ?? primary?.remoteId ?? operation.ticketId ?? 0;
@@ -404,9 +414,17 @@ export class SyncCoordinator {
           : { kind: "mark_local_finalize_pending", canonical: reconcileCanonical },
         scope,
       );
-      if (finalizeOp) {
-        currentOp = finalizeOp;
+      if (!finalizeOp) {
+        // INV-N10: Reconciliation→Finalize間のcheckpointが失敗したら completed を返さない
+        return {
+          kind: "remote_committed",
+          ticketId: currentOp.createdRemoteId ?? currentOp.ticketId ?? 0,
+          commentId: currentOp.commentId,
+          pending: "remote_reconcile",
+          message: "Failed to persist reconciliation checkpoint (record_reconciled_identity or mark_local_finalize_pending)",
+        };
       }
+      currentOp = finalizeOp;
     }
 
     // Step C: Local Finalize (local_finalize_pending からの再開または後続)
@@ -447,10 +465,13 @@ export class SyncCoordinator {
       };
     }
 
+    // INV-N10: どのphaseにも到達しなかった場合はsafe-sideへ倒す（completed は絶対に返さない）
     return {
-      kind: "completed",
+      kind: "remote_committed",
       ticketId: currentOp.createdRemoteId ?? currentOp.ticketId ?? 0,
       commentId: currentOp.commentId,
+      pending: "remote_reconcile",
+      message: `Unexpected phase after sync lifecycle: ${currentOp.phase}`,
     };
   }
 
@@ -525,7 +546,12 @@ export class SyncCoordinator {
             e.effectId === "comment-create" ||
             e.effectId === "comment-update",
         );
-        const isPrimaryCommitted = primaryEffect?.state === "committed" || (freshOp.createdRemoteId !== undefined && freshOp.createdRemoteId > 0);
+        // INV-N12: compensated は committed として誤判定しない
+        // primaryEffect.state が "committed" の場合、"compensated" には同時になれないため、
+        // legacy fallback (effects未記録) のみ createdRemoteId を使う
+        const isPrimaryCommitted =
+          primaryEffect?.state === "committed" ||
+          (primaryEffect === undefined && freshOp.createdRemoteId !== undefined && freshOp.createdRemoteId > 0);
         if (isPrimaryCommitted) {
           return {
             kind: "remote_committed",
@@ -831,6 +857,126 @@ export class SyncCoordinator {
     } finally {
       this.inFlight.delete(flightKey);
     }
+  }
+
+  /**
+   * INV-N13: Secondary Effect recovery — effectId単位でPrimary mutationとは独立してrecoveryを実行する。
+   *
+   * resolution:
+   *   retry_effect      — commit_unknown/failed なEffectを再試行（attachmentはupload再実行、childはcreateIssue再実行）
+   *   assume_committed  — EffectをcommittedとみなしてremoteId/tokenをセット
+   *   mark_failed       — Effectをfailedとしてマークし、次回syncでplanし直せるようにする
+   */
+  public async resolveEffect(input: {
+    key: SyncOperationKey;
+    effectId: string;
+    context: SyncContext;
+    resolution:
+      | { kind: "retry_effect" }
+      | { kind: "assume_committed"; remoteId?: number; token?: string }
+      | { kind: "mark_failed" };
+    deps?: OperationHandlerDeps;
+  }): Promise<SyncOutcome> {
+    const scope = input.context.connectionScope;
+    const op = this.repository.getOperation(input.key, scope);
+    if (!op) {
+      return {
+        kind: "failed_before_commit",
+        error: new Error(`Operation not found for effect resolution: key=${JSON.stringify(input.key)}, effectId=${input.effectId}`),
+      };
+    }
+
+    const effect = (op.effects ?? []).find((e) => e.effectId === input.effectId);
+    if (!effect) {
+      return {
+        kind: "failed_before_commit",
+        error: new Error(`Effect not found: effectId=${input.effectId} in operation ${op.operationId}`),
+      };
+    }
+
+    // Primary effect (ticket/comment CRUD) は resolveCommitUnknown に委譲
+    const isPrimaryEffect =
+      input.effectId === "ticket-create" ||
+      input.effectId === "ticket-update" ||
+      input.effectId === "comment-create" ||
+      input.effectId === "comment-update";
+
+    if (input.resolution.kind === "mark_failed") {
+      if (effect.state === "failed") {
+        // すでに failed ならfailed → planned への再計画は sync() 側で行う
+        return { kind: "remote_committed", ticketId: op.createdRemoteId ?? op.ticketId ?? 0, commentId: op.commentId, pending: "remote_reconcile", message: `Effect ${input.effectId} is already failed` };
+      }
+      const marked = await this.repository.transitionEffect(
+        input.key,
+        input.effectId,
+        { kind: "mark_failed", detail: "Manually marked as failed via resolveEffect" },
+        scope,
+        { sourceState: effect.state },
+      );
+      if (!marked) {
+        return { kind: "failed_before_commit", error: new Error(`Failed to mark effect as failed: ${input.effectId}`) };
+      }
+      return {
+        kind: "remote_committed",
+        ticketId: op.createdRemoteId ?? op.ticketId ?? 0,
+        commentId: op.commentId,
+        pending: "remote_reconcile",
+        message: `Effect ${input.effectId} marked as failed. It will be re-planned on next sync.`,
+      };
+    }
+
+    if (input.resolution.kind === "assume_committed") {
+      const assumed = await this.repository.transitionEffect(
+        input.key,
+        input.effectId,
+        { kind: "assume_committed", remoteId: input.resolution.remoteId } as any,
+        scope,
+        { sourceState: effect.state },
+      );
+      if (!assumed) {
+        return { kind: "failed_before_commit", error: new Error(`Failed to assume effect committed: ${input.effectId}`) };
+      }
+      // assume後にPrimary lifecycle を再評価するため sync() に委譲
+      return this.sync(input.key, input.context, { deps: input.deps });
+    }
+
+    // retry_effect
+    if (isPrimaryEffect) {
+      // Primary mutation の retry は resolveCommitUnknown(retry_remote_write) に委譲
+      return this.resolveCommitUnknown({
+        key: input.key,
+        context: input.context,
+        resolution: { kind: "retry_remote_write" },
+        deps: input.deps,
+      });
+    }
+
+    // Secondary effect (attachment/image/child) の retry
+    if (effect.state !== "commit_unknown" && effect.state !== "failed") {
+      return {
+        kind: "failed_before_commit",
+        error: new Error(`Effect ${input.effectId} is in state "${effect.state}", expected "commit_unknown" or "failed" for retry`),
+      };
+    }
+
+    const handler = this.handlers[op.kind];
+    const handlerCtx: OperationHandlerContext = { connectionScope: scope };
+    const depsWithRepo = { repository: this.repository, ...input.deps };
+
+    if (handler.resolveEffect) {
+      return handler.resolveEffect({
+        key: input.key,
+        effectId: input.effectId,
+        operation: op,
+        context: handlerCtx,
+        deps: depsWithRepo,
+      });
+    }
+
+    return {
+      kind: "failed_before_commit",
+      error: new Error(`Handler for "${op.kind}" does not support effect-specific recovery for effectId "${input.effectId}"`),
+    };
   }
 
   public async syncAll(context: SyncContext, options: SyncCoordinatorOptions = {}): Promise<SyncAllCoordinatorOutcome> {

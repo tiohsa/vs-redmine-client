@@ -304,13 +304,22 @@ export class DefaultSyncOperationRepository implements SyncOperationRepository {
     return operations;
   }
 
+  private runExclusive<T>(
+    scope: string,
+    fn: () => Promise<T>,
+  ): Promise<T> {
+    const prev = this.mutexByScope.get(scope) ?? Promise.resolve();
+    const next = prev.catch(() => undefined).then(fn);
+    this.mutexByScope.set(scope, next.catch(() => undefined) as Promise<unknown>);
+    return next;
+  }
+
   public async saveOperation(
     operation: UnifiedSyncOperation,
     scope: string,
     expectedPersistenceVersion?: number,
   ): Promise<UnifiedSyncOperation | undefined> {
-    const prevMutex = this.mutexByScope.get(scope) ?? Promise.resolve();
-    const task = prevMutex.catch(() => undefined).then(async () => {
+    return this.runExclusive(scope, async () => {
       const queue = getOfflineSyncQueue(scope);
       const key = operation.key ?? {
         kind: operation.kind === "ticket_create" ? "newTicket" : operation.kind === "comment_create" || operation.kind === "comment_update" ? "comment" : "ticket",
@@ -494,9 +503,6 @@ export class DefaultSyncOperationRepository implements SyncOperationRepository {
         return undefined;
       }
     });
-
-    this.mutexByScope.set(scope, task);
-    return task;
   }
 
   public async transitionOperation(
@@ -620,9 +626,12 @@ export class DefaultSyncOperationRepository implements SyncOperationRepository {
     const updated: UnifiedSyncOperation = {
       ...current,
       effects,
-      createdRemoteId: (nextEffect.kind === "ticket_create" && nextEffect.state === "committed" && nextEffect.remoteId !== undefined)
-        ? nextEffect.remoteId
-        : current.createdRemoteId,
+      createdRemoteId:
+        nextEffect.kind === "ticket_create" && nextEffect.state === "committed" && nextEffect.remoteId !== undefined
+          ? nextEffect.remoteId
+          : nextEffect.kind === "ticket_create" && nextEffect.state === "compensated"
+            ? undefined  // compensation完了時にatomicにcreatedRemoteIdを消去
+            : current.createdRemoteId,
     };
     try {
       return await this.saveOperation(updated, scope, current.version ?? current.persistenceVersion);
@@ -637,87 +646,89 @@ export class DefaultSyncOperationRepository implements SyncOperationRepository {
     expectedRevision?: number,
     completion?: { canonical?: any; remoteUpdatedAt?: string },
   ): Promise<boolean> {
-    const current = this.getOperation(key, scope);
-    const revision = expectedRevision ?? current?.revision ?? 1;
+    return this.runExclusive(scope, async () => {
+      const current = this.getOperation(key, scope);
+      const revision = expectedRevision ?? current?.revision ?? 1;
 
-    if (key.kind === "ticket") {
-      const rawCanonical = completion?.canonical;
-      const canonical = rawCanonical
-        ? (rawCanonical.ticket
-            ? {
-                subject: rawCanonical.ticket.subject,
-                description: rawCanonical.ticket.description,
-                metadata: rawCanonical.ticket.metadata ?? { tracker: rawCanonical.ticket.trackerName ?? "", priority: rawCanonical.ticket.priorityName ?? "", status: rawCanonical.ticket.statusName ?? "", due_date: "", children: [] },
-              }
-            : rawCanonical)
-        : (current ? {
-            subject: (current.intent as any)?.baseSubject ?? (current.intent as any)?.subject ?? "",
-            description: (current.intent as any)?.baseDescription ?? (current.intent as any)?.description ?? "",
-            metadata: (current.intent as any)?.baseMetadata ?? (current.intent as any)?.metadata ?? { tracker: "", priority: "", status: "", due_date: "", children: [] },
-          } : undefined);
-      return completeOfflineTicketUpdateAsync(
-        key.ticketId,
-        scope,
-        canonical ? { canonical, remoteUpdatedAt: completion?.remoteUpdatedAt ?? current?.remoteUpdatedAt ?? new Date().toISOString() } : undefined,
-        revision,
-      );
-    }
-    if (key.kind === "newTicket") {
-      let promotion: (OfflineTicketUpdate & { sourceRevision?: number }) | undefined = undefined;
-      const createdId = current?.createdRemoteId;
-      if (current?.nextIntent && createdId) {
-        const next = current.nextIntent as any;
-        const nextContent = typeof next.content === "string" ? next.content : (typeof next.description === "string" ? next.description : "");
-        let parsedNext: any;
-        try {
-          parsedNext = parseTicketEditorContent(nextContent, {
-            allowMissingMetadata: true,
-            fallbackMetadata: next.metadata ?? { tracker: "", priority: "", status: "", due_date: "", children: [] },
-            allowMissingSubject: true,
-          });
-        } catch {
-          parsedNext = next;
-        }
-        const canonicalSubject = completion?.canonical?.ticket?.subject ?? completion?.canonical?.subject ?? (current as any)?.canonical?.ticket?.subject ?? (current as any)?.canonical?.subject ?? "Canonical subject";
-        const canonicalDescription = completion?.canonical?.ticket?.description ?? completion?.canonical?.description ?? (current as any)?.canonical?.ticket?.description ?? (current as any)?.canonical?.description ?? (current.intent as any)?.description ?? "";
-        const canonicalMetadata = completion?.canonical?.ticket?.metadata ?? completion?.canonical?.metadata ?? (current as any)?.canonical?.ticket?.metadata ?? (current as any)?.canonical?.metadata ?? (current.intent as any)?.metadata ?? { tracker: "", priority: "", status: "", due_date: "", children: [] };
-
-        promotion = {
-          ticketId: createdId,
-          baseSubject: canonicalSubject,
-          baseDescription: canonicalDescription,
-          baseMetadata: canonicalMetadata,
-          lastKnownRemoteUpdatedAt: completion?.remoteUpdatedAt ?? current.remoteUpdatedAt ?? new Date().toISOString(),
-          subject: parsedNext.subject ?? next.subject ?? "",
-          description: parsedNext.description ?? next.description ?? "",
-          metadata: parsedNext.metadata ?? next.metadata ?? { tracker: "", priority: "", status: "", due_date: "", children: [] },
-          layout: parsedNext.layout ?? next.layout,
-          metadataBlock: parsedNext.metadataBlock ?? next.metadataBlock,
-          controlFields: parsedNext.controlFields ?? next.controlFields,
-          baseDir: next.baseDir,
-          documentUri: next.documentUri ?? current.documentUri,
-          operationId: current.operationId,
-          connectionScope: scope,
-          phase: "queued",
-          revision: next.revision ?? (current.revision ?? 0) + 1,
-          sourceRevision: next.revision,
-        };
+      if (key.kind === "ticket") {
+        const rawCanonical = completion?.canonical;
+        const canonical = rawCanonical
+          ? (rawCanonical.ticket
+              ? {
+                  subject: rawCanonical.ticket.subject,
+                  description: rawCanonical.ticket.description,
+                  metadata: rawCanonical.ticket.metadata ?? { tracker: rawCanonical.ticket.trackerName ?? "", priority: rawCanonical.ticket.priorityName ?? "", status: rawCanonical.ticket.statusName ?? "", due_date: "", children: [] },
+                }
+              : rawCanonical)
+          : (current ? {
+              subject: (current.intent as any)?.baseSubject ?? (current.intent as any)?.subject ?? "",
+              description: (current.intent as any)?.baseDescription ?? (current.intent as any)?.description ?? "",
+              metadata: (current.intent as any)?.baseMetadata ?? (current.intent as any)?.metadata ?? { tracker: "", priority: "", status: "", due_date: "", children: [] },
+            } : undefined);
+        return completeOfflineTicketUpdateAsync(
+          key.ticketId,
+          scope,
+          canonical ? { canonical, remoteUpdatedAt: completion?.remoteUpdatedAt ?? current?.remoteUpdatedAt ?? new Date().toISOString() } : undefined,
+          revision,
+        );
       }
-      return completeOfflineNewTicketAsync(
-        { queueId: key.queueId, documentUri: key.documentUri },
-        scope,
-        promotion,
-        revision,
-      );
-    }
-    if (key.kind === "comment") {
-      return completeOfflineCommentAsync(
-        { commentId: key.commentId, documentUri: key.documentUri, ticketId: key.ticketId },
-        scope,
-        revision,
-      );
-    }
-    return true;
+      if (key.kind === "newTicket") {
+        let promotion: (OfflineTicketUpdate & { sourceRevision?: number }) | undefined = undefined;
+        const createdId = current?.createdRemoteId;
+        if (current?.nextIntent && createdId) {
+          const next = current.nextIntent as any;
+          const nextContent = typeof next.content === "string" ? next.content : (typeof next.description === "string" ? next.description : "");
+          let parsedNext: any;
+          try {
+            parsedNext = parseTicketEditorContent(nextContent, {
+              allowMissingMetadata: true,
+              fallbackMetadata: next.metadata ?? { tracker: "", priority: "", status: "", due_date: "", children: [] },
+              allowMissingSubject: true,
+            });
+          } catch {
+            parsedNext = next;
+          }
+          const canonicalSubject = completion?.canonical?.ticket?.subject ?? completion?.canonical?.subject ?? (current as any)?.canonical?.ticket?.subject ?? (current as any)?.canonical?.subject ?? "Canonical subject";
+          const canonicalDescription = completion?.canonical?.ticket?.description ?? completion?.canonical?.description ?? (current as any)?.canonical?.ticket?.description ?? (current as any)?.canonical?.description ?? (current.intent as any)?.description ?? "";
+          const canonicalMetadata = completion?.canonical?.ticket?.metadata ?? completion?.canonical?.metadata ?? (current as any)?.canonical?.ticket?.metadata ?? (current as any)?.canonical?.metadata ?? (current.intent as any)?.metadata ?? { tracker: "", priority: "", status: "", due_date: "", children: [] };
+
+          promotion = {
+            ticketId: createdId,
+            baseSubject: canonicalSubject,
+            baseDescription: canonicalDescription,
+            baseMetadata: canonicalMetadata,
+            lastKnownRemoteUpdatedAt: completion?.remoteUpdatedAt ?? current.remoteUpdatedAt ?? new Date().toISOString(),
+            subject: parsedNext.subject ?? next.subject ?? "",
+            description: parsedNext.description ?? next.description ?? "",
+            metadata: parsedNext.metadata ?? next.metadata ?? { tracker: "", priority: "", status: "", due_date: "", children: [] },
+            layout: parsedNext.layout ?? next.layout,
+            metadataBlock: parsedNext.metadataBlock ?? next.metadataBlock,
+            controlFields: parsedNext.controlFields ?? next.controlFields,
+            baseDir: next.baseDir,
+            documentUri: next.documentUri ?? current.documentUri,
+            operationId: current.operationId,
+            connectionScope: scope,
+            phase: "queued",
+            revision: next.revision ?? (current.revision ?? 0) + 1,
+            sourceRevision: next.revision,
+          };
+        }
+        return completeOfflineNewTicketAsync(
+          { queueId: key.queueId, documentUri: key.documentUri },
+          scope,
+          promotion,
+          revision,
+        );
+      }
+      if (key.kind === "comment") {
+        return completeOfflineCommentAsync(
+          { commentId: key.commentId, documentUri: key.documentUri, ticketId: key.ticketId },
+          scope,
+          revision,
+        );
+      }
+      return true;
+    });
   }
 
   public async deleteOperation(key: SyncOperationKey, scope: string): Promise<boolean> {

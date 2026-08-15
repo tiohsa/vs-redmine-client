@@ -1518,12 +1518,19 @@ export const completeOfflineNewTicketAsync = async (
       return false;
     }
   }
-  queue.newTickets.splice(index, 1);
+  // persist-first: まず next snapshotを構築してから永続化
+  const nextNewTickets = queue.newTickets.filter((_, i) => i !== index);
+  const nextTickets = new Map(queue.tickets);
   if (promotion) {
     const { sourceRevision: _sourceRevision, ...ticketUpdate } = promotion;
-    queue.tickets.set(promotion.ticketId, ticketUpdate);
+    nextTickets.set(promotion.ticketId, ticketUpdate);
   }
-  await persistAsync(scope);
+  const nextQueue: OfflineSyncQueue = { ...queue, newTickets: nextNewTickets, tickets: nextTickets };
+  try {
+    await replaceOfflineSyncQueueAsync(nextQueue, scope);
+  } catch {
+    return false;  // persist失敗時にmemoryを変更しない
+  }
   return true;
 };
 
@@ -1730,10 +1737,12 @@ export const completeOfflineTicketUpdateAsync = async (
   if (expectedRevision !== undefined && current.revision !== expectedRevision) {
     return false;
   }
+  // next snapshotを構築
+  const nextTickets = new Map(queue.tickets);
   if (current.nextIntent) {
     const next = current.nextIntent;
     const canonical = completion?.canonical;
-    queue.tickets.set(ticketId, {
+    nextTickets.set(ticketId, {
       ticketId,
       baseSubject: canonical?.subject ?? current.baseSubject,
       baseDescription: canonical?.description ?? current.baseDescription,
@@ -1753,9 +1762,14 @@ export const completeOfflineTicketUpdateAsync = async (
       revision: next.revision ?? (current.revision ?? 0) + 1,
     });
   } else {
-    queue.tickets.delete(ticketId);
+    nextTickets.delete(ticketId);
   }
-  await persistAsync(scope);
+  const nextQueue: OfflineSyncQueue = { ...queue, tickets: nextTickets };
+  try {
+    await replaceOfflineSyncQueueAsync(nextQueue, scope);
+  } catch {
+    return false;
+  }
   return true;
 };
 
@@ -1925,12 +1939,16 @@ export const completeOfflineCommentAsync = async (
   if (index === -1) { return true; }
   const current = queue.comments[index];
   if (current.revision !== expectedRevision) { return false; }
-  if (current.nextIntent) {
-    queue.comments[index] = promoteCommentIntent(current);
-  } else {
-    queue.comments.splice(index, 1);
+  // next snapshotを構築
+  const nextComments = current.nextIntent
+    ? queue.comments.map((c, i) => i === index ? promoteCommentIntent(c) : c)
+    : queue.comments.filter((_, i) => i !== index);
+  const nextQueue: OfflineSyncQueue = { ...queue, comments: nextComments };
+  try {
+    await replaceOfflineSyncQueueAsync(nextQueue, scope);
+  } catch {
+    return false;
   }
-  await persistAsync(scope);
   return true;
 };
 

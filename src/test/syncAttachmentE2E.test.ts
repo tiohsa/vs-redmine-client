@@ -25,16 +25,27 @@ suite("RT-A: Attachment E2E Pipeline (syncAttachmentE2E.test.ts)", () => {
       const op = this.getOperation(key, scope);
       if (!op) {return undefined;}
       let nextPhase = op.phase;
+      let updatedFields: Partial<UnifiedSyncOperation> = {};
       if (action.kind === "begin_preparation") {nextPhase = "preparing";}
       if (action.kind === "start_normal_remote_write") {nextPhase = "remote_write_started";}
       if (action.kind === "record_remote_commit") {
         nextPhase = "remote_committed";
-        op.createdRemoteId = action.createdRemoteId;
+        updatedFields.createdRemoteId = action.createdRemoteId;
       }
       if (action.kind === "mark_reconciliation_pending") {nextPhase = "reconciliation_pending";}
       if (action.kind === "mark_local_finalize_pending") {nextPhase = "local_finalize_pending";}
+      if (action.kind === "record_reconciled_identity") {
+        // record_reconciled_identity → local_finalize_pending (INV-N10 checkpoint)
+        nextPhase = "local_finalize_pending";
+        if (action.remoteId !== undefined) {
+          updatedFields.createdRemoteId = action.remoteId;
+        }
+        if (action.remoteUpdatedAt !== undefined) {
+          updatedFields.remoteUpdatedAt = action.remoteUpdatedAt;
+        }
+      }
       if (action.kind === "complete") {nextPhase = "completed";}
-      const updated = { ...op, phase: nextPhase, version: (op.version ?? 1) + 1 };
+      const updated = { ...op, ...updatedFields, phase: nextPhase, version: (op.version ?? 1) + 1 };
       this.ops.set(op.operationId, updated);
       return updated;
     }
