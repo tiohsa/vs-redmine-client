@@ -150,12 +150,15 @@ export const toUnifiedOperationFromNewTicket = (
       })
     : undefined;
 
+  const rawPhase = ticket.phase ?? "queued";
+  const phase: GenericSyncPhase = rawPhase === "remote_created" ? "remote_committed" : (rawPhase as GenericSyncPhase);
+
   return {
     operationId: ticket.operationId ?? ticket.queueId ?? `${scope}:newTicket:${ticket.documentUri ?? ticket.projectId ?? "0"}`,
     kind: "ticket_create",
     key: { kind: "newTicket", queueId: ticket.queueId, documentUri: ticket.documentUri },
     connectionScope: scope,
-    phase: (ticket.phase ?? "queued") as GenericSyncPhase,
+    phase,
     revision: (ticket as any).intentRevision ?? (ticket.revision !== undefined && ticket.revision > 0 ? ticket.revision : 1),
     intentRevision: (ticket as any).intentRevision ?? (ticket.revision !== undefined && ticket.revision > 0 ? ticket.revision : 1),
     version: (ticket as any).version ?? (ticket as any).persistenceVersion ?? ticket.revision ?? 1,
@@ -213,7 +216,7 @@ export const toUnifiedOperationFromComment = (
   ticketId: comment.ticketId,
   commentId: comment.commentId,
   documentUri: comment.documentUri,
-  createdRemoteId: comment.commentId,
+  createdRemoteId: undefined,
   projectId: comment.remoteProjectId,
   effects: comment.effects,
   intent: (comment.commentId !== undefined ? {
@@ -697,7 +700,7 @@ export class DefaultSyncOperationRepository implements SyncOperationRepository {
           connectionScope: scope,
           phase: "queued",
           revision: next.revision ?? (current.revision ?? 0) + 1,
-          sourceRevision: next.revision ?? (current.revision ?? 0) + 1,
+          sourceRevision: next.revision,
         };
       }
       return completeOfflineNewTicketAsync(

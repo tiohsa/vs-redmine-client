@@ -459,6 +459,10 @@ export class TicketCreateHandler implements OperationHandler<TicketCreateIntent,
       queueId: operation.operationId,
       documentUri: operation.documentUri,
     };
+    const currentOp = repo.getOperation(opKey, context.connectionScope);
+    if (!currentOp) {
+      await repo.saveOperation(operation, context.connectionScope);
+    }
     const revision = operation.intentRevision ?? operation.revision ?? 1;
 
     let resolved: any = prepared.resolved;
@@ -482,7 +486,7 @@ export class TicketCreateHandler implements OperationHandler<TicketCreateIntent,
     let createdId = operation.createdRemoteId;
 
     if (!createdId) {
-      await repo.planEffect(
+      const planned = await repo.planEffect(
         opKey,
         {
           effectId: "ticket-create",
@@ -494,14 +498,30 @@ export class TicketCreateHandler implements OperationHandler<TicketCreateIntent,
         context.connectionScope,
         revision,
       );
+      if (!planned) {
+        return {
+          ok: false,
+          commitUnknown: false,
+          error: new Error("Failed to persist planned checkpoint for ticket-create"),
+          outcome: { kind: "failed_before_commit", error: new Error("Failed to persist planned checkpoint for ticket-create") },
+        };
+      }
 
-      await repo.transitionEffect(
+      const started = await repo.transitionEffect(
         opKey,
         "ticket-create",
         { kind: "start" },
         context.connectionScope,
         { operationRevision: revision, sourceState: "planned" },
       );
+      if (!started) {
+        return {
+          ok: false,
+          commitUnknown: false,
+          error: new Error("Failed to persist started checkpoint for ticket-create"),
+          outcome: { kind: "failed_before_commit", error: new Error("Failed to persist started checkpoint for ticket-create") },
+        };
+      }
 
       try {
         createdId = await createDeps.createIssue({
@@ -520,13 +540,21 @@ export class TicketCreateHandler implements OperationHandler<TicketCreateIntent,
           throw new Error("Failed to create issue");
         }
 
-        await repo.transitionEffect(
+        const committed = await repo.transitionEffect(
           opKey,
           "ticket-create",
           { kind: "commit", remoteId: createdId },
           context.connectionScope,
           { operationRevision: revision, sourceState: "started" },
         );
+        if (!committed) {
+          return {
+            ok: false,
+            commitUnknown: true,
+            error: new Error("Remote issue created but failed to persist commit checkpoint"),
+            outcome: { kind: "commit_unknown", operationId: operation.operationId, message: "Remote issue created but failed to persist commit checkpoint" },
+          };
+        }
       } catch (err) {
         const commitUnknown = isRemoteCommitUnknownError(err);
         await repo.transitionEffect(
@@ -573,7 +601,7 @@ export class TicketCreateHandler implements OperationHandler<TicketCreateIntent,
         };
       }
 
-      await repo.planEffect(
+      const planChild = await repo.planEffect(
         opKey,
         {
           effectId,
@@ -585,14 +613,28 @@ export class TicketCreateHandler implements OperationHandler<TicketCreateIntent,
         context.connectionScope,
         revision,
       );
+      if (!planChild) {
+        return {
+          ok: false,
+          commitUnknown: false,
+          error: new Error(`Failed to plan child effect ${effectId}`),
+        };
+      }
 
-      await repo.transitionEffect(
+      const startChild = await repo.transitionEffect(
         opKey,
         effectId,
         { kind: "start" },
         context.connectionScope,
         { operationRevision: revision, sourceState: "planned" },
       );
+      if (!startChild) {
+        return {
+          ok: false,
+          commitUnknown: false,
+          error: new Error(`Failed to start child effect ${effectId}`),
+        };
+      }
 
       try {
         const createdChildId = await createDeps.createIssue({
@@ -604,13 +646,27 @@ export class TicketCreateHandler implements OperationHandler<TicketCreateIntent,
         if (!createdChildId) {
           throw new Error(`Failed to create child issue: ${subject}`);
         }
-        await repo.transitionEffect(
+        const commitChild = await repo.transitionEffect(
           opKey,
           effectId,
           { kind: "commit", remoteId: createdChildId },
           context.connectionScope,
           { operationRevision: revision, sourceState: "started" },
         );
+        if (!commitChild) {
+          await repo.transitionEffect(
+            opKey,
+            effectId,
+            { kind: "mark_commit_unknown" },
+            context.connectionScope,
+            { operationRevision: revision, sourceState: "started" },
+          );
+          return {
+            ok: false,
+            commitUnknown: true,
+            error: new Error(`Child issue created but failed to persist commit checkpoint for ${effectId}`),
+          };
+        }
       } catch (err) {
         const commitUnknown = isRemoteCommitUnknownError(err);
         await repo.transitionEffect(
@@ -660,6 +716,7 @@ export class TicketCreateHandler implements OperationHandler<TicketCreateIntent,
             }
           }
 
+          // 親チケットの補償
           const opAfterChildren = repo.getOperation(opKey, context.connectionScope) ?? operation;
           const parentEffect = opAfterChildren.effects?.find((e) => e.effectId === "ticket-create");
           if (parentEffect && parentEffect.state === "committed" && parentEffect.remoteId) {
@@ -674,6 +731,7 @@ export class TicketCreateHandler implements OperationHandler<TicketCreateIntent,
               if (startParentComp) {
                 try {
                   await createDeps.deleteIssue?.(parentEffect.remoteId);
+                  operation.createdRemoteId = undefined;
                   await repo.transitionEffect(
                     opKey,
                     "ticket-create",
@@ -1097,75 +1155,81 @@ export class TicketUpdateHandler implements OperationHandler<TicketUpdateIntent,
       await repo.saveOperation(operation, context.connectionScope);
     }
 
-    const planned = await repo.planEffect(
-      opKey,
-      {
-        effectId: "ticket-update",
-        kind: "ticket_update",
-        operationRevision: revision,
-        state: "planned",
-        target: { ticketId },
-      },
-      context.connectionScope,
-      revision,
-    );
-    if (!planned) {
-      return {
-        ok: false,
-        commitUnknown: false,
-        error: new Error("Failed to persist planned checkpoint for ticket-update"),
-      };
-    }
-
-    const started = await repo.transitionEffect(
-      opKey,
-      "ticket-update",
-      { kind: "start" },
-      context.connectionScope,
-      { operationRevision: revision, sourceState: "planned" },
-    );
-    if (!started) {
-      return {
-        ok: false,
-        commitUnknown: false,
-        error: new Error("Failed to persist started checkpoint for ticket-update"),
-      };
-    }
-
-    // 1. Primary PUT
-    try {
-      if (Object.keys(prepared.changes).length > 0) {
-        await saveDeps.updateIssue({ issueId: ticketId, fields: prepared.changes });
-      }
-
-      const committed = await repo.transitionEffect(
+    const existingPrimaryEffect = (currentOp?.effects ?? operation.effects ?? []).find((e) => e.effectId === "ticket-update");
+    if (!existingPrimaryEffect || existingPrimaryEffect.state !== "committed") {
+      const planned = await repo.planEffect(
         opKey,
-        "ticket-update",
-        { kind: "commit", remoteId: ticketId },
+        {
+          effectId: "ticket-update",
+          kind: "ticket_update",
+          operationRevision: revision,
+          state: "planned",
+          target: { ticketId },
+        },
         context.connectionScope,
-        { operationRevision: revision, sourceState: "started" },
+        revision,
       );
-      if (!committed) {
+      if (!planned) {
         return {
           ok: false,
-          commitUnknown: true,
-          error: new Error("Remote updated but failed to record commit checkpoint"),
+          commitUnknown: false,
+          error: new Error("Failed to persist planned checkpoint for ticket-update"),
         };
       }
-    } catch (err) {
-      const commitUnknown = isRemoteCommitUnknownError(err);
-      await repo.transitionEffect(
+
+      const started = await repo.transitionEffect(
         opKey,
         "ticket-update",
-        commitUnknown ? { kind: "mark_commit_unknown" } : { kind: "mark_failed", detail: (err as Error).message },
+        { kind: "start" },
         context.connectionScope,
-        { operationRevision: revision, sourceState: "started" },
+        { operationRevision: revision, sourceState: "planned" },
       );
-      return {
-        ok: false,
-        commitUnknown,
-        error: err as Error,
-      };
+      if (!started) {
+        return {
+          ok: false,
+          commitUnknown: false,
+          error: new Error("Failed to persist started checkpoint for ticket-update"),
+        };
+      }
+
+      // 1. Primary PUT
+      try {
+        if (Object.keys(prepared.changes).length > 0) {
+          await saveDeps.updateIssue({ issueId: ticketId, fields: prepared.changes });
+        }
+
+        const committed = await repo.transitionEffect(
+          opKey,
+          "ticket-update",
+          { kind: "commit", remoteId: ticketId },
+          context.connectionScope,
+          { operationRevision: revision, sourceState: "started" },
+        );
+        if (!committed) {
+          return {
+            ok: false,
+            commitUnknown: true,
+            error: new Error("Remote updated but failed to record commit checkpoint"),
+          };
+        }
+      } catch (err) {
+        const commitUnknown = isRemoteCommitUnknownError(err);
+        await repo.transitionEffect(
+          opKey,
+          "ticket-update",
+          commitUnknown ? { kind: "mark_commit_unknown" } : { kind: "mark_failed", detail: (err as Error).message },
+          context.connectionScope,
+          { operationRevision: revision, sourceState: "started" },
+        );
+        return {
+          ok: false,
+          commitUnknown,
+          error: err as Error,
+          outcome: commitUnknown
+            ? { kind: "commit_unknown", operationId: operation.operationId, ticketId, message: (err as Error).message }
+            : { kind: "failed_before_commit", ticketId, error: err as Error },
+        };
+      }
     }
 
     // 2. Dependent Effects: Child issue creation (DR-02: After Primary Commit)
@@ -1244,13 +1308,27 @@ export class TicketUpdateHandler implements OperationHandler<TicketUpdateIntent,
           if (!createdChildId) {
             throw new Error(`Failed to create child issue: ${subject}`);
           }
-          await repo.transitionEffect(
+          const committedChild = await repo.transitionEffect(
             opKey,
             effectId,
             { kind: "commit", remoteId: createdChildId },
             context.connectionScope,
             { operationRevision: revision, sourceState: "started" },
           );
+          if (!committedChild) {
+            await repo.transitionEffect(
+              opKey,
+              effectId,
+              { kind: "mark_commit_unknown" },
+              context.connectionScope,
+              { operationRevision: revision, sourceState: "started" },
+            );
+            return {
+              ok: false,
+              commitUnknown: true,
+              error: new Error(`Child issue created but failed to persist commit checkpoint for ${effectId}`),
+            };
+          }
         } catch (err) {
           const commitUnknown = isRemoteCommitUnknownError(err);
           await repo.transitionEffect(
@@ -1760,7 +1838,7 @@ export class CommentCreateHandler implements OperationHandler<CommentCreateInten
     const opKey: SyncOperationKey = operation.key ?? { kind: "comment", ticketId: prepared.ticketId, documentUri: operation.documentUri };
     const revision = operation.intentRevision ?? operation.revision ?? 1;
 
-    await repo.planEffect(
+    const planned = await repo.planEffect(
       opKey,
       {
         effectId: "comment-create",
@@ -1772,14 +1850,30 @@ export class CommentCreateHandler implements OperationHandler<CommentCreateInten
       context.connectionScope,
       revision,
     );
+    if (!planned) {
+      return {
+        ok: false,
+        commitUnknown: false,
+        error: new Error("Failed to persist planned checkpoint for comment-create"),
+        outcome: { kind: "failed_before_commit", ticketId: prepared.ticketId, error: new Error("Failed to persist planned checkpoint for comment-create") },
+      };
+    }
 
-    await repo.transitionEffect(
+    const started = await repo.transitionEffect(
       opKey,
       "comment-create",
       { kind: "start" },
       context.connectionScope,
       { operationRevision: revision, sourceState: "planned" },
     );
+    if (!started) {
+      return {
+        ok: false,
+        commitUnknown: false,
+        error: new Error("Failed to persist started checkpoint for comment-create"),
+        outcome: { kind: "failed_before_commit", ticketId: prepared.ticketId, error: new Error("Failed to persist started checkpoint for comment-create") },
+      };
+    }
 
     try {
       await commentDeps.addComment(
@@ -1788,13 +1882,21 @@ export class CommentCreateHandler implements OperationHandler<CommentCreateInten
         prepared.uploads.length > 0 ? prepared.uploads : undefined,
       );
 
-      await repo.transitionEffect(
+      const committed = await repo.transitionEffect(
         opKey,
         "comment-create",
         { kind: "commit" },
         context.connectionScope,
         { operationRevision: revision, sourceState: "started" },
       );
+      if (!committed) {
+        return {
+          ok: false,
+          commitUnknown: true,
+          error: new Error("Comment created but failed to persist commit checkpoint"),
+          outcome: { kind: "commit_unknown", operationId: operation.operationId, ticketId: prepared.ticketId, message: "Comment created but failed to persist commit checkpoint" },
+        };
+      }
 
       return {
         ok: true,
@@ -2150,7 +2252,7 @@ export class CommentUpdateHandler implements OperationHandler<CommentUpdateInten
     const opKey: SyncOperationKey = operation.key ?? { kind: "comment", ticketId: prepared.ticketId, commentId: prepared.commentId, documentUri: operation.documentUri };
     const revision = operation.intentRevision ?? operation.revision ?? 1;
 
-    await repo.planEffect(
+    const planned = await repo.planEffect(
       opKey,
       {
         effectId: "comment-update",
@@ -2162,14 +2264,30 @@ export class CommentUpdateHandler implements OperationHandler<CommentUpdateInten
       context.connectionScope,
       revision,
     );
+    if (!planned) {
+      return {
+        ok: false,
+        commitUnknown: false,
+        error: new Error("Failed to persist planned checkpoint for comment-update"),
+        outcome: { kind: "failed_before_commit", ticketId: prepared.ticketId, commentId: prepared.commentId, error: new Error("Failed to persist planned checkpoint for comment-update") },
+      };
+    }
 
-    await repo.transitionEffect(
+    const started = await repo.transitionEffect(
       opKey,
       "comment-update",
       { kind: "start" },
       context.connectionScope,
       { operationRevision: revision, sourceState: "planned" },
     );
+    if (!started) {
+      return {
+        ok: false,
+        commitUnknown: false,
+        error: new Error("Failed to persist started checkpoint for comment-update"),
+        outcome: { kind: "failed_before_commit", ticketId: prepared.ticketId, commentId: prepared.commentId, error: new Error("Failed to persist started checkpoint for comment-update") },
+      };
+    }
 
     try {
       await commentDeps.updateComment(
@@ -2178,13 +2296,21 @@ export class CommentUpdateHandler implements OperationHandler<CommentUpdateInten
         prepared.uploads.length > 0 ? prepared.uploads : undefined,
       );
 
-      await repo.transitionEffect(
+      const committed = await repo.transitionEffect(
         opKey,
         "comment-update",
         { kind: "commit", remoteId: prepared.commentId },
         context.connectionScope,
         { operationRevision: revision, sourceState: "started" },
       );
+      if (!committed) {
+        return {
+          ok: false,
+          commitUnknown: true,
+          error: new Error("Comment updated but failed to persist commit checkpoint"),
+          outcome: { kind: "commit_unknown", operationId: operation.operationId, ticketId: prepared.ticketId, commentId: prepared.commentId, message: "Comment updated but failed to persist commit checkpoint" },
+        };
+      }
 
       return {
         ok: true,

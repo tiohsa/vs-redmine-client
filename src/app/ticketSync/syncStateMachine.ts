@@ -119,8 +119,52 @@ export const applyGenericTransition = (
       return next;
     }
 
-    case "abort_before_remote_write":
-    case "abort_known_remote_failure":
+    case "abort_before_remote_write": {
+      // Remote mutation が開始される前にのみ安全にロールバック可能
+      const primaryEffect = (next.effects ?? []).find(
+        (e) =>
+          e.kind === "ticket_create" ||
+          e.kind === "ticket_update" ||
+          e.kind === "comment_create" ||
+          e.kind === "comment_update" ||
+          e.effectId === "ticket-create" ||
+          e.effectId === "ticket-update" ||
+          e.effectId === "comment-create" ||
+          e.effectId === "comment-update",
+      );
+      if (primaryEffect?.state === "committed") {
+        return undefined; // Primary committed がある場合はロールバック拒絶 (INV-N01)
+      }
+      next.phase = "queued";
+      next.createdRemoteId = undefined;
+      next.createdChildIds = undefined;
+      next.effects = [];
+      if (next.nextIntent) {
+        next.intent = next.nextIntent;
+        next.nextIntent = undefined;
+        next.intentRevision = (next.intentRevision ?? next.revision ?? 0) + 1;
+        next.revision = next.intentRevision;
+      }
+      return next;
+    }
+
+    case "abort_known_remote_failure": {
+      // Primary Remote mutation 自体が既知失敗した場合専用
+      const primaryEffect = (next.effects ?? []).find(
+        (e) =>
+          e.kind === "ticket_create" ||
+          e.kind === "ticket_update" ||
+          e.kind === "comment_create" ||
+          e.kind === "comment_update" ||
+          e.effectId === "ticket-create" ||
+          e.effectId === "ticket-update" ||
+          e.effectId === "comment-create" ||
+          e.effectId === "comment-update",
+      );
+      if (primaryEffect?.state === "committed" || (primaryEffect?.state !== "compensated" && next.createdRemoteId !== undefined && next.createdRemoteId > 0)) {
+        // Primary が既に committed なら Primary 証拠を失わせてはならない (INV-N01)
+        return undefined;
+      }
       next.phase = "queued";
       next.createdRemoteId = undefined;
       next.createdChildIds = undefined;
@@ -133,6 +177,7 @@ export const applyGenericTransition = (
         next.revision = next.intentRevision;
       }
       return next;
+    }
 
     case "assume_remote_commit":
       next.phase = "remote_committed";

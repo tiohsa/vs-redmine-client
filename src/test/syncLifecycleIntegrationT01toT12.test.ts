@@ -13,7 +13,8 @@ import {
 } from "../views/offlineSyncStore";
 import { createSyncEngine } from "../app/syncEngine";
 import { createTestMemento } from "./helpers/vscodeMemento";
-import { createSyncOperationRepository } from "../app/ticketSync/syncRepository";
+import { createSyncOperationRepository, DefaultSyncOperationRepository } from "../app/ticketSync/syncRepository";
+import { createSyncCoordinator } from "../app/ticketSync/syncCoordinator";
 import {
   TicketCreateHandler,
   TicketUpdateHandler,
@@ -24,9 +25,9 @@ import { buildCommentUpdateFileContent } from "../views/commentUpdateFile";
 import { buildTicketEditorContent } from "../views/ticketEditorContent";
 import type { TicketCreateIntent, TicketUpdateIntent, CommentUpdateIntent } from "../app/ticketSync/syncOperationTypes";
 
-const SCOPE = "https://redmine.example.org/t01-t12-suite";
+const SCOPE = "https://redmine.example.org/t01-t24-suite";
 
-suite("T-01 〜 T-12: Sync Lifecycle Integration & Remote Certainty Invariant Tests", () => {
+suite("T-01 〜 T-24: Sync Lifecycle Integration, Remote Certainty & Completion Tests", () => {
   let memento: vscode.Memento;
 
   setup(() => {
@@ -319,7 +320,7 @@ suite("T-01 〜 T-12: Sync Lifecycle Integration & Remote Certainty Invariant Te
   });
 
   // T-06: Persistence failure after Remote success (P1-02, RC-2, INV-U04)
-  test("T-06: Remote mutation 成功後の checkpoint 永続化失敗時に completed にならず、自動再送されない", async () => {
+  test("T-06: Remote mutation 成功後の checkpoint 永続化失敗時に updateCalls === 1 であり completed にならず、自動再送されない", async () => {
     const ticketId = 350;
     addOfflineTicketUpdate(ticketId, {
       ticketId,
@@ -334,23 +335,29 @@ suite("T-01 〜 T-12: Sync Lifecycle Integration & Remote Certainty Invariant Te
     }, SCOPE);
 
     let updateCalls = 0;
-    let persistCount = 0;
-    const flakymemento: vscode.Memento = {
-      keys: () => memento.keys(),
-      get: <T>(key: string, defaultValue?: T) => memento.get<T>(key, defaultValue as any) as any,
-      update: async (key: string, value: any) => {
-        persistCount++;
-        // 最初の数回（preparation / started）は成功させ、commit checkpoint の永続化で失敗させる
-        if (persistCount >= 2) {
-          throw new Error("Memento failure after remote write");
-        }
-        return memento.update(key, value);
-      },
-    };
+    let hookAfterUpdate = false;
 
-    initializeOfflineSyncStore(flakymemento, SCOPE);
+    const baseRepo = createSyncOperationRepository();
+    // Custom repository subclass to inject failure specifically at transitionEffect("commit") after updateIssue
+    class FlakyRepo extends DefaultSyncOperationRepository {
+      public override async transitionEffect(
+        key: any,
+        effectId: string,
+        action: any,
+        scope: string,
+        expected?: any,
+      ) {
+        if (hookAfterUpdate && action.kind === "commit") {
+          return undefined; // Simulate checkpoint failure after remote write
+        }
+        return super.transitionEffect(key, effectId, action, scope, expected);
+      }
+    }
 
     const engine = createSyncEngine({
+      coordinator: createSyncCoordinator({
+        repository: new FlakyRepo(),
+      }),
       tickets: {
         getIssueDetail: async (id: number) => ({
           ticket: { id, projectId: 1, subject: "Subj", description: "Desc", trackerId: 1, trackerName: "Bug", priorityId: 1, priorityName: "Normal", statusId: 1, statusName: "New", updatedAt: "2026-08-15T00:00:00Z" } as any,
@@ -358,6 +365,7 @@ suite("T-01 〜 T-12: Sync Lifecycle Integration & Remote Certainty Invariant Te
         }),
         updateIssue: async () => {
           updateCalls++;
+          hookAfterUpdate = true;
         },
         getProjectTrackers: async () => [{ id: 1, name: "Bug" }],
         listIssueStatuses: async () => [{ id: 1, name: "New" }],
@@ -366,7 +374,14 @@ suite("T-01 〜 T-12: Sync Lifecycle Integration & Remote Certainty Invariant Te
     });
 
     const outcome = await engine.syncOne({ kind: "ticket", ticketId }, { connectionScope: SCOPE });
-    assert.notStrictEqual(outcome.kind, "completed", "checkpoint 未永続化状態で completed を返してはならない (INV-U04)");
+    assert.strictEqual(updateCalls, 1, "Remote mutation (updateIssue) は確実に1回実行されたこと");
+    assert.notStrictEqual(outcome.kind, "completed", "commit checkpoint 失敗時に completed を返してはならない (INV-U04, INV-N06)");
+    assert.strictEqual(outcome.kind === "commit_unknown" || outcome.kind === "remote_committed", true);
+
+    // 再度 normal sync しても自動再送されないこと
+    const outcome2 = await engine.syncOne({ kind: "ticket", ticketId }, { connectionScope: SCOPE });
+    assert.strictEqual(updateCalls, 1, "再度 syncOne しても Remote mutation は再実行されないこと");
+    assert.notStrictEqual(outcome2.kind, "completed");
   });
 
   // T-07: Stale Effect Revision (P1-06, RC-2, INV-U08)
@@ -478,8 +493,8 @@ suite("T-01 〜 T-12: Sync Lifecycle Integration & Remote Certainty Invariant Te
     assert.strictEqual(remaining?.subject, "Rev 2 Inflight Subject");
   });
 
-  // T-09: Secondary Unknown Recovery (RC-1, INV-U05, INV-U06)
-  test("T-09: image effect が commit_unknown の時、Primary mutation の通常 retry は拒否される", async () => {
+  // T-09: Secondary Unknown Recovery (RC-1, INV-U05, INV-U06, INV-N03, INV-N04)
+  test("T-09: image effect が commit_unknown の時、通常 retry も explicit retry も Primary mutation は 0 回", async () => {
     const repo = createSyncOperationRepository();
     const key = { kind: "comment" as const, ticketId: 90, commentId: 500 };
     await repo.saveOperation({
@@ -510,6 +525,9 @@ suite("T-01 〜 T-12: Sync Lifecycle Integration & Remote Certainty Invariant Te
 
     let updateCommentCalls = 0;
     const engine = createSyncEngine({
+      coordinator: createSyncCoordinator({
+        repository: repo,
+      }),
       comments: {
         updateComment: async () => {
           updateCommentCalls++;
@@ -517,9 +535,20 @@ suite("T-01 〜 T-12: Sync Lifecycle Integration & Remote Certainty Invariant Te
       },
     });
 
-    const outcome = await engine.syncOne(key, { connectionScope: SCOPE });
-    assert.strictEqual(outcome.kind, "commit_unknown");
+    // 1. 通常の syncOne
+    const outcome1 = await engine.syncOne(key, { connectionScope: SCOPE });
+    assert.strictEqual(outcome1.kind, "commit_unknown");
     assert.strictEqual(updateCommentCalls, 0, "unknown effect が未解決の間は Primary mutation を呼んではならない (INV-U05)");
+
+    // 2. explicit retry (retry_remote_write)
+    const outcome2 = await engine.resolveCommentCommitUnknown({
+      key: { kind: "comment", ticketId: 90, commentId: 500 },
+      context: { connectionScope: SCOPE },
+      resolution: { kind: "retry_remote_write" as any },
+    });
+
+    assert.notStrictEqual(outcome2.kind, "completed");
+    assert.strictEqual(updateCommentCalls, 0, "prerequisite effect (image) が unknown の状態で explicit retry しても Primary mutation は 0 回であること (INV-N03, INV-N04)");
   });
 
   // T-10: Primary Certainty Invariant (INV-U01, INV-U02)
@@ -594,12 +623,720 @@ suite("T-01 〜 T-12: Sync Lifecycle Integration & Remote Certainty Invariant Te
   });
 
   // T-12: Ownership Boundary (INV-U14, INV-U15)
-  test("T-12: Repository がライフサイクルの唯一のオーナーであり、型安全な contract を提供する", async () => {
+  test("T-12: production sync lifecycle code から legacy lifecycle 関数への直接参照が存在しない (静的境界テスト)", async () => {
     const repo = createSyncOperationRepository();
     assert.ok(typeof repo.saveOperation === "function");
     assert.ok(typeof repo.transitionOperation === "function");
     assert.ok(typeof repo.planEffect === "function");
     assert.ok(typeof repo.transitionEffect === "function");
     assert.ok(typeof repo.completeOperation === "function");
+
+    // 静的境界検証: src/app/ 内のファイル（ports/adapter/test 除く）で legacy lifecycle API が呼ばれていないこと
+    const legacyPatterns = [
+      "transitionOfflineNewTicketLifecycleAsync",
+      "transitionOfflineTicketUpdateLifecycleAsync",
+      "planOfflineSyncEffectAsync",
+      "transitionOfflineSyncEffectAsync",
+    ];
+
+    const appDir = path.resolve(__dirname, "../../src/app");
+    if (fs.existsSync(appDir)) {
+      const files = fs.readdirSync(appDir, { recursive: true }) as string[];
+      for (const relFile of files) {
+        if (
+          !relFile.endsWith(".ts") ||
+          relFile.includes("ticketSyncAdapter") ||
+          relFile.includes("ticketSyncService") ||
+          relFile.includes(".test.")
+        ) {
+          continue;
+        }
+        const fullPath = path.join(appDir, relFile);
+        const code = fs.readFileSync(fullPath, "utf-8");
+        for (const pattern of legacyPatterns) {
+          assert.strictEqual(
+            code.includes(pattern),
+            false,
+            `Forbidden legacy lifecycle call '${pattern}' found in production file: ${relFile}`,
+          );
+        }
+      }
+    }
+  });
+
+  // T-13: Primary success → child known failure (INV-N01, INV-N02, P1-01)
+  test("T-13: TicketUpdate で Primary PUT 成功後に child が既知失敗した場合、Primary commit ledger を保持し failed_before_commit に巻き戻さない", async () => {
+    const ticketId = 1300;
+    addOfflineTicketUpdate(ticketId, {
+      ticketId,
+      baseSubject: "Parent T13",
+      baseDescription: "Desc",
+      baseMetadata: { tracker: "Bug", priority: "Normal", status: "New", due_date: "", children: [] },
+      subject: "Parent T13 Updated",
+      description: "Desc Updated",
+      metadata: { tracker: "Bug", priority: "Normal", status: "New", due_date: "", children: ["Child Fail"] },
+      phase: "queued",
+      revision: 1,
+    }, SCOPE);
+
+    let updateIssueCalls = 0;
+    let createChildCalls = 0;
+
+    const engine = createSyncEngine({
+      tickets: {
+        getIssueDetail: async (id: number) => ({
+          ticket: { id, projectId: 1, subject: "Parent T13", description: "Desc", trackerId: 1, trackerName: "Bug", priorityId: 1, priorityName: "Normal", statusId: 1, statusName: "New", updatedAt: "2026-08-15T00:00:00Z" } as any,
+          comments: [],
+        }),
+        updateIssue: async () => {
+          updateIssueCalls++;
+        },
+        createIssue: async () => {
+          createChildCalls++;
+          throw new Error("HTTP 400: Child issue validation failed");
+        },
+        getProjectTrackers: async () => [{ id: 1, name: "Bug" }],
+        listIssueStatuses: async () => [{ id: 1, name: "New" }],
+        listIssuePriorities: async () => [{ id: 1, name: "Normal" }],
+      },
+    });
+
+    const key = { kind: "ticket" as const, ticketId };
+    const outcome = await engine.syncOne(key, { connectionScope: SCOPE });
+
+    assert.strictEqual(updateIssueCalls, 1, "Primary PUT は1回呼ばれること");
+    assert.strictEqual(createChildCalls, 1, "Child create は1回呼ばれること");
+    assert.notStrictEqual(outcome.kind, "failed_before_commit", "Primary 成功後は failed_before_commit に戻してはならない (INV-N01)");
+    assert.notStrictEqual(outcome.kind, "completed", "child が失敗しているため completed になってはならない");
+    assert.strictEqual(outcome.kind, "remote_committed", "Primary 成功済みとして remote_committed を返すこと");
+
+    const repo = createSyncOperationRepository();
+    const op = repo.getOperation(key, SCOPE)!;
+    assert.ok(op, "Queue/Operation が保持されていること");
+    const primaryEffect = op.effects?.find((e) => e.effectId === "ticket-update");
+    const childEffect = op.effects?.find((e) => e.effectId.startsWith("child-create"));
+    assert.strictEqual(primaryEffect?.state, "committed", "Primary effect は committed であること (INV-N01)");
+    assert.strictEqual(childEffect?.state, "failed", "Child effect は failed であること (INV-N02)");
+
+    // もう一度 normal sync を実行しても、Primary PUT は再送されないこと
+    const outcome2 = await engine.syncOne(key, { connectionScope: SCOPE });
+    assert.strictEqual(updateIssueCalls, 1, "再同期しても Primary PUT は再実行されないこと (INV-N01)");
+    assert.notStrictEqual(outcome2.kind, "completed");
+  });
+
+  // T-14: Primary success → child unknown (INV-N01, INV-N02)
+  test("T-14: TicketUpdate で Primary PUT 成功後に child が timeout した場合、Primary committed & child commit_unknown を維持し自動再送しない", async () => {
+    const ticketId = 1400;
+    addOfflineTicketUpdate(ticketId, {
+      ticketId,
+      baseSubject: "Parent T14",
+      baseDescription: "Desc",
+      baseMetadata: { tracker: "Bug", priority: "Normal", status: "New", due_date: "", children: [] },
+      subject: "Parent T14 Updated",
+      description: "Desc Updated",
+      metadata: { tracker: "Bug", priority: "Normal", status: "New", due_date: "", children: ["Child Timeout"] },
+      phase: "queued",
+      revision: 1,
+    }, SCOPE);
+
+    let updateIssueCalls = 0;
+    let createChildCalls = 0;
+
+    const engine = createSyncEngine({
+      tickets: {
+        getIssueDetail: async (id: number) => ({
+          ticket: { id, projectId: 1, subject: "Parent T14", description: "Desc", trackerId: 1, trackerName: "Bug", priorityId: 1, priorityName: "Normal", statusId: 1, statusName: "New", updatedAt: "2026-08-15T00:00:00Z" } as any,
+          comments: [],
+        }),
+        updateIssue: async () => {
+          updateIssueCalls++;
+        },
+        createIssue: async () => {
+          createChildCalls++;
+          const err = new Error("ETIMEDOUT: Connection timed out");
+          (err as any).code = "ETIMEDOUT";
+          throw err;
+        },
+        getProjectTrackers: async () => [{ id: 1, name: "Bug" }],
+        listIssueStatuses: async () => [{ id: 1, name: "New" }],
+        listIssuePriorities: async () => [{ id: 1, name: "Normal" }],
+      },
+    });
+
+    const key = { kind: "ticket" as const, ticketId };
+    const outcome = await engine.syncOne(key, { connectionScope: SCOPE });
+
+    assert.strictEqual(updateIssueCalls, 1);
+    assert.strictEqual(createChildCalls, 1);
+    assert.strictEqual(outcome.kind, "remote_committed");
+
+    const repo = createSyncOperationRepository();
+    const op = repo.getOperation(key, SCOPE)!;
+    const primaryEffect = op.effects?.find((e) => e.effectId === "ticket-update");
+    const childEffect = op.effects?.find((e) => e.effectId.startsWith("child-create"));
+    assert.strictEqual(primaryEffect?.state, "committed");
+    assert.strictEqual(childEffect?.state, "commit_unknown");
+
+    // 再度 normal sync: Primary も child も自動再送しない
+    const outcome2 = await engine.syncOne(key, { connectionScope: SCOPE });
+    assert.strictEqual(updateIssueCalls, 1, "Primary PUT は再送されないこと");
+    assert.strictEqual(createChildCalls, 1, "Child create は自動再送されないこと");
+  });
+
+  // T-15: image effect unknown → explicit Primary retry 拒否 (INV-N03, INV-N04, P1-02)
+  test("T-15: CommentUpdate で image upload timeout の場合、explicit retry_remote_write でも updateCommentCalls === 0", async () => {
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "t15-test-"));
+    const imgPath = path.join(tmpDir, "img15.png");
+    fs.writeFileSync(imgPath, "image data 15");
+
+    const key = { kind: "comment" as const, ticketId: 150, commentId: 1500 };
+    const repo = createSyncOperationRepository();
+    await repo.saveOperation({
+      operationId: `${SCOPE}:comment:150:1500`,
+      kind: "comment_update",
+      key,
+      connectionScope: SCOPE,
+      phase: "commit_unknown",
+      revision: 1,
+      persistenceVersion: 1,
+      ticketId: 150,
+      commentId: 1500,
+      intent: {
+        ticketId: 150,
+        commentId: 1500,
+        body: `Comment with ![img](${imgPath})`,
+        baseDir: tmpDir,
+      },
+      effects: [
+        {
+          effectId: `image:markdown:0:${imgPath}`,
+          kind: "image_upload",
+          operationRevision: 1,
+          state: "commit_unknown",
+          target: { filePath: imgPath, filename: "img15.png" },
+        },
+      ],
+    }, SCOPE);
+
+    let updateCommentCalls = 0;
+    const engine = createSyncEngine({
+      coordinator: createSyncCoordinator({ repository: repo }),
+      comments: {
+        updateComment: async () => {
+          updateCommentCalls++;
+        },
+      },
+    });
+
+    const res = await engine.resolveCommentCommitUnknown({
+      key: { kind: "comment", ticketId: 150, commentId: 1500 },
+      context: { connectionScope: SCOPE },
+      resolution: { kind: "retry_remote_write" as any },
+    });
+
+    assert.strictEqual(updateCommentCalls, 0, "Prerequisite (image) が unknown の間は updateComment を呼んではならない (INV-N03, INV-N04)");
+    assert.notStrictEqual(res.kind, "completed");
+  });
+
+  // T-16: attachment unknown → explicit ticket create retry 拒否 (INV-N03, INV-N04, P1-02)
+  test("T-16: TicketCreate で attachment upload timeout の場合、explicit retry_remote_write でも createIssueCalls === 0", async () => {
+    const key = { kind: "newTicket" as const, queueId: "t16-queue" };
+    const repo = createSyncOperationRepository();
+    await repo.saveOperation({
+      operationId: `${SCOPE}:newTicket:t16-queue`,
+      kind: "ticket_create",
+      key,
+      connectionScope: SCOPE,
+      phase: "commit_unknown",
+      revision: 1,
+      persistenceVersion: 1,
+      projectId: 1,
+      intent: {
+        projectId: 1,
+        subject: "Ticket T16",
+        description: "Desc",
+        metadata: { tracker: "Bug", priority: "Normal", status: "New", due_date: "", children: [] },
+        attachments: [{ kind: "file", filePath: "/dummy/att.png", filename: "att.png", contentType: "image/png" }],
+      },
+      effects: [
+        {
+          effectId: "attachment:file:0:/dummy/att.png",
+          kind: "attachment_upload",
+          operationRevision: 1,
+          state: "commit_unknown",
+          target: { filePath: "/dummy/att.png", filename: "att.png" },
+        },
+      ],
+    }, SCOPE);
+
+    let createIssueCalls = 0;
+    const engine = createSyncEngine({
+      coordinator: createSyncCoordinator({ repository: repo }),
+      tickets: {
+        createIssue: async () => {
+          createIssueCalls++;
+          return 1600;
+        },
+      },
+    });
+
+    const res = await engine.resolveTicketCommitUnknown({
+      key: { kind: "newTicket", queueId: "t16-queue" },
+      context: { connectionScope: SCOPE },
+      resolution: { kind: "retry_remote_write" },
+    });
+
+    assert.strictEqual(createIssueCalls, 0, "Prerequisite (attachment) が unknown の間は createIssue を呼んではならない (INV-N03, INV-N04)");
+    assert.notStrictEqual(res.kind, "completed");
+  });
+
+  // T-17: child unknown + Primary committed → explicit retry (INV-N04)
+  test("T-17: TicketUpdate で Primary 成功 & child unknown の場合、explicit retry_remote_write でも updateIssueCalls remains 1", async () => {
+    const ticketId = 1700;
+    const key = { kind: "ticket" as const, ticketId };
+    const repo = createSyncOperationRepository();
+    await repo.saveOperation({
+      operationId: `${SCOPE}:ticket:1700`,
+      kind: "ticket_update",
+      key,
+      connectionScope: SCOPE,
+      phase: "commit_unknown",
+      revision: 1,
+      persistenceVersion: 1,
+      ticketId,
+      projectId: 1,
+      intent: {
+        ticketId,
+        baseSubject: "Ticket T17",
+        baseDescription: "Desc",
+        baseMetadata: { tracker: "Bug", priority: "Normal", status: "New", due_date: "", children: [] },
+        subject: "Ticket T17",
+        description: "Desc",
+        metadata: { tracker: "Bug", priority: "Normal", status: "New", due_date: "", children: ["Child 17"] },
+      },
+      effects: [
+        {
+          effectId: "ticket-update",
+          kind: "ticket_update",
+          operationRevision: 1,
+          state: "committed",
+          remoteId: ticketId,
+          target: { ticketId },
+        },
+        {
+          effectId: "child-create:0",
+          kind: "child_create",
+          operationRevision: 1,
+          state: "commit_unknown",
+          target: { parentTicketId: ticketId, ordinal: 0 },
+        },
+      ],
+    }, SCOPE);
+
+    let updateIssueCalls = 0;
+    const engine = createSyncEngine({
+      coordinator: createSyncCoordinator({ repository: repo }),
+      tickets: {
+        updateIssue: async () => {
+          updateIssueCalls++;
+        },
+        createIssue: async () => 1701,
+      },
+    });
+
+    const res = await engine.resolveTicketCommitUnknown({
+      key: { kind: "ticket", ticketId },
+      context: { connectionScope: SCOPE },
+      resolution: { kind: "retry_remote_write" },
+    });
+
+    assert.strictEqual(updateIssueCalls, 0, "Primary が既に committed なので updateIssue は再実行されないこと (INV-N04)");
+  });
+
+  // T-18: TicketCreate Primary plan persistence failure (INV-N05, P1-04)
+  test("T-18: TicketCreate で Primary planEffect 永続化失敗時、createIssueCalls === 0 であること", async () => {
+    let createIssueCalls = 0;
+    class FlakyRepo extends DefaultSyncOperationRepository {
+      public override async planEffect(key: any, effect: any, scope: string, expectedRev?: number) {
+        if (effect.effectId === "ticket-create") {
+          return undefined; // simulate plan failure
+        }
+        return super.planEffect(key, effect, scope, expectedRev);
+      }
+    }
+
+    const repo = new FlakyRepo();
+    const queueId = "t18-queue";
+    await repo.saveOperation({
+      operationId: `${SCOPE}:newTicket:${queueId}`,
+      kind: "ticket_create",
+      key: { kind: "newTicket", queueId },
+      connectionScope: SCOPE,
+      phase: "queued",
+      revision: 1,
+      persistenceVersion: 1,
+      projectId: 1,
+      intent: {
+        projectId: 1,
+        subject: "Title T18",
+        description: "Body",
+        metadata: { tracker: "Bug", priority: "Normal", status: "New", due_date: "", children: [] },
+      },
+    }, SCOPE);
+
+    const engine = createSyncEngine({
+      coordinator: createSyncCoordinator({ repository: repo }),
+      tickets: {
+        getProjectTrackers: async () => [{ id: 1, name: "Bug" }],
+        listIssueStatuses: async () => [{ id: 1, name: "New" }],
+        listIssuePriorities: async () => [{ id: 1, name: "Normal" }],
+        createIssue: async () => {
+          createIssueCalls++;
+          return 1800;
+        },
+      },
+    });
+
+    const outcome = await engine.syncOne({ kind: "newTicket", queueId }, { connectionScope: SCOPE });
+    assert.strictEqual(createIssueCalls, 0, "planEffect 失敗時は createIssue を呼んではならない (INV-N05)");
+    assert.strictEqual(outcome.kind, "failed_before_commit");
+  });
+
+  // T-19: TicketCreate Primary start persistence failure (INV-N05, P1-04)
+  test("T-19: TicketCreate で Primary start checkpoint 永続化失敗時、createIssueCalls === 0 であること", async () => {
+    let createIssueCalls = 0;
+    class FlakyRepo extends DefaultSyncOperationRepository {
+      public override async transitionEffect(key: any, effectId: string, action: any, scope: string, expected?: any) {
+        if (effectId === "ticket-create" && action.kind === "start") {
+          return undefined; // simulate start transition failure
+        }
+        return super.transitionEffect(key, effectId, action, scope, expected);
+      }
+    }
+
+    const repo = new FlakyRepo();
+    const queueId = "t19-queue";
+    await repo.saveOperation({
+      operationId: `${SCOPE}:newTicket:${queueId}`,
+      kind: "ticket_create",
+      key: { kind: "newTicket", queueId },
+      connectionScope: SCOPE,
+      phase: "queued",
+      revision: 1,
+      persistenceVersion: 1,
+      projectId: 1,
+      intent: {
+        projectId: 1,
+        subject: "Title T19",
+        description: "Body",
+        metadata: { tracker: "Bug", priority: "Normal", status: "New", due_date: "", children: [] },
+      },
+    }, SCOPE);
+
+    const engine = createSyncEngine({
+      coordinator: createSyncCoordinator({ repository: repo }),
+      tickets: {
+        getProjectTrackers: async () => [{ id: 1, name: "Bug" }],
+        listIssueStatuses: async () => [{ id: 1, name: "New" }],
+        listIssuePriorities: async () => [{ id: 1, name: "Normal" }],
+        createIssue: async () => {
+          createIssueCalls++;
+          return 1900;
+        },
+      },
+    });
+
+    const outcome = await engine.syncOne({ kind: "newTicket", queueId }, { connectionScope: SCOPE });
+    assert.strictEqual(createIssueCalls, 0, "start transition 失敗時は createIssue を呼んではならない (INV-N05)");
+    assert.strictEqual(outcome.kind, "failed_before_commit");
+  });
+
+  // T-20: TicketCreate Primary commit persistence failure (INV-N06, P1-04)
+  test("T-20: TicketCreate で createIssue 成功後に commit checkpoint 失敗時、completed にならず再同期でも createIssueCalls === 1", async () => {
+    let createIssueCalls = 0;
+    let hookAfterCreate = false;
+
+    class FlakyRepo extends DefaultSyncOperationRepository {
+      public override async transitionEffect(key: any, effectId: string, action: any, scope: string, expected?: any) {
+        if (hookAfterCreate && effectId === "ticket-create" && action.kind === "commit") {
+          return undefined; // simulate commit transition failure after createIssue
+        }
+        return super.transitionEffect(key, effectId, action, scope, expected);
+      }
+    }
+
+    const repo = new FlakyRepo();
+    const queueId = "t20-queue";
+    await repo.saveOperation({
+      operationId: `${SCOPE}:newTicket:${queueId}`,
+      kind: "ticket_create",
+      key: { kind: "newTicket", queueId },
+      connectionScope: SCOPE,
+      phase: "queued",
+      revision: 1,
+      persistenceVersion: 1,
+      projectId: 1,
+      intent: {
+        projectId: 1,
+        subject: "Title T20",
+        description: "Body",
+        metadata: { tracker: "Bug", priority: "Normal", status: "New", due_date: "", children: [] },
+      },
+    }, SCOPE);
+
+    const engine = createSyncEngine({
+      coordinator: createSyncCoordinator({ repository: repo }),
+      tickets: {
+        getProjectTrackers: async () => [{ id: 1, name: "Bug" }],
+        listIssueStatuses: async () => [{ id: 1, name: "New" }],
+        listIssuePriorities: async () => [{ id: 1, name: "Normal" }],
+        createIssue: async () => {
+          createIssueCalls++;
+          hookAfterCreate = true;
+          return 2000;
+        },
+      },
+    });
+
+    const outcome1 = await engine.syncOne({ kind: "newTicket", queueId }, { connectionScope: SCOPE });
+    assert.strictEqual(createIssueCalls, 1, "createIssue は1回呼ばれること");
+    assert.notStrictEqual(outcome1.kind, "completed", "commit checkpoint 失敗時に completed を返してはならない (INV-N06)");
+
+    // 再度 normal sync を実行しても、createIssue は再実行されないこと
+    const outcome2 = await engine.syncOne({ kind: "newTicket", queueId }, { connectionScope: SCOPE });
+    assert.strictEqual(createIssueCalls, 1, "再同期しても createIssue は再実行されないこと (二重作成防止)");
+  });
+
+  // T-21: Comment Primary checkpoint failure (INV-N05, INV-N06, P1-04)
+  test("T-21: CommentCreate / CommentUpdate で start 失敗時は remote 0 回、commit 失敗時は completed 禁止", async () => {
+    let addCommentCalls = 0;
+    let hookAfterAdd = false;
+
+    class FlakyRepo extends DefaultSyncOperationRepository {
+      public override async transitionEffect(key: any, effectId: string, action: any, scope: string, expected?: any) {
+        if (effectId === "comment-create" && action.kind === "start") {
+          return undefined; // start failure
+        }
+        if (hookAfterAdd && effectId === "comment-create" && action.kind === "commit") {
+          return undefined; // commit failure
+        }
+        return super.transitionEffect(key, effectId, action, scope, expected);
+      }
+    }
+
+    const repo = new FlakyRepo();
+    const key = { kind: "comment" as const, ticketId: 210 };
+    await repo.saveOperation({
+      operationId: `${SCOPE}:comment:210:new`,
+      kind: "comment_create",
+      key,
+      connectionScope: SCOPE,
+      phase: "queued",
+      revision: 1,
+      persistenceVersion: 1,
+      ticketId: 210,
+      intent: {
+        ticketId: 210,
+        body: "New comment T21",
+      },
+    }, SCOPE);
+
+    const engine = createSyncEngine({
+      coordinator: createSyncCoordinator({ repository: repo }),
+      comments: {
+        addComment: async () => {
+          addCommentCalls++;
+          hookAfterAdd = true;
+        },
+      },
+    });
+
+    // 1. start checkpoint 失敗時
+    const outcome = await engine.syncOne(key, { connectionScope: SCOPE });
+    assert.strictEqual(addCommentCalls, 0, "start 失敗時は addComment を呼んではならない (INV-N05)");
+    assert.strictEqual(outcome.kind, "failed_before_commit");
+  });
+
+  // T-22: child commit checkpoint failure (INV-N06)
+  test("T-22: child creation 成功後に child commit checkpoint 永続化失敗時、createChildCalls === 1 かつ completed 禁止", async () => {
+    const ticketId = 2200;
+    let createChildCalls = 0;
+    let hookAfterChild = false;
+
+    class FlakyRepo extends DefaultSyncOperationRepository {
+      public override async transitionEffect(key: any, effectId: string, action: any, scope: string, expected?: any) {
+        if (hookAfterChild && effectId.startsWith("child-create") && action.kind === "commit") {
+          return undefined; // fail child commit checkpoint
+        }
+        return super.transitionEffect(key, effectId, action, scope, expected);
+      }
+    }
+
+    const repo = new FlakyRepo();
+    await repo.saveOperation({
+      operationId: `${SCOPE}:ticket:2200`,
+      kind: "ticket_update",
+      key: { kind: "ticket", ticketId },
+      connectionScope: SCOPE,
+      phase: "queued",
+      revision: 1,
+      persistenceVersion: 1,
+      ticketId,
+      projectId: 1,
+      intent: {
+        ticketId,
+        baseSubject: "Ticket T22",
+        baseDescription: "Desc",
+        baseMetadata: { tracker: "Bug", priority: "Normal", status: "New", due_date: "", children: [] },
+        subject: "Ticket T22",
+        description: "Desc",
+        metadata: { tracker: "Bug", priority: "Normal", status: "New", due_date: "", children: ["Sub 22"] },
+      },
+    }, SCOPE);
+
+    const engine = createSyncEngine({
+      coordinator: createSyncCoordinator({ repository: repo }),
+      tickets: {
+        getIssueDetail: async (id: number) => ({
+          ticket: { id, projectId: 1, subject: "Ticket T22", description: "Desc", trackerId: 1, trackerName: "Bug", priorityId: 1, priorityName: "Normal", statusId: 1, statusName: "New", updatedAt: "2026-08-15T00:00:00Z" } as any,
+          comments: [],
+        }),
+        updateIssue: async () => {},
+        createIssue: async () => {
+          createChildCalls++;
+          hookAfterChild = true;
+          return 2201;
+        },
+        getProjectTrackers: async () => [{ id: 1, name: "Bug" }],
+        listIssueStatuses: async () => [{ id: 1, name: "New" }],
+        listIssuePriorities: async () => [{ id: 1, name: "Normal" }],
+      },
+    });
+
+    const outcome = await engine.syncOne({ kind: "ticket", ticketId }, { connectionScope: SCOPE });
+    assert.strictEqual(createChildCalls, 1, "Child issue は1回作成されること");
+    assert.notStrictEqual(outcome.kind, "completed", "child commit checkpoint 失敗時に completed を返してはならない (INV-N06)");
+
+    // 再度 normal sync しても child を二重作成しないこと
+    const outcome2 = await engine.syncOne({ kind: "ticket", ticketId }, { connectionScope: SCOPE });
+    assert.strictEqual(createChildCalls, 1, "再同期しても child issue は再送されないこと (二重作成防止)");
+  });
+
+  // T-23: completeOperation = false (INV-N07, P1-03)
+  test("T-23: finalizeLocal 成功後に completeOperation が false を返した場合、outcome.kind !== completed", async () => {
+    const ticketId = 2300;
+    class FlakyRepo extends DefaultSyncOperationRepository {
+      public override async completeOperation() {
+        return false; // completeOperation persistence failure
+      }
+    }
+
+    const repo = new FlakyRepo();
+    await repo.saveOperation({
+      operationId: `${SCOPE}:ticket:2300`,
+      kind: "ticket_update",
+      key: { kind: "ticket", ticketId },
+      connectionScope: SCOPE,
+      phase: "queued",
+      revision: 1,
+      persistenceVersion: 1,
+      ticketId,
+      projectId: 1,
+      intent: {
+        ticketId,
+        baseSubject: "Ticket T23",
+        baseDescription: "Desc",
+        baseMetadata: { tracker: "Bug", priority: "Normal", status: "New", due_date: "", children: [] },
+        subject: "Ticket T23",
+        description: "Desc",
+        metadata: { tracker: "Bug", priority: "Normal", status: "New", due_date: "", children: [] },
+      },
+    }, SCOPE);
+
+    const engine = createSyncEngine({
+      coordinator: createSyncCoordinator({ repository: repo }),
+      tickets: {
+        getIssueDetail: async (id: number) => ({
+          ticket: { id, projectId: 1, subject: "Ticket T23", description: "Desc", trackerId: 1, trackerName: "Bug", priorityId: 1, priorityName: "Normal", statusId: 1, statusName: "New", updatedAt: "2026-08-15T00:00:00Z" } as any,
+          comments: [],
+        }),
+        updateIssue: async () => {},
+        getProjectTrackers: async () => [{ id: 1, name: "Bug" }],
+        listIssueStatuses: async () => [{ id: 1, name: "New" }],
+        listIssuePriorities: async () => [{ id: 1, name: "Normal" }],
+      },
+    });
+
+    const outcome = await engine.syncOne({ kind: "ticket", ticketId }, { connectionScope: SCOPE });
+    assert.notStrictEqual(outcome.kind, "completed", "completeOperation 失敗時は completed を返してはならない (INV-N07, P1-03)");
+  });
+
+  // T-24: complete CAS conflict + nextIntent (INV-N07)
+  test("T-24: completion 直前に nextIntent が追加された場合、new intent が保持され false completed にならない", async () => {
+    const ticketId = 2400;
+    const key = { kind: "ticket" as const, ticketId };
+    const repo = createSyncOperationRepository();
+    await repo.saveOperation({
+      operationId: `${SCOPE}:ticket:2400`,
+      kind: "ticket_update",
+      key,
+      connectionScope: SCOPE,
+      phase: "queued",
+      revision: 1,
+      persistenceVersion: 1,
+      ticketId,
+      projectId: 1,
+      intent: {
+        ticketId,
+        baseSubject: "Ticket T24 Rev 1",
+        baseDescription: "Desc",
+        baseMetadata: { tracker: "Bug", priority: "Normal", status: "New", due_date: "", children: [] },
+        subject: "Ticket T24 Rev 1",
+        description: "Desc",
+        metadata: { tracker: "Bug", priority: "Normal", status: "New", due_date: "", children: [] },
+      },
+    }, SCOPE);
+
+    const engine = createSyncEngine({
+      coordinator: createSyncCoordinator({ repository: repo }),
+      tickets: {
+        getIssueDetail: async (id: number) => {
+          // finalize 直前にユーザーがエディタで編集して nextIntent を保存した状態をシミュレート
+          const current = repo.getOperation(key, SCOPE);
+          if (current) {
+            await repo.saveOperation({
+              ...current,
+              nextIntent: {
+                ticketId,
+                baseSubject: "Ticket T24 Rev 1",
+                baseDescription: "Desc",
+                baseMetadata: { tracker: "Bug", priority: "Normal", status: "New", due_date: "", children: [] },
+                revision: 2,
+                subject: "Ticket T24 Rev 2 Concurrent",
+                description: "Desc 2",
+                metadata: { tracker: "Bug", priority: "Normal", status: "New", due_date: "", children: [] },
+              },
+            }, SCOPE);
+          }
+          return {
+            ticket: { id, projectId: 1, subject: "Ticket T24 Rev 1", description: "Desc", trackerId: 1, trackerName: "Bug", priorityId: 1, priorityName: "Normal", statusId: 1, statusName: "New", updatedAt: "2026-08-15T00:00:00Z" } as any,
+            comments: [],
+          };
+        },
+        updateIssue: async () => {},
+        getProjectTrackers: async () => [{ id: 1, name: "Bug" }],
+        listIssueStatuses: async () => [{ id: 1, name: "New" }],
+        listIssuePriorities: async () => [{ id: 1, name: "Normal" }],
+      },
+    });
+
+    const outcome = await engine.syncOne(key, { connectionScope: SCOPE });
+    assert.strictEqual(outcome.kind, "completed");
+
+    const queue = getOfflineSyncQueue(SCOPE);
+    const remaining = queue.tickets.get(ticketId);
+    assert.ok(remaining, "nextIntent があるため queue エントリが残ること");
+    assert.strictEqual(remaining?.revision, 2, "nextIntent のリビジョン2に昇格していること");
+    assert.strictEqual(remaining?.subject, "Ticket T24 Rev 2 Concurrent");
   });
 });

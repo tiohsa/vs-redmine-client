@@ -1514,7 +1514,7 @@ export const completeOfflineNewTicketAsync = async (
     return false;
   }
   if (current.nextIntent) {
-    if (!promotion || promotion.sourceRevision !== current.nextIntent.revision) {
+    if (!promotion || (current.nextIntent.revision !== undefined && promotion.sourceRevision !== current.nextIntent.revision)) {
       return false;
     }
   }
