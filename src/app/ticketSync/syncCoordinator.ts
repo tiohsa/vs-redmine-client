@@ -210,28 +210,6 @@ export class SyncCoordinator {
         const secResult = await handler.executeSecondaryEffects(currentOp, prepResult.prepared, handlerCtx, depsWithRepo);
         if (!secResult.ok) {
           const failedSec = secResult;
-          const freshOp = this.repository.getOperation(getOpKey(currentOp), scope);
-          const hasCommittedOrUnknownEffects = (freshOp?.effects ?? []).some(
-            (e) => e.state === "committed" || e.state === "commit_unknown" || e.state === "compensation_unknown" || e.state === "compensation_started",
-          );
-          if (hasCommittedOrUnknownEffects) {
-            const committedParentId = freshOp?.createdRemoteId ?? (freshOp?.effects?.find((e) => e.effectId === "ticket-create" && e.state === "committed")?.remoteId) ?? currentOp.ticketId ?? 0;
-            try {
-              await this.repository.transitionOperation(
-                getOpKey(currentOp),
-                { kind: "record_remote_commit", createdRemoteId: committedParentId > 0 ? committedParentId : undefined },
-                scope,
-              );
-            } catch {
-              // ignore persistence failure
-            }
-            return {
-              kind: "remote_committed",
-              ticketId: committedParentId,
-              pending: "remote_reconcile",
-              message: failedSec.error.message,
-            };
-          }
           if (failedSec.commitUnknown) {
             try {
               await this.repository.transitionOperation(
@@ -288,9 +266,11 @@ export class SyncCoordinator {
           (e.state === "committed" || e.state === "commit_unknown" || e.state === "compensation_unknown" || e.state === "compensation_started")
         );
         const isParentCreateCommitted = currentOp.kind === "ticket_create" && (latestOp.createdRemoteId !== undefined || (latestOp.effects ?? []).some((e) => e.effectId === "ticket-create" && e.state === "committed"));
-        const committedParentId = latestOp.createdRemoteId ?? (latestOp.effects?.find((e) => e.effectId === "ticket-create" && e.state === "committed")?.remoteId) ?? 0;
+        const isParentUpdateCommitted = currentOp.kind === "ticket_update" && (latestOp.effects ?? []).some((e) => e.effectId === "ticket-update" && e.state === "committed");
+        const isParentCommitted = isParentCreateCommitted || isParentUpdateCommitted;
+        const committedParentId = latestOp.createdRemoteId ?? (latestOp.effects?.find((e) => (e.effectId === "ticket-create" || e.effectId === "ticket-update") && e.state === "committed")?.remoteId) ?? currentOp.ticketId ?? 0;
 
-        if (isParentCreateCommitted && hasUnresolvedChild && committedParentId > 0) {
+        if (isParentCommitted && hasUnresolvedChild && committedParentId > 0) {
           await this.repository.transitionOperation(
             getOpKey(currentOp),
             { kind: "record_remote_commit", createdRemoteId: committedParentId },

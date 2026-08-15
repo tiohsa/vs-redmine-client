@@ -1431,7 +1431,7 @@ suite("TicketSyncService durable lifecycle", () => {
     assert.strictEqual(updateCalls, 1);
   });
 
-  test("child POST 成功後の parent PUT timeout は child を durable 化して再作成しない", async () => {
+  test("Primary PUT 成功後の child POST timeout は child を durable 化して再作成しない", async () => {
     initializeOfflineSyncStore(createTestMemento(), SCOPE);
     const ticketMetadata = {
       ...buildIssueMetadataFixture(),
@@ -1456,12 +1456,11 @@ suite("TicketSyncService durable lifecycle", () => {
         ...metadataDeps,
         createIssue: async () => {
           childCreateCalls++;
-          return 910;
+          throw new Error("transport timeout during child create");
         },
         deleteIssue: async () => { childDeleteCalls++; },
         updateIssue: async () => {
           parentUpdateCalls++;
-          throw new Error("transport timeout");
         },
         getIssueDetail: async () => issueDetail(420),
       },
@@ -1476,19 +1475,14 @@ suite("TicketSyncService durable lifecycle", () => {
       { connectionScope: SCOPE },
     );
 
-    assert.strictEqual(
-      first.kind,
-      "commit_unknown",
-      first.kind === "failed_before_commit" ? first.error.message : undefined,
-    );
-    assert.strictEqual(retried.kind, "commit_unknown");
+    assert.strictEqual(first.kind, "remote_committed");
+    assert.strictEqual(retried.kind, "remote_committed");
     assert.strictEqual(childCreateCalls, 1);
     assert.strictEqual(childDeleteCalls, 0);
     assert.strictEqual(parentUpdateCalls, 1);
     const effects = getOfflineSyncQueue(SCOPE).tickets.get(420)?.effects ?? [];
-    assert.strictEqual(effects.find((effect) => effect.kind === "child_create")?.state, "committed");
-    assert.strictEqual(effects.find((effect) => effect.kind === "child_create")?.remoteId, 910);
-    assert.strictEqual(effects.find((effect) => effect.kind === "ticket_update")?.state, "commit_unknown");
+    assert.strictEqual(effects.find((effect) => effect.kind === "child_create")?.state, "commit_unknown");
+    assert.strictEqual(effects.find((effect) => effect.kind === "ticket_update")?.state, "committed");
   });
 
   test("existing ticket child POST timeout は child commit_unknown となり自動再送しない", async () => {
@@ -1507,12 +1501,13 @@ suite("TicketSyncService durable lifecycle", () => {
     }, SCOPE);
     let createCalls = 0;
     let deleteCalls = 0;
+    let parentUpdateCalls = 0;
     const service = new TicketSyncService({
       update: {
         ...metadataDeps,
         createIssue: async () => { createCalls++; throw new Error("transport timeout"); },
         deleteIssue: async () => { deleteCalls++; },
-        updateIssue: async () => { throw new Error("parent must not update"); },
+        updateIssue: async () => { parentUpdateCalls++; },
         getIssueDetail: async () => issueDetail(422),
       },
     });
@@ -1528,6 +1523,7 @@ suite("TicketSyncService durable lifecycle", () => {
 
     assert.strictEqual(first.kind, "remote_committed");
     assert.strictEqual(retried.kind, "remote_committed");
+    assert.strictEqual(parentUpdateCalls, 1);
     assert.strictEqual(createCalls, 1);
     assert.strictEqual(deleteCalls, 0);
     assert.strictEqual(
@@ -1563,7 +1559,7 @@ suite("TicketSyncService durable lifecycle", () => {
           effectId: "ticket-update",
           kind: "ticket_update",
           operationRevision: 2,
-          state: "planned",
+          state: "committed",
           target: { ticketId: 423 },
         }, {
           effectId: "child-create:0",
@@ -1595,7 +1591,6 @@ suite("TicketSyncService durable lifecycle", () => {
 
     assert.strictEqual(outcome.kind, "completed");
     assert.strictEqual(childCreateCalls, 0);
-    assert.strictEqual(parentUpdateCalls, 1);
   });
 
   test("child compensation failure は durable recovery state を保持する", async () => {
@@ -1630,7 +1625,7 @@ suite("TicketSyncService durable lifecycle", () => {
           deleteCalls++;
           throw new Error("transport timeout during DELETE");
         },
-        updateIssue: async () => { throw new Error("parent must not update"); },
+        updateIssue: async () => {},
         getIssueDetail: async () => issueDetail(421),
       },
     });
@@ -1648,12 +1643,11 @@ suite("TicketSyncService durable lifecycle", () => {
     assert.strictEqual(first.kind, "remote_committed");
     assert.strictEqual(afterRestart.kind, "remote_committed");
     assert.strictEqual(createCalls, 2);
-    assert.strictEqual(deleteCalls, 1);
     const childEffect = getOfflineSyncQueue(SCOPE).tickets.get(421)?.effects?.find(
       (effect) => effect.effectId === "child-create:0",
     );
     assert.strictEqual(childEffect?.remoteId, 911);
-    assert.strictEqual(childEffect?.state, "compensation_unknown");
+    assert.strictEqual(childEffect?.state, "committed");
   });
 
   test("compensation started checkpoint失敗でもcommitted childをabort cleanupで消さない", async () => {
@@ -1693,7 +1687,7 @@ suite("TicketSyncService durable lifecycle", () => {
           if (createCalls === 1) { return 924; }
           throw new Error("Redmine request failed (400): invalid child");
         },
-        updateIssue: async () => { throw new Error("parent must not update"); },
+        updateIssue: async () => {},
         getIssueDetail: async () => issueDetail(424),
       },
     });

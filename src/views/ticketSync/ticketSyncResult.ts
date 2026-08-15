@@ -33,10 +33,17 @@ export const mapErrorToResult = (error: unknown): TicketSaveResult => {
 
 export const isRemoteCommitUnknownError = (error: unknown): boolean => {
   const message = error instanceof Error ? error.message : String(error);
-  const match = message.match(/\((\d{3})\)/);
-  if (!match) {
+  const match = message.match(/\((\d{3})\)/) ?? message.match(/HTTP\s*(\d{3})/i) ?? message.match(/status\s*code\s*(\d{3})/i);
+  if (match) {
+    const statusCode = Number(match[1]);
+    return statusCode === 408 || statusCode === 429 || statusCode >= 500;
+  }
+  const lower = message.toLowerCase();
+  if (lower.includes("timeout") || lower.includes("econnrefused") || lower.includes("econnreset") || lower.includes("etimedout") || lower.includes("network") || lower.includes("socket")) {
     return true;
   }
-  const statusCode = Number(match[1]);
-  return statusCode === 408 || statusCode === 429 || statusCode >= 500;
+  if (lower.includes("400") || lower.includes("401") || lower.includes("403") || lower.includes("404") || lower.includes("422") || lower.includes("validation")) {
+    return false;
+  }
+  return true;
 };

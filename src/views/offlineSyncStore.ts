@@ -595,9 +595,13 @@ const persist = (scope = activeScope): void => {
 
 const promoteTicketIntent = (operation: OfflineTicketUpdate): OfflineTicketUpdate => {
   const next = operation.nextIntent;
+  const effects = operation.effects ?? [];
   if (!next) {
-    return { ...operation, phase: "queued", nextIntent: undefined, effects: [] };
+    return { ...operation, phase: "queued", nextIntent: undefined, effects };
   }
+  const reusableEffects = effects.filter((e) =>
+    e.state === "committed" || e.state === "commit_unknown" || e.state === "compensation_unknown" || e.state === "compensation_started"
+  );
   return {
     ...operation,
     subject: next.subject,
@@ -611,15 +615,19 @@ const promoteTicketIntent = (operation: OfflineTicketUpdate): OfflineTicketUpdat
     phase: "queued",
     revision: next.revision,
     nextIntent: undefined,
-    effects: [],
+    effects: reusableEffects,
   };
 };
 
 const promoteNewTicketIntent = (operation: OfflineNewTicket): OfflineNewTicket => {
   const next = operation.nextIntent;
+  const effects = operation.effects ?? [];
   if (!next) {
-    return { ...operation, phase: "queued", nextIntent: undefined, effects: [] };
+    return { ...operation, phase: "queued", nextIntent: undefined, effects };
   }
+  const reusableEffects = effects.filter((e) =>
+    e.state === "committed" || e.state === "commit_unknown" || e.state === "compensation_unknown" || e.state === "compensation_started"
+  );
   return {
     ...operation,
     content: next.content,
@@ -629,7 +637,7 @@ const promoteNewTicketIntent = (operation: OfflineNewTicket): OfflineNewTicket =
     phase: "queued",
     revision: next.revision,
     nextIntent: undefined,
-    effects: [],
+    effects: reusableEffects,
   };
 };
 
@@ -689,11 +697,15 @@ const normalizeNewTicket = (ticket: OfflineNewTicket): OfflineNewTicket => {
 
 const promoteCommentIntent = (operation: OfflineCommentUpdate): OfflineCommentUpdate => {
   const next = operation.nextIntent;
+  const effects = operation.effects ?? [];
   if (!next) {
-    return { ...operation, phase: "queued", nextIntent: undefined, effects: [] };
+    return { ...operation, phase: "queued", nextIntent: undefined, effects };
   }
   const commentId = operation.commentId ?? (operation as any).createdRemoteId;
   const hasCommentId = commentId !== undefined;
+  const reusableEffects = effects.filter((e) =>
+    e.state === "committed" || e.state === "commit_unknown" || e.state === "compensation_unknown" || e.state === "compensation_started"
+  );
   return {
     ...operation,
     commentId,
@@ -712,7 +724,7 @@ const promoteCommentIntent = (operation: OfflineCommentUpdate): OfflineCommentUp
     phase: "queued",
     revision: next.revision,
     nextIntent: undefined,
-    effects: [],
+    effects: reusableEffects,
   };
 };
 
@@ -1222,11 +1234,16 @@ export const replaceOfflineSyncQueueAsync = async (
   next: OfflineSyncQueue,
   scope = activeScope,
 ): Promise<void> => {
+  const serialized: SerializedQueue = {
+    version: 3,
+    operations: operationsFromQueue(next, scope),
+  };
+  await schedulePersist(scope, serialized);
   const queue = getQueue(scope);
   queue.tickets = new Map(next.tickets);
   queue.comments = [...next.comments];
   queue.newTickets = [...next.newTickets];
-  await persistAsync(scope);
+  notifyQueueChanged();
 };
 
 export const removeOfflineTicketUpdate = (ticketId: number, scope = activeScope): void => {

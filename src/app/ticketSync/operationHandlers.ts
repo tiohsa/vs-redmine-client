@@ -288,6 +288,11 @@ export class TicketCreateHandler implements OperationHandler<TicketCreateIntent,
     const opKey: SyncOperationKey = operation.key ?? { kind: "newTicket", documentUri: operation.documentUri };
     const revision = operation.intentRevision ?? operation.revision ?? 1;
 
+    const currentOp = repo.getOperation(opKey, context.connectionScope);
+    if (!currentOp) {
+      await repo.saveOperation(operation, context.connectionScope);
+    }
+
     for (let i = 0; i < attachments.length; i++) {
       const att = attachments[i];
       if (att.kind === "token") {
@@ -306,7 +311,7 @@ export class TicketCreateHandler implements OperationHandler<TicketCreateIntent,
           continue;
         }
 
-        await repo.planEffect(
+        const planRes = await repo.planEffect(
           opKey,
           {
             effectId,
@@ -318,25 +323,34 @@ export class TicketCreateHandler implements OperationHandler<TicketCreateIntent,
           context.connectionScope,
           revision,
         );
+        if (!planRes) {
+          return { ok: false, error: new Error(`Failed to plan effect ${effectId}`) };
+        }
 
-        await repo.transitionEffect(
+        const startRes = await repo.transitionEffect(
           opKey,
           effectId,
           { kind: "start" },
           context.connectionScope,
           { operationRevision: revision, sourceState: "planned" },
         );
+        if (!startRes) {
+          return { ok: false, error: new Error(`Failed to start effect ${effectId}`) };
+        }
 
         try {
           const uploadFn = (createDeps as any).uploadFile ?? uploadFileAttachment;
           const res = await uploadFn(att.filePath);
-          await repo.transitionEffect(
+          const commitRes = await repo.transitionEffect(
             opKey,
             effectId,
             { kind: "commit", token: res.token, target: { filePath: att.filePath, filename: att.filename ?? res.filename } },
             context.connectionScope,
             { operationRevision: revision, sourceState: "started" },
           );
+          if (!commitRes) {
+            return { ok: false, error: new Error(`Failed to commit effect ${effectId}`), commitUnknown: true };
+          }
           tokens.push({ token: res.token, filename: att.filename ?? res.filename, content_type: att.contentType ?? res.contentType });
         } catch (err) {
           const commitUnknown = isRemoteCommitUnknownError(err);
@@ -361,7 +375,7 @@ export class TicketCreateHandler implements OperationHandler<TicketCreateIntent,
           continue;
         }
 
-        await repo.planEffect(
+        const planClipRes = await repo.planEffect(
           opKey,
           {
             effectId,
@@ -373,25 +387,34 @@ export class TicketCreateHandler implements OperationHandler<TicketCreateIntent,
           context.connectionScope,
           revision,
         );
+        if (!planClipRes) {
+          return { ok: false, error: new Error(`Failed to plan effect ${effectId}`) };
+        }
 
-        await repo.transitionEffect(
+        const startClipRes = await repo.transitionEffect(
           opKey,
           effectId,
           { kind: "start" },
           context.connectionScope,
           { operationRevision: revision, sourceState: "planned" },
         );
+        if (!startClipRes) {
+          return { ok: false, error: new Error(`Failed to start effect ${effectId}`) };
+        }
 
         try {
           const uploadFn = (createDeps as any).uploadClipboardImage ?? uploadClipboardImage;
           const res = await uploadFn();
-          await repo.transitionEffect(
+          const commitClipRes = await repo.transitionEffect(
             opKey,
             effectId,
             { kind: "commit", token: res.token, target: { filename: att.filename ?? res.filename } },
             context.connectionScope,
             { operationRevision: revision, sourceState: "started" },
           );
+          if (!commitClipRes) {
+            return { ok: false, error: new Error(`Failed to commit effect ${effectId}`), commitUnknown: true };
+          }
           tokens.push({ token: res.token, filename: att.filename ?? res.filename, content_type: att.contentType ?? res.contentType });
         } catch (err) {
           const commitUnknown = isRemoteCommitUnknownError(err);
@@ -1039,163 +1062,11 @@ export class TicketUpdateHandler implements OperationHandler<TicketUpdateIntent,
   }
 
   public async executeSecondaryEffects(
-    operation: UnifiedSyncOperation<TicketUpdateIntent>,
-    prepared: PreparedTicketUpdate,
-    context: OperationHandlerContext,
-    deps?: OperationHandlerDeps,
+    _operation: UnifiedSyncOperation<TicketUpdateIntent>,
+    _prepared: PreparedTicketUpdate,
+    _context: OperationHandlerContext,
+    _deps?: OperationHandlerDeps,
   ): Promise<{ ok: true } | { ok: false; error: Error; commitUnknown?: boolean }> {
-    const ticketId = prepared.ticketId;
-    const saveDeps = { ...defaultTicketDeps, ...deps?.ticketUpdate };
-    const repo = deps?.repository ?? createSyncOperationRepository();
-    const opKey: SyncOperationKey = operation.key ?? { kind: "ticket", ticketId };
-    const revision = operation.intentRevision ?? operation.revision ?? 1;
-    const uniqueChildren = prepared.uniqueChildren;
-    if (!uniqueChildren || uniqueChildren.length === 0) {
-      return { ok: true };
-    }
-
-    const childProjectId = prepared.projectId ?? operation.projectId;
-
-    for (let ordinal = 0; ordinal < uniqueChildren.length; ordinal++) {
-      const subject = uniqueChildren[ordinal];
-      const effectId = `child-create:${ordinal}`;
-
-      const currentOp = repo.getOperation(opKey, context.connectionScope) ?? operation;
-      const existingEffect = currentOp.effects?.find((e) => e.effectId === effectId);
-
-      if (existingEffect?.state === "committed" && existingEffect.remoteId) {
-        continue;
-      }
-      if (
-        existingEffect?.state === "commit_unknown" ||
-        existingEffect?.state === "compensation_unknown" ||
-        existingEffect?.state === "compensation_started"
-      ) {
-        return {
-          ok: false,
-          commitUnknown: true,
-          error: new Error(`Child effect ${effectId} is in uncertain state`),
-        };
-      }
-
-      await repo.planEffect(
-        opKey,
-        {
-          effectId,
-          kind: "child_create",
-          operationRevision: revision,
-          state: "planned",
-          target: { parentTicketId: ticketId, ordinal },
-        },
-        context.connectionScope,
-        revision,
-      );
-
-      await repo.transitionEffect(
-        opKey,
-        effectId,
-        { kind: "start" },
-        context.connectionScope,
-        { operationRevision: revision, sourceState: "planned" },
-      );
-
-      if (!childProjectId || childProjectId <= 0) {
-        throw new Error(`Missing projectId for child issue creation: ${subject}`);
-      }
-
-      try {
-        const createdChildId = await saveDeps.createIssue?.({
-          subject,
-          description: "",
-          parentId: ticketId,
-          projectId: childProjectId,
-        });
-        if (!createdChildId) {
-          throw new Error(`Failed to create child issue: ${subject}`);
-        }
-        await repo.transitionEffect(
-          opKey,
-          effectId,
-          { kind: "commit", remoteId: createdChildId },
-          context.connectionScope,
-          { operationRevision: revision, sourceState: "started" },
-        );
-      } catch (err) {
-        const commitUnknown = isRemoteCommitUnknownError(err);
-        await repo.transitionEffect(
-          opKey,
-          effectId,
-          commitUnknown ? { kind: "mark_commit_unknown" } : { kind: "mark_failed", detail: (err as Error).message },
-          context.connectionScope,
-          { operationRevision: revision, sourceState: "started" },
-        );
-
-        if (!commitUnknown) {
-          for (let prev = 0; prev < ordinal; prev++) {
-            const prevEffectId = `child-create:${prev}`;
-            const opAfterFail = repo.getOperation(opKey, context.connectionScope) ?? operation;
-            const prevEffect = opAfterFail.effects?.find((e) => e.effectId === prevEffectId);
-            if (prevEffect && prevEffect.state === "committed" && prevEffect.remoteId) {
-              try {
-                const startComp = await repo.transitionEffect(
-                  opKey,
-                  prevEffectId,
-                  { kind: "start_compensation" },
-                  context.connectionScope,
-                  { operationRevision: revision, sourceState: "committed" },
-                );
-                if (startComp) {
-                  try {
-                    await saveDeps.deleteIssue?.(prevEffect.remoteId);
-                    await repo.transitionEffect(
-                      opKey,
-                      prevEffectId,
-                      { kind: "complete_compensation" },
-                      context.connectionScope,
-                      { operationRevision: revision, sourceState: "compensation_started" },
-                    );
-                  } catch (delErr) {
-                    await repo.transitionEffect(
-                      opKey,
-                      prevEffectId,
-                      { kind: "mark_compensation_unknown", detail: (delErr as Error).message },
-                      context.connectionScope,
-                      { operationRevision: revision, sourceState: "compensation_started" },
-                    );
-                  }
-                }
-              } catch {
-                // Ignore checkpoint failure to preserve committed child
-              }
-            }
-          }
-        }
-
-        return {
-          ok: false,
-          error: err as Error,
-          commitUnknown,
-        };
-      }
-    }
-
-    const finalOp = repo.getOperation(opKey, context.connectionScope) ?? operation;
-    const finalEffects = finalOp.effects ?? [];
-    const hasFailedEffects = finalEffects.some((e) => e.state === "failed");
-    const hasUnknownEffects = finalEffects.some(
-      (e) =>
-        e.state === "commit_unknown" ||
-        e.state === "compensation_unknown" ||
-        e.state === "compensation_started",
-    );
-    if (hasUnknownEffects || hasFailedEffects) {
-      return {
-        ok: false,
-        error: new Error("Secondary effects remain unresolved or failed"),
-        commitUnknown: hasUnknownEffects,
-      };
-    }
-
     return { ok: true };
   }
 
@@ -1221,7 +1092,12 @@ export class TicketUpdateHandler implements OperationHandler<TicketUpdateIntent,
     const opKey: SyncOperationKey = operation.key ?? { kind: "ticket", ticketId };
     const revision = operation.intentRevision ?? operation.revision ?? 1;
 
-    await repo.planEffect(
+    const currentOp = repo.getOperation(opKey, context.connectionScope);
+    if (!currentOp) {
+      await repo.saveOperation(operation, context.connectionScope);
+    }
+
+    const planned = await repo.planEffect(
       opKey,
       {
         effectId: "ticket-update",
@@ -1233,33 +1109,49 @@ export class TicketUpdateHandler implements OperationHandler<TicketUpdateIntent,
       context.connectionScope,
       revision,
     );
+    if (!planned) {
+      return {
+        ok: false,
+        commitUnknown: false,
+        error: new Error("Failed to persist planned checkpoint for ticket-update"),
+      };
+    }
 
-    await repo.transitionEffect(
+    const started = await repo.transitionEffect(
       opKey,
       "ticket-update",
       { kind: "start" },
       context.connectionScope,
       { operationRevision: revision, sourceState: "planned" },
     );
+    if (!started) {
+      return {
+        ok: false,
+        commitUnknown: false,
+        error: new Error("Failed to persist started checkpoint for ticket-update"),
+      };
+    }
 
+    // 1. Primary PUT
     try {
       if (Object.keys(prepared.changes).length > 0) {
         await saveDeps.updateIssue({ issueId: ticketId, fields: prepared.changes });
       }
 
-      await repo.transitionEffect(
+      const committed = await repo.transitionEffect(
         opKey,
         "ticket-update",
         { kind: "commit", remoteId: ticketId },
         context.connectionScope,
         { operationRevision: revision, sourceState: "started" },
       );
-
-      return {
-        ok: true,
-        createdRemoteId: ticketId,
-        remoteUpdatedAt: new Date().toISOString(),
-      };
+      if (!committed) {
+        return {
+          ok: false,
+          commitUnknown: true,
+          error: new Error("Remote updated but failed to record commit checkpoint"),
+        };
+      }
     } catch (err) {
       const commitUnknown = isRemoteCommitUnknownError(err);
       await repo.transitionEffect(
@@ -1273,11 +1165,115 @@ export class TicketUpdateHandler implements OperationHandler<TicketUpdateIntent,
         ok: false,
         commitUnknown,
         error: err as Error,
-        outcome: commitUnknown
-          ? { kind: "commit_unknown", operationId: operation.operationId, ticketId, message: (err as Error).message }
-          : { kind: "failed_before_commit", ticketId, error: err as Error },
       };
     }
+
+    // 2. Dependent Effects: Child issue creation (DR-02: After Primary Commit)
+    const uniqueChildren = prepared.uniqueChildren;
+    if (uniqueChildren && uniqueChildren.length > 0) {
+      const childProjectId = prepared.projectId ?? operation.projectId;
+
+      for (let ordinal = 0; ordinal < uniqueChildren.length; ordinal++) {
+        const subject = uniqueChildren[ordinal];
+        const effectId = `child-create:${ordinal}`;
+
+        const currentOp = repo.getOperation(opKey, context.connectionScope) ?? operation;
+        const existingEffect = currentOp.effects?.find((e) => e.effectId === effectId);
+
+        if (existingEffect?.state === "committed" && existingEffect.remoteId) {
+          continue;
+        }
+        if (
+          existingEffect?.state === "commit_unknown" ||
+          existingEffect?.state === "compensation_unknown" ||
+          existingEffect?.state === "compensation_started"
+        ) {
+          return {
+            ok: false,
+            commitUnknown: true,
+            error: new Error(`Child effect ${effectId} is in uncertain state`),
+          };
+        }
+
+        const planChild = await repo.planEffect(
+          opKey,
+          {
+            effectId,
+            kind: "child_create",
+            operationRevision: revision,
+            state: "planned",
+            target: { parentTicketId: ticketId, ordinal },
+          },
+          context.connectionScope,
+          revision,
+        );
+        if (!planChild) {
+          return {
+            ok: false,
+            commitUnknown: false,
+            error: new Error(`Failed to plan child effect ${effectId}`),
+          };
+        }
+
+        const startChild = await repo.transitionEffect(
+          opKey,
+          effectId,
+          { kind: "start" },
+          context.connectionScope,
+          { operationRevision: revision, sourceState: "planned" },
+        );
+        if (!startChild) {
+          return {
+            ok: false,
+            commitUnknown: false,
+            error: new Error(`Failed to start child effect ${effectId}`),
+          };
+        }
+
+        if (!childProjectId || childProjectId <= 0) {
+          throw new Error(`Missing projectId for child issue creation: ${subject}`);
+        }
+
+        try {
+          const createdChildId = await saveDeps.createIssue?.({
+            subject,
+            description: "",
+            parentId: ticketId,
+            projectId: childProjectId,
+          });
+          if (!createdChildId) {
+            throw new Error(`Failed to create child issue: ${subject}`);
+          }
+          await repo.transitionEffect(
+            opKey,
+            effectId,
+            { kind: "commit", remoteId: createdChildId },
+            context.connectionScope,
+            { operationRevision: revision, sourceState: "started" },
+          );
+        } catch (err) {
+          const commitUnknown = isRemoteCommitUnknownError(err);
+          await repo.transitionEffect(
+            opKey,
+            effectId,
+            commitUnknown ? { kind: "mark_commit_unknown" } : { kind: "mark_failed", detail: (err as Error).message },
+            context.connectionScope,
+            { operationRevision: revision, sourceState: "started" },
+          );
+
+          return {
+            ok: false,
+            commitUnknown,
+            error: err as Error,
+          };
+        }
+      }
+    }
+    return {
+      ok: true,
+      createdRemoteId: ticketId,
+      remoteUpdatedAt: new Date().toISOString(),
+    };
   }
 
   public async reconcileRemote(
@@ -1642,6 +1638,11 @@ export class CommentCreateHandler implements OperationHandler<CommentCreateInten
     const opKey: SyncOperationKey = operation.key ?? { kind: "comment", ticketId: prepared.ticketId, documentUri: operation.documentUri };
     const revision = operation.intentRevision ?? operation.revision ?? 1;
 
+    const currentOp = repo.getOperation(opKey, context.connectionScope);
+    if (!currentOp) {
+      await repo.saveOperation(operation, context.connectionScope);
+    }
+
     const resolvedMap = new Map<string, UploadToken>();
 
     for (let ordinal = 0; ordinal < prepared.imageLinks.length; ordinal++) {
@@ -1664,7 +1665,7 @@ export class CommentCreateHandler implements OperationHandler<CommentCreateInten
         continue;
       }
 
-      await repo.planEffect(
+      const planImg = await repo.planEffect(
         opKey,
         {
           effectId,
@@ -1676,24 +1677,33 @@ export class CommentCreateHandler implements OperationHandler<CommentCreateInten
         context.connectionScope,
         revision,
       );
+      if (!planImg) {
+        return { ok: false, error: new Error(`Failed to plan effect ${effectId}`) };
+      }
 
-      await repo.transitionEffect(
+      const startImg = await repo.transitionEffect(
         opKey,
         effectId,
         { kind: "start" },
         context.connectionScope,
         { operationRevision: revision, sourceState: "planned" },
       );
+      if (!startImg) {
+        return { ok: false, error: new Error(`Failed to start effect ${effectId}`) };
+      }
 
       try {
         const upload = await commentDeps.uploadFile(filePath);
-        await repo.transitionEffect(
+        const commitImg = await repo.transitionEffect(
           opKey,
           effectId,
           { kind: "commit", token: upload.token, target: { filePath, filename: upload.filename } },
           context.connectionScope,
           { operationRevision: revision, sourceState: "started" },
         );
+        if (!commitImg) {
+          return { ok: false, error: new Error(`Failed to commit effect ${effectId}`), commitUnknown: true };
+        }
         resolvedMap.set(filePath, {
           token: upload.token,
           filename: upload.filename,
@@ -2018,6 +2028,11 @@ export class CommentUpdateHandler implements OperationHandler<CommentUpdateInten
     const opKey: SyncOperationKey = operation.key ?? { kind: "comment", ticketId: prepared.ticketId, commentId: prepared.commentId, documentUri: operation.documentUri };
     const revision = operation.intentRevision ?? operation.revision ?? 1;
 
+    const currentOp = repo.getOperation(opKey, context.connectionScope);
+    if (!currentOp) {
+      await repo.saveOperation(operation, context.connectionScope);
+    }
+
     const resolvedMap = new Map<string, UploadToken>();
 
     for (let ordinal = 0; ordinal < prepared.imageLinks.length; ordinal++) {
@@ -2040,7 +2055,7 @@ export class CommentUpdateHandler implements OperationHandler<CommentUpdateInten
         continue;
       }
 
-      await repo.planEffect(
+      const planImg = await repo.planEffect(
         opKey,
         {
           effectId,
@@ -2052,24 +2067,33 @@ export class CommentUpdateHandler implements OperationHandler<CommentUpdateInten
         context.connectionScope,
         revision,
       );
+      if (!planImg) {
+        return { ok: false, error: new Error(`Failed to plan effect ${effectId}`) };
+      }
 
-      await repo.transitionEffect(
+      const startImg = await repo.transitionEffect(
         opKey,
         effectId,
         { kind: "start" },
         context.connectionScope,
         { operationRevision: revision, sourceState: "planned" },
       );
+      if (!startImg) {
+        return { ok: false, error: new Error(`Failed to start effect ${effectId}`) };
+      }
 
       try {
         const upload = await commentDeps.uploadFile(filePath);
-        await repo.transitionEffect(
+        const commitImg = await repo.transitionEffect(
           opKey,
           effectId,
           { kind: "commit", token: upload.token, target: { filePath, filename: upload.filename } },
           context.connectionScope,
           { operationRevision: revision, sourceState: "started" },
         );
+        if (!commitImg) {
+          return { ok: false, error: new Error(`Failed to commit effect ${effectId}`), commitUnknown: true };
+        }
         resolvedMap.set(filePath, {
           token: upload.token,
           filename: upload.filename,
