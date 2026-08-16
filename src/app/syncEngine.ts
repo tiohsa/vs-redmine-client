@@ -11,7 +11,8 @@ import type { SyncContext } from "./ticketSync/ports";
 import type { TicketSyncOutcome, TicketSyncQueueKey } from "./ticketSync/ticketSyncOutcome";
 import type { CommentSaveDependencies } from "../views/commentSaveSync";
 import type { SyncOutcome } from "./ticketSync/syncOperationTypes";
-import { TicketCreateHandler, TicketUpdateHandler } from "./ticketSync/operationHandlers";
+import { EffectResolution, TicketCreateHandler, TicketUpdateHandler } from "./ticketSync/operationHandlers";
+import type { DurableSyncEffectState } from "./syncEffects";
 
 export type SyncEngineKey =
   | TicketSyncQueueKey
@@ -116,6 +117,31 @@ export class SyncEngine {
         comment: this.comments,
       },
     });
+  }
+
+  public async resolveEffect(input: {
+    key: SyncEngineKey;
+    operationId: string;
+    operationRevision: number;
+    effectId: string;
+    expectedEffectState: DurableSyncEffectState;
+    context: SyncContext;
+    resolution: EffectResolution;
+  }): Promise<SyncEngineOutcome> {
+    return this.coordinator.resolveEffect({
+      key: input.key as any,
+      operationId: input.operationId,
+      operationRevision: input.operationRevision,
+      effectId: input.effectId,
+      expectedEffectState: input.expectedEffectState,
+      context: input.context,
+      resolution: input.resolution,
+      deps: {
+        ticketCreate: this.rawTicketDeps,
+        ticketUpdate: this.rawTicketDeps,
+        comment: this.comments,
+      },
+    }) as any;
   }
 
   public async syncOne(

@@ -292,7 +292,10 @@ suite("R01 〜 R10: Invariant & Lifecycle Recovery Tests", () => {
 
     const outcome = await coordinator.resolveEffect({
       key,
+      operationId: `${SCOPE}:newTicket:r05-queue`,
+      operationRevision: 1,
       effectId: "ticket-create",
+      expectedEffectState: "compensation_unknown",
       context: { connectionScope: SCOPE },
       resolution: { kind: "retry_effect" },
       deps: {
@@ -363,7 +366,10 @@ suite("R01 〜 R10: Invariant & Lifecycle Recovery Tests", () => {
     // 2. Explicit assume_committed with token: token must be preserved
     const assumeOutcome = await coordinator.resolveEffect({
       key,
+      operationId: `${SCOPE}:comment:606`,
+      operationRevision: 1,
       effectId,
+      expectedEffectState: "commit_unknown",
       context: { connectionScope: SCOPE },
       resolution: { kind: "assume_committed", token: "token-already-committed" },
     });

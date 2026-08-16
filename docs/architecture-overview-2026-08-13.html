@@ -1,0 +1,91 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Redmine Client アーキテクチャ概要</title>
+  <link href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&amp;family=Geist:wght@400;500;600&amp;family=Geist+Mono:wght@400;500;600&amp;display=swap" rel="stylesheet">
+  <style>
+    :root { --paper:#f5f5f5; --ink:#2d3142; --muted:#4f5d75; --soft:#7a8399; --rule:rgba(45,49,66,.12); --accent:#eb6c36; --accent-tint:rgba(235,108,54,.08); --link:#2e5aa8; }
+    * { box-sizing: border-box; }
+    body { margin:0; background:var(--paper); color:var(--ink); font-family:'Geist','Hiragino Sans','Noto Sans JP','Yu Gothic',sans-serif; }
+    main { width:min(1360px,100%); margin:0 auto; padding:32px 40px 24px; }
+    .eyebrow { margin:0 0 8px; color:var(--soft); font:500 8px/1.4 'Geist Mono','Noto Sans Mono CJK JP',monospace; letter-spacing:.18em; text-transform:uppercase; }
+    h1 { margin:0; font:400 28px/1.1 'Instrument Serif','Yu Mincho',serif; }
+    .subtitle { margin:8px 0 24px; color:var(--muted); font-size:12px; }
+    figure { margin:0; overflow-x:auto; }
+    svg { display:block; width:100%; min-width:960px; height:auto; }
+    footer { margin-top:16px; padding-top:12px; border-top:1px solid var(--rule); color:var(--soft); font:400 8px/1.5 'Geist Mono','Noto Sans Mono CJK JP',monospace; letter-spacing:.06em; }
+  </style>
+</head>
+<body>
+<main>
+  <p class="eyebrow">SYSTEM ARCHITECTURE · 2026-08-13</p>
+  <h1>Redmine Client — UIから耐障害同期まで</h1>
+  <p class="subtitle">DashboardとMarkdown editorの操作は、Extension Host内の共通同期境界へ集約され、connection-scoped journalを経てRedmine 6.1へ到達する。</p>
+  <figure>
+    <svg viewBox="0 0 1280 720" role="img" aria-labelledby="redmine-client-architecture-title redmine-client-architecture-desc">
+      <title id="redmine-client-architecture-title">Redmine Client アーキテクチャ概要</title>
+      <desc id="redmine-client-architecture-desc">DashboardとMarkdown editorから、application orchestration、同期エンジン、永続journal、Redmine adapterを経てRedmine 6.1へ至る主要コンポーネントと依存方向を示す。</desc>
+      <defs>
+        <marker id="arrow" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto"><polygon points="0 0,8 3,0 6" fill="#4f5d75"/></marker>
+        <marker id="arrow-accent" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto"><polygon points="0 0,8 3,0 6" fill="#eb6c36"/></marker>
+        <marker id="arrow-link" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto"><polygon points="0 0,8 3,0 6" fill="#2e5aa8"/></marker>
+      </defs>
+      <rect width="1280" height="720" fill="#f5f5f5"/>
+
+      <!-- Zones -->
+      <rect x="40" y="64" width="240" height="528" rx="8" fill="rgba(45,49,66,.02)" stroke="rgba(45,49,66,.10)" stroke-width=".8"/>
+      <rect x="52" y="68" width="88" height="16" rx="2" fill="#f5f5f5"/>
+      <text x="96" y="80" fill="rgba(45,49,66,.48)" font-size="8" font-family="'Geist Mono',monospace" text-anchor="middle" letter-spacing=".14em">VS CODE UI</text>
+      <rect x="320" y="64" width="680" height="528" rx="8" fill="rgba(45,49,66,.02)" stroke="rgba(45,49,66,.10)" stroke-width=".8"/>
+      <rect x="332" y="68" width="128" height="16" rx="2" fill="#f5f5f5"/>
+      <text x="396" y="80" fill="rgba(45,49,66,.48)" font-size="8" font-family="'Geist Mono',monospace" text-anchor="middle" letter-spacing=".14em">EXTENSION HOST</text>
+      <rect x="1040" y="64" width="200" height="528" rx="8" fill="rgba(45,49,66,.02)" stroke="rgba(45,49,66,.10)" stroke-width=".8"/>
+      <rect x="1052" y="68" width="80" height="16" rx="2" fill="#f5f5f5"/>
+      <text x="1092" y="80" fill="rgba(45,49,66,.48)" font-size="8" font-family="'Geist Mono',monospace" text-anchor="middle" letter-spacing=".14em">EXTERNAL</text>
+
+      <!-- Connectors: drawn before nodes -->
+      <line x1="240" y1="176" x2="360" y2="176" stroke="#4f5d75" stroke-width="1.2" marker-end="url(#arrow)"/>
+      <line x1="560" y1="176" x2="600" y2="176" stroke="#4f5d75" stroke-width="1.2" marker-end="url(#arrow)"/>
+      <line x1="760" y1="176" x2="800" y2="176" stroke="#4f5d75" stroke-width="1.2" marker-end="url(#arrow)"/>
+      <line x1="680" y1="216" x2="680" y2="336" stroke="#eb6c36" stroke-width="1.2" marker-end="url(#arrow-accent)"/>
+      <path d="M 240 400 H 416 Q 424 400 424 392 V 384 Q 424 376 432 376 H 600" fill="none" stroke="#4f5d75" stroke-width="1.2" marker-end="url(#arrow)"/>
+      <line x1="760" y1="376" x2="800" y2="376" stroke="#eb6c36" stroke-width="1.2" marker-end="url(#arrow-accent)"/>
+      <path d="M 640 416 H 528 Q 520 416 520 424 V 488" fill="none" stroke="#4f5d75" stroke-width="1.2" marker-end="url(#arrow)"/>
+      <path d="M 840 416 H 608 Q 600 416 600 424 V 520 Q 600 528 592 528 H 560" fill="none" stroke="#4f5d75" stroke-width="1.2" marker-end="url(#arrow)"/>
+      <line x1="880" y1="336" x2="880" y2="216" stroke="#4f5d75" stroke-width="1.2" marker-end="url(#arrow)"/>
+      <path d="M 960 176 H 1016 Q 1024 176 1024 184 V 308 Q 1024 316 1032 316 H 1080" fill="none" stroke="#2e5aa8" stroke-width="1.2" marker-end="url(#arrow-link)"/>
+
+      <!-- Arrow labels with masks and visible gap -->
+      <rect x="264" y="144" width="72" height="16" rx="2" fill="#f5f5f5"/><text x="300" y="156" fill="#7a8399" font-size="8" font-family="'Geist Mono',monospace" text-anchor="middle">POSTMESSAGE</text>
+      <rect x="692" y="264" width="88" height="16" rx="2" fill="#f5f5f5"/><text x="736" y="276" fill="#eb6c36" font-size="8" font-family="'Geist Mono',monospace" text-anchor="middle">QUEUE / EXEC</text>
+      <rect x="276" y="368" width="112" height="16" rx="2" fill="#f5f5f5"/><text x="332" y="380" fill="#7a8399" font-size="8" font-family="'Geist Mono',monospace" text-anchor="middle">SAVE / COMMAND</text>
+      <rect x="768" y="344" width="24" height="16" rx="2" fill="#f5f5f5"/><text x="780" y="356" fill="#eb6c36" font-size="8" font-family="'Geist Mono',monospace" text-anchor="middle">RUN</text>
+      <rect x="892" y="256" width="112" height="16" rx="2" fill="#f5f5f5"/><text x="948" y="268" fill="#7a8399" font-size="8" font-family="'Geist Mono',monospace" text-anchor="middle">READ / WRITE</text>
+      <rect x="972" y="144" width="72" height="16" rx="2" fill="#f5f5f5"/><text x="1008" y="156" fill="#2e5aa8" font-size="8" font-family="'Geist Mono',monospace" text-anchor="middle">REST JSON</text>
+
+      <!-- Nodes -->
+      <g><rect x="80" y="136" width="160" height="80" rx="6" fill="#f5f5f5"/><rect x="80" y="136" width="160" height="80" rx="6" fill="rgba(79,93,117,.10)" stroke="#7a8399"/><text x="160" y="168" fill="#2d3142" font-size="12" font-weight="600" font-family="'Geist','Noto Sans JP',sans-serif" text-anchor="middle">Dashboard Webview</text><text x="160" y="188" fill="#4f5d75" font-size="8" font-family="'Geist Mono',monospace" text-anchor="middle">Tickets · Unsynced · Comments</text></g>
+      <g><rect x="80" y="360" width="160" height="80" rx="6" fill="#f5f5f5"/><rect x="80" y="360" width="160" height="80" rx="6" fill="rgba(79,93,117,.10)" stroke="#7a8399"/><text x="160" y="392" fill="#2d3142" font-size="12" font-weight="600" font-family="'Geist','Noto Sans JP',sans-serif" text-anchor="middle">Markdown Editor</text><text x="160" y="412" fill="#4f5d75" font-size="8" font-family="'Geist Mono',monospace" text-anchor="middle">ticket / comment draft</text></g>
+      <g><rect x="360" y="136" width="200" height="80" rx="6" fill="#f5f5f5"/><rect x="360" y="136" width="200" height="80" rx="6" fill="#fff" stroke="#2d3142"/><text x="460" y="168" fill="#2d3142" font-size="12" font-weight="600" font-family="'Geist','Noto Sans JP',sans-serif" text-anchor="middle">Dashboard Boundary</text><text x="460" y="188" fill="#4f5d75" font-size="8" font-family="'Geist Mono',monospace" text-anchor="middle">protocol · validation · router · state</text></g>
+      <g><rect x="600" y="136" width="160" height="80" rx="6" fill="#f5f5f5"/><rect x="600" y="136" width="160" height="80" rx="6" fill="#fff" stroke="#2d3142"/><text x="680" y="168" fill="#2d3142" font-size="12" font-weight="600" font-family="'Geist','Noto Sans JP',sans-serif" text-anchor="middle">Application</text><text x="680" y="188" fill="#4f5d75" font-size="8" font-family="'Geist Mono',monospace" text-anchor="middle">commands · controllers · services</text></g>
+      <g><rect x="800" y="136" width="160" height="80" rx="6" fill="#f5f5f5"/><rect x="800" y="136" width="160" height="80" rx="6" fill="#fff" stroke="#2d3142"/><text x="880" y="168" fill="#2d3142" font-size="12" font-weight="600" font-family="'Geist','Noto Sans JP',sans-serif" text-anchor="middle">Redmine Adapters</text><text x="880" y="188" fill="#4f5d75" font-size="8" font-family="'Geist Mono',monospace" text-anchor="middle">client · issues · comments · files</text></g>
+      <g><rect x="600" y="336" width="160" height="80" rx="6" fill="#f5f5f5"/><rect x="600" y="336" width="160" height="80" rx="6" fill="rgba(235,108,54,.08)" stroke="#eb6c36" stroke-width="1.2"/><text x="680" y="368" fill="#2d3142" font-size="12" font-weight="600" font-family="'Geist','Noto Sans JP',sans-serif" text-anchor="middle">SyncEngine</text><text x="680" y="388" fill="#4f5d75" font-size="8" font-family="'Geist Mono',monospace" text-anchor="middle">sync one · sync all · single-flight</text></g>
+      <g><rect x="800" y="336" width="160" height="80" rx="6" fill="#f5f5f5"/><rect x="800" y="336" width="160" height="80" rx="6" fill="#fff" stroke="#2d3142"/><text x="880" y="368" fill="#2d3142" font-size="12" font-weight="600" font-family="'Geist','Noto Sans JP',sans-serif" text-anchor="middle">Ticket Lifecycle</text><text x="880" y="388" fill="#4f5d75" font-size="8" font-family="'Geist Mono',monospace" text-anchor="middle">checkpoint · reconcile · finalize</text></g>
+      <g><rect x="360" y="488" width="200" height="80" rx="6" fill="#f5f5f5"/><rect x="360" y="488" width="200" height="80" rx="6" fill="rgba(235,108,54,.08)" stroke="#eb6c36" stroke-width="1.2"/><text x="460" y="520" fill="#2d3142" font-size="12" font-weight="600" font-family="'Geist','Noto Sans JP',sans-serif" text-anchor="middle">Persistent State</text><text x="460" y="540" fill="#4f5d75" font-size="8" font-family="'Geist Mono',monospace" text-anchor="middle">SyncOperation v3 · revision · effects</text></g>
+      <g><rect x="1080" y="268" width="120" height="96" rx="6" fill="#f5f5f5"/><rect x="1080" y="268" width="120" height="96" rx="6" fill="rgba(45,49,66,.03)" stroke="rgba(45,49,66,.30)"/><text x="1140" y="308" fill="#2d3142" font-size="12" font-weight="600" font-family="'Geist','Noto Sans JP',sans-serif" text-anchor="middle">Redmine 6.1</text><text x="1140" y="332" fill="#4f5d75" font-size="8" font-family="'Geist Mono',monospace" text-anchor="middle">REST API</text></g>
+
+      <!-- Legend strip -->
+      <line x1="40" y1="652" x2="1240" y2="652" stroke="rgba(45,49,66,.12)" stroke-width=".8"/>
+      <text x="40" y="676" fill="#4f5d75" font-size="8" font-family="'Geist Mono',monospace" letter-spacing=".14em">LEGEND</text>
+      <rect x="128" y="664" width="16" height="16" rx="4" fill="rgba(79,93,117,.10)" stroke="#7a8399"/><text x="156" y="676" fill="#4f5d75" font-size="8" font-family="'Geist Mono',monospace">USER INPUT</text>
+      <rect x="280" y="664" width="16" height="16" rx="4" fill="#fff" stroke="#2d3142"/><text x="308" y="676" fill="#4f5d75" font-size="8" font-family="'Geist Mono',monospace">INTERNAL COMPONENT</text>
+      <rect x="480" y="664" width="16" height="16" rx="4" fill="rgba(235,108,54,.08)" stroke="#eb6c36"/><text x="508" y="676" fill="#4f5d75" font-size="8" font-family="'Geist Mono',monospace">LIFECYCLE FOCUS</text>
+      <line x1="680" y1="672" x2="712" y2="672" stroke="#2e5aa8" stroke-width="1.2" marker-end="url(#arrow-link)"/><text x="724" y="676" fill="#4f5d75" font-size="8" font-family="'Geist Mono',monospace">HTTP / API</text>
+    </svg>
+  </figure>
+  <footer>FORMAT HTML · SIZE DOC-WIDE 1280×720 · DETAIL BALANCED · AUDIENCE ENGINEER · STATIC</footer>
+</main>
+</body>
+</html>

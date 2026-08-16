@@ -10,6 +10,7 @@ import type { FrontmatterControlFields } from "./ticketMetadataControlFields";
 import { computeNotesHash } from "../utils/notesHash";
 import {
   hasUncertainDurableSyncEffect,
+  hasUncertainPrimaryDurableSyncEffect,
   restoreDurableSyncEffect,
   transitionDurableSyncEffect,
   type DurableSyncEffect,
@@ -678,8 +679,9 @@ const normalizeNewTicket = (ticket: OfflineNewTicket): OfflineNewTicket => {
     revision,
     phase,
     payload: ticket,
+    effects: ticket.effects,
   });
-  const restoredPhase = hasUncertainDurableSyncEffect(effects) &&
+  const restoredPhase = hasUncertainPrimaryDurableSyncEffect(effects) &&
     (phase === "preparing" || phase === "queued")
     ? "commit_unknown"
     : phase;
@@ -750,8 +752,9 @@ const normalizeComment = (
     revision,
     phase,
     payload: comment,
+    effects: comment.effects,
   });
-  const restoredPhase = hasUncertainDurableSyncEffect(effects) &&
+  const restoredPhase = hasUncertainPrimaryDurableSyncEffect(effects) &&
     (phase === "preparing" || phase === "queued")
     ? "commit_unknown"
     : phase;
@@ -846,8 +849,11 @@ const findStoredOperation = (
 
   return queue.comments.find((op) =>
     op.operationId === operationId ||
+    (op.operationId !== undefined && (operationId.endsWith(`:${op.operationId}`) || op.operationId.endsWith(`:${operationId}`))) ||
     (op.commentId !== undefined && `comment:${op.ticketId}:${op.commentId}` === operationId) ||
-    (op.documentUri !== undefined && (operationId.endsWith(`:${op.documentUri}`) || operationId === op.documentUri))
+    (op.commentId !== undefined && operationId.includes(`:${op.ticketId}:${op.commentId}`)) ||
+    (op.documentUri !== undefined && (operationId.endsWith(`:${op.documentUri}`) || operationId === op.documentUri)) ||
+    (op.ticketId !== undefined && operationId.includes(`:${op.ticketId}:`))
   );
 };
 

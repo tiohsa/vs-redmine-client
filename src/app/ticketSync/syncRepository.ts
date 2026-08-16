@@ -174,7 +174,11 @@ export const toUnifiedOperationFromNewTicket = (
   }
 
   const rawPhase = ticket.phase ?? "queued";
-  const phase: GenericSyncPhase = rawPhase === "remote_created" ? "remote_committed" : (rawPhase as GenericSyncPhase);
+  const phase: GenericSyncPhase =
+    rawPhase === "remote_created" ||
+    (rawPhase === "local_finalize_pending" && ticket.createdIssueId !== undefined && !(ticket as any).canonical?.ticket)
+      ? "remote_committed"
+      : (rawPhase as GenericSyncPhase);
 
   return {
     operationId: ticket.operationId ?? ticket.queueId ?? `${scope}:newTicket:${ticket.documentUri ?? ticket.projectId ?? "0"}`,

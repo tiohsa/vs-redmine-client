@@ -5,7 +5,7 @@ import { addComment, updateComment } from "../../redmine/comments";
 import { getCurrentUserId } from "../../redmine/users";
 import { uploadClipboardImage, uploadFileAttachment } from "../../redmine/attachments";
 import { buildTicketEditorContent, parseTicketEditorContent, type TicketEditorContent } from "../../views/ticketEditorContent";
-import { editorContentFromTicket } from "../../views/ticketSync/ticketRemoteContent";
+import { editorContentFromTicket, metadataFromTicket } from "../../views/ticketSync/ticketRemoteContent";
 import {
   computeChanges,
   computeMetadataChanges,
@@ -44,13 +44,18 @@ import { validateComment } from "../../utils/commentValidation";
 import { resolveUploadSummary } from "../../views/ticketSync/ticketImageUploadSync";
 import { containsConflictMarkers } from "../../utils/threeWayMerge";
 import { computeNotesHash } from "../../utils/notesHash";
+import { computeFileHashAndSize } from "../../utils/fileHash";
+import { classifyFailureDisposition } from "../../utils/redmineErrors";
 import type { UploadToken } from "../../redmine/types";
 import type {
+  ChildTicketCreateRequestSnapshot,
   CommentCreateRequestSnapshot,
   CommentUpdateRequestSnapshot,
+  FailureDisposition,
   SyncEffectRequestSnapshot,
   TicketCreateRequestSnapshot,
   TicketUpdateRequestSnapshot,
+  UploadRequestSnapshot,
 } from "../syncEffects";
 import type {
   CommentCreateIntent,
@@ -200,8 +205,15 @@ export interface OperationHandler<TIntent extends SyncIntent = any, TPrepared = 
     operation: UnifiedSyncOperation<TIntent>;
     context: OperationHandlerContext;
     deps: OperationHandlerDeps & { repository: SyncOperationRepository };
+    resolution: EffectResolution;
   }): Promise<SyncOutcome>;
 }
+
+export type EffectResolution =
+  | { kind: "retry_effect" }
+  | { kind: "assume_committed"; remoteId?: number; token?: string }
+  | { kind: "link_remote_child"; remoteId: number }
+  | { kind: "mark_failed"; disposition?: FailureDisposition; category?: string };
 
 export type PreparedTicketCreate = {
   parsed: TicketEditorContent;
@@ -329,6 +341,16 @@ export class TicketCreateHandler implements OperationHandler<TicketCreateIntent,
           continue;
         }
 
+        const fileId = computeFileHashAndSize(att.filePath);
+        const uploadSnapshot: UploadRequestSnapshot = {
+          kind: "upload",
+          filePath: att.filePath,
+          filename: att.filename ?? "attachment",
+          contentType: att.contentType ?? "application/octet-stream",
+          contentHash: fileId?.contentHash,
+          contentSize: fileId?.contentSize,
+        };
+
         const planRes = await repo.planEffect(
           opKey,
           {
@@ -337,6 +359,7 @@ export class TicketCreateHandler implements OperationHandler<TicketCreateIntent,
             operationRevision: revision,
             state: "planned",
             target: { filePath: att.filePath, filename: att.filename },
+            requestSnapshot: uploadSnapshot,
           },
           context.connectionScope,
           revision,
@@ -348,7 +371,7 @@ export class TicketCreateHandler implements OperationHandler<TicketCreateIntent,
         const startRes = await repo.transitionEffect(
           opKey,
           effectId,
-          { kind: "start" },
+          { kind: "start", requestSnapshot: uploadSnapshot },
           context.connectionScope,
           { operationRevision: revision, sourceState: "planned" },
         );
@@ -362,7 +385,7 @@ export class TicketCreateHandler implements OperationHandler<TicketCreateIntent,
           const commitRes = await repo.transitionEffect(
             opKey,
             effectId,
-            { kind: "commit", token: res.token, target: { filePath: att.filePath, filename: att.filename ?? res.filename } },
+            { kind: "commit", token: res.token, target: { filePath: att.filePath, filename: att.filename ?? res.filename }, requestSnapshot: uploadSnapshot },
             context.connectionScope,
             { operationRevision: revision, sourceState: "started" },
           );
@@ -372,10 +395,11 @@ export class TicketCreateHandler implements OperationHandler<TicketCreateIntent,
           tokens.push({ token: res.token, filename: att.filename ?? res.filename, content_type: att.contentType ?? res.contentType });
         } catch (err) {
           const commitUnknown = isRemoteCommitUnknownError(err);
+          const disposition = classifyFailureDisposition(err);
           await repo.transitionEffect(
             opKey,
             effectId,
-            commitUnknown ? { kind: "mark_commit_unknown" } : { kind: "mark_failed", detail: (err as Error).message },
+            commitUnknown ? { kind: "mark_commit_unknown" } : { kind: "mark_failed", detail: (err as Error).message, disposition },
             context.connectionScope,
             { operationRevision: revision, sourceState: "started" },
           );
@@ -393,6 +417,14 @@ export class TicketCreateHandler implements OperationHandler<TicketCreateIntent,
           continue;
         }
 
+        const uploadSnapshot: UploadRequestSnapshot = {
+          kind: "upload",
+          filename: att.filename ?? "clipboard.png",
+          contentType: att.contentType ?? "image/png",
+          contentHash: "clipboard",
+          contentSize: 0,
+        };
+
         const planClipRes = await repo.planEffect(
           opKey,
           {
@@ -401,6 +433,7 @@ export class TicketCreateHandler implements OperationHandler<TicketCreateIntent,
             operationRevision: revision,
             state: "planned",
             target: { filename: att.filename },
+            requestSnapshot: uploadSnapshot,
           },
           context.connectionScope,
           revision,
@@ -412,7 +445,7 @@ export class TicketCreateHandler implements OperationHandler<TicketCreateIntent,
         const startClipRes = await repo.transitionEffect(
           opKey,
           effectId,
-          { kind: "start" },
+          { kind: "start", requestSnapshot: uploadSnapshot },
           context.connectionScope,
           { operationRevision: revision, sourceState: "planned" },
         );
@@ -426,7 +459,7 @@ export class TicketCreateHandler implements OperationHandler<TicketCreateIntent,
           const commitClipRes = await repo.transitionEffect(
             opKey,
             effectId,
-            { kind: "commit", token: res.token, target: { filename: att.filename ?? res.filename } },
+            { kind: "commit", token: res.token, target: { filename: att.filename ?? res.filename }, requestSnapshot: uploadSnapshot },
             context.connectionScope,
             { operationRevision: revision, sourceState: "started" },
           );
@@ -436,10 +469,11 @@ export class TicketCreateHandler implements OperationHandler<TicketCreateIntent,
           tokens.push({ token: res.token, filename: att.filename ?? res.filename, content_type: att.contentType ?? res.contentType });
         } catch (err) {
           const commitUnknown = isRemoteCommitUnknownError(err);
+          const disposition = classifyFailureDisposition(err);
           await repo.transitionEffect(
             opKey,
             effectId,
-            commitUnknown ? { kind: "mark_commit_unknown" } : { kind: "mark_failed", detail: (err as Error).message },
+            commitUnknown ? { kind: "mark_commit_unknown" } : { kind: "mark_failed", detail: (err as Error).message, disposition },
             context.connectionScope,
             { operationRevision: revision, sourceState: "started" },
           );
@@ -483,27 +517,44 @@ export class TicketCreateHandler implements OperationHandler<TicketCreateIntent,
     }
     const revision = operation.intentRevision ?? operation.revision ?? 1;
 
-    let resolved: any = prepared.resolved;
-    if (!resolved) {
-      try {
-        resolved = await resolveMetadataForCreate(
-          prepared.parsed.metadata,
-          createDeps,
-          prepared.projectId,
-        );
-      } catch (err) {
-        return {
-          ok: false,
-          commitUnknown: false,
-          error: err as Error,
-          outcome: { kind: "failed_before_commit", error: err as Error },
-        };
-      }
+    let createdId = operation.createdRemoteId ?? currentOp?.createdRemoteId;
+    const existingPrimaryEffect = (currentOp?.effects ?? operation.effects ?? []).find((e) => e.effectId === "ticket-create");
+    if (existingPrimaryEffect?.state === "committed" && existingPrimaryEffect.remoteId) {
+      createdId = existingPrimaryEffect.remoteId;
     }
 
-    let createdId = operation.createdRemoteId;
-
     if (!createdId) {
+      let resolved: any = prepared.resolved;
+      if (!resolved) {
+        try {
+          resolved = await resolveMetadataForCreate(
+            prepared.parsed.metadata,
+            createDeps,
+            prepared.projectId,
+          );
+        } catch (err) {
+          return {
+            ok: false,
+            commitUnknown: false,
+            error: err as Error,
+            outcome: { kind: "failed_before_commit", error: err as Error },
+          };
+        }
+      }
+      const ticketSnapshot: TicketCreateRequestSnapshot = {
+        kind: "ticket_create",
+        projectId: prepared.projectId,
+        subject: prepared.parsed.subject,
+        description: prepared.parsed.description,
+        trackerId: resolved.trackerId,
+        priorityId: resolved.priorityId,
+        statusId: resolved.statusId,
+        startDate: prepared.parsed.metadata.start_date || undefined,
+        dueDate: prepared.parsed.metadata.due_date || undefined,
+        uploads: prepared.uploadTokens.length > 0 ? prepared.uploadTokens : undefined,
+        childTickets: prepared.parsed.metadata?.children?.map((c) => ({ subject: c })),
+      };
+
       const planned = await repo.planEffect(
         opKey,
         {
@@ -512,6 +563,7 @@ export class TicketCreateHandler implements OperationHandler<TicketCreateIntent,
           operationRevision: revision,
           state: "planned",
           target: { documentUri: operation.documentUri },
+          requestSnapshot: ticketSnapshot,
         },
         context.connectionScope,
         revision,
@@ -528,7 +580,7 @@ export class TicketCreateHandler implements OperationHandler<TicketCreateIntent,
       const started = await repo.transitionEffect(
         opKey,
         "ticket-create",
-        { kind: "start" },
+        { kind: "start", requestSnapshot: ticketSnapshot },
         context.connectionScope,
         { operationRevision: revision, sourceState: "planned" },
       );
@@ -561,7 +613,7 @@ export class TicketCreateHandler implements OperationHandler<TicketCreateIntent,
         const committed = await repo.transitionEffect(
           opKey,
           "ticket-create",
-          { kind: "commit", remoteId: createdId },
+          { kind: "commit", remoteId: createdId, requestSnapshot: ticketSnapshot },
           context.connectionScope,
           { operationRevision: revision, sourceState: "started" },
         );
@@ -575,10 +627,11 @@ export class TicketCreateHandler implements OperationHandler<TicketCreateIntent,
         }
       } catch (err) {
         const commitUnknown = isRemoteCommitUnknownError(err);
+        const disposition = classifyFailureDisposition(err);
         await repo.transitionEffect(
           opKey,
           "ticket-create",
-          commitUnknown ? { kind: "mark_commit_unknown" } : { kind: "mark_failed", detail: (err as Error).message },
+          commitUnknown ? { kind: "mark_commit_unknown" } : { kind: "mark_failed", detail: (err as Error).message, disposition },
           context.connectionScope,
           { operationRevision: revision, sourceState: "started" },
         );
@@ -619,6 +672,15 @@ export class TicketCreateHandler implements OperationHandler<TicketCreateIntent,
         };
       }
 
+      const childSnapshot: ChildTicketCreateRequestSnapshot = {
+        kind: "child_create",
+        parentTicketId: createdId,
+        projectId: prepared.projectId,
+        subject,
+        description: "",
+        ordinal,
+      };
+
       const planChild = await repo.planEffect(
         opKey,
         {
@@ -627,6 +689,7 @@ export class TicketCreateHandler implements OperationHandler<TicketCreateIntent,
           operationRevision: revision,
           state: "planned",
           target: { parentTicketId: createdId, ordinal },
+          requestSnapshot: childSnapshot,
         },
         context.connectionScope,
         revision,
@@ -642,7 +705,7 @@ export class TicketCreateHandler implements OperationHandler<TicketCreateIntent,
       const startChild = await repo.transitionEffect(
         opKey,
         effectId,
-        { kind: "start" },
+        { kind: "start", requestSnapshot: childSnapshot },
         context.connectionScope,
         { operationRevision: revision, sourceState: "planned" },
       );
@@ -667,7 +730,7 @@ export class TicketCreateHandler implements OperationHandler<TicketCreateIntent,
         const commitChild = await repo.transitionEffect(
           opKey,
           effectId,
-          { kind: "commit", remoteId: createdChildId },
+          { kind: "commit", remoteId: createdChildId, requestSnapshot: childSnapshot },
           context.connectionScope,
           { operationRevision: revision, sourceState: "started" },
         );
@@ -687,20 +750,20 @@ export class TicketCreateHandler implements OperationHandler<TicketCreateIntent,
         }
       } catch (err) {
         const commitUnknown = isRemoteCommitUnknownError(err);
+        const disposition = classifyFailureDisposition(err);
         await repo.transitionEffect(
           opKey,
           effectId,
-          commitUnknown ? { kind: "mark_commit_unknown" } : { kind: "mark_failed", detail: (err as Error).message },
+          commitUnknown ? { kind: "mark_commit_unknown" } : { kind: "mark_failed", detail: (err as Error).message, disposition },
           context.connectionScope,
           { operationRevision: revision, sourceState: "started" },
         );
-        if (!commitUnknown) {
+        if (!commitUnknown && createDeps.deleteIssue) {
           for (let prev = ordinal - 1; prev >= 0; prev--) {
             const prevEffectId = `child-create:${prev}`;
             const opAfterFail = repo.getOperation(opKey, context.connectionScope) ?? operation;
             const prevEffect = opAfterFail.effects?.find((e) => e.effectId === prevEffectId);
             if (prevEffect && prevEffect.state === "committed" && prevEffect.remoteId) {
-              // 子チケット補償 (fail-closed: start_compensation 失敗ならDELETEしない)
               const startComp = await repo.transitionEffect(
                 opKey,
                 prevEffectId,
@@ -710,7 +773,7 @@ export class TicketCreateHandler implements OperationHandler<TicketCreateIntent,
               );
               if (startComp) {
                 try {
-                  await createDeps.deleteIssue?.(prevEffect.remoteId);
+                  await createDeps.deleteIssue(prevEffect.remoteId);
                   const childCompResult = await repo.transitionEffect(
                     opKey,
                     prevEffectId,
@@ -719,7 +782,6 @@ export class TicketCreateHandler implements OperationHandler<TicketCreateIntent,
                     { operationRevision: revision, sourceState: "compensation_started" },
                   );
                   if (!childCompResult) {
-                    // persistence failure: compensation_unknown として保持
                     await repo.transitionEffect(
                       opKey,
                       prevEffectId,
@@ -738,7 +800,6 @@ export class TicketCreateHandler implements OperationHandler<TicketCreateIntent,
                   );
                 }
               }
-              // start_compensation 失敗時はDELETEしない（fail-closed）
             }
           }
 
@@ -746,7 +807,6 @@ export class TicketCreateHandler implements OperationHandler<TicketCreateIntent,
           const opAfterChildren = repo.getOperation(opKey, context.connectionScope) ?? operation;
           const parentEffect = opAfterChildren.effects?.find((e) => e.effectId === "ticket-create");
           if (parentEffect && parentEffect.state === "committed" && parentEffect.remoteId) {
-            // DELETE前: start_compensation checkpoint 失敗ならDELETEしない
             const startParentComp = await repo.transitionEffect(
               opKey,
               "ticket-create",
@@ -756,9 +816,7 @@ export class TicketCreateHandler implements OperationHandler<TicketCreateIntent,
             );
             if (startParentComp) {
               try {
-                await createDeps.deleteIssue?.(parentEffect.remoteId);
-                // DELETE成功後: complete_compensation の persistence failure は compensation_unknown 相当
-                // createdRemoteId = undefined は transitionEffect 内でatomicに処理されるため不要
+                await createDeps.deleteIssue(parentEffect.remoteId);
                 const compResult = await repo.transitionEffect(
                   opKey,
                   "ticket-create",
@@ -767,7 +825,6 @@ export class TicketCreateHandler implements OperationHandler<TicketCreateIntent,
                   { operationRevision: revision, sourceState: "compensation_started" },
                 );
                 if (!compResult) {
-                  // persistence failure: compensation_unknown として保持 (safe-side)
                   await repo.transitionEffect(
                     opKey,
                     "ticket-create",
@@ -786,15 +843,30 @@ export class TicketCreateHandler implements OperationHandler<TicketCreateIntent,
                 );
               }
             }
-            // start_compensation 失敗時はDELETEしない（fail-closed）
           }
+          const finalCheck = repo.getOperation(opKey, context.connectionScope);
+          const hasCompUnknown = (finalCheck?.effects ?? []).some(
+            (e) => e.state === "compensation_unknown" || e.state === "compensation_started",
+          );
+          if (hasCompUnknown) {
+            return {
+              ok: false,
+              error: err as Error,
+              commitUnknown: false,
+              outcome: {
+                kind: "remote_committed",
+                ticketId: finalCheck?.createdRemoteId ?? 0,
+                pending: "remote_reconcile",
+                message: "Compensation failed or persistence failed",
+              },
+            };
+          }
+          return {
+            ok: false,
+            error: err as Error,
+            commitUnknown: false,
+          };
         }
-
-        return {
-          ok: false,
-          error: err as Error,
-          commitUnknown,
-        };
       }
     }
 
@@ -810,8 +882,14 @@ export class TicketCreateHandler implements OperationHandler<TicketCreateIntent,
     if (hasUnknownEffects || hasFailedEffects) {
       return {
         ok: false,
-        error: new Error("Secondary effects remain unresolved or failed"),
-        commitUnknown: hasUnknownEffects,
+        error: new Error("One or more child ticket effects require explicit recovery"),
+        commitUnknown: false,
+        outcome: {
+          kind: "remote_committed",
+          ticketId: createdId ?? 0,
+          pending: "remote_reconcile",
+          message: "One or more child ticket effects require explicit recovery",
+        },
       };
     }
 
@@ -848,8 +926,8 @@ export class TicketCreateHandler implements OperationHandler<TicketCreateIntent,
       return {
         ok: true,
         remoteId,
-        projectId: detail.ticket.projectId,
-        remoteUpdatedAt: detail.ticket.updatedAt,
+        projectId: detail.ticket?.projectId ?? operation.projectId,
+        remoteUpdatedAt: detail.ticket?.updatedAt ?? operation.remoteUpdatedAt,
         canonical: detail,
       };
     } catch (err) {
@@ -863,157 +941,99 @@ export class TicketCreateHandler implements OperationHandler<TicketCreateIntent,
     context: OperationHandlerContext,
     deps?: OperationHandlerDeps,
   ): Promise<{ ok: true } | { ok: false; message: string; pending: "local_finalize" }> {
-    const documentUri = operation.documentUri ?? operation.intent?.documentUri;
-    const createdId = operation.createdRemoteId ?? operation.ticketId;
+    const createdId = operation.createdRemoteId ?? reconciled?.ticket?.id;
     if (!createdId) {
-      return { ok: false, message: "No createdRemoteId", pending: "local_finalize" };
+      return { ok: false, message: "Missing createdRemoteId for ticket_create local finalize", pending: "local_finalize" };
     }
 
-    let detail = reconciled;
-    if (!detail) {
-      const getDetail = deps?.ticketCreate?.getIssueDetail ?? getIssueDetail;
+    const subject = reconciled?.ticket?.subject ?? operation.intent?.subject ?? "";
+    const description = reconciled?.ticket?.description ?? operation.intent?.description ?? "";
+    const remoteUpdatedAt = reconciled?.ticket?.updatedAt ?? operation.remoteUpdatedAt ?? new Date().toISOString();
+
+    const effectiveIntent = operation.nextIntent ?? operation.intent;
+    const effectiveContent = (effectiveIntent as any)?.content;
+    const baseParsed = effectiveContent
+      ? parseTicketEditorContent(effectiveContent, { allowMissingMetadata: true, allowMissingSubject: true })
+      : undefined;
+    const parsed: TicketEditorContent = baseParsed
+      ? {
+          ...baseParsed,
+          subject: (effectiveIntent as any).subject || baseParsed.subject || subject,
+          description: (effectiveIntent as any).description || baseParsed.description || description,
+          metadata: (effectiveIntent as any).metadata ?? baseParsed.metadata,
+        }
+      : (effectiveIntent
+        ? {
+            subject: (effectiveIntent as any).subject ?? subject,
+            description: (effectiveIntent as any).description ?? description,
+            metadata: (effectiveIntent as any).metadata ?? { tracker: "", priority: "", status: "", due_date: "", children: [] },
+            layout: (effectiveIntent as any).layout,
+            metadataBlock: (effectiveIntent as any).metadataBlock,
+            controlFields: (effectiveIntent as any).controlFields,
+          }
+        : { subject, description, metadata: { tracker: "", priority: "", status: "", due_date: "", children: [] } });
+    const canonicalParsed = operation.nextIntent
+      ? parsed
+      : (reconciled?.ticket ? editorContentFromTicket(reconciled.ticket, parsed) : parsed);
+    const metadata = canonicalParsed?.metadata ?? (reconciled?.ticket ? metadataFromTicket(reconciled.ticket) : { tracker: "", priority: "", status: "", due_date: "", children: [] });
+
+    if (operation.documentUri) {
       try {
-        detail = await getDetail(createdId);
-      } catch {
-        // read-back optional in finalizeLocal
-      }
-    }
-
-    const ticketData = detail?.ticket ?? (detail?.id ? detail : undefined);
-    const canonical = ticketData
-      ? editorContentFromTicket(ticketData, {
-          layout: operation.intent?.layout,
-          metadataBlock: operation.intent?.metadataBlock,
-          controlFields: operation.intent?.controlFields,
-        })
-      : (detail?.subject ? detail : undefined);
-    const subject = canonical?.subject ?? operation.intent?.subject ?? "";
-    const description = canonical?.description ?? operation.intent?.description ?? "";
-    const metadata = canonical?.metadata ?? operation.intent?.metadata ?? { tracker: "", priority: "", status: "", due_date: "", children: [] };
-    const remoteUpdatedAt = ticketData?.updatedAt ?? operation.remoteUpdatedAt;
-
-    if (documentUri) {
-      try {
-        const replacement = (operation.nextIntent && canonical)
-          ? rebaseTicketEditorContent(
-              {
-                subject: operation.intent?.subject ?? "",
-                description: operation.intent?.description ?? "",
-                metadata: operation.intent?.metadata ?? { tracker: "", priority: "", status: "", due_date: "", children: [] },
-                layout: operation.intent?.layout,
-                metadataBlock: operation.intent?.metadataBlock,
-                controlFields: operation.intent?.controlFields,
-              },
-              canonical,
-              {
-                subject: operation.nextIntent.subject,
-                description: operation.nextIntent.description,
-                metadata: operation.nextIntent.metadata ?? { tracker: "", priority: "", status: "", due_date: "", children: [] },
-                layout: operation.nextIntent.layout,
-                metadataBlock: operation.nextIntent.metadataBlock,
-                controlFields: operation.nextIntent.controlFields,
-              },
-            )
-          : canonical ?? {
-              subject,
-              description,
-              metadata,
-            };
-
         if (deps?.documents?.rewriteNewTicket) {
-          const openDoc = deps.documents.findOpenDocument?.(documentUri);
-          const source = operation.nextIntent
-            ? {
-                subject: operation.nextIntent.subject,
-                description: operation.nextIntent.description,
-                metadata: operation.nextIntent.metadata,
-                layout: operation.nextIntent.layout,
-                metadataBlock: operation.nextIntent.metadataBlock,
-                controlFields: operation.nextIntent.controlFields,
-              }
-            : operation.intent
-              ? {
-                  subject: operation.intent.subject,
-                  description: operation.intent.description,
-                  metadata: operation.intent.metadata,
-                  layout: operation.intent.layout,
-                  metadataBlock: operation.intent.metadataBlock,
-                  controlFields: operation.intent.controlFields,
-                }
-              : {
-                  subject: "",
-                  description: "",
-                  metadata: { tracker: "", priority: "", status: "", due_date: "", children: [] },
-                };
-          const rewriteRes = await deps.documents.rewriteNewTicket({
-            documentUri,
+          const res = await deps.documents.rewriteNewTicket({
+            documentUri: operation.documentUri,
             ticketId: createdId,
             projectId: operation.projectId ?? reconciled?.ticket?.projectId ?? 0,
-            replacement,
+            replacement: canonicalParsed,
             expected: {
-              content: openDoc?.getText() ?? buildTicketEditorContent(source),
-              operationRevision: (operation.nextIntent as any)?.revision ?? operation.revision,
+              content: operation.intent?.content ?? "",
+              operationRevision: operation.intentRevision ?? operation.revision ?? 1,
             },
           });
-          if (rewriteRes.kind !== "applied") {
-            return { ok: false, message: `Editor rewrite pending: ${rewriteRes.kind}`, pending: "local_finalize" };
-          }
-          if (deps?.localState?.register) {
-            deps.localState.register({
-              ticketId: createdId,
-              documentUri,
-              projectId: operation.projectId ?? reconciled?.ticket?.projectId ?? 0,
-              connectionScope: context.connectionScope,
-            } as any);
-          } else if ((deps?.localState as any)?.registerDocument) {
-            (deps.localState as any).registerDocument(
-              documentUri,
-              createdId,
-              operation.projectId ?? reconciled?.ticket?.projectId ?? 0,
-              context.connectionScope,
-            );
-          } else if (openDoc) {
-            removeTicketEditorByUri(vscode.Uri.parse(documentUri));
-            registerTicketDocument(
-              createdId,
-              openDoc,
-              "ticket",
-              operation.projectId ?? reconciled?.ticket?.projectId ?? 0,
-              context.connectionScope,
-            );
+          if (res.kind !== "applied") {
+            return { ok: false, message: `Document rewrite failed: ${res.kind}`, pending: "local_finalize" };
           }
         } else {
-          const uri = vscode.Uri.parse(documentUri);
-          const editor = vscode.window.visibleTextEditors.find((e) => e.document.uri.toString() === uri.toString());
-          if (editor) {
-            const parsed = operation.intent
-              ? {
-                  subject: operation.intent.subject,
-                  description: operation.intent.description,
-                  metadata: operation.intent.metadata,
-                  layout: operation.intent.layout,
-                  metadataBlock: operation.intent.metadataBlock,
-                  controlFields: operation.intent.controlFields,
-                }
-              : parseTicketEditorContent(editor.document.getText(), {
-                  allowMissingMetadata: true,
-                  fallbackMetadata: { tracker: "", priority: "", status: "", due_date: "", children: [] },
-                });
-            const canonicalParsed = reconciled?.ticket
-              ? editorContentFromTicket(reconciled.ticket, parsed)
-              : parsed;
-            await rewriteNewTicketEditorToTicketMode({
-              operationScope: context.connectionScope,
-              editor,
-              createdId,
-              projectId: operation.projectId ?? reconciled?.ticket?.projectId ?? 0,
-              parsed: canonicalParsed,
-              lastKnownRemoteUpdatedAt: reconciled?.ticket?.updatedAt,
-            });
+          const doc = (vscode.workspace.textDocuments ?? []).find((d) => d.uri.toString() === operation.documentUri);
+          if (doc) {
+            const editor = vscode.window.visibleTextEditors.find((e) => e.document.uri.toString() === operation.documentUri);
+            if (editor) {
+              await rewriteNewTicketEditorToTicketMode({
+                operationScope: context.connectionScope,
+                editor,
+                createdId,
+                projectId: operation.projectId ?? reconciled?.ticket?.projectId ?? 0,
+                parsed: canonicalParsed,
+                lastKnownRemoteUpdatedAt: reconciled?.ticket?.updatedAt,
+              });
+            }
           }
         }
       } catch (err) {
         return { ok: false, message: (err as Error).message, pending: "local_finalize" };
+      }
+    }
+
+    if (deps?.localState?.register) {
+      deps.localState.register({
+        ticketId: createdId,
+        documentUri: operation.documentUri,
+        projectId: operation.projectId ?? reconciled?.ticket?.projectId,
+        connectionScope: context.connectionScope,
+      });
+    } else {
+      if (operation.documentUri) {
+        removeTicketEditorByUri(vscode.Uri.parse(operation.documentUri));
+        const doc = (vscode.workspace.textDocuments ?? []).find((d) => d.uri.toString() === operation.documentUri);
+        if (doc) {
+          registerTicketDocument(
+            createdId,
+            doc,
+            "ticket",
+            operation.projectId ?? reconciled?.ticket?.projectId,
+            context.connectionScope,
+          );
+        }
       }
     }
 
@@ -1043,8 +1063,9 @@ export class TicketCreateHandler implements OperationHandler<TicketCreateIntent,
     operation: UnifiedSyncOperation<TicketCreateIntent>;
     context: OperationHandlerContext;
     deps: OperationHandlerDeps & { repository: SyncOperationRepository };
+    resolution: EffectResolution;
   }): Promise<SyncOutcome> {
-    const { key, effectId, operation, context, deps } = input;
+    const { key, effectId, operation, context, deps, resolution } = input;
     const repo = deps.repository;
     const revision = operation.intentRevision ?? operation.revision ?? 1;
     const scope = context.connectionScope;
@@ -1055,7 +1076,27 @@ export class TicketCreateHandler implements OperationHandler<TicketCreateIntent,
 
     const createDeps = { ...defaultCreateDeps, ...deps.ticketCreate };
 
-    // 1. ticket-create compensation_unknown recovery
+    // mark_failed
+    if (resolution.kind === "mark_failed") {
+      const marked = await repo.transitionEffect(
+        key,
+        effectId,
+        { kind: "mark_failed", detail: "Manually marked as failed", disposition: resolution.disposition ?? "retryable", category: resolution.category },
+        scope,
+        { operationRevision: revision, sourceState: effect.state },
+      );
+      if (!marked) {
+        return { kind: "failed_before_commit", error: new Error(`Failed to mark effect as failed: ${effectId}`) };
+      }
+      return {
+        kind: "remote_committed",
+        ticketId: operation.createdRemoteId ?? 0,
+        pending: "remote_reconcile",
+        message: `Effect ${effectId} marked as failed`,
+      };
+    }
+
+    // 1. ticket-create compensation recovery
     if (effectId === "ticket-create" && (effect.state === "compensation_unknown" || effect.state === "compensation_started")) {
       const remoteTicketId = effect.remoteId ?? operation.createdRemoteId;
       if (!remoteTicketId) {
@@ -1090,69 +1131,304 @@ export class TicketCreateHandler implements OperationHandler<TicketCreateIntent,
       }
     }
 
-    // 2. attachment recovery
-    if (effect.kind === "attachment_upload") {
-      const filePath = effect.target.filePath;
-      if (!filePath) {
-        return { kind: "failed_before_commit", error: new Error(`Cannot retry attachment without filePath for effect ${effectId}`) };
-      }
-      const started = await repo.transitionEffect(key, effectId, { kind: "start_explicit_retry" }, scope, { operationRevision: revision, sourceState: effect.state });
-      if (!started) {
-        return { kind: "failed_before_commit", error: new Error(`Failed to start retry for effect ${effectId}`) };
-      }
-      try {
-        const uploadFn = (createDeps as any).uploadFile ?? uploadFileAttachment;
-        const res = await uploadFn(filePath);
-        const committed = await repo.transitionEffect(key, effectId, { kind: "commit", token: res.token, target: { filePath, filename: effect.target.filename ?? res.filename } }, scope, { operationRevision: revision, sourceState: "started" });
-        if (!committed) {
-          return { kind: "commit_unknown", operationId: operation.operationId, message: `Attachment uploaded but commit checkpoint failed for ${effectId}` };
+    // 2. attachment / image recovery
+    if (effect.kind === "attachment_upload" || effect.kind === "image_upload") {
+      if (resolution.kind === "assume_committed") {
+        const token = resolution.token ?? effect.token;
+        const assumed = await repo.transitionEffect(
+          key,
+          effectId,
+          { kind: "assume_committed", token, remoteId: resolution.remoteId },
+          scope,
+          { operationRevision: revision, sourceState: effect.state },
+        );
+        if (!assumed) {
+          return { kind: "failed_before_commit", error: new Error(`Failed to assume committed for effect ${effectId}`) };
         }
-        return { kind: "remote_committed", ticketId: operation.createdRemoteId ?? 0, pending: "remote_reconcile", message: `Attachment ${effectId} uploaded successfully` };
-      } catch (err) {
-        const isUnknown = isRemoteCommitUnknownError(err);
-        await repo.transitionEffect(key, effectId, isUnknown ? { kind: "mark_commit_unknown" } : { kind: "mark_failed", detail: (err as Error).message }, scope, { operationRevision: revision, sourceState: "started" });
-        return isUnknown
-          ? { kind: "commit_unknown", operationId: operation.operationId, message: (err as Error).message }
-          : { kind: "failed_before_commit", error: err as Error };
+        return {
+          kind: "remote_committed",
+          ticketId: operation.createdRemoteId ?? 0,
+          pending: "remote_reconcile",
+          message: `Attachment effect ${effectId} assumed committed`,
+        };
+      }
+
+      if (resolution.kind === "retry_effect") {
+        if (effect.state === "failed" && effect.failure?.disposition === "non_retriable") {
+          return { kind: "failed_before_commit", error: new Error("Cannot retry non-retriable failure") };
+        }
+        const filePath = effect.target.filePath ?? (effect.requestSnapshot as UploadRequestSnapshot | undefined)?.filePath;
+        if (!filePath) {
+          return { kind: "failed_before_commit", error: new Error(`Cannot retry attachment without filePath for effect ${effectId}`) };
+        }
+
+        // Upload retry 前検証: hash / size
+        const currentFile = computeFileHashAndSize(filePath);
+        const snapshot = effect.requestSnapshot as UploadRequestSnapshot | undefined;
+        if (snapshot?.contentHash && currentFile?.contentHash && snapshot.contentHash !== currentFile.contentHash) {
+          return {
+            kind: "failed_before_commit",
+            error: new Error(`File content has changed since snapshot (expected hash ${snapshot.contentHash}, found ${currentFile.contentHash}). Retry rejected.`),
+          };
+        }
+
+        const uploadSnapshot: UploadRequestSnapshot = {
+          kind: "upload",
+          filePath,
+          filename: effect.target.filename ?? snapshot?.filename ?? "attachment",
+          contentType: snapshot?.contentType ?? "application/octet-stream",
+          contentHash: currentFile?.contentHash ?? snapshot?.contentHash,
+          contentSize: currentFile?.contentSize ?? snapshot?.contentSize,
+        };
+
+        const started = await repo.transitionEffect(
+          key,
+          effectId,
+          { kind: "start_explicit_retry", requestSnapshot: uploadSnapshot },
+          scope,
+          { operationRevision: revision, sourceState: effect.state },
+        );
+        if (!started) {
+          return { kind: "failed_before_commit", error: new Error(`Failed to start retry for effect ${effectId}`) };
+        }
+        try {
+          const uploadFn = (createDeps as any).uploadFile ?? uploadFileAttachment;
+          const res = await uploadFn(filePath);
+          const committed = await repo.transitionEffect(
+            key,
+            effectId,
+            { kind: "commit", token: res.token, target: { filePath, filename: effect.target.filename ?? res.filename }, requestSnapshot: uploadSnapshot },
+            scope,
+            { operationRevision: revision, sourceState: "started" },
+          );
+          if (!committed) {
+            return { kind: "commit_unknown", operationId: operation.operationId, message: `Attachment uploaded but commit checkpoint failed for ${effectId}` };
+          }
+          return { kind: "remote_committed", ticketId: operation.createdRemoteId ?? 0, pending: "remote_reconcile", message: `Attachment ${effectId} uploaded successfully` };
+        } catch (err) {
+          const isUnknown = isRemoteCommitUnknownError(err);
+          const disposition = classifyFailureDisposition(err);
+          await repo.transitionEffect(
+            key,
+            effectId,
+            isUnknown ? { kind: "mark_commit_unknown" } : { kind: "mark_failed", detail: (err as Error).message, disposition },
+            scope,
+            { operationRevision: revision, sourceState: "started" },
+          );
+          return isUnknown
+            ? { kind: "commit_unknown", operationId: operation.operationId, message: (err as Error).message }
+            : { kind: "failed_before_commit", error: err as Error };
+        }
       }
     }
 
     // 3. child_create recovery
     if (effect.kind === "child_create") {
-      const parentTicketId = effect.target.parentTicketId ?? operation.createdRemoteId;
-      const ordinal = effect.target.ordinal;
-      const subject = (operation.intent?.childTickets?.[ordinal ?? 0]?.subject)
-        ?? (operation.intent?.metadata?.children?.[ordinal ?? 0]);
-      if (!parentTicketId || !subject) {
-        return { kind: "failed_before_commit", error: new Error(`Cannot retry child create for effect ${effectId}: missing parent or subject`) };
+      const childSnapshot = effect.requestSnapshot as ChildTicketCreateRequestSnapshot | undefined;
+      const parentEffect = (operation.effects ?? []).find(
+        (e) => e.effectId === "ticket-create" || e.kind === "ticket_create",
+      );
+      const parentTicketId =
+        childSnapshot?.parentTicketId ??
+        effect.target.parentTicketId ??
+        parentEffect?.remoteId ??
+        operation.createdRemoteId;
+
+      if (resolution.kind === "link_remote_child" || (resolution.kind === "assume_committed" && resolution.remoteId)) {
+        const remoteChildId = resolution.kind === "link_remote_child" ? resolution.remoteId : resolution.remoteId!;
+        const getDetail = deps?.ticketCreate?.getIssueDetail ?? createDeps.getIssueDetail ?? getIssueDetail;
+        try {
+          const detail = await getDetail(remoteChildId);
+          if (!detail || !detail.ticket) {
+            return { kind: "failed_before_commit", error: new Error(`Remote ticket #${remoteChildId} not found.`) };
+          }
+
+          // 検証: parentId, projectId, subject
+          if (parentTicketId && detail.ticket.parentId !== parentTicketId) {
+            return {
+              kind: "failed_before_commit",
+              error: new Error(`Parent ticket ID mismatch: child #${remoteChildId} has parent ${detail.ticket.parentId}, expected ${parentTicketId}`),
+            };
+          }
+          const expectedProj = childSnapshot?.projectId ?? operation.projectId ?? operation.intent?.projectId;
+          if (expectedProj && detail.ticket.projectId !== expectedProj) {
+            return {
+              kind: "failed_before_commit",
+              error: new Error(`Project mismatch: child #${remoteChildId} belongs to project ${detail.ticket.projectId}, expected ${expectedProj}`),
+            };
+          }
+          const parsedContent = operation.intent?.content ? parseTicketEditorContent(operation.intent.content, { allowMissingMetadata: true, allowMissingSubject: true }) : undefined;
+          const expectedSubj =
+            childSnapshot?.subject ??
+            (effect.target as any).subject ??
+            (operation.intent?.childTickets?.[effect.target.ordinal ?? 0]?.subject) ??
+            (operation.intent?.metadata?.children?.[effect.target.ordinal ?? 0]) ??
+            (parsedContent?.metadata?.children?.[effect.target.ordinal ?? 0]);
+          if (expectedSubj && normalizeTicketText(detail.ticket.subject) !== normalizeTicketText(expectedSubj)) {
+            return {
+              kind: "failed_before_commit",
+              error: new Error(`Subject mismatch: child #${remoteChildId} has subject "${detail.ticket.subject}", expected "${expectedSubj}"`),
+            };
+          }
+
+          const assumed = await repo.transitionEffect(
+            key,
+            effectId,
+            { kind: "assume_committed", remoteId: remoteChildId },
+            scope,
+            { operationRevision: revision, sourceState: effect.state },
+          );
+          if (!assumed) {
+            return { kind: "failed_before_commit", error: new Error(`Failed to assume committed for child effect ${effectId}`) };
+          }
+
+          // 親チケットが committed の場合、すべての Effect が committed なら completed へ進める
+          return this.finalizeOperationIfReady(assumed as UnifiedSyncOperation<TicketCreateIntent>, context, deps);
+        } catch (err) {
+          return { kind: "failed_before_commit", error: err as Error };
+        }
       }
 
-      const started = await repo.transitionEffect(key, effectId, { kind: "start_explicit_retry" }, scope, { operationRevision: revision, sourceState: effect.state });
-      if (!started) {
-        return { kind: "failed_before_commit", error: new Error(`Failed to start retry for effect ${effectId}`) };
-      }
-      try {
-        const createdChildId = await createDeps.createIssue({
-          subject,
-          description: "",
-          parentId: parentTicketId,
-          projectId: operation.projectId ?? operation.intent?.projectId ?? 0,
-        });
-        const committed = await repo.transitionEffect(key, effectId, { kind: "commit", remoteId: createdChildId }, scope, { operationRevision: revision, sourceState: "started" });
-        if (!committed) {
-          return { kind: "commit_unknown", operationId: operation.operationId, message: `Child issue created but failed to persist commit checkpoint for ${effectId}` };
+      if (resolution.kind === "retry_effect") {
+        if (effect.state === "commit_unknown") {
+          // blind retry 禁止
+          return {
+            kind: "failed_before_commit",
+            error: new Error("Blind retry for child_create in commit_unknown is forbidden without verified absence. Please link the remote issue ID or verify absence first."),
+          };
         }
-        return { kind: "remote_committed", ticketId: parentTicketId, pending: "remote_reconcile", message: `Child issue #${createdChildId} created successfully` };
-      } catch (err) {
-        const isUnknown = isRemoteCommitUnknownError(err);
-        await repo.transitionEffect(key, effectId, isUnknown ? { kind: "mark_commit_unknown" } : { kind: "mark_failed", detail: (err as Error).message }, scope, { operationRevision: revision, sourceState: "started" });
-        return isUnknown
-          ? { kind: "commit_unknown", operationId: operation.operationId, message: (err as Error).message }
-          : { kind: "failed_before_commit", error: err as Error };
+
+        if (effect.state === "failed" && effect.failure?.disposition === "non_retriable") {
+          return { kind: "failed_before_commit", error: new Error("Cannot retry non-retriable failure.") };
+        }
+
+        const parsedContent = operation.intent?.content ? parseTicketEditorContent(operation.intent.content, { allowMissingMetadata: true, allowMissingSubject: true }) : undefined;
+        const subject =
+          childSnapshot?.subject ??
+          (effect.target as any).subject ??
+          (operation.intent?.childTickets?.[effect.target.ordinal ?? 0]?.subject) ??
+          (operation.intent?.metadata?.children?.[effect.target.ordinal ?? 0]) ??
+          (parsedContent?.metadata?.children?.[effect.target.ordinal ?? 0]);
+        const projectId = childSnapshot?.projectId ?? operation.projectId ?? operation.intent?.projectId ?? 0;
+
+        if (!parentTicketId || !subject) {
+          return { kind: "failed_before_commit", error: new Error(`Cannot retry child create for effect ${effectId}: missing parent or subject (parentTicketId=${parentTicketId}, subject=${subject})`) };
+        }
+
+        const started = await repo.transitionEffect(
+          key,
+          effectId,
+          { kind: "start_explicit_retry", requestSnapshot: childSnapshot },
+          scope,
+          { operationRevision: revision, sourceState: effect.state },
+        );
+        if (!started) {
+          return { kind: "failed_before_commit", error: new Error(`Failed to start retry for effect ${effectId}`) };
+        }
+
+        try {
+          const createdChildId = await createDeps.createIssue({
+            subject,
+            description: childSnapshot?.description ?? "",
+            parentId: parentTicketId,
+            projectId,
+          });
+          const committed = await repo.transitionEffect(
+            key,
+            effectId,
+            { kind: "commit", remoteId: createdChildId, requestSnapshot: childSnapshot },
+            scope,
+            { operationRevision: revision, sourceState: "started" },
+          );
+          if (!committed) {
+            return { kind: "commit_unknown", operationId: operation.operationId, message: `Child issue created but failed to persist commit checkpoint for ${effectId}` };
+          }
+
+          // 親チケットが committed の場合、すべての Effect が committed なら completed へ進める
+          return this.finalizeOperationIfReady(committed as UnifiedSyncOperation<TicketCreateIntent>, context, deps);
+        } catch (err) {
+          const isUnknown = isRemoteCommitUnknownError(err);
+          const disposition = classifyFailureDisposition(err);
+          await repo.transitionEffect(
+            key,
+            effectId,
+            isUnknown ? { kind: "mark_commit_unknown" } : { kind: "mark_failed", detail: (err as Error).message, disposition },
+            scope,
+            { operationRevision: revision, sourceState: "started" },
+          );
+          return isUnknown
+            ? { kind: "commit_unknown", operationId: operation.operationId, message: (err as Error).message }
+            : { kind: "failed_before_commit", error: err as Error };
+        }
       }
     }
 
-    return { kind: "failed_before_commit", error: new Error(`Unsupported effect recovery for ${effectId}`) };
+    return {
+      kind: "failed_before_commit",
+      error: new Error(`Unsupported effect resolution for kind ${effect.kind} or resolution ${JSON.stringify(resolution)}`),
+    };
+  }
+
+  private async finalizeOperationIfReady(
+    op: UnifiedSyncOperation<TicketCreateIntent>,
+    context: OperationHandlerContext,
+    deps: OperationHandlerDeps & { repository: SyncOperationRepository },
+  ): Promise<SyncOutcome> {
+    const parentCommitted = (op.effects ?? []).some(
+      (e) => (e.effectId === "ticket-create" || e.kind === "ticket_create") && e.state === "committed"
+    ) || (op.createdRemoteId !== undefined && op.createdRemoteId > 0);
+
+    const hasUnresolved = (op.effects ?? []).some(
+      (e) => e.state === "commit_unknown" || e.state === "failed" || e.state === "started" || e.state === "compensation_started" || e.state === "compensation_unknown"
+    );
+
+    if (!parentCommitted || hasUnresolved) {
+      return {
+        kind: "remote_committed",
+        ticketId: op.createdRemoteId ?? 0,
+        pending: "remote_reconcile",
+        message: "Secondary effects resolved partially",
+      };
+    }
+
+    // すべて committed なので reconcile -> finalize -> complete
+    const reconciled = await this.reconcileRemote(op, context, deps);
+    if (!reconciled.ok) {
+      return {
+        kind: "remote_committed",
+        ticketId: op.createdRemoteId ?? 0,
+        pending: "remote_reconcile",
+        message: reconciled.message,
+      };
+    }
+
+    const fin = await this.finalizeLocal(op, reconciled.canonical, context, deps);
+    if (!fin.ok) {
+      return {
+        kind: "remote_committed",
+        ticketId: op.createdRemoteId ?? 0,
+        pending: "local_finalize",
+        message: fin.message,
+      };
+    }
+
+    const key = op.key ?? { kind: "newTicket", documentUri: op.documentUri };
+    const compOp = await deps.repository.completeOperation(key, context.connectionScope, undefined, {
+      canonical: reconciled.canonical,
+      remoteUpdatedAt: op.remoteUpdatedAt,
+    });
+    if (compOp) {
+      return {
+        kind: "completed",
+        ticketId: op.createdRemoteId ?? 0,
+      };
+    }
+    return {
+      kind: "remote_committed",
+      ticketId: op.createdRemoteId ?? 0,
+      pending: "local_finalize",
+      message: "Failed to persist complete state",
+    };
   }
 }
 
@@ -1339,8 +1615,25 @@ export class TicketUpdateHandler implements OperationHandler<TicketUpdateIntent,
       await repo.saveOperation(operation, context.connectionScope);
     }
 
+    const uniqueChildren = prepared.uniqueChildren;
     const existingPrimaryEffect = (currentOp?.effects ?? operation.effects ?? []).find((e) => e.effectId === "ticket-update");
     if (!existingPrimaryEffect || existingPrimaryEffect.state !== "committed") {
+      const updateSnapshot: TicketUpdateRequestSnapshot = {
+        kind: "ticket_update",
+        ticketId,
+        subject: prepared.changes.subject,
+        description: prepared.changes.description,
+        trackerId: prepared.changes.tracker_id,
+        statusId: prepared.changes.status_id,
+        priorityId: prepared.changes.priority_id,
+        assigneeId: prepared.changes.assigned_to_id,
+        startDate: prepared.changes.start_date,
+        dueDate: prepared.changes.due_date,
+        notes: prepared.changes.notes,
+        uploads: prepared.changes.uploads,
+        childTickets: uniqueChildren.map((c) => ({ subject: c })),
+      };
+
       const planned = await repo.planEffect(
         opKey,
         {
@@ -1349,6 +1642,7 @@ export class TicketUpdateHandler implements OperationHandler<TicketUpdateIntent,
           operationRevision: revision,
           state: "planned",
           target: { ticketId },
+          requestSnapshot: updateSnapshot,
         },
         context.connectionScope,
         revision,
@@ -1364,7 +1658,7 @@ export class TicketUpdateHandler implements OperationHandler<TicketUpdateIntent,
       const started = await repo.transitionEffect(
         opKey,
         "ticket-update",
-        { kind: "start" },
+        { kind: "start", requestSnapshot: updateSnapshot },
         context.connectionScope,
         { operationRevision: revision, sourceState: "planned" },
       );
@@ -1385,7 +1679,7 @@ export class TicketUpdateHandler implements OperationHandler<TicketUpdateIntent,
         const committed = await repo.transitionEffect(
           opKey,
           "ticket-update",
-          { kind: "commit", remoteId: ticketId },
+          { kind: "commit", remoteId: ticketId, requestSnapshot: updateSnapshot },
           context.connectionScope,
           { operationRevision: revision, sourceState: "started" },
         );
@@ -1398,10 +1692,11 @@ export class TicketUpdateHandler implements OperationHandler<TicketUpdateIntent,
         }
       } catch (err) {
         const commitUnknown = isRemoteCommitUnknownError(err);
+        const disposition = classifyFailureDisposition(err);
         await repo.transitionEffect(
           opKey,
           "ticket-update",
-          commitUnknown ? { kind: "mark_commit_unknown" } : { kind: "mark_failed", detail: (err as Error).message },
+          commitUnknown ? { kind: "mark_commit_unknown" } : { kind: "mark_failed", detail: (err as Error).message, disposition },
           context.connectionScope,
           { operationRevision: revision, sourceState: "started" },
         );
@@ -1417,7 +1712,6 @@ export class TicketUpdateHandler implements OperationHandler<TicketUpdateIntent,
     }
 
     // 2. Dependent Effects: Child issue creation (DR-02: After Primary Commit)
-    const uniqueChildren = prepared.uniqueChildren;
     if (uniqueChildren && uniqueChildren.length > 0) {
       const childProjectId = prepared.projectId ?? operation.projectId;
 
@@ -1443,6 +1737,15 @@ export class TicketUpdateHandler implements OperationHandler<TicketUpdateIntent,
           };
         }
 
+        const childSnapshot: ChildTicketCreateRequestSnapshot = {
+          kind: "child_create",
+          parentTicketId: ticketId,
+          projectId: childProjectId ?? 0,
+          subject,
+          description: "",
+          ordinal,
+        };
+
         const planChild = await repo.planEffect(
           opKey,
           {
@@ -1451,6 +1754,7 @@ export class TicketUpdateHandler implements OperationHandler<TicketUpdateIntent,
             operationRevision: revision,
             state: "planned",
             target: { parentTicketId: ticketId, ordinal },
+            requestSnapshot: childSnapshot,
           },
           context.connectionScope,
           revision,
@@ -1466,7 +1770,7 @@ export class TicketUpdateHandler implements OperationHandler<TicketUpdateIntent,
         const startChild = await repo.transitionEffect(
           opKey,
           effectId,
-          { kind: "start" },
+          { kind: "start", requestSnapshot: childSnapshot },
           context.connectionScope,
           { operationRevision: revision, sourceState: "planned" },
         );
@@ -1495,7 +1799,7 @@ export class TicketUpdateHandler implements OperationHandler<TicketUpdateIntent,
           const committedChild = await repo.transitionEffect(
             opKey,
             effectId,
-            { kind: "commit", remoteId: createdChildId },
+            { kind: "commit", remoteId: createdChildId, requestSnapshot: childSnapshot },
             context.connectionScope,
             { operationRevision: revision, sourceState: "started" },
           );
@@ -1515,10 +1819,11 @@ export class TicketUpdateHandler implements OperationHandler<TicketUpdateIntent,
           }
         } catch (err) {
           const commitUnknown = isRemoteCommitUnknownError(err);
+          const disposition = classifyFailureDisposition(err);
           await repo.transitionEffect(
             opKey,
             effectId,
-            commitUnknown ? { kind: "mark_commit_unknown" } : { kind: "mark_failed", detail: (err as Error).message },
+            commitUnknown ? { kind: "mark_commit_unknown" } : { kind: "mark_failed", detail: (err as Error).message, disposition },
             context.connectionScope,
             { operationRevision: revision, sourceState: "started" },
           );
@@ -1794,8 +2099,9 @@ export class TicketUpdateHandler implements OperationHandler<TicketUpdateIntent,
     operation: UnifiedSyncOperation<TicketUpdateIntent>;
     context: OperationHandlerContext;
     deps: OperationHandlerDeps & { repository: SyncOperationRepository };
+    resolution: EffectResolution;
   }): Promise<SyncOutcome> {
-    const { key, effectId, operation, context, deps } = input;
+    const { key, effectId, operation, context, deps, resolution } = input;
     const repo = deps.repository;
     const revision = operation.intentRevision ?? operation.revision ?? 1;
     const scope = context.connectionScope;
@@ -1808,68 +2114,292 @@ export class TicketUpdateHandler implements OperationHandler<TicketUpdateIntent,
       ? { ...defaultTicketDeps, ...deps.ticketUpdate }
       : { ...defaultTicketDeps };
 
+    if (resolution.kind === "mark_failed") {
+      const marked = await repo.transitionEffect(
+        key,
+        effectId,
+        { kind: "mark_failed", detail: "Manually marked as failed", disposition: resolution.disposition ?? "retryable", category: resolution.category },
+        scope,
+        { operationRevision: revision, sourceState: effect.state },
+      );
+      if (!marked) {
+        return { kind: "failed_before_commit", error: new Error(`Failed to mark effect as failed: ${effectId}`) };
+      }
+      return {
+        kind: "remote_committed",
+        ticketId: operation.ticketId ?? 0,
+        pending: "remote_reconcile",
+        message: `Effect ${effectId} marked as failed`,
+      };
+    }
+
     if (effect.kind === "attachment_upload" || effect.kind === "image_upload") {
-      const filePath = effect.target.filePath;
-      if (!filePath) {
-        return { kind: "failed_before_commit", error: new Error(`Cannot retry attachment without filePath for effect ${effectId}`) };
-      }
-      const started = await repo.transitionEffect(key, effectId, { kind: "start_explicit_retry" }, scope, { operationRevision: revision, sourceState: effect.state });
-      if (!started) {
-        return { kind: "failed_before_commit", error: new Error(`Failed to start retry for effect ${effectId}`) };
-      }
-      try {
-        const uploadFn = saveDeps.uploadFile ?? uploadFileAttachment;
-        const res = await uploadFn(filePath);
-        const committed = await repo.transitionEffect(key, effectId, { kind: "commit", token: res.token, target: { filePath, filename: effect.target.filename ?? res.filename } }, scope, { operationRevision: revision, sourceState: "started" });
-        if (!committed) {
-          return { kind: "commit_unknown", operationId: operation.operationId, message: `Attachment uploaded but commit checkpoint failed for ${effectId}` };
+      if (resolution.kind === "assume_committed") {
+        const token = resolution.token ?? effect.token;
+        const assumed = await repo.transitionEffect(
+          key,
+          effectId,
+          { kind: "assume_committed", token, remoteId: resolution.remoteId },
+          scope,
+          { operationRevision: revision, sourceState: effect.state },
+        );
+        if (!assumed) {
+          return { kind: "failed_before_commit", error: new Error(`Failed to assume committed for effect ${effectId}`) };
         }
-        return { kind: "remote_committed", ticketId: operation.ticketId ?? 0, pending: "remote_reconcile", message: `Attachment ${effectId} uploaded successfully` };
-      } catch (err) {
-        const isUnknown = isRemoteCommitUnknownError(err);
-        await repo.transitionEffect(key, effectId, isUnknown ? { kind: "mark_commit_unknown" } : { kind: "mark_failed", detail: (err as Error).message }, scope, { operationRevision: revision, sourceState: "started" });
-        return isUnknown
-          ? { kind: "commit_unknown", operationId: operation.operationId, message: (err as Error).message }
-          : { kind: "failed_before_commit", error: err as Error };
+        return {
+          kind: "remote_committed",
+          ticketId: operation.ticketId ?? 0,
+          pending: "remote_reconcile",
+          message: `Attachment effect ${effectId} assumed committed`,
+        };
+      }
+
+      if (resolution.kind === "retry_effect") {
+        if (effect.state === "failed" && effect.failure?.disposition === "non_retriable") {
+          return { kind: "failed_before_commit", error: new Error("Cannot retry non-retriable failure") };
+        }
+        const filePath = effect.target.filePath ?? (effect.requestSnapshot as UploadRequestSnapshot | undefined)?.filePath;
+        if (!filePath) {
+          return { kind: "failed_before_commit", error: new Error(`Cannot retry attachment without filePath for effect ${effectId}`) };
+        }
+
+        const currentFile = computeFileHashAndSize(filePath);
+        const snapshot = effect.requestSnapshot as UploadRequestSnapshot | undefined;
+        if (snapshot?.contentHash && currentFile?.contentHash && snapshot.contentHash !== currentFile.contentHash) {
+          return {
+            kind: "failed_before_commit",
+            error: new Error(`File content has changed since snapshot. Retry rejected.`),
+          };
+        }
+
+        const uploadSnapshot: UploadRequestSnapshot = {
+          kind: "upload",
+          filePath,
+          filename: effect.target.filename ?? snapshot?.filename ?? "attachment",
+          contentType: snapshot?.contentType ?? "application/octet-stream",
+          contentHash: currentFile?.contentHash ?? snapshot?.contentHash,
+          contentSize: currentFile?.contentSize ?? snapshot?.contentSize,
+        };
+
+        const started = await repo.transitionEffect(
+          key,
+          effectId,
+          { kind: "start_explicit_retry", requestSnapshot: uploadSnapshot },
+          scope,
+          { operationRevision: revision, sourceState: effect.state },
+        );
+        if (!started) {
+          return { kind: "failed_before_commit", error: new Error(`Failed to start retry for effect ${effectId}`) };
+        }
+        try {
+          const uploadFn = saveDeps.uploadFile ?? uploadFileAttachment;
+          const res = await uploadFn(filePath);
+          const committed = await repo.transitionEffect(
+            key,
+            effectId,
+            { kind: "commit", token: res.token, target: { filePath, filename: effect.target.filename ?? res.filename }, requestSnapshot: uploadSnapshot },
+            scope,
+            { operationRevision: revision, sourceState: "started" },
+          );
+          if (!committed) {
+            return { kind: "commit_unknown", operationId: operation.operationId, message: `Attachment uploaded but commit checkpoint failed for ${effectId}` };
+          }
+          return { kind: "remote_committed", ticketId: operation.ticketId ?? 0, pending: "remote_reconcile", message: `Attachment ${effectId} uploaded successfully` };
+        } catch (err) {
+          const isUnknown = isRemoteCommitUnknownError(err);
+          const disposition = classifyFailureDisposition(err);
+          await repo.transitionEffect(
+            key,
+            effectId,
+            isUnknown ? { kind: "mark_commit_unknown" } : { kind: "mark_failed", detail: (err as Error).message, disposition },
+            scope,
+            { operationRevision: revision, sourceState: "started" },
+          );
+          return isUnknown
+            ? { kind: "commit_unknown", operationId: operation.operationId, message: (err as Error).message }
+            : { kind: "failed_before_commit", error: err as Error };
+        }
       }
     }
 
     if (effect.kind === "child_create") {
-      const parentTicketId = effect.target.parentTicketId ?? operation.ticketId;
-      const ordinal = effect.target.ordinal;
-      const subject = (operation.intent?.childTickets?.[ordinal ?? 0]?.subject)
-        ?? (operation.intent?.metadata?.children?.[ordinal ?? 0]);
-      if (!parentTicketId || !subject) {
-        return { kind: "failed_before_commit", error: new Error(`Cannot retry child create for effect ${effectId}: missing parent or subject`) };
+      const childSnapshot = effect.requestSnapshot as ChildTicketCreateRequestSnapshot | undefined;
+      const parentTicketId = childSnapshot?.parentTicketId ?? effect.target.parentTicketId ?? operation.ticketId;
+
+      if (resolution.kind === "link_remote_child" || (resolution.kind === "assume_committed" && resolution.remoteId)) {
+        const remoteChildId = resolution.kind === "link_remote_child" ? resolution.remoteId : resolution.remoteId!;
+        const getDetail = deps?.ticketUpdate?.getIssueDetail ?? saveDeps.getIssueDetail ?? getIssueDetail;
+        try {
+          const detail = await getDetail(remoteChildId);
+          if (!detail || !detail.ticket) {
+            return { kind: "failed_before_commit", error: new Error(`Remote ticket #${remoteChildId} not found.`) };
+          }
+
+          if (parentTicketId && detail.ticket.parentId !== parentTicketId) {
+            return {
+              kind: "failed_before_commit",
+              error: new Error(`Parent ticket ID mismatch: child #${remoteChildId} has parent ${detail.ticket.parentId}, expected ${parentTicketId}`),
+            };
+          }
+          const expectedProj = childSnapshot?.projectId ?? operation.projectId;
+          if (expectedProj && detail.ticket.projectId !== expectedProj) {
+            return {
+              kind: "failed_before_commit",
+              error: new Error(`Project mismatch: child #${remoteChildId} belongs to project ${detail.ticket.projectId}, expected ${expectedProj}`),
+            };
+          }
+          const expectedSubj = childSnapshot?.subject ?? (operation.intent?.childTickets?.[effect.target.ordinal ?? 0]?.subject) ?? (operation.intent?.metadata?.children?.[effect.target.ordinal ?? 0]);
+          if (expectedSubj && normalizeTicketText(detail.ticket.subject) !== normalizeTicketText(expectedSubj)) {
+            return {
+              kind: "failed_before_commit",
+              error: new Error(`Subject mismatch: child #${remoteChildId} has subject "${detail.ticket.subject}", expected "${expectedSubj}"`),
+            };
+          }
+
+          const assumed = await repo.transitionEffect(
+            key,
+            effectId,
+            { kind: "assume_committed", remoteId: remoteChildId },
+            scope,
+            { operationRevision: revision, sourceState: effect.state },
+          );
+          if (!assumed) {
+            return { kind: "failed_before_commit", error: new Error(`Failed to assume committed for child effect ${effectId}`) };
+          }
+
+          return this.finalizeOperationIfReady(assumed as UnifiedSyncOperation<TicketUpdateIntent>, context, deps);
+        } catch (err) {
+          return { kind: "failed_before_commit", error: err as Error };
+        }
       }
 
-      const started = await repo.transitionEffect(key, effectId, { kind: "start_explicit_retry" }, scope, { operationRevision: revision, sourceState: effect.state });
-      if (!started) {
-        return { kind: "failed_before_commit", error: new Error(`Failed to start retry for effect ${effectId}`) };
-      }
-      try {
-        const createFn = saveDeps.createIssue ?? createIssue;
-        const createdChildId = await createFn({
-          subject,
-          description: "",
-          parentId: parentTicketId,
-          projectId: operation.projectId ?? 0,
-        });
-        const committed = await repo.transitionEffect(key, effectId, { kind: "commit", remoteId: createdChildId }, scope, { operationRevision: revision, sourceState: "started" });
-        if (!committed) {
-          return { kind: "commit_unknown", operationId: operation.operationId, message: `Child issue created but failed to persist commit checkpoint for ${effectId}` };
+      if (resolution.kind === "retry_effect") {
+        if (effect.state === "commit_unknown") {
+          return {
+            kind: "failed_before_commit",
+            error: new Error("Blind retry for child_create in commit_unknown is forbidden without verified absence."),
+          };
         }
-        return { kind: "remote_committed", ticketId: parentTicketId, pending: "remote_reconcile", message: `Child issue #${createdChildId} created successfully` };
-      } catch (err) {
-        const isUnknown = isRemoteCommitUnknownError(err);
-        await repo.transitionEffect(key, effectId, isUnknown ? { kind: "mark_commit_unknown" } : { kind: "mark_failed", detail: (err as Error).message }, scope, { operationRevision: revision, sourceState: "started" });
-        return isUnknown
-          ? { kind: "commit_unknown", operationId: operation.operationId, message: (err as Error).message }
-          : { kind: "failed_before_commit", error: err as Error };
+
+        if (effect.state === "failed" && effect.failure?.disposition === "non_retriable") {
+          return { kind: "failed_before_commit", error: new Error("Cannot retry non-retriable failure.") };
+        }
+
+        const subject = childSnapshot?.subject ?? (operation.intent?.childTickets?.[effect.target.ordinal ?? 0]?.subject) ?? (operation.intent?.metadata?.children?.[effect.target.ordinal ?? 0]);
+        const projectId = childSnapshot?.projectId ?? operation.projectId ?? 0;
+
+        if (!parentTicketId || !subject) {
+          return { kind: "failed_before_commit", error: new Error(`Cannot retry child create for effect ${effectId}: missing parent or subject`) };
+        }
+
+        const started = await repo.transitionEffect(
+          key,
+          effectId,
+          { kind: "start_explicit_retry", requestSnapshot: childSnapshot },
+          scope,
+          { operationRevision: revision, sourceState: effect.state },
+        );
+        if (!started) {
+          return { kind: "failed_before_commit", error: new Error(`Failed to start retry for effect ${effectId}`) };
+        }
+        try {
+          const createFn = saveDeps.createIssue ?? createIssue;
+          const createdChildId = await createFn({
+            subject,
+            description: childSnapshot?.description ?? "",
+            parentId: parentTicketId,
+            projectId,
+          });
+          const committed = await repo.transitionEffect(
+            key,
+            effectId,
+            { kind: "commit", remoteId: createdChildId, requestSnapshot: childSnapshot },
+            scope,
+            { operationRevision: revision, sourceState: "started" },
+          );
+          if (!committed) {
+            return { kind: "commit_unknown", operationId: operation.operationId, message: `Child issue created but failed to persist commit checkpoint for ${effectId}` };
+          }
+          return this.finalizeOperationIfReady(committed as UnifiedSyncOperation<TicketUpdateIntent>, context, deps);
+        } catch (err) {
+          const isUnknown = isRemoteCommitUnknownError(err);
+          const disposition = classifyFailureDisposition(err);
+          await repo.transitionEffect(
+            key,
+            effectId,
+            isUnknown ? { kind: "mark_commit_unknown" } : { kind: "mark_failed", detail: (err as Error).message, disposition },
+            scope,
+            { operationRevision: revision, sourceState: "started" },
+          );
+          return isUnknown
+            ? { kind: "commit_unknown", operationId: operation.operationId, message: (err as Error).message }
+            : { kind: "failed_before_commit", error: err as Error };
+        }
       }
     }
 
     return { kind: "failed_before_commit", error: new Error(`Unsupported effect recovery for ${effectId}`) };
+  }
+
+  private async finalizeOperationIfReady(
+    op: UnifiedSyncOperation<TicketUpdateIntent>,
+    context: OperationHandlerContext,
+    deps: OperationHandlerDeps & { repository: SyncOperationRepository },
+  ): Promise<SyncOutcome> {
+    const parentCommitted = (op.effects ?? []).some(
+      (e) => (e.effectId === "ticket-update" || e.kind === "ticket_update") && e.state === "committed"
+    );
+
+    const hasUnresolved = (op.effects ?? []).some(
+      (e) => e.state === "commit_unknown" || e.state === "failed" || e.state === "started" || e.state === "compensation_started" || e.state === "compensation_unknown"
+    );
+
+    if (!parentCommitted || hasUnresolved) {
+      return {
+        kind: "remote_committed",
+        ticketId: op.ticketId ?? 0,
+        pending: "remote_reconcile",
+        message: "Secondary effects resolved partially",
+      };
+    }
+
+    const reconciled = await this.reconcileRemote(op, context, deps);
+    if (!reconciled.ok) {
+      return {
+        kind: "remote_committed",
+        ticketId: op.ticketId ?? 0,
+        pending: "remote_reconcile",
+        message: reconciled.message,
+      };
+    }
+
+    const fin = await this.finalizeLocal(op, reconciled.canonical, context, deps);
+    if (!fin.ok) {
+      return {
+        kind: "remote_committed",
+        ticketId: op.ticketId ?? 0,
+        pending: "local_finalize",
+        message: fin.message,
+      };
+    }
+
+    const key = op.key ?? { kind: "ticket", ticketId: op.ticketId ?? 0 };
+    const compOp = await deps.repository.completeOperation(key, context.connectionScope, undefined, {
+      canonical: reconciled.canonical,
+      remoteUpdatedAt: op.remoteUpdatedAt,
+    });
+    if (compOp) {
+      return {
+        kind: "completed",
+        ticketId: op.ticketId ?? 0,
+      };
+    }
+    return {
+      kind: "remote_committed",
+      ticketId: op.ticketId ?? 0,
+      pending: "local_finalize",
+      message: "Failed to persist complete state",
+    };
   }
 }
 
@@ -2011,6 +2541,16 @@ export class CommentCreateHandler implements OperationHandler<CommentCreateInten
         continue;
       }
 
+      const fileId = computeFileHashAndSize(filePath);
+      const uploadSnapshot: UploadRequestSnapshot = {
+        kind: "upload",
+        filePath,
+        filename: path.basename(filePath),
+        contentType: "image/png",
+        contentHash: fileId?.contentHash,
+        contentSize: fileId?.contentSize,
+      };
+
       const planImg = await repo.planEffect(
         opKey,
         {
@@ -2019,6 +2559,7 @@ export class CommentCreateHandler implements OperationHandler<CommentCreateInten
           operationRevision: revision,
           state: "planned",
           target: { filePath, filename: path.basename(filePath) },
+          requestSnapshot: uploadSnapshot,
         },
         context.connectionScope,
         revision,
@@ -2030,7 +2571,7 @@ export class CommentCreateHandler implements OperationHandler<CommentCreateInten
       const startImg = await repo.transitionEffect(
         opKey,
         effectId,
-        { kind: "start" },
+        { kind: "start", requestSnapshot: uploadSnapshot },
         context.connectionScope,
         { operationRevision: revision, sourceState: "planned" },
       );
@@ -2043,7 +2584,7 @@ export class CommentCreateHandler implements OperationHandler<CommentCreateInten
         const commitImg = await repo.transitionEffect(
           opKey,
           effectId,
-          { kind: "commit", token: upload.token, target: { filePath, filename: upload.filename } },
+          { kind: "commit", token: upload.token, target: { filePath, filename: upload.filename }, requestSnapshot: uploadSnapshot },
           context.connectionScope,
           { operationRevision: revision, sourceState: "started" },
         );
@@ -2057,10 +2598,11 @@ export class CommentCreateHandler implements OperationHandler<CommentCreateInten
         });
       } catch (err) {
         const commitUnknown = isRemoteCommitUnknownError(err);
+        const disposition = classifyFailureDisposition(err);
         await repo.transitionEffect(
           opKey,
           effectId,
-          commitUnknown ? { kind: "mark_commit_unknown" } : { kind: "mark_failed", detail: (err as Error).message },
+          commitUnknown ? { kind: "mark_commit_unknown" } : { kind: "mark_failed", detail: (err as Error).message, disposition },
           context.connectionScope,
           { operationRevision: revision, sourceState: "started" },
         );
@@ -2181,10 +2723,11 @@ export class CommentCreateHandler implements OperationHandler<CommentCreateInten
       };
     } catch (err) {
       const commitUnknown = isRemoteCommitUnknownError(err);
+      const disposition = classifyFailureDisposition(err);
       await repo.transitionEffect(
         opKey,
         "comment-create",
-        commitUnknown ? { kind: "mark_commit_unknown" } : { kind: "mark_failed", detail: (err as Error).message },
+        commitUnknown ? { kind: "mark_commit_unknown" } : { kind: "mark_failed", detail: (err as Error).message, disposition },
         context.connectionScope,
         { operationRevision: revision, sourceState: "started" },
       );
@@ -2301,8 +2844,9 @@ export class CommentCreateHandler implements OperationHandler<CommentCreateInten
     operation: UnifiedSyncOperation<CommentCreateIntent>;
     context: OperationHandlerContext;
     deps: OperationHandlerDeps & { repository: SyncOperationRepository };
+    resolution: EffectResolution;
   }): Promise<SyncOutcome> {
-    const { key, effectId, operation, context, deps } = input;
+    const { key, effectId, operation, context, deps, resolution } = input;
     const repo = deps.repository;
     const revision = operation.intentRevision ?? operation.revision ?? 1;
     const scope = context.connectionScope;
@@ -2313,28 +2857,111 @@ export class CommentCreateHandler implements OperationHandler<CommentCreateInten
 
     const commentDeps = { ...defaultCommentDeps, ...deps.comment };
 
+    if (resolution.kind === "mark_failed") {
+      const marked = await repo.transitionEffect(
+        key,
+        effectId,
+        { kind: "mark_failed", detail: "Manually marked as failed", disposition: resolution.disposition ?? "retryable", category: resolution.category },
+        scope,
+        { operationRevision: revision, sourceState: effect.state },
+      );
+      if (!marked) {
+        return { kind: "failed_before_commit", error: new Error(`Failed to mark effect as failed: ${effectId}`) };
+      }
+      return {
+        kind: "remote_committed",
+        ticketId: operation.ticketId ?? 0,
+        pending: "remote_reconcile",
+        message: `Effect ${effectId} marked as failed`,
+      };
+    }
+
     if (effect.kind === "image_upload" || effect.kind === "attachment_upload") {
-      const filePath = effect.target.filePath;
-      if (!filePath) {
-        return { kind: "failed_before_commit", error: new Error(`Cannot retry image upload without filePath for effect ${effectId}`) };
-      }
-      const started = await repo.transitionEffect(key, effectId, { kind: "start_explicit_retry" }, scope, { operationRevision: revision, sourceState: effect.state });
-      if (!started) {
-        return { kind: "failed_before_commit", error: new Error(`Failed to start retry for effect ${effectId}`) };
-      }
-      try {
-        const upload = await commentDeps.uploadFile(filePath);
-        const committed = await repo.transitionEffect(key, effectId, { kind: "commit", token: upload.token, target: { filePath, filename: upload.filename } }, scope, { operationRevision: revision, sourceState: "started" });
-        if (!committed) {
-          return { kind: "commit_unknown", operationId: operation.operationId, message: `Image uploaded but commit checkpoint failed for ${effectId}` };
+      if (resolution.kind === "assume_committed") {
+        const token = resolution.token ?? effect.token;
+        const assumed = await repo.transitionEffect(
+          key,
+          effectId,
+          { kind: "assume_committed", token, remoteId: resolution.remoteId },
+          scope,
+          { operationRevision: revision, sourceState: effect.state },
+        );
+        if (!assumed) {
+          return { kind: "failed_before_commit", error: new Error(`Failed to assume committed for effect ${effectId}`) };
         }
-        return { kind: "remote_committed", ticketId: operation.ticketId ?? 0, commentId: operation.commentId, pending: "remote_reconcile", message: `Image ${effectId} uploaded successfully` };
-      } catch (err) {
-        const isUnknown = isRemoteCommitUnknownError(err);
-        await repo.transitionEffect(key, effectId, isUnknown ? { kind: "mark_commit_unknown" } : { kind: "mark_failed", detail: (err as Error).message }, scope, { operationRevision: revision, sourceState: "started" });
-        return isUnknown
-          ? { kind: "commit_unknown", operationId: operation.operationId, message: (err as Error).message }
-          : { kind: "failed_before_commit", error: err as Error };
+        return {
+          kind: "remote_committed",
+          ticketId: operation.ticketId ?? 0,
+          commentId: operation.commentId,
+          pending: "remote_reconcile",
+          message: `Attachment effect ${effectId} assumed committed`,
+        };
+      }
+
+      if (resolution.kind === "retry_effect") {
+        if (effect.state === "failed" && effect.failure?.disposition === "non_retriable") {
+          return { kind: "failed_before_commit", error: new Error("Cannot retry non-retriable failure") };
+        }
+        const filePath = effect.target.filePath ?? (effect.requestSnapshot as UploadRequestSnapshot | undefined)?.filePath;
+        if (!filePath) {
+          return { kind: "failed_before_commit", error: new Error(`Cannot retry image upload without filePath for effect ${effectId}`) };
+        }
+
+        const currentFile = computeFileHashAndSize(filePath);
+        const snapshot = effect.requestSnapshot as UploadRequestSnapshot | undefined;
+        if (snapshot?.contentHash && currentFile?.contentHash && snapshot.contentHash !== currentFile.contentHash) {
+          return {
+            kind: "failed_before_commit",
+            error: new Error(`File content has changed since snapshot. Retry rejected.`),
+          };
+        }
+
+        const uploadSnapshot: UploadRequestSnapshot = {
+          kind: "upload",
+          filePath,
+          filename: effect.target.filename ?? snapshot?.filename ?? path.basename(filePath),
+          contentType: snapshot?.contentType ?? "image/png",
+          contentHash: currentFile?.contentHash ?? snapshot?.contentHash,
+          contentSize: currentFile?.contentSize ?? snapshot?.contentSize,
+        };
+
+        const started = await repo.transitionEffect(
+          key,
+          effectId,
+          { kind: "start_explicit_retry", requestSnapshot: uploadSnapshot },
+          scope,
+          { operationRevision: revision, sourceState: effect.state },
+        );
+        if (!started) {
+          return { kind: "failed_before_commit", error: new Error(`Failed to start retry for effect ${effectId}`) };
+        }
+        try {
+          const upload = await commentDeps.uploadFile(filePath);
+          const committed = await repo.transitionEffect(
+            key,
+            effectId,
+            { kind: "commit", token: upload.token, target: { filePath, filename: upload.filename }, requestSnapshot: uploadSnapshot },
+            scope,
+            { operationRevision: revision, sourceState: "started" },
+          );
+          if (!committed) {
+            return { kind: "commit_unknown", operationId: operation.operationId, message: `Image uploaded but commit checkpoint failed for ${effectId}` };
+          }
+          return { kind: "remote_committed", ticketId: operation.ticketId ?? 0, commentId: operation.commentId, pending: "remote_reconcile", message: `Image ${effectId} uploaded successfully` };
+        } catch (err) {
+          const isUnknown = isRemoteCommitUnknownError(err);
+          const disposition = classifyFailureDisposition(err);
+          await repo.transitionEffect(
+            key,
+            effectId,
+            isUnknown ? { kind: "mark_commit_unknown" } : { kind: "mark_failed", detail: (err as Error).message, disposition },
+            scope,
+            { operationRevision: revision, sourceState: "started" },
+          );
+          return isUnknown
+            ? { kind: "commit_unknown", operationId: operation.operationId, message: (err as Error).message }
+            : { kind: "failed_before_commit", error: err as Error };
+        }
       }
     }
 
@@ -2487,6 +3114,16 @@ export class CommentUpdateHandler implements OperationHandler<CommentUpdateInten
         continue;
       }
 
+      const fileId = computeFileHashAndSize(filePath);
+      const uploadSnapshot: UploadRequestSnapshot = {
+        kind: "upload",
+        filePath,
+        filename: path.basename(filePath),
+        contentType: "image/png",
+        contentHash: fileId?.contentHash,
+        contentSize: fileId?.contentSize,
+      };
+
       const planImg = await repo.planEffect(
         opKey,
         {
@@ -2495,6 +3132,7 @@ export class CommentUpdateHandler implements OperationHandler<CommentUpdateInten
           operationRevision: revision,
           state: "planned",
           target: { filePath, filename: path.basename(filePath) },
+          requestSnapshot: uploadSnapshot,
         },
         context.connectionScope,
         revision,
@@ -2506,7 +3144,7 @@ export class CommentUpdateHandler implements OperationHandler<CommentUpdateInten
       const startImg = await repo.transitionEffect(
         opKey,
         effectId,
-        { kind: "start" },
+        { kind: "start", requestSnapshot: uploadSnapshot },
         context.connectionScope,
         { operationRevision: revision, sourceState: "planned" },
       );
@@ -2519,7 +3157,7 @@ export class CommentUpdateHandler implements OperationHandler<CommentUpdateInten
         const commitImg = await repo.transitionEffect(
           opKey,
           effectId,
-          { kind: "commit", token: upload.token, target: { filePath, filename: upload.filename } },
+          { kind: "commit", token: upload.token, target: { filePath, filename: upload.filename }, requestSnapshot: uploadSnapshot },
           context.connectionScope,
           { operationRevision: revision, sourceState: "started" },
         );
@@ -2533,10 +3171,11 @@ export class CommentUpdateHandler implements OperationHandler<CommentUpdateInten
         });
       } catch (err) {
         const commitUnknown = isRemoteCommitUnknownError(err);
+        const disposition = classifyFailureDisposition(err);
         await repo.transitionEffect(
           opKey,
           effectId,
-          commitUnknown ? { kind: "mark_commit_unknown" } : { kind: "mark_failed", detail: (err as Error).message },
+          commitUnknown ? { kind: "mark_commit_unknown" } : { kind: "mark_failed", detail: (err as Error).message, disposition },
           context.connectionScope,
           { operationRevision: revision, sourceState: "started" },
         );
@@ -2658,10 +3297,11 @@ export class CommentUpdateHandler implements OperationHandler<CommentUpdateInten
       };
     } catch (err) {
       const commitUnknown = isRemoteCommitUnknownError(err);
+      const disposition = classifyFailureDisposition(err);
       await repo.transitionEffect(
         opKey,
         "comment-update",
-        commitUnknown ? { kind: "mark_commit_unknown" } : { kind: "mark_failed", detail: (err as Error).message },
+        commitUnknown ? { kind: "mark_commit_unknown" } : { kind: "mark_failed", detail: (err as Error).message, disposition },
         context.connectionScope,
         { operationRevision: revision, sourceState: "started" },
       );
@@ -2760,8 +3400,9 @@ export class CommentUpdateHandler implements OperationHandler<CommentUpdateInten
     operation: UnifiedSyncOperation<CommentUpdateIntent>;
     context: OperationHandlerContext;
     deps: OperationHandlerDeps & { repository: SyncOperationRepository };
+    resolution: EffectResolution;
   }): Promise<SyncOutcome> {
-    const { key, effectId, operation, context, deps } = input;
+    const { key, effectId, operation, context, deps, resolution } = input;
     const repo = deps.repository;
     const revision = operation.intentRevision ?? operation.revision ?? 1;
     const scope = context.connectionScope;
@@ -2772,28 +3413,111 @@ export class CommentUpdateHandler implements OperationHandler<CommentUpdateInten
 
     const commentDeps = { ...defaultCommentDeps, ...deps.comment };
 
+    if (resolution.kind === "mark_failed") {
+      const marked = await repo.transitionEffect(
+        key,
+        effectId,
+        { kind: "mark_failed", detail: "Manually marked as failed", disposition: resolution.disposition ?? "retryable", category: resolution.category },
+        scope,
+        { operationRevision: revision, sourceState: effect.state },
+      );
+      if (!marked) {
+        return { kind: "failed_before_commit", error: new Error(`Failed to mark effect as failed: ${effectId}`) };
+      }
+      return {
+        kind: "remote_committed",
+        ticketId: operation.ticketId ?? 0,
+        pending: "remote_reconcile",
+        message: `Effect ${effectId} marked as failed`,
+      };
+    }
+
     if (effect.kind === "image_upload" || effect.kind === "attachment_upload") {
-      const filePath = effect.target.filePath;
-      if (!filePath) {
-        return { kind: "failed_before_commit", error: new Error(`Cannot retry image upload without filePath for effect ${effectId}`) };
-      }
-      const started = await repo.transitionEffect(key, effectId, { kind: "start_explicit_retry" }, scope, { operationRevision: revision, sourceState: effect.state });
-      if (!started) {
-        return { kind: "failed_before_commit", error: new Error(`Failed to start retry for effect ${effectId}`) };
-      }
-      try {
-        const upload = await commentDeps.uploadFile(filePath);
-        const committed = await repo.transitionEffect(key, effectId, { kind: "commit", token: upload.token, target: { filePath, filename: upload.filename } }, scope, { operationRevision: revision, sourceState: "started" });
-        if (!committed) {
-          return { kind: "commit_unknown", operationId: operation.operationId, message: `Image uploaded but commit checkpoint failed for ${effectId}` };
+      if (resolution.kind === "assume_committed") {
+        const token = resolution.token ?? effect.token;
+        const assumed = await repo.transitionEffect(
+          key,
+          effectId,
+          { kind: "assume_committed", token, remoteId: resolution.remoteId },
+          scope,
+          { operationRevision: revision, sourceState: effect.state },
+        );
+        if (!assumed) {
+          return { kind: "failed_before_commit", error: new Error(`Failed to assume committed for effect ${effectId}`) };
         }
-        return { kind: "remote_committed", ticketId: operation.ticketId ?? 0, commentId: operation.commentId, pending: "remote_reconcile", message: `Image ${effectId} uploaded successfully` };
-      } catch (err) {
-        const isUnknown = isRemoteCommitUnknownError(err);
-        await repo.transitionEffect(key, effectId, isUnknown ? { kind: "mark_commit_unknown" } : { kind: "mark_failed", detail: (err as Error).message }, scope, { operationRevision: revision, sourceState: "started" });
-        return isUnknown
-          ? { kind: "commit_unknown", operationId: operation.operationId, message: (err as Error).message }
-          : { kind: "failed_before_commit", error: err as Error };
+        return {
+          kind: "remote_committed",
+          ticketId: operation.ticketId ?? 0,
+          commentId: operation.commentId,
+          pending: "remote_reconcile",
+          message: `Attachment effect ${effectId} assumed committed`,
+        };
+      }
+
+      if (resolution.kind === "retry_effect") {
+        if (effect.state === "failed" && effect.failure?.disposition === "non_retriable") {
+          return { kind: "failed_before_commit", error: new Error("Cannot retry non-retriable failure") };
+        }
+        const filePath = effect.target.filePath ?? (effect.requestSnapshot as UploadRequestSnapshot | undefined)?.filePath;
+        if (!filePath) {
+          return { kind: "failed_before_commit", error: new Error(`Cannot retry image upload without filePath for effect ${effectId}`) };
+        }
+
+        const currentFile = computeFileHashAndSize(filePath);
+        const snapshot = effect.requestSnapshot as UploadRequestSnapshot | undefined;
+        if (snapshot?.contentHash && currentFile?.contentHash && snapshot.contentHash !== currentFile.contentHash) {
+          return {
+            kind: "failed_before_commit",
+            error: new Error(`File content has changed since snapshot. Retry rejected.`),
+          };
+        }
+
+        const uploadSnapshot: UploadRequestSnapshot = {
+          kind: "upload",
+          filePath,
+          filename: effect.target.filename ?? snapshot?.filename ?? path.basename(filePath),
+          contentType: snapshot?.contentType ?? "image/png",
+          contentHash: currentFile?.contentHash ?? snapshot?.contentHash,
+          contentSize: currentFile?.contentSize ?? snapshot?.contentSize,
+        };
+
+        const started = await repo.transitionEffect(
+          key,
+          effectId,
+          { kind: "start_explicit_retry", requestSnapshot: uploadSnapshot },
+          scope,
+          { operationRevision: revision, sourceState: effect.state },
+        );
+        if (!started) {
+          return { kind: "failed_before_commit", error: new Error(`Failed to start retry for effect ${effectId}`) };
+        }
+        try {
+          const upload = await commentDeps.uploadFile(filePath);
+          const committed = await repo.transitionEffect(
+            key,
+            effectId,
+            { kind: "commit", token: upload.token, target: { filePath, filename: upload.filename }, requestSnapshot: uploadSnapshot },
+            scope,
+            { operationRevision: revision, sourceState: "started" },
+          );
+          if (!committed) {
+            return { kind: "commit_unknown", operationId: operation.operationId, message: `Image uploaded but commit checkpoint failed for ${effectId}` };
+          }
+          return { kind: "remote_committed", ticketId: operation.ticketId ?? 0, commentId: operation.commentId, pending: "remote_reconcile", message: `Image ${effectId} uploaded successfully` };
+        } catch (err) {
+          const isUnknown = isRemoteCommitUnknownError(err);
+          const disposition = classifyFailureDisposition(err);
+          await repo.transitionEffect(
+            key,
+            effectId,
+            isUnknown ? { kind: "mark_commit_unknown" } : { kind: "mark_failed", detail: (err as Error).message, disposition },
+            scope,
+            { operationRevision: revision, sourceState: "started" },
+          );
+          return isUnknown
+            ? { kind: "commit_unknown", operationId: operation.operationId, message: (err as Error).message }
+            : { kind: "failed_before_commit", error: err as Error };
+        }
       }
     }
 

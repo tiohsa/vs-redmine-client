@@ -37,11 +37,38 @@ export const classifyError = (error: unknown, statusCode?: number): RedmineError
 export const getUserMessage = (type: RedmineErrorType): string =>
   getErrorMessages()[type];
 
-export const getTechnicalMessage = (error: unknown): string =>
-  error instanceof Error ? error.message : String(error);
+import type { FailureDisposition } from "../app/syncEffects";
 
-const extractStatusCode = (error: unknown): number | undefined => {
+export const extractStatusCode = (error: unknown): number | undefined => {
+  if (error && typeof error === "object") {
+    if ("status" in error && typeof (error as any).status === "number") {
+      return (error as any).status;
+    }
+    if ("statusCode" in error && typeof (error as any).statusCode === "number") {
+      return (error as any).statusCode;
+    }
+  }
   const message = error instanceof Error ? error.message : String(error);
-  const match = message.match(/\((\d{3})\)/);
+  const match = message.match(/(?:HTTP|status|code|\()?\s*(\d{3})\b/i);
   return match ? Number(match[1]) : undefined;
+};
+
+export const classifyFailureDisposition = (error: unknown): FailureDisposition => {
+  const code = extractStatusCode(error);
+  if (code !== undefined) {
+    if (code >= 400 && code < 500) {
+      return "non_retriable";
+    }
+    if (code >= 500) {
+      return "retryable";
+    }
+  }
+  const message = error instanceof Error ? error.message : String(error);
+  if (/ECONNREFUSED|ENOTFOUND|ECONNRESET|ETIMEDOUT|network|socket/i.test(message)) {
+    return "retryable";
+  }
+  if (/validation|invalid|unprocessable|422|400|403|404|401/i.test(message)) {
+    return "non_retriable";
+  }
+  return "retryable";
 };

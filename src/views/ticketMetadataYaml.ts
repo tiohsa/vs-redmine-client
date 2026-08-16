@@ -150,11 +150,19 @@ export const parseIssueMetadataYaml = (text: string): IssueMetadata => {
     }
 
     if (!sawIssue) {
-      if (line.trim() !== "issue:") {
-        throw new Error("Metadata must start with 'issue:'");
+      const trimmed = line.trim();
+      if (trimmed === "issue:") {
+        sawIssue = true;
+        return;
       }
-      sawIssue = true;
-      return;
+      if (
+        trimmed.startsWith("mode:") ||
+        trimmed.startsWith("issue_id:") ||
+        trimmed.startsWith("project_id:")
+      ) {
+        return;
+      }
+      throw new Error("Metadata must start with 'issue:'");
     }
 
     if (!line.startsWith("  ")) {

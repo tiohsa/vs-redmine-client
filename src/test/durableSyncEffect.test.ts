@@ -144,15 +144,41 @@ suite("DurableSyncEffect state machine", () => {
     ), undefined);
   });
 
-  test("known remote failure は commit_unknown と区別して failed にする", () => {
+  test("known remote failure は commit_unknown と区別して failed にし、disposition を保持する", () => {
     const failed = transitionDurableSyncEffect(
       { ...plannedEffect(), state: "started" },
-      { kind: "mark_failed", detail: "HTTP 400" },
+      { kind: "mark_failed", detail: "HTTP 400", disposition: "non_retriable" },
       { operationRevision: 3, sourceState: "started" },
     );
 
     assert.strictEqual(failed?.state, "failed");
     assert.strictEqual(failed?.detail, "HTTP 400");
+    assert.strictEqual(failed?.failure?.disposition, "non_retriable");
+
+    // non_retriable failed は start_explicit_retry できない
+    const retryNonRetriable = transitionDurableSyncEffect(
+      failed!,
+      { kind: "start_explicit_retry" },
+      { operationRevision: 3, sourceState: "failed" },
+    );
+    assert.strictEqual(retryNonRetriable, undefined, "non_retriable は retry 不可");
+
+    // retryable failed は start_explicit_retry 可能
+    const retryableFailed = transitionDurableSyncEffect(
+      { ...plannedEffect(), state: "started" },
+      { kind: "mark_failed", detail: "503 Service Unavailable", disposition: "retryable" },
+      { operationRevision: 3, sourceState: "started" },
+    );
+    assert.strictEqual(retryableFailed?.state, "failed");
+    assert.strictEqual(retryableFailed?.failure?.disposition, "retryable");
+
+    const retried = transitionDurableSyncEffect(
+      retryableFailed!,
+      { kind: "start_explicit_retry" },
+      { operationRevision: 3, sourceState: "failed" },
+    );
+    assert.strictEqual(retried?.state, "started", "retryable は started へ遷移可能");
+    assert.strictEqual(retried?.failure, undefined, "retry 後は failure がクリアされる");
   });
 
   test("全state/action組合せがreference transition matrixと一致する", () => {
@@ -179,9 +205,11 @@ suite("DurableSyncEffect state machine", () => {
     ];
     const allowed = new Set([
       "planned:start",
+      "planned:mark_failed",
       "started:commit",
       "started:mark_commit_unknown",
       "started:mark_failed",
+      "failed:start_explicit_retry",
       "commit_unknown:start_explicit_retry",
       "commit_unknown:assume_committed",
       "committed:start_compensation",
@@ -194,8 +222,13 @@ suite("DurableSyncEffect state machine", () => {
 
     for (const state of states) {
       for (const action of actions) {
+        const baseEffect = {
+          ...plannedEffect(),
+          state,
+          failure: state === "failed" ? { disposition: "retryable" as const } : undefined,
+        };
         const result = transitionDurableSyncEffect(
-          { ...plannedEffect(), state },
+          baseEffect,
           action,
           { operationRevision: 3, sourceState: state },
         );

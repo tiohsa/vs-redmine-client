@@ -19,6 +19,14 @@ export type DurableSyncEffectState =
   | "compensated"
   | "compensation_unknown";
 
+export type FailureDisposition = "retryable" | "non_retriable";
+
+export type EffectFailureInfo = {
+  disposition: FailureDisposition;
+  category?: string;
+  detail?: string;
+};
+
 export type DurableSyncEffectTarget = {
   ticketId?: number;
   parentTicketId?: number;
@@ -54,8 +62,16 @@ export type TicketCreateRequestSnapshot = {
   projectId: number;
   subject: string;
   description: string;
-  parentTicketId?: number;
-  uploadTokens?: Array<{ token: string; filename?: string; contentType?: string }>;
+  statusId?: number;
+  trackerId?: number;
+  priorityId?: number;
+  dueDate?: string;
+  parentId?: number;
+  startDate?: string;
+  doneRatio?: number;
+  estimatedHours?: number;
+  assigneeId?: number;
+  uploads?: Array<{ token: string; filename?: string; contentType?: string }>;
   childTickets?: Array<{ subject: string; description?: string; tracker?: string; priority?: string }>;
 };
 
@@ -66,7 +82,15 @@ export type TicketUpdateRequestSnapshot = {
   description?: string;
   notes?: string;
   projectId?: number;
-  uploadTokens?: Array<{ token: string; filename?: string; contentType?: string }>;
+  statusId?: number;
+  trackerId?: number;
+  priorityId?: number;
+  dueDate?: string;
+  startDate?: string;
+  doneRatio?: number;
+  estimatedHours?: number;
+  assigneeId?: number;
+  uploads?: Array<{ token: string; filename?: string; contentType?: string }>;
   childTickets?: Array<{ subject: string; description?: string; tracker?: string; priority?: string }>;
 };
 
@@ -76,16 +100,24 @@ export type ChildTicketCreateRequestSnapshot = {
   projectId: number;
   subject: string;
   description?: string;
-  tracker?: string;
-  priority?: string;
+  trackerId?: number;
+  priorityId?: number;
+  statusId?: number;
+  startDate?: string;
+  dueDate?: string;
+  doneRatio?: number;
+  estimatedHours?: number;
+  assigneeId?: number;
   ordinal?: number;
 };
 
 export type UploadRequestSnapshot = {
   kind: "upload";
   filePath?: string;
-  filename?: string;
-  contentType?: string;
+  filename: string;
+  contentType: string;
+  contentHash?: string;
+  contentSize?: number;
   imageUri?: string;
 };
 
@@ -107,6 +139,7 @@ export type DurableSyncEffect = {
   remoteId?: number;
   token?: string;
   detail?: string;
+  failure?: EffectFailureInfo;
 };
 
 export type DurableSyncEffectExpectation = {
@@ -120,7 +153,7 @@ export type DurableSyncEffectAction =
   | { kind: "commit"; remoteId?: number; token?: string; target?: DurableSyncEffectTarget; requestSnapshot?: SyncEffectRequestSnapshot }
   | { kind: "assume_committed"; remoteId?: number; token?: string; target?: DurableSyncEffectTarget; requestSnapshot?: SyncEffectRequestSnapshot }
   | { kind: "mark_commit_unknown"; detail?: string }
-  | { kind: "mark_failed"; detail?: string }
+  | { kind: "mark_failed"; detail?: string; disposition?: FailureDisposition; category?: string }
   | { kind: "start_compensation" }
   | { kind: "complete_compensation" }
   | { kind: "mark_compensation_unknown"; detail?: string };
@@ -145,8 +178,21 @@ export const restoreDurableSyncEffect = (
   } else {
     delete (restored as any).requestSnapshot;
   }
+  if (effect.failure) {
+    restored.failure = { ...effect.failure };
+  }
   return restored;
 };
+
+export const isPrimaryEffectKind = (kind: DurableSyncEffectKind): boolean =>
+  kind === "ticket_create" ||
+  kind === "ticket_update" ||
+  kind === "comment_create" ||
+  kind === "comment_update";
+
+export const hasUncertainPrimaryDurableSyncEffect = (
+  effects: readonly DurableSyncEffect[] | undefined,
+): boolean => effects?.some((effect) => isPrimaryEffectKind(effect.kind) && UNCERTAIN_EFFECT_STATES.has(effect.state)) === true;
 
 export const hasUncertainDurableSyncEffect = (
   effects: readonly DurableSyncEffect[] | undefined,
@@ -154,15 +200,20 @@ export const hasUncertainDurableSyncEffect = (
 
 const actionAllowsSource = (
   action: DurableSyncEffectAction,
-  source: DurableSyncEffectState,
+  effect: DurableSyncEffect,
 ): boolean => {
+  const source = effect.state;
   switch (action.kind) {
     case "start": return source === "planned";
-    case "start_explicit_retry": return source === "commit_unknown";
+    case "start_explicit_retry":
+      if (source === "failed") {
+        return effect.failure?.disposition !== "non_retriable";
+      }
+      return source === "commit_unknown";
     case "commit": return source === "started";
     case "assume_committed": return source === "commit_unknown";
     case "mark_commit_unknown": return source === "started";
-    case "mark_failed": return source === "started";
+    case "mark_failed": return source === "started" || source === "planned";
     case "start_compensation": return source === "committed" || source === "compensation_unknown";
     case "complete_compensation": return source === "compensation_started" || source === "compensation_unknown";
     case "mark_compensation_unknown": return source === "compensation_started" || source === "compensation_unknown";
@@ -177,7 +228,7 @@ export const transitionDurableSyncEffect = (
   if (
     effect.operationRevision !== expected.operationRevision ||
     effect.state !== expected.sourceState ||
-    !actionAllowsSource(action, expected.sourceState)
+    !actionAllowsSource(action, effect)
   ) {
     return undefined;
   }
@@ -189,6 +240,7 @@ export const transitionDurableSyncEffect = (
         state: "started",
         requestSnapshot: action.requestSnapshot ?? effect.requestSnapshot,
         detail: undefined,
+        failure: undefined,
       };
     case "commit":
     case "assume_committed":
@@ -200,16 +252,26 @@ export const transitionDurableSyncEffect = (
         target: action.target ? { ...effect.target, ...action.target } : effect.target,
         requestSnapshot: action.requestSnapshot ?? effect.requestSnapshot,
         detail: undefined,
+        failure: undefined,
       };
     case "mark_commit_unknown":
-      return { ...effect, state: "commit_unknown", detail: action.detail };
+      return { ...effect, state: "commit_unknown", detail: action.detail, failure: undefined };
     case "mark_failed":
-      return { ...effect, state: "failed", detail: action.detail };
+      return {
+        ...effect,
+        state: "failed",
+        detail: action.detail,
+        failure: {
+          disposition: action.disposition ?? "retryable",
+          category: action.category,
+          detail: action.detail,
+        },
+      };
     case "start_compensation":
-      return { ...effect, state: "compensation_started", detail: undefined };
+      return { ...effect, state: "compensation_started", detail: undefined, failure: undefined };
     case "complete_compensation":
-      return { ...effect, state: "compensated", detail: undefined };
+      return { ...effect, state: "compensated", detail: undefined, failure: undefined };
     case "mark_compensation_unknown":
-      return { ...effect, state: "compensation_unknown", detail: action.detail };
+      return { ...effect, state: "compensation_unknown", detail: action.detail, failure: undefined };
   }
 };
