@@ -125,8 +125,10 @@ export class SyncCoordinator {
     const isPrimaryCompensated = primary?.state === "compensated";
     const isParentCommitted = !isPrimaryCompensated && (
       operation.kind === "ticket_create"
-        ? (primary?.state === "committed" || (
-            primary === undefined &&  // legacy entry: effects記録なし
+        ? (primary?.state === "committed" ||
+           primary?.state === "compensation_unknown" ||
+           primary?.state === "compensation_started" ||
+           primary?.state === "commit_unknown" || (
             operation.createdRemoteId !== undefined &&
             operation.createdRemoteId > 0 &&
             operation.phase !== "queued" &&
@@ -143,6 +145,37 @@ export class SyncCoordinator {
         commentId: operation.commentId,
         pending: "remote_reconcile",
         message: "Secondary child effects remain unresolved",
+      };
+    }
+
+    // D-04 / F-02 / F-03: failed / commit_unknown な Effect を持つ Operation は normal sync から自動再送できない (retry = 0)
+    if (primary && (primary.state === "failed" || primary.state === "commit_unknown")) {
+      if (primary.state === "commit_unknown") {
+        return {
+          kind: "commit_unknown",
+          operationId: operation.operationId,
+          ticketId: operation.ticketId,
+          commentId: operation.commentId,
+          message: operation.errorMessage ?? vscode.l10n.t("A previous remote write outcome is unknown. Please resolve or reconcile before retrying."),
+        };
+      }
+      return {
+        kind: "failed_before_commit",
+        error: new Error(primary.failure?.detail ?? "Primary remote mutation has previously failed. Explicit recovery required."),
+        ticketId: operation.ticketId,
+        commentId: operation.commentId,
+      };
+    }
+
+    const failedSecondary = (operation.effects ?? []).find(
+      (e) => !isPrimaryEffectKind(e.kind) && e.state === "failed"
+    );
+    if (failedSecondary) {
+      return {
+        kind: "failed_before_commit",
+        error: new Error(failedSecondary.failure?.detail ?? `Secondary effect ${failedSecondary.effectId} has failed. Explicit recovery required.`),
+        ticketId: operation.ticketId,
+        commentId: operation.commentId,
       };
     }
 
@@ -340,16 +373,19 @@ export class SyncCoordinator {
       }
 
       // 6. record_remote_commit
-      const committedOp = await this.repository.transitionOperation(
-        getOpKey(currentOp),
-        {
-          kind: "record_remote_commit",
-          createdRemoteId: remoteResult.createdRemoteId,
-          projectId: remoteResult.projectId,
-          remoteUpdatedAt: remoteResult.remoteUpdatedAt,
-        },
-        scope,
-      );
+      let committedOp = this.repository.getOperation(getOpKey(currentOp), scope);
+      if (!committedOp || committedOp.phase !== "remote_committed") {
+        committedOp = await this.repository.transitionOperation(
+          getOpKey(currentOp),
+          {
+            kind: "record_remote_commit",
+            createdRemoteId: remoteResult.createdRemoteId,
+            projectId: remoteResult.projectId,
+            remoteUpdatedAt: remoteResult.remoteUpdatedAt,
+          },
+          scope,
+        );
+      }
       if (!committedOp) {
         return {
           kind: "remote_committed",
@@ -516,6 +552,7 @@ export class SyncCoordinator {
 
       const handler = this.handlers[freshOp.kind];
       const handlerCtx: OperationHandlerContext = { connectionScope: scope };
+      const depsWithRepo = { ...input.deps, repository: this.repository };
 
       if (input.resolution?.kind === "retry_remote_write") {
         // INV-N03, INV-N04: 未解決の Prerequisite Effect (attachment, image) があれば Primary retry を拒絶
@@ -563,7 +600,7 @@ export class SyncCoordinator {
           };
         }
 
-        const prepResult = await handler.prepare(freshOp, handlerCtx, input.deps);
+        const prepResult = await handler.prepare(freshOp, handlerCtx, depsWithRepo);
         if (!prepResult.ok) {
           return {
             kind: "commit_unknown",
@@ -574,58 +611,37 @@ export class SyncCoordinator {
           };
         }
 
-        const writeStartOp = await this.repository.transitionOperation(
-          input.key,
-          { kind: "start_explicit_retry_remote_write" },
-          scope,
-          { operationId: freshOp.operationId, sourcePhase: "commit_unknown", revision: freshOp.intentRevision ?? freshOp.revision },
-        );
-        if (!writeStartOp) {
+        if (primaryEffect?.state === "failed" && primaryEffect.failure?.disposition === "non_retriable") {
           return {
-            kind: "commit_unknown",
-            operationId: freshOp.operationId,
+            kind: "failed_before_commit",
             ticketId: freshOp.ticketId,
             commentId: freshOp.commentId,
-            message: "Failed to transition to remote_write_started due to conflict",
+            error: new Error("Cannot retry non-retriable failure."),
           };
         }
 
-        const remoteResult = await handler.executeRemoteWrite(writeStartOp, prepResult.prepared, handlerCtx, input.deps);
+        const remoteResult = await handler.executeRemoteWrite(freshOp, prepResult.prepared, handlerCtx, depsWithRepo);
         if (!remoteResult.ok) {
-          await this.repository.transitionOperation(
-            input.key,
-            { kind: "mark_commit_unknown", message: remoteResult.error.message },
-            scope,
-          );
+          if (remoteResult.commitUnknown) {
+            return {
+              kind: "commit_unknown",
+              operationId: freshOp.operationId,
+              ticketId: freshOp.ticketId,
+              commentId: freshOp.commentId,
+              message: remoteResult.error.message,
+            };
+          }
           return {
-            kind: "commit_unknown",
-            operationId: writeStartOp.operationId,
-            ticketId: writeStartOp.ticketId,
-            commentId: writeStartOp.commentId,
-            message: remoteResult.error.message,
+            kind: "failed_before_commit",
+            ticketId: freshOp.ticketId,
+            commentId: freshOp.commentId,
+            error: remoteResult.error,
           };
         }
 
-        const committedOp = await this.repository.transitionOperation(
-          input.key,
-          {
-            kind: "record_remote_commit",
-            createdRemoteId: remoteResult.createdRemoteId,
-            projectId: remoteResult.projectId,
-            remoteUpdatedAt: remoteResult.remoteUpdatedAt,
-          },
-          scope,
-          { operationId: op.operationId, sourcePhase: "remote_write_started", revision: writeStartOp.intentRevision ?? writeStartOp.revision },
-        );
-        if (!committedOp) {
-          return {
-            kind: "remote_committed",
-            ticketId: remoteResult.createdRemoteId ?? op.ticketId ?? 0,
-            pending: "remote_reconcile",
-          };
-        }
+        const committedOp = this.repository.getOperation(input.key, scope) ?? freshOp;
 
-        const reconciled = await handler.reconcileRemote(committedOp, handlerCtx, input.deps);
+        const reconciled = await handler.reconcileRemote(committedOp, handlerCtx, depsWithRepo);
         if (!reconciled.ok) {
           return {
             kind: "remote_committed",
@@ -635,7 +651,7 @@ export class SyncCoordinator {
           };
         }
 
-        const fin = await handler.finalizeLocal(committedOp, reconciled.canonical, handlerCtx, input.deps);
+        const fin = await handler.finalizeLocal(committedOp, reconciled.canonical, handlerCtx, depsWithRepo);
         if (fin.ok) {
           const compOp = await this.repository.completeOperation(input.key, scope, undefined, { canonical: reconciled.canonical, remoteUpdatedAt: committedOp.remoteUpdatedAt });
           if (compOp) {
@@ -747,7 +763,7 @@ export class SyncCoordinator {
             message: "Failed to record reconciled identity due to conflict",
           };
         }
-        const fin = await handler.finalizeLocal(transitioned, detail, handlerCtx, input.deps);
+        const fin = await handler.finalizeLocal(transitioned, detail, handlerCtx, depsWithRepo);
         if (fin.ok) {
           const compOp = await this.repository.completeOperation(input.key, scope, undefined, { canonical: detail, remoteUpdatedAt: transitioned.remoteUpdatedAt });
           if (compOp) {
@@ -778,8 +794,8 @@ export class SyncCoordinator {
             message: "Failed to transition to assume_remote_commit due to conflict",
           };
         }
-        const reconciled = await handler.reconcileRemote(assumed, handlerCtx, input.deps);
-        const fin = await handler.finalizeLocal(assumed, reconciled.ok ? reconciled.canonical : undefined, handlerCtx, input.deps);
+        const reconciled = await handler.reconcileRemote(assumed, handlerCtx, depsWithRepo);
+        const fin = await handler.finalizeLocal(assumed, reconciled.ok ? reconciled.canonical : undefined, handlerCtx, depsWithRepo);
         if (fin.ok) {
           const compOp = await this.repository.completeOperation(input.key, scope, undefined, { canonical: reconciled.ok ? reconciled.canonical : undefined, remoteUpdatedAt: assumed.remoteUpdatedAt });
           if (compOp) {
@@ -805,7 +821,7 @@ export class SyncCoordinator {
       }
 
       // reconcile_remote
-      const reconciled = await handler.reconcileRemote(freshOp, handlerCtx, input.deps);
+      const reconciled = await handler.reconcileRemote(freshOp, handlerCtx, depsWithRepo);
       if (reconciled.ok && reconciled.remoteId) {
         const transitioned = await this.repository.transitionOperation(
           input.key,
@@ -816,7 +832,7 @@ export class SyncCoordinator {
         if (!transitioned) {
           return { kind: "failed_before_commit", error: new Error("Failed to record reconciled identity") };
         }
-        const fin = await handler.finalizeLocal(transitioned, reconciled.canonical, handlerCtx, input.deps);
+        const fin = await handler.finalizeLocal(transitioned, reconciled.canonical, handlerCtx, depsWithRepo);
         if (fin.ok) {
           const compOp = await this.repository.completeOperation(input.key, scope, undefined, { canonical: reconciled.canonical, remoteUpdatedAt: transitioned.remoteUpdatedAt });
           if (compOp) {

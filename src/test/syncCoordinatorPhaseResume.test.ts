@@ -66,6 +66,49 @@ suite("RT-D: SyncCoordinator Phase Resume Matrix (syncCoordinatorPhaseResume.tes
       this.op = { ...this.op, effects };
       return this.op;
     }
+    public async transitionPrimaryRemoteWrite(
+      key: any,
+      transition: any,
+    ): Promise<UnifiedSyncOperation | undefined> {
+      if (!this.op) { return undefined; }
+      const primaryEffect = (this.op.effects ?? []).find(
+        (e) => e.effectId === "ticket-create" || e.effectId === "ticket-update" || e.effectId === "comment-create" || e.effectId === "comment-update",
+      );
+      const effects = [...(this.op.effects ?? [])];
+      const effectIndex = primaryEffect ? effects.findIndex((e) => e.effectId === primaryEffect.effectId) : -1;
+      let nextPhase = this.op.phase;
+      let updatedFields: Partial<UnifiedSyncOperation> = {};
+
+      if (transition.kind === "start" || transition.kind === "start_explicit_retry") {
+        nextPhase = "remote_write_started";
+        if (effectIndex !== -1) {
+          effects[effectIndex] = { ...effects[effectIndex], state: "started", requestSnapshot: transition.requestSnapshot ?? effects[effectIndex].requestSnapshot };
+        }
+      } else if (transition.kind === "commit") {
+        nextPhase = "remote_committed";
+        if (transition.remoteId !== undefined) {
+          updatedFields.createdRemoteId = transition.remoteId;
+        }
+        if (transition.projectId !== undefined) {
+          updatedFields.projectId = transition.projectId;
+        }
+        if (effectIndex !== -1) {
+          effects[effectIndex] = { ...effects[effectIndex], state: "committed", remoteId: transition.remoteId ?? effects[effectIndex].remoteId };
+        }
+      } else if (transition.kind === "commit_unknown") {
+        nextPhase = "commit_unknown";
+        if (effectIndex !== -1) {
+          effects[effectIndex] = { ...effects[effectIndex], state: "commit_unknown" };
+        }
+      } else if (transition.kind === "failed") {
+        nextPhase = "queued";
+        if (effectIndex !== -1) {
+          effects[effectIndex] = { ...effects[effectIndex], state: "failed", failure: transition.failure };
+        }
+      }
+      this.op = { ...this.op, ...updatedFields, phase: nextPhase, effects, version: (this.op.version ?? 1) + 1 };
+      return this.op;
+    }
     public async completeOperation(): Promise<boolean> {
       if (this.op) {this.op = { ...this.op, phase: "completed" };}
       return true;

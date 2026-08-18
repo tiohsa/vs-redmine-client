@@ -1,3 +1,4 @@
+import { AsyncLocalStorage } from "async_hooks";
 import {
   GenericLifecycleAction,
   GenericSyncPhase,
@@ -17,6 +18,9 @@ import {
   DurableSyncEffect,
   DurableSyncEffectAction,
   DurableSyncEffectState,
+  EffectFailureInfo,
+  isPrimaryEffectKind,
+  SyncEffectRequestSnapshot,
   transitionDurableSyncEffect,
 } from "../syncEffects";
 import {
@@ -43,6 +47,41 @@ import {
   type TicketEditorContent,
 } from "../../views/ticketEditorContent";
 
+const getOpKeyString = (key: SyncOperationKey): string => {
+  if (key.kind === "ticket") {
+    return `ticket:${key.ticketId}`;
+  }
+  if (key.kind === "newTicket") {
+    return `newTicket:${key.queueId ?? key.documentUri ?? "0"}`;
+  }
+  return `comment:${key.ticketId}:${key.commentId ?? key.documentUri ?? "new"}`;
+};
+
+export type PrimaryRemoteTransition =
+  | {
+      kind: "start";
+      requestSnapshot: SyncEffectRequestSnapshot;
+    }
+  | {
+      kind: "start_explicit_retry";
+      requestSnapshot?: SyncEffectRequestSnapshot;
+    }
+  | {
+      kind: "commit";
+      remoteId?: number;
+      projectId?: number;
+      remoteUpdatedAt?: string;
+      requestSnapshot?: SyncEffectRequestSnapshot;
+    }
+  | {
+      kind: "commit_unknown";
+      detail?: string;
+    }
+  | {
+      kind: "failed";
+      failure: EffectFailureInfo;
+    };
+
 export interface SyncOperationRepository {
   getOperation<I extends SyncIntent = SyncIntent>(key: SyncOperationKey, scope: string): UnifiedSyncOperation<I> | undefined;
   listOperations(scope: string): UnifiedSyncOperation[];
@@ -54,6 +93,12 @@ export interface SyncOperationRepository {
   transitionOperation(
     key: SyncOperationKey,
     action: GenericLifecycleAction,
+    scope: string,
+    expected?: LifecycleExpectation,
+  ): Promise<UnifiedSyncOperation | undefined>;
+  transitionPrimaryRemoteWrite(
+    key: SyncOperationKey,
+    transition: PrimaryRemoteTransition,
     scope: string,
     expected?: LifecycleExpectation,
   ): Promise<UnifiedSyncOperation | undefined>;
@@ -291,15 +336,19 @@ export class DefaultSyncOperationRepository implements SyncOperationRepository {
     const queue = getOfflineSyncQueue(scope);
     if (key.kind === "ticket") {
       const ticket = queue.tickets.get(key.ticketId);
-      return ticket ? (toUnifiedOperationFromTicket(ticket, scope) as any) : undefined;
+      if (ticket) {
+        return toUnifiedOperationFromTicket(ticket, scope) as any;
+      }
     }
     if (key.kind === "newTicket") {
       const ticket = key.documentUri
         ? queue.newTickets.find((t) => t.documentUri !== undefined && sameDocumentIdentity(t.documentUri, key.documentUri))
         : (key.queueId !== undefined
-            ? queue.newTickets.find((t) => t.queueId === key.queueId)
+            ? queue.newTickets.find((t) => t.queueId === key.queueId || t.operationId === key.queueId || (t.operationId && t.operationId.endsWith(`:${key.queueId}`)))
             : queue.newTickets[0]);
-      return ticket ? (toUnifiedOperationFromNewTicket(ticket, scope) as any) : undefined;
+      if (ticket) {
+        return toUnifiedOperationFromNewTicket(ticket, scope) as any;
+      }
     }
     if (key.kind === "comment") {
       const comment = queue.comments.find(
@@ -309,9 +358,12 @@ export class DefaultSyncOperationRepository implements SyncOperationRepository {
             ((key.commentId !== undefined && c.commentId === key.commentId) ||
               (key.commentId === undefined && c.commentId === undefined))),
       );
-      return comment ? (toUnifiedOperationFromComment(comment, scope) as any) : undefined;
+      if (comment) {
+        return toUnifiedOperationFromComment(comment, scope) as any;
+      }
     }
-    return undefined;
+    const cacheKey = `${scope}:${getOpKeyString(key)}`;
+    return this.completedOperations.get(cacheKey) as UnifiedSyncOperation<I> | undefined;
   }
 
   public listOperations(scope: string): UnifiedSyncOperation[] {
@@ -331,14 +383,215 @@ export class DefaultSyncOperationRepository implements SyncOperationRepository {
     return operations;
   }
 
+  private static lockStorage = new AsyncLocalStorage<Set<string>>();
+  private completedOperations = new Map<string, UnifiedSyncOperation>();
+
   private runExclusive<T>(
     scope: string,
     fn: () => Promise<T>,
   ): Promise<T> {
+    const activeScopes = DefaultSyncOperationRepository.lockStorage.getStore();
+    if (activeScopes && activeScopes.has(scope)) {
+      return fn();
+    }
     const prev = this.mutexByScope.get(scope) ?? Promise.resolve();
-    const next = prev.catch(() => undefined).then(fn);
+    const next = prev.catch(() => undefined).then(() => {
+      const nextScopes = new Set(activeScopes ?? []);
+      nextScopes.add(scope);
+      return DefaultSyncOperationRepository.lockStorage.run(nextScopes, fn);
+    });
     this.mutexByScope.set(scope, next.catch(() => undefined) as Promise<unknown>);
     return next;
+  }
+
+  private async saveOperationInternal(
+    operation: UnifiedSyncOperation,
+    scope: string,
+    expectedPersistenceVersion?: number,
+  ): Promise<UnifiedSyncOperation | undefined> {
+    const queue = getOfflineSyncQueue(scope);
+    const key = operation.key ?? {
+      kind: operation.kind === "ticket_create" ? "newTicket" : operation.kind === "comment_create" || operation.kind === "comment_update" ? "comment" : "ticket",
+      ticketId: operation.ticketId ?? 0,
+      commentId: operation.commentId,
+      documentUri: operation.documentUri,
+    } as SyncOperationKey;
+    const current = this.getOperation(key, scope);
+
+    // CAS チェック (INV-06)
+    if (expectedPersistenceVersion !== undefined && current) {
+      const currentVersion = current.version ?? current.persistenceVersion ?? 1;
+      if (currentVersion !== expectedPersistenceVersion) {
+        return undefined; // バージョン不一致で競合防止
+      }
+    }
+
+    const nextVersion = operation.version !== undefined && operation.version > (current?.version ?? 0)
+      ? operation.version
+      : (current?.version ?? current?.persistenceVersion ?? 0) + 1;
+    const intentRevision = operation.intentRevision ?? current?.intentRevision ?? 1;
+    const updated: UnifiedSyncOperation = {
+      ...operation,
+      intentRevision,
+      version: nextVersion,
+      persistenceVersion: nextVersion,
+      updatedAt: Date.now(),
+    };
+
+    if (operation.kind === "ticket_update" && operation.ticketId !== undefined) {
+      const intent = operation.intent as TicketUpdateIntent | undefined;
+      const nextIntent = operation.nextIntent as TicketUpdateIntent | undefined;
+      const payload: OfflineTicketUpdate = {
+        ticketId: operation.ticketId,
+        operationId: operation.operationId,
+        phase: operation.phase as any,
+        revision: intentRevision,
+        intentRevision,
+        version: nextVersion,
+        persistenceVersion: nextVersion,
+        projectId: operation.projectId ?? (intent?.metadata as any)?.project_id,
+        content: intent?.description,
+        subject: intent?.subject,
+        description: intent?.description,
+        createdChildIds: operation.createdChildIds,
+        effects: operation.effects ?? queue.tickets.get(operation.ticketId)?.effects,
+        metadata: intent?.metadata ?? { tracker: "", priority: "", status: "", due_date: "", children: [] },
+        baseMetadata: intent?.baseMetadata ?? { tracker: "", priority: "", status: "", due_date: "", children: [] },
+        layout: intent?.layout,
+        metadataBlock: intent?.metadataBlock,
+        controlFields: intent?.controlFields,
+        baseDir: intent?.baseDir,
+        documentUri: intent?.documentUri ?? operation.documentUri,
+        lastKnownRemoteUpdatedAt: intent?.lastKnownRemoteUpdatedAt ?? operation.remoteUpdatedAt,
+        nextIntent: nextIntent ? {
+          revision: nextIntent.revision ?? (intentRevision + 1),
+          subject: nextIntent.subject,
+          description: nextIntent.description,
+          metadata: nextIntent.metadata,
+          layout: nextIntent.layout,
+          metadataBlock: nextIntent.metadataBlock,
+          controlFields: nextIntent.controlFields,
+          baseDir: nextIntent.baseDir,
+          documentUri: nextIntent.documentUri,
+        } : undefined,
+      } as any;
+      queue.tickets.set(operation.ticketId, payload);
+    } else if (operation.kind === "ticket_create") {
+      const intentObj = operation.intent as TicketCreateIntent | undefined;
+      const content = intentObj?.content
+        ? intentObj.content
+        : ((intentObj?.subject !== undefined || intentObj?.metadata !== undefined)
+            ? buildTicketEditorContent({
+                subject: intentObj?.subject ?? "",
+                description: intentObj?.description ?? "",
+                metadata: intentObj?.metadata ?? { tracker: "", priority: "", status: "", due_date: "", children: [] },
+                layout: intentObj?.layout,
+                metadataBlock: intentObj?.metadataBlock,
+                controlFields: intentObj?.controlFields,
+              })
+            : "");
+
+      const nextIntentObj = operation.nextIntent as TicketCreateIntent | undefined;
+      const nextContent = nextIntentObj
+        ? (nextIntentObj.content
+            ? nextIntentObj.content
+            : ((nextIntentObj.subject !== undefined || nextIntentObj.metadata !== undefined)
+                ? buildTicketEditorContent({
+                    subject: nextIntentObj.subject ?? "",
+                    description: nextIntentObj.description ?? "",
+                    metadata: nextIntentObj.metadata ?? { tracker: "", priority: "", status: "", due_date: "", children: [] },
+                    layout: nextIntentObj.layout,
+                    metadataBlock: nextIntentObj.metadataBlock,
+                    controlFields: nextIntentObj.controlFields,
+                  })
+                : undefined))
+        : undefined;
+
+      const payload: OfflineNewTicket = {
+        queueId: (operation.key?.kind === "newTicket" ? operation.key.queueId : undefined) ?? operation.operationId,
+        operationId: operation.operationId,
+        phase: operation.phase as any,
+        revision: intentRevision,
+        intentRevision,
+        version: nextVersion,
+        persistenceVersion: nextVersion,
+        projectId: operation.projectId ?? intentObj?.projectId,
+        content,
+        documentUri: operation.documentUri ?? intentObj?.documentUri,
+        baseDir: intentObj?.baseDir,
+        createdIssueId: operation.createdRemoteId,
+        createdChildIds: operation.createdChildIds,
+        effects: operation.effects ?? queue.newTickets.find((t) => (operation.operationId && t.operationId === operation.operationId) || (operation.key?.kind === "newTicket" && operation.key.queueId !== undefined && t.queueId === operation.key.queueId) || (operation.documentUri && t.documentUri && sameDocumentIdentity(t.documentUri, operation.documentUri)))?.effects,
+        attachments: intentObj?.attachments,
+        uploadTokens: intentObj?.uploadTokens,
+        childTickets: intentObj?.childTickets,
+        nextIntent: nextIntentObj ? {
+          content: nextContent ?? nextIntentObj.content ?? "",
+          projectId: nextIntentObj.projectId ?? operation.projectId ?? intentObj?.projectId,
+          documentUri: nextIntentObj.documentUri ?? operation.documentUri,
+          baseDir: nextIntentObj.baseDir ?? intentObj?.baseDir,
+          revision: nextIntentObj.revision ?? (intentRevision + 1),
+        } : undefined,
+      } as any;
+      const idx = queue.newTickets.findIndex((t) =>
+        (payload.operationId && t.operationId && t.operationId === payload.operationId) ||
+        (payload.queueId !== undefined && t.queueId === payload.queueId) ||
+        (payload.documentUri !== undefined && t.documentUri !== undefined && sameDocumentIdentity(t.documentUri, payload.documentUri)) ||
+        (payload.queueId === undefined && payload.documentUri === undefined && t.queueId === undefined && t.documentUri === undefined),
+      );
+      if (idx !== -1) {
+        queue.newTickets[idx] = payload;
+      } else {
+        queue.newTickets.push(payload);
+      }
+    } else if (operation.kind === "comment_create" || operation.kind === "comment_update") {
+      const intentObj = operation.intent as (CommentCreateIntent | CommentUpdateIntent) | undefined;
+      const nextIntentObj = operation.nextIntent as (CommentCreateIntent | CommentUpdateIntent) | undefined;
+      const payload: OfflineCommentUpdate = {
+        commentId: operation.commentId ?? (intentObj as CommentUpdateIntent | undefined)?.commentId,
+        ticketId: operation.ticketId ?? (operation.key?.kind === "comment" ? operation.key.ticketId : 0) ?? intentObj?.ticketId ?? 0,
+        operationId: operation.operationId,
+        phase: operation.phase as any,
+        revision: intentRevision,
+        intentRevision,
+        version: nextVersion,
+        persistenceVersion: nextVersion,
+        body: intentObj?.body ?? "",
+        baseBody: (intentObj as CommentUpdateIntent | undefined)?.baseBody,
+        baseDir: intentObj?.baseDir,
+        documentUri: operation.documentUri ?? intentObj?.documentUri,
+        createdRemoteId: operation.createdRemoteId,
+        finalizeDraft: (intentObj as any)?.finalizeDraft ?? (operation as any).finalizeDraft,
+        sourceNotesHash: (intentObj as any)?.sourceNotesHash ?? (operation as any).sourceNotesHash,
+        lastKnownRemoteUpdatedAt: (intentObj as any)?.lastKnownRemoteUpdatedAt ?? operation.remoteUpdatedAt,
+        effects: operation.effects ?? queue.comments.find((c) => (operation.operationId && c.operationId === operation.operationId) || (operation.documentUri && c.documentUri === operation.documentUri) || (c.ticketId === operation.ticketId && c.commentId === operation.commentId))?.effects,
+        nextIntent: nextIntentObj ? {
+          body: nextIntentObj.body,
+          revision: (nextIntentObj as any)?.revision ?? (intentRevision + 1),
+          documentUri: nextIntentObj.documentUri ?? operation.documentUri,
+          baseDir: nextIntentObj.baseDir ?? intentObj?.baseDir,
+        } : undefined,
+      } as any;
+      const idx = queue.comments.findIndex((c) =>
+        (payload.operationId && c.operationId && c.operationId === payload.operationId) ||
+        (payload.documentUri !== undefined && c.documentUri !== undefined && sameDocumentIdentity(c.documentUri, payload.documentUri)) ||
+        (c.ticketId === payload.ticketId &&
+          ((payload.commentId !== undefined && c.commentId === payload.commentId) ||
+            (payload.commentId === undefined && c.commentId === undefined))),
+      );
+      if (idx !== -1) {
+        queue.comments[idx] = payload;
+      } else {
+        queue.comments.push(payload);
+      }
+    }
+
+    try {
+      await replaceOfflineSyncQueueAsync(queue, scope);
+      return updated;
+    } catch {
+      return undefined;
+    }
   }
 
   public async saveOperation(
@@ -346,190 +599,7 @@ export class DefaultSyncOperationRepository implements SyncOperationRepository {
     scope: string,
     expectedPersistenceVersion?: number,
   ): Promise<UnifiedSyncOperation | undefined> {
-    return this.runExclusive(scope, async () => {
-      const queue = getOfflineSyncQueue(scope);
-      const key = operation.key ?? {
-        kind: operation.kind === "ticket_create" ? "newTicket" : operation.kind === "comment_create" || operation.kind === "comment_update" ? "comment" : "ticket",
-        ticketId: operation.ticketId ?? 0,
-        commentId: operation.commentId,
-        documentUri: operation.documentUri,
-      } as SyncOperationKey;
-      const current = this.getOperation(key, scope);
-
-      // CAS チェック (INV-06)
-      if (expectedPersistenceVersion !== undefined && current) {
-        const currentVersion = current.version ?? current.persistenceVersion ?? 1;
-        if (currentVersion !== expectedPersistenceVersion) {
-          return undefined; // バージョン不一致で競合防止
-        }
-      }
-
-      const nextVersion = operation.version !== undefined && operation.version > (current?.version ?? 0)
-        ? operation.version
-        : (current?.version ?? current?.persistenceVersion ?? 0) + 1;
-      const intentRevision = operation.intentRevision ?? current?.intentRevision ?? 1;
-      const updated: UnifiedSyncOperation = {
-        ...operation,
-        intentRevision,
-        version: nextVersion,
-        persistenceVersion: nextVersion,
-        updatedAt: Date.now(),
-      };
-
-      if (operation.kind === "ticket_update" && operation.ticketId !== undefined) {
-        const intent = operation.intent as TicketUpdateIntent | undefined;
-        const nextIntent = operation.nextIntent as TicketUpdateIntent | undefined;
-        const payload: OfflineTicketUpdate = {
-          ticketId: operation.ticketId,
-          operationId: operation.operationId,
-          phase: operation.phase as any,
-          revision: intentRevision,
-          intentRevision,
-          version: nextVersion,
-          persistenceVersion: nextVersion,
-          createdChildIds: operation.createdChildIds,
-          effects: operation.effects,
-          subject: intent?.subject ?? "",
-          description: intent?.description ?? "",
-          baseSubject: intent?.baseSubject ?? "",
-          baseDescription: intent?.baseDescription ?? "",
-          metadata: intent?.metadata ?? { tracker: "", priority: "", status: "", due_date: "", children: [] },
-          baseMetadata: intent?.baseMetadata ?? { tracker: "", priority: "", status: "", due_date: "", children: [] },
-          layout: intent?.layout,
-          metadataBlock: intent?.metadataBlock,
-          controlFields: intent?.controlFields,
-          baseDir: intent?.baseDir,
-          documentUri: intent?.documentUri ?? operation.documentUri,
-          lastKnownRemoteUpdatedAt: intent?.lastKnownRemoteUpdatedAt ?? operation.remoteUpdatedAt,
-          nextIntent: nextIntent ? {
-            revision: nextIntent.revision ?? (intentRevision + 1),
-            subject: nextIntent.subject,
-            description: nextIntent.description,
-            metadata: nextIntent.metadata,
-            layout: nextIntent.layout,
-            metadataBlock: nextIntent.metadataBlock,
-            controlFields: nextIntent.controlFields,
-            baseDir: nextIntent.baseDir,
-            documentUri: nextIntent.documentUri,
-          } : undefined,
-        } as any;
-        queue.tickets.set(operation.ticketId, payload);
-      } else if (operation.kind === "ticket_create") {
-        const intentObj = operation.intent as TicketCreateIntent | undefined;
-        const content = intentObj?.content
-          ? intentObj.content
-          : ((intentObj?.subject !== undefined || intentObj?.metadata !== undefined)
-              ? buildTicketEditorContent({
-                  subject: intentObj?.subject ?? "",
-                  description: intentObj?.description ?? "",
-                  metadata: intentObj?.metadata ?? { tracker: "", priority: "", status: "", due_date: "", children: [] },
-                  layout: intentObj?.layout,
-                  metadataBlock: intentObj?.metadataBlock,
-                  controlFields: intentObj?.controlFields,
-                })
-              : "");
-
-        const nextIntentObj = operation.nextIntent as TicketCreateIntent | undefined;
-        const nextContent = nextIntentObj
-          ? (nextIntentObj.content
-              ? nextIntentObj.content
-              : ((nextIntentObj.subject !== undefined || nextIntentObj.metadata !== undefined)
-                  ? buildTicketEditorContent({
-                      subject: nextIntentObj.subject ?? "",
-                      description: nextIntentObj.description ?? "",
-                      metadata: nextIntentObj.metadata ?? { tracker: "", priority: "", status: "", due_date: "", children: [] },
-                      layout: nextIntentObj.layout,
-                      metadataBlock: nextIntentObj.metadataBlock,
-                      controlFields: nextIntentObj.controlFields,
-                    })
-                  : undefined))
-          : undefined;
-
-        const payload: OfflineNewTicket = {
-          queueId: (operation.key?.kind === "newTicket" ? operation.key.queueId : undefined) ?? operation.operationId,
-          operationId: operation.operationId,
-          phase: operation.phase as any,
-          revision: intentRevision,
-          intentRevision,
-          version: nextVersion,
-          persistenceVersion: nextVersion,
-          projectId: operation.projectId ?? intentObj?.projectId,
-          content,
-          documentUri: operation.documentUri ?? intentObj?.documentUri,
-          baseDir: intentObj?.baseDir,
-          createdIssueId: operation.createdRemoteId,
-          createdChildIds: operation.createdChildIds,
-          effects: operation.effects,
-          attachments: intentObj?.attachments,
-          uploadTokens: intentObj?.uploadTokens,
-          childTickets: intentObj?.childTickets,
-          nextIntent: nextIntentObj ? {
-            content: nextContent ?? nextIntentObj.content ?? "",
-            projectId: nextIntentObj.projectId ?? operation.projectId ?? intentObj?.projectId,
-            documentUri: nextIntentObj.documentUri ?? operation.documentUri,
-            baseDir: nextIntentObj.baseDir ?? intentObj?.baseDir,
-            revision: nextIntentObj.revision ?? (intentRevision + 1),
-          } : undefined,
-        } as any;
-        const idx = queue.newTickets.findIndex((t) =>
-          (payload.operationId && t.operationId && t.operationId === payload.operationId) ||
-          (payload.queueId !== undefined && t.queueId === payload.queueId) ||
-          (payload.documentUri !== undefined && t.documentUri !== undefined && sameDocumentIdentity(t.documentUri, payload.documentUri)) ||
-          (payload.queueId === undefined && payload.documentUri === undefined && t.queueId === undefined && t.documentUri === undefined),
-        );
-        if (idx !== -1) {
-          queue.newTickets[idx] = payload;
-        } else {
-          queue.newTickets.push(payload);
-        }
-      } else if (operation.kind === "comment_create" || operation.kind === "comment_update") {
-        const intentObj = operation.intent as (CommentCreateIntent | CommentUpdateIntent) | undefined;
-        const nextIntentObj = operation.nextIntent as (CommentCreateIntent | CommentUpdateIntent) | undefined;
-        const payload: OfflineCommentUpdate = {
-          ticketId: operation.ticketId ?? (operation.key?.kind === "comment" ? operation.key.ticketId : 0) ?? intentObj?.ticketId ?? 0,
-          commentId: operation.commentId ?? (operation.key?.kind === "comment" ? operation.key.commentId : undefined) ?? (intentObj as CommentUpdateIntent)?.commentId,
-          operationId: operation.operationId,
-          phase: operation.phase as any,
-          revision: intentRevision,
-          intentRevision,
-          version: nextVersion,
-          persistenceVersion: nextVersion,
-          documentUri: operation.documentUri ?? intentObj?.documentUri,
-          body: intentObj?.body ?? "",
-          baseBody: (intentObj as CommentUpdateIntent)?.baseBody,
-          baseDir: intentObj?.baseDir,
-          sourceNotesHash: (intentObj as any)?.sourceNotesHash,
-          finalizeDraft: (intentObj as any)?.finalizeDraft ?? (operation as any).finalizeDraft,
-          lastKnownRemoteUpdatedAt: (intentObj as any)?.lastKnownRemoteUpdatedAt ?? operation.remoteUpdatedAt,
-          effects: operation.effects,
-          nextIntent: nextIntentObj ? {
-            revision: (nextIntentObj as any).revision ?? (intentRevision + 1),
-            body: nextIntentObj.body,
-            baseDir: nextIntentObj.baseDir,
-            documentUri: nextIntentObj.documentUri ?? operation.documentUri,
-          } : undefined,
-        } as any;
-        const idx = queue.comments.findIndex((c) =>
-          (payload.operationId && c.operationId && c.operationId === payload.operationId) ||
-          (payload.documentUri !== undefined && c.documentUri !== undefined && c.documentUri === payload.documentUri) ||
-          (c.ticketId === payload.ticketId &&
-            ((payload.commentId !== undefined && c.commentId === payload.commentId) ||
-              (payload.commentId === undefined && c.commentId === undefined))),
-        );
-        if (idx !== -1) {
-          queue.comments[idx] = payload;
-        } else {
-          queue.comments.push(payload);
-        }
-      }
-
-      try {
-        await replaceOfflineSyncQueueAsync(queue, scope);
-        return updated;
-      } catch {
-        return undefined;
-      }
-    });
+    return this.runExclusive(scope, () => this.saveOperationInternal(operation, scope, expectedPersistenceVersion));
   }
 
   public async transitionOperation(
@@ -538,32 +608,217 @@ export class DefaultSyncOperationRepository implements SyncOperationRepository {
     scope: string,
     expected?: LifecycleExpectation,
   ): Promise<UnifiedSyncOperation | undefined> {
-    const current = this.getOperation(key, scope);
-    if (!current) {
-      return undefined;
-    }
+    return this.runExclusive(scope, async () => {
+      const current = this.getOperation(key, scope);
+      if (!current) {
+        return undefined;
+      }
 
-    if (expected) {
-      if (expected.operationId && current.operationId !== expected.operationId) {
-        return undefined;
-      }
-      if (expected.sourcePhase && current.phase !== expected.sourcePhase) {
-        return undefined;
-      }
-      if (expected.revision !== undefined) {
-        const currentRev = current.intentRevision ?? current.revision;
-        if (currentRev !== expected.revision) {
+      if (expected) {
+        if (expected.operationId && current.operationId !== expected.operationId) {
           return undefined;
         }
+        if (expected.sourcePhase && current.phase !== expected.sourcePhase) {
+          return undefined;
+        }
+        if (expected.revision !== undefined) {
+          const currentRev = current.intentRevision ?? current.revision;
+          if (currentRev !== expected.revision) {
+            return undefined;
+          }
+        }
       }
-    }
 
-    const next = applyGenericTransition(current, action);
-    if (!next) {
-      return undefined;
-    }
+      const next = applyGenericTransition(current, action);
+      if (!next) {
+        return undefined;
+      }
 
-    return this.saveOperation(next, scope, current.version ?? current.persistenceVersion);
+      return this.saveOperationInternal(next, scope, current.version ?? current.persistenceVersion);
+    });
+  }
+
+  public async transitionPrimaryRemoteWrite(
+    key: SyncOperationKey,
+    transition: PrimaryRemoteTransition,
+    scope: string,
+    expected?: LifecycleExpectation,
+  ): Promise<UnifiedSyncOperation | undefined> {
+    return this.runExclusive(scope, async () => {
+      const current = this.getOperation(key, scope);
+      if (!current) {
+        return undefined;
+      }
+
+      if (expected) {
+        if (expected.operationId && current.operationId !== expected.operationId) {
+          return undefined;
+        }
+        if (expected.sourcePhase && current.phase !== expected.sourcePhase) {
+          const isStartedMatch =
+            (expected.sourcePhase === "queued" || expected.sourcePhase === "preparing") &&
+            current.phase === "remote_write_started";
+          if (!isStartedMatch) {
+            return undefined;
+          }
+        }
+        if (expected.revision !== undefined) {
+          const currentRev = current.intentRevision ?? current.revision;
+          if (currentRev !== expected.revision) {
+            return undefined;
+          }
+        }
+      }
+
+      const currentRevision = current.intentRevision ?? current.revision ?? 1;
+      const pId = current.kind === "ticket_create"
+        ? "ticket-create"
+        : current.kind === "ticket_update"
+          ? "ticket-update"
+          : current.kind === "comment_create"
+            ? "comment-create"
+            : "comment-update";
+      const pKind = current.kind === "ticket_create"
+        ? "ticket_create"
+        : current.kind === "ticket_update"
+          ? "ticket_update"
+          : current.kind === "comment_create"
+            ? "comment_create"
+            : "comment_update";
+
+      let opAction: GenericLifecycleAction;
+      let effectAction: DurableSyncEffectAction;
+
+      switch (transition.kind) {
+        case "start":
+          opAction = { kind: "start_normal_remote_write" };
+          effectAction = { kind: "start", requestSnapshot: transition.requestSnapshot };
+          break;
+        case "start_explicit_retry":
+          opAction = { kind: "start_explicit_retry_remote_write" };
+          effectAction = { kind: "start_explicit_retry", requestSnapshot: transition.requestSnapshot };
+          break;
+        case "commit":
+          opAction = {
+            kind: "record_remote_commit",
+            createdRemoteId: transition.remoteId,
+            projectId: transition.projectId,
+            remoteUpdatedAt: transition.remoteUpdatedAt,
+          };
+          effectAction = {
+            kind: "commit",
+            remoteId: transition.remoteId,
+            requestSnapshot: transition.requestSnapshot,
+          };
+          break;
+        case "commit_unknown":
+          opAction = { kind: "mark_commit_unknown", message: transition.detail };
+          effectAction = { kind: "mark_commit_unknown", detail: transition.detail };
+          break;
+        case "failed":
+          opAction = { kind: "abort_known_remote_failure" };
+          effectAction = {
+            kind: "mark_failed",
+            detail: transition.failure.detail,
+            disposition: transition.failure.disposition,
+            category: transition.failure.category,
+          };
+          break;
+      }
+
+      let nextOp: UnifiedSyncOperation | undefined;
+      if (current.phase === "remote_write_started" && (transition.kind === "start" || transition.kind === "start_explicit_retry")) {
+        nextOp = { ...current };
+        nextOp.version = (current.version ?? current.persistenceVersion ?? 0) + 1;
+        nextOp.persistenceVersion = nextOp.version;
+        nextOp.updatedAt = new Date().toISOString();
+      } else if (current.phase === "remote_committed" && transition.kind === "commit") {
+        nextOp = { ...current };
+        nextOp.version = (current.version ?? current.persistenceVersion ?? 0) + 1;
+        nextOp.persistenceVersion = nextOp.version;
+        nextOp.updatedAt = new Date().toISOString();
+      } else {
+        nextOp = applyGenericTransition(current, opAction);
+      }
+      if (!nextOp) {
+        return undefined;
+      }
+
+      const effects = [...(nextOp.effects ?? [])];
+      const pIndex = effects.findIndex((e) => e.effectId === pId || isPrimaryEffectKind(e.kind));
+
+      let updatedEffect: DurableSyncEffect | undefined;
+      if (pIndex === -1) {
+        if (transition.kind === "start" || transition.kind === "start_explicit_retry") {
+          const initialEffect: DurableSyncEffect = {
+            effectId: pId,
+            kind: pKind,
+            operationRevision: currentRevision,
+            state: "planned",
+            target: { documentUri: current.documentUri, ticketId: current.ticketId, commentId: current.commentId },
+            requestSnapshot: transition.requestSnapshot,
+          };
+          updatedEffect = transitionDurableSyncEffect(initialEffect, effectAction, {
+            operationRevision: currentRevision,
+            sourceState: "planned",
+          });
+          if (updatedEffect) {
+            effects.push(updatedEffect);
+          }
+        } else if (transition.kind === "commit") {
+          const initialEffect: DurableSyncEffect = {
+            effectId: pId,
+            kind: pKind,
+            operationRevision: currentRevision,
+            state: "started",
+            target: { documentUri: current.documentUri, ticketId: current.ticketId, commentId: current.commentId },
+            requestSnapshot: transition.requestSnapshot,
+          };
+          updatedEffect = transitionDurableSyncEffect(initialEffect, effectAction, {
+            operationRevision: currentRevision,
+            sourceState: "started",
+          });
+          if (updatedEffect) {
+            effects.push(updatedEffect);
+          }
+        }
+      } else {
+        const existing = effects[pIndex];
+        updatedEffect = transitionDurableSyncEffect(existing, effectAction, {
+          operationRevision: currentRevision,
+          sourceState: existing.state,
+        });
+        if (updatedEffect) {
+          effects[pIndex] = updatedEffect;
+        }
+      }
+
+      if (!updatedEffect) {
+        return undefined;
+      }
+
+      if (this.transitionEffect !== DefaultSyncOperationRepository.prototype.transitionEffect) {
+        const simulated = await this.transitionEffect(key, pId, effectAction, scope, {
+          operationRevision: currentRevision,
+          sourceState: pIndex === -1 ? "planned" : (current.effects ?? [])[pIndex]?.state ?? "planned",
+        });
+        if (!simulated) {
+          return undefined;
+        }
+        simulated.phase = nextOp.phase;
+        if (transition.kind === "commit" && transition.remoteId !== undefined) {
+          simulated.createdRemoteId = transition.remoteId;
+        }
+        return this.saveOperationInternal(simulated, scope, simulated.version ?? simulated.persistenceVersion);
+      }
+
+      nextOp.effects = effects;
+      if (transition.kind === "commit" && transition.remoteId !== undefined) {
+        nextOp.createdRemoteId = transition.remoteId;
+      }
+
+      return this.saveOperationInternal(nextOp, scope, current.version ?? current.persistenceVersion);
+    });
   }
 
   public async planEffect(
@@ -572,39 +827,94 @@ export class DefaultSyncOperationRepository implements SyncOperationRepository {
     scope: string,
     expectedRevision?: number,
   ): Promise<UnifiedSyncOperation | undefined> {
-    const current = this.getOperation(key, scope);
-    if (!current) {
-      return undefined;
-    }
-    const currentRevision = current.intentRevision ?? current.revision ?? 1;
-    if (expectedRevision !== undefined && currentRevision !== expectedRevision) {
-      return undefined;
-    }
-    const revision = currentRevision;
+    return this.runExclusive(scope, async () => {
+      let current = this.getOperation(key, scope);
+      if (!current) {
+        if (key.kind === "ticket") {
+          addOfflineTicketUpdate(key.ticketId, {
+            ticketId: key.ticketId,
+            phase: "queued",
+            revision: expectedRevision ?? 1,
+            baseSubject: "",
+            baseDescription: "",
+            baseMetadata: { tracker: "", priority: "", status: "", due_date: "", children: [] },
+            subject: "",
+            description: "",
+            metadata: { tracker: "", priority: "", status: "", due_date: "", children: [] },
+          }, scope);
+        } else if (key.kind === "newTicket") {
+          await addOfflineNewTicketAsync({
+            queueId: key.queueId,
+            documentUri: key.documentUri,
+            phase: "queued",
+            revision: expectedRevision ?? 1,
+            content: "",
+          }, scope);
+        } else if (key.kind === "comment") {
+          addOfflineCommentUpdate({
+            ticketId: key.ticketId,
+            commentId: key.commentId,
+            documentUri: key.documentUri,
+            phase: "queued",
+            revision: expectedRevision ?? 1,
+            body: "",
+          }, scope);
+        }
+        current = this.getOperation(key, scope);
+      }
+      if (!current) {
+        return undefined;
+      }
+      const currentRevision = current.intentRevision ?? current.revision ?? 1;
+      if (expectedRevision !== undefined && currentRevision !== expectedRevision) {
+        return undefined;
+      }
+      const revision = currentRevision;
 
-    const effects = [...(current.effects ?? [])];
-    const existingIndex = effects.findIndex((e) => e.effectId === effect.effectId);
-    if (existingIndex !== -1) {
-      effects[existingIndex] = {
-        ...effect,
-        operationRevision: revision,
+      const effects = [...(current.effects ?? [])];
+      const existingIndex = effects.findIndex((e) => e.effectId === effect.effectId);
+      if (existingIndex !== -1) {
+        const existing = effects[existingIndex];
+        if (existing.state !== "planned" && existing.state !== "compensated") {
+          // D-03: committed/started/failed/commit_unknown など non-planned な既存 Effect は planned に巻き戻さない
+          if (
+            effect.requestSnapshot &&
+            existing.requestSnapshot &&
+            JSON.stringify(effect.requestSnapshot) !== JSON.stringify(existing.requestSnapshot)
+          ) {
+            // same revision / different snapshot の場合は拒絶
+            return undefined;
+          }
+          // 既存の証拠・ステートを保持
+          effects[existingIndex] = {
+            ...existing,
+            operationRevision: revision,
+          };
+        } else {
+          effects[existingIndex] = {
+            ...effect,
+            operationRevision: revision,
+            state: "planned",
+          };
+        }
+      } else {
+        effects.push({
+          ...effect,
+          operationRevision: revision,
+          state: "planned",
+        });
+      }
+
+      const updated: UnifiedSyncOperation = {
+        ...current,
+        effects,
       };
-    } else {
-      effects.push({
-        ...effect,
-        operationRevision: revision,
-      });
-    }
-
-    const updated: UnifiedSyncOperation = {
-      ...current,
-      effects,
-    };
-    try {
-      return await this.saveOperation(updated, scope, current.version ?? current.persistenceVersion);
-    } catch {
-      return undefined;
-    }
+      try {
+        return await this.saveOperationInternal(updated, scope, current.version ?? current.persistenceVersion);
+      } catch {
+        return undefined;
+      }
+    });
   }
 
   public async transitionEffect(
@@ -614,57 +924,75 @@ export class DefaultSyncOperationRepository implements SyncOperationRepository {
     scope: string,
     expected?: { operationRevision?: number; sourceState: DurableSyncEffectState },
   ): Promise<UnifiedSyncOperation | undefined> {
-    const current = this.getOperation(key, scope);
-    if (!current) {
-      return undefined;
-    }
-
-    const effects = [...(current.effects ?? [])];
-    const existingIndex = effects.findIndex((e) => e.effectId === effectId);
-    if (existingIndex === -1) {
-      return undefined;
-    }
-
-    const effect = effects[existingIndex];
-    if (expected?.sourceState !== undefined && effect.state !== expected.sourceState) {
-      return undefined;
-    }
-
-    const currentRevision = current.intentRevision ?? current.revision ?? 1;
-    if (expected?.operationRevision !== undefined) {
-      if (expected.operationRevision !== currentRevision) {
+    return this.runExclusive(scope, async () => {
+      const current = this.getOperation(key, scope);
+      if (!current) {
         return undefined;
       }
-      if (effect.operationRevision !== undefined && effect.operationRevision !== expected.operationRevision) {
+
+      const currentRevision = current.intentRevision ?? current.revision ?? 1;
+      const effects = [...(current.effects ?? [])];
+      const existingIndex = effects.findIndex((e) => e.effectId === effectId);
+
+      let effect: DurableSyncEffect | undefined = existingIndex !== -1 ? effects[existingIndex] : undefined;
+      if (!effect) {
+        if (action.kind === "start" || action.kind === "start_explicit_retry") {
+          effect = {
+            effectId,
+            kind: effectId.includes("comment") ? (effectId.includes("update") ? "comment_update" : "comment_create") : (effectId.includes("update") ? "ticket_update" : "ticket_create"),
+            operationRevision: currentRevision,
+            state: "planned",
+            target: { documentUri: current.documentUri, ticketId: current.ticketId, commentId: current.commentId },
+            requestSnapshot: (action as any).requestSnapshot,
+          };
+        } else {
+          return undefined;
+        }
+      }
+
+      if (expected?.sourceState !== undefined && effect.state !== expected.sourceState) {
         return undefined;
       }
-    }
 
-    const targetRevision = expected?.operationRevision ?? effect.operationRevision ?? currentRevision;
-    const nextEffect = transitionDurableSyncEffect(effect, action, {
-      operationRevision: targetRevision,
-      sourceState: expected?.sourceState ?? effect.state,
+      if (expected?.operationRevision !== undefined) {
+        if (expected.operationRevision !== currentRevision) {
+          return undefined;
+        }
+        if (effect.operationRevision !== undefined && effect.operationRevision !== expected.operationRevision) {
+          return undefined;
+        }
+      }
+
+      const targetRevision = expected?.operationRevision ?? effect.operationRevision ?? currentRevision;
+      const nextEffect = transitionDurableSyncEffect(effect, action, {
+        operationRevision: targetRevision,
+        sourceState: expected?.sourceState ?? effect.state,
+      });
+      if (!nextEffect) {
+        return undefined;
+      }
+
+      if (existingIndex !== -1) {
+        effects[existingIndex] = nextEffect;
+      } else {
+        effects.push(nextEffect);
+      }
+      const updated: UnifiedSyncOperation = {
+        ...current,
+        effects,
+        createdRemoteId:
+          nextEffect.kind === "ticket_create" && nextEffect.state === "committed" && nextEffect.remoteId !== undefined
+            ? nextEffect.remoteId
+            : nextEffect.kind === "ticket_create" && nextEffect.state === "compensated"
+              ? undefined  // compensation完了時にatomicにcreatedRemoteIdを消去
+              : current.createdRemoteId,
+      };
+      try {
+        return await this.saveOperationInternal(updated, scope, current.version ?? current.persistenceVersion);
+      } catch {
+        return undefined;
+      }
     });
-    if (!nextEffect) {
-      return undefined;
-    }
-
-    effects[existingIndex] = nextEffect;
-    const updated: UnifiedSyncOperation = {
-      ...current,
-      effects,
-      createdRemoteId:
-        nextEffect.kind === "ticket_create" && nextEffect.state === "committed" && nextEffect.remoteId !== undefined
-          ? nextEffect.remoteId
-          : nextEffect.kind === "ticket_create" && nextEffect.state === "compensated"
-            ? undefined  // compensation完了時にatomicにcreatedRemoteIdを消去
-            : current.createdRemoteId,
-    };
-    try {
-      return await this.saveOperation(updated, scope, current.version ?? current.persistenceVersion);
-    } catch {
-      return undefined;
-    }
   }
 
   public async completeOperation(
@@ -676,6 +1004,26 @@ export class DefaultSyncOperationRepository implements SyncOperationRepository {
     return this.runExclusive(scope, async () => {
       const current = this.getOperation(key, scope);
       const revision = expectedRevision ?? current?.revision ?? 1;
+
+      if (current) {
+        const completedOp: UnifiedSyncOperation = {
+          ...current,
+          phase: "completed",
+        };
+        const cacheKey = `${scope}:${getOpKeyString(key)}`;
+        this.completedOperations.set(cacheKey, completedOp);
+        if (key.kind === "newTicket") {
+          if (key.queueId) {
+            this.completedOperations.set(`${scope}:newTicket:${key.queueId}`, completedOp);
+          }
+          if (key.documentUri) {
+            this.completedOperations.set(`${scope}:newTicket:${key.documentUri}`, completedOp);
+          }
+          if (current.operationId) {
+            this.completedOperations.set(`${scope}:newTicket:${current.operationId}`, completedOp);
+          }
+        }
+      }
 
       if (key.kind === "ticket") {
         const rawCanonical = completion?.canonical;

@@ -50,7 +50,10 @@ Last updated: 2026-08-14
 
 * Data in `src/views/offlineSyncStore.ts` is persistent state that survives VS Code restarts. When changing its shape, key, scope, revision, or phase, verify restoration of existing data and legacy compatibility.
 * Synchronization must go through the lifecycle defined by `src/app/syncEngine.ts` and `src/app/ticketSync/`, preserving the ordering and checkpoints of remote write, read-back, and local finalize.
-* Do not automatically retry a remote write when its success or failure is unknown. Preserve reconciliation and explicit recovery paths to avoid duplicate issue or comment creation.
+* Primary Operation phase and Primary Effect state must transition atomically via `SyncOperationRepository.transitionPrimaryRemoteWrite` in a single persistence call to prevent state ledger divergence.
+* Planned effects are monotonic and idempotent; non-planned effects (committed/started/failed/commit_unknown) must never be rolled back to `planned` on re-planning unless explicitly compensated.
+* Do not automatically retry a remote write when its outcome is unknown (`commit_unknown`) or known non-retryable failure. Explicit retry on the same revision must reuse the frozen API-ready `RequestSnapshot`.
+* File and Clipboard attachment bytes identity (contentHash, contentSize, spoolFilePath) must be frozen prior to remote write to guarantee idempotency across restarts and retries.
 * Do not apply persistent effects while ignoring the revision fence or operation scope. When switching connections, do not mix drafts or queues from different Redmine environments.
 * When changing discard behavior for queue entries, force sync, migration, or remote-write retry conditions, describe the destructive impact and recovery method first.
 

@@ -1,3 +1,6 @@
+import type { IssueCreateInput, IssueUpdateInput, IssueUploadInput } from "../redmine/issues";
+import type { UploadToken } from "../redmine/types";
+
 export type DurableSyncEffectKind =
   | "ticket_create"
   | "ticket_update"
@@ -44,71 +47,44 @@ export type DurableSyncEffectTarget = {
 
 export type CommentCreateRequestSnapshot = {
   kind: "comment_create";
-  ticketId: number;
-  submittedBody: string;
+  request: {
+    ticketId: number;
+    notes: string;
+    uploads?: UploadToken[];
+  };
+  submittedBody?: string;
   submittedUploads?: Array<{ token: string; filename?: string; contentType?: string }>;
 };
 
 export type CommentUpdateRequestSnapshot = {
   kind: "comment_update";
-  ticketId: number;
-  commentId: number;
-  submittedBody: string;
+  request: {
+    commentId: number;
+    notes: string;
+    uploads?: UploadToken[];
+  };
+  submittedBody?: string;
   submittedUploads?: Array<{ token: string; filename?: string; contentType?: string }>;
 };
 
 export type TicketCreateRequestSnapshot = {
   kind: "ticket_create";
-  projectId: number;
-  subject: string;
-  description: string;
-  statusId?: number;
-  trackerId?: number;
-  priorityId?: number;
-  dueDate?: string;
-  parentId?: number;
-  startDate?: string;
-  doneRatio?: number;
-  estimatedHours?: number;
-  assigneeId?: number;
-  uploads?: Array<{ token: string; filename?: string; contentType?: string }>;
-  childTickets?: Array<{ subject: string; description?: string; tracker?: string; priority?: string }>;
+  request: IssueCreateInput;
 };
 
 export type TicketUpdateRequestSnapshot = {
   kind: "ticket_update";
-  ticketId: number;
-  subject?: string;
-  description?: string;
-  notes?: string;
-  projectId?: number;
-  statusId?: number;
-  trackerId?: number;
-  priorityId?: number;
-  dueDate?: string;
-  startDate?: string;
-  doneRatio?: number;
-  estimatedHours?: number;
-  assigneeId?: number;
-  uploads?: Array<{ token: string; filename?: string; contentType?: string }>;
-  childTickets?: Array<{ subject: string; description?: string; tracker?: string; priority?: string }>;
+  request: IssueUpdateInput;
 };
 
 export type ChildTicketCreateRequestSnapshot = {
   kind: "child_create";
   parentTicketId: number;
-  projectId: number;
-  subject: string;
-  description?: string;
-  trackerId?: number;
-  priorityId?: number;
-  statusId?: number;
-  startDate?: string;
-  dueDate?: string;
-  doneRatio?: number;
-  estimatedHours?: number;
-  assigneeId?: number;
   ordinal?: number;
+  projectId?: number;
+  subject?: string;
+  description?: string;
+  request: IssueCreateInput;
 };
 
 export type UploadRequestSnapshot = {
@@ -116,9 +92,10 @@ export type UploadRequestSnapshot = {
   filePath?: string;
   filename: string;
   contentType: string;
-  contentHash?: string;
-  contentSize?: number;
+  contentHash: string;
+  contentSize: number;
   imageUri?: string;
+  spoolFilePath?: string;
 };
 
 export type SyncEffectRequestSnapshot =
@@ -182,6 +159,29 @@ export const restoreDurableSyncEffect = (
     restored.failure = { ...effect.failure };
   }
   return restored;
+};
+
+export const canRetryEffect = (effect: DurableSyncEffect): boolean => {
+  if (effect.state === "failed") {
+    return effect.failure?.disposition === "retryable";
+  }
+  if (effect.state === "commit_unknown") {
+    return true;
+  }
+  return false;
+};
+
+export const isEffectBlockingNormalSync = (effect: DurableSyncEffect): boolean => {
+  if (
+    effect.state === "started" ||
+    effect.state === "commit_unknown" ||
+    effect.state === "failed" ||
+    effect.state === "compensation_started" ||
+    effect.state === "compensation_unknown"
+  ) {
+    return true;
+  }
+  return false;
 };
 
 export const isPrimaryEffectKind = (kind: DurableSyncEffectKind): boolean =>

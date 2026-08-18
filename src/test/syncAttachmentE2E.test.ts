@@ -86,6 +86,52 @@ suite("RT-A: Attachment E2E Pipeline (syncAttachmentE2E.test.ts)", () => {
       this.ops.set(op.operationId, updated);
       return updated;
     }
+    public async transitionPrimaryRemoteWrite(
+      key: any,
+      transition: any,
+      scope: string,
+    ): Promise<UnifiedSyncOperation | undefined> {
+      const op = this.getOperation(key, scope);
+      if (!op) { return undefined; }
+      const primaryEffect = (op.effects ?? []).find(
+        (e) => e.effectId === "ticket-create" || e.effectId === "ticket-update" || e.effectId === "comment-create" || e.effectId === "comment-update",
+      );
+      const effects = [...(op.effects ?? [])];
+      const effectIndex = primaryEffect ? effects.findIndex((e) => e.effectId === primaryEffect.effectId) : -1;
+      let nextPhase = op.phase;
+      let updatedFields: Partial<UnifiedSyncOperation> = {};
+
+      if (transition.kind === "start" || transition.kind === "start_explicit_retry") {
+        nextPhase = "remote_write_started";
+        if (effectIndex !== -1) {
+          effects[effectIndex] = { ...effects[effectIndex], state: "started", requestSnapshot: transition.requestSnapshot ?? effects[effectIndex].requestSnapshot };
+        }
+      } else if (transition.kind === "commit") {
+        nextPhase = "remote_committed";
+        if (transition.remoteId !== undefined) {
+          updatedFields.createdRemoteId = transition.remoteId;
+        }
+        if (transition.projectId !== undefined) {
+          updatedFields.projectId = transition.projectId;
+        }
+        if (effectIndex !== -1) {
+          effects[effectIndex] = { ...effects[effectIndex], state: "committed", remoteId: transition.remoteId ?? effects[effectIndex].remoteId };
+        }
+      } else if (transition.kind === "commit_unknown") {
+        nextPhase = "commit_unknown";
+        if (effectIndex !== -1) {
+          effects[effectIndex] = { ...effects[effectIndex], state: "commit_unknown" };
+        }
+      } else if (transition.kind === "failed") {
+        nextPhase = "queued";
+        if (effectIndex !== -1) {
+          effects[effectIndex] = { ...effects[effectIndex], state: "failed", failure: transition.failure };
+        }
+      }
+      const updated = { ...op, ...updatedFields, phase: nextPhase, effects, version: (op.version ?? 1) + 1 };
+      this.ops.set(op.operationId, updated);
+      return updated;
+    }
     public async completeOperation(key: any, scope: string): Promise<boolean> {
       const op = this.getOperation(key, scope);
       if (op) {this.ops.delete(op.operationId);}

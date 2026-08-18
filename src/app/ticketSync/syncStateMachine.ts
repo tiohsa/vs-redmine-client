@@ -3,12 +3,12 @@ import type {
   GenericSyncPhase,
   UnifiedSyncOperation,
 } from "./syncOperationTypes";
-import type { DurableSyncEffect } from "../syncEffects";
+import { type DurableSyncEffect, restoreDurableSyncEffect } from "../syncEffects";
 
 /**
- * abort/retry rollback時にdurableなSecondary Effectを保持するフィルター (INV-N11)
- * committed/commit_unknown/compensation_* は次回retry時に再利用可能なため保持する。
- * Primaryがcommit前にabortする場合でも、アップロード済みtoken等を失わない。
+ * abort/retry rollback時にdurableなEffectを保持するフィルター (INV-N11, F-17)
+ * committed/commit_unknown/failed/compensation_* は次回retry・明示的リカバリ時に再利用可能なため保持する。
+ * Primaryがcommit前にabortする場合でも、アップロード済みtokenや失敗証拠等を失わない。
  */
 export const retainDurableEffectsForRetry = (
   effects: DurableSyncEffect[],
@@ -17,21 +17,23 @@ export const retainDurableEffectsForRetry = (
     (e) =>
       e.state === "committed" ||
       e.state === "commit_unknown" ||
+      (e.state === "failed" && e.failure?.disposition === "retryable") ||
       e.state === "compensation_started" ||
       e.state === "compensation_unknown",
   );
-
 
 /**
  * 許可される状態遷移テーブル (INV-04, INV-09, INV-10, INV-11)
  */
 const ALLOWED_TRANSITIONS: Record<GenericSyncPhase, GenericLifecycleAction["kind"][]> = {
-  queued: ["begin_preparation"],
+  queued: [
+    "begin_preparation",
+    "start_normal_remote_write",
+    "abort_before_remote_write",
+  ],
   preparing: [
     "start_normal_remote_write",
     "abort_before_remote_write",
-    "record_remote_commit",
-    "mark_commit_unknown",
   ],
   remote_write_started: [
     "record_remote_commit",
@@ -41,11 +43,13 @@ const ALLOWED_TRANSITIONS: Record<GenericSyncPhase, GenericLifecycleAction["kind
     "record_reconciled_identity",
     "start_explicit_retry_remote_write",
   ],
-  commit_unknown: ["assume_remote_commit", "record_reconciled_identity", "start_explicit_retry_remote_write", "record_remote_commit"],
+  commit_unknown: ["assume_remote_commit", "record_reconciled_identity", "start_explicit_retry_remote_write"],
   remote_committed: [
+    "record_remote_commit",
     "mark_reconciliation_pending",
     "mark_local_finalize_pending",
     "record_reconciled_identity",
+    "abort_known_remote_failure",
   ],
   reconciliation_pending: ["mark_reconciliation_pending", "mark_local_finalize_pending", "record_reconciled_identity"],
   local_finalize_pending: ["mark_local_finalize_pending", "complete"],
@@ -81,21 +85,6 @@ export const applyGenericTransition = (
     case "start_normal_remote_write":
     case "start_explicit_retry_remote_write": {
       next.phase = "remote_write_started";
-      const pId = operation.kind === "ticket_create" ? "ticket-create" : operation.kind === "ticket_update" ? "ticket-update" : operation.kind === "comment_create" ? "comment-create" : "comment-update";
-      const effects = next.effects ? [...next.effects] : [];
-      const idx = effects.findIndex((e) => e.effectId === pId);
-      if (idx !== -1) {
-        effects[idx] = { ...effects[idx], state: "started" };
-      } else {
-        effects.push({
-          effectId: pId,
-          kind: operation.kind === "ticket_create" ? "ticket_create" : operation.kind === "ticket_update" ? "ticket_update" : operation.kind === "comment_create" ? "comment_create" : "comment_update",
-          operationRevision: next.revision ?? 1,
-          state: "started",
-          target: {},
-        });
-      }
-      next.effects = effects;
       return next;
     }
 
@@ -110,15 +99,6 @@ export const applyGenericTransition = (
       if (action.remoteUpdatedAt !== undefined) {
         next.remoteUpdatedAt = action.remoteUpdatedAt;
       }
-      if (action.createdRemoteId !== undefined && operation.kind === "ticket_create") {
-        const pId = "ticket-create";
-        const effects = next.effects ? [...next.effects] : [];
-        const idx = effects.findIndex((e) => e.effectId === pId);
-        if (idx !== -1) {
-          effects[idx] = { ...effects[idx], state: "committed", remoteId: action.createdRemoteId ?? effects[idx].remoteId };
-        }
-        next.effects = effects;
-      }
       return next;
     }
 
@@ -127,13 +107,6 @@ export const applyGenericTransition = (
       if (action.message) {
         next.errorMessage = action.message;
       }
-      const pId = operation.kind === "ticket_create" ? "ticket-create" : operation.kind === "ticket_update" ? "ticket-update" : operation.kind === "comment_create" ? "comment-create" : "comment-update";
-      const effects = next.effects ? [...next.effects] : [];
-      const idx = effects.findIndex((e) => e.effectId === pId);
-      if (idx !== -1 && effects[idx].state !== "committed") {
-        effects[idx] = { ...effects[idx], state: "commit_unknown" };
-      }
-      next.effects = effects;
       return next;
     }
 
@@ -156,8 +129,7 @@ export const applyGenericTransition = (
       next.phase = "queued";
       next.createdRemoteId = undefined;
       next.createdChildIds = undefined;
-      // INV-N11: committed/commit_unknown/compensation_* なSecondary Effectは保持する
-      // Primary未commitでもアップロード済みtoken等を失わない
+      // INV-N11, F-17: committed/commit_unknown/failed/compensation_* なEffectは保持する
       next.effects = retainDurableEffectsForRetry(next.effects ?? []);
       if (next.nextIntent) {
         next.intent = next.nextIntent;
@@ -188,8 +160,8 @@ export const applyGenericTransition = (
       next.phase = "queued";
       next.createdRemoteId = undefined;
       next.createdChildIds = undefined;
-      // INV-N11: committed/commit_unknown/compensation_* なSecondary Effectは保持する
-      next.effects = retainDurableEffectsForRetry(next.effects ?? []);
+      // INV-N11, F-17: Primaryが完全補償された場合は全Effectをリセット。それ以外は committed/commit_unknown/failed/compensation_* を保持
+      next.effects = primaryEffect?.state === "compensated" ? [] : retainDurableEffectsForRetry(next.effects ?? []);
       if (next.nextIntent) {
         // 次の intent があれば昇格 (INV-07)
         next.intent = next.nextIntent;
@@ -255,7 +227,7 @@ export const applyGenericTransition = (
 };
 
 /**
- * プロセス再起動時の正規化 (INV-03 / INV-14)
+ * プロセス再起動時の正規化 (INV-03 / INV-14, D-07)
  */
 export const normalizeOperationOnRestart = (
   operation: UnifiedSyncOperation,
@@ -279,18 +251,9 @@ export const normalizeOperationOnRestart = (
     }
   }
 
-  // secondary effect の started は commit_unknown に正規化 (INV-14)
+  // secondary effect の started は commit_unknown に正規化 (syncEffects.ts の restoreDurableSyncEffect を正本とする)
   if (normalized.effects && normalized.effects.length > 0) {
-    normalized.effects = normalized.effects.map((effect) => {
-      if (effect.state === "started" || effect.state === "compensation_started") {
-        return {
-          ...effect,
-          state: effect.state === "started" ? "commit_unknown" : "compensation_unknown",
-          updatedAt: Date.now(),
-        };
-      }
-      return effect;
-    });
+    normalized.effects = normalized.effects.map(restoreDurableSyncEffect);
   }
 
   return normalized;
