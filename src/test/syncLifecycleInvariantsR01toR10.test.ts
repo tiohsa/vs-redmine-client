@@ -178,7 +178,7 @@ suite("R01 〜 R10: Invariant & Lifecycle Recovery Tests", () => {
     const outcome2 = await engine.syncOne({ kind: "comment", ticketId: 303 }, { connectionScope: SCOPE });
     assert.strictEqual(outcome2.kind, "failed_before_commit");
     assert.strictEqual(uploadACalls, 1, "Image A must not be re-uploaded (INV-04)");
-    assert.strictEqual(uploadBCalls, 2, "Image B is retried");
+    assert.strictEqual(uploadBCalls, 1, "Image B is not retried automatically on non_retriable failure (R-04, INV-04)");
   });
 
   // R04 / T-33: Compensation Crash (INV-07, INV-N12)

@@ -209,6 +209,9 @@ suite("RT-A 〜 RT-J: Remote Certainty & Secondary Effect Invariant Tests", () =
       return { token, filename: "file.png", contentType: "image/png" };
     };
 
+    const tmpFile = path.join(os.tmpdir(), "rt-d-test-file.png");
+    fs.writeFileSync(tmpFile, "RT-D test content");
+
     const repo = createSyncOperationRepository();
     const operationId = `${SCOPE}:newTicket:queue-att-1`;
     await repo.saveOperation({
@@ -225,7 +228,7 @@ suite("RT-A 〜 RT-J: Remote Certainty & Secondary Effect Invariant Tests", () =
         subject: "Ticket with attachment",
         description: "Desc",
         metadata: { tracker: "Bug", priority: "Normal", status: "New", due_date: "", children: [] },
-        attachments: [{ kind: "file", filePath: "/path/to/file.png", filename: "file.png", contentType: "image/png" }],
+        attachments: [{ kind: "file", filePath: tmpFile, filename: "file.png", contentType: "image/png" }],
       },
     }, SCOPE);
 

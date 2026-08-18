@@ -13,8 +13,10 @@ import {
 } from "./syncOperationTypes";
 import {
   applyGenericTransition,
+  retainDurableEffectsForRetry,
 } from "./syncStateMachine";
 import {
+  areSnapshotsEqual,
   DurableSyncEffect,
   DurableSyncEffectAction,
   DurableSyncEffectState,
@@ -429,7 +431,7 @@ export class DefaultSyncOperationRepository implements SyncOperationRepository {
     const nextVersion = operation.version !== undefined && operation.version > (current?.version ?? 0)
       ? operation.version
       : (current?.version ?? current?.persistenceVersion ?? 0) + 1;
-    const intentRevision = operation.intentRevision ?? current?.intentRevision ?? 1;
+    const intentRevision = operation.intentRevision ?? operation.revision ?? current?.intentRevision ?? current?.revision ?? 1;
     const updated: UnifiedSyncOperation = {
       ...operation,
       intentRevision,
@@ -657,20 +659,23 @@ export class DefaultSyncOperationRepository implements SyncOperationRepository {
         if (expected.sourcePhase && current.phase !== expected.sourcePhase) {
           const isStartedMatch =
             (expected.sourcePhase === "queued" || expected.sourcePhase === "preparing") &&
-            current.phase === "remote_write_started";
-          if (!isStartedMatch) {
+            (current.phase === "queued" || current.phase === "preparing" || current.phase === "remote_write_started");
+          const isRetryMatch =
+            (expected.sourcePhase === "commit_unknown" || expected.sourcePhase === "queued") &&
+            (current.phase === "commit_unknown" || current.phase === "queued" || current.phase === "remote_write_started");
+          if (!isStartedMatch && !isRetryMatch) {
             return undefined;
           }
         }
         if (expected.revision !== undefined) {
-          const currentRev = current.intentRevision ?? current.revision;
+          const currentRev = current.revision;
           if (currentRev !== expected.revision) {
             return undefined;
           }
         }
       }
 
-      const currentRevision = current.intentRevision ?? current.revision ?? 1;
+      const currentRevision = current.revision ?? current.intentRevision ?? 1;
       const pId = current.kind === "ticket_create"
         ? "ticket-create"
         : current.kind === "ticket_update"
@@ -726,6 +731,59 @@ export class DefaultSyncOperationRepository implements SyncOperationRepository {
           break;
       }
 
+      const currentEffects = [...(current.effects ?? [])];
+      const pIndex = currentEffects.findIndex((e) => e.effectId === pId || isPrimaryEffectKind(e.kind));
+
+      let updatedEffect: DurableSyncEffect | undefined;
+      if (pIndex === -1) {
+        if (transition.kind === "start" || transition.kind === "start_explicit_retry") {
+          const initialEffect: DurableSyncEffect = {
+            effectId: pId,
+            kind: pKind,
+            operationRevision: currentRevision,
+            state: "planned",
+            target: { documentUri: current.documentUri, ticketId: current.ticketId, commentId: current.commentId },
+            requestSnapshot: transition.requestSnapshot,
+          };
+          updatedEffect = transitionDurableSyncEffect(initialEffect, effectAction, {
+            operationRevision: currentRevision,
+            sourceState: "planned",
+          });
+          if (updatedEffect) {
+            currentEffects.push(updatedEffect);
+          }
+        } else if (transition.kind === "commit") {
+          const initialEffect: DurableSyncEffect = {
+            effectId: pId,
+            kind: pKind,
+            operationRevision: currentRevision,
+            state: "started",
+            target: { documentUri: current.documentUri, ticketId: current.ticketId, commentId: current.commentId },
+            requestSnapshot: transition.requestSnapshot,
+          };
+          updatedEffect = transitionDurableSyncEffect(initialEffect, effectAction, {
+            operationRevision: currentRevision,
+            sourceState: "started",
+          });
+          if (updatedEffect) {
+            currentEffects.push(updatedEffect);
+          }
+        }
+      } else {
+        const existing = currentEffects[pIndex];
+        updatedEffect = transitionDurableSyncEffect(existing, effectAction, {
+          operationRevision: currentRevision,
+          sourceState: existing.state,
+        });
+        if (updatedEffect) {
+          currentEffects[pIndex] = updatedEffect;
+        }
+      }
+
+      if (!updatedEffect) {
+        return undefined;
+      }
+
       let nextOp: UnifiedSyncOperation | undefined;
       if (current.phase === "remote_write_started" && (transition.kind === "start" || transition.kind === "start_explicit_retry")) {
         nextOp = { ...current };
@@ -744,75 +802,9 @@ export class DefaultSyncOperationRepository implements SyncOperationRepository {
         return undefined;
       }
 
-      const effects = [...(nextOp.effects ?? [])];
-      const pIndex = effects.findIndex((e) => e.effectId === pId || isPrimaryEffectKind(e.kind));
-
-      let updatedEffect: DurableSyncEffect | undefined;
-      if (pIndex === -1) {
-        if (transition.kind === "start" || transition.kind === "start_explicit_retry") {
-          const initialEffect: DurableSyncEffect = {
-            effectId: pId,
-            kind: pKind,
-            operationRevision: currentRevision,
-            state: "planned",
-            target: { documentUri: current.documentUri, ticketId: current.ticketId, commentId: current.commentId },
-            requestSnapshot: transition.requestSnapshot,
-          };
-          updatedEffect = transitionDurableSyncEffect(initialEffect, effectAction, {
-            operationRevision: currentRevision,
-            sourceState: "planned",
-          });
-          if (updatedEffect) {
-            effects.push(updatedEffect);
-          }
-        } else if (transition.kind === "commit") {
-          const initialEffect: DurableSyncEffect = {
-            effectId: pId,
-            kind: pKind,
-            operationRevision: currentRevision,
-            state: "started",
-            target: { documentUri: current.documentUri, ticketId: current.ticketId, commentId: current.commentId },
-            requestSnapshot: transition.requestSnapshot,
-          };
-          updatedEffect = transitionDurableSyncEffect(initialEffect, effectAction, {
-            operationRevision: currentRevision,
-            sourceState: "started",
-          });
-          if (updatedEffect) {
-            effects.push(updatedEffect);
-          }
-        }
-      } else {
-        const existing = effects[pIndex];
-        updatedEffect = transitionDurableSyncEffect(existing, effectAction, {
-          operationRevision: currentRevision,
-          sourceState: existing.state,
-        });
-        if (updatedEffect) {
-          effects[pIndex] = updatedEffect;
-        }
-      }
-
-      if (!updatedEffect) {
-        return undefined;
-      }
-
-      if (this.transitionEffect !== DefaultSyncOperationRepository.prototype.transitionEffect) {
-        const simulated = await this.transitionEffect(key, pId, effectAction, scope, {
-          operationRevision: currentRevision,
-          sourceState: pIndex === -1 ? "planned" : (current.effects ?? [])[pIndex]?.state ?? "planned",
-        });
-        if (!simulated) {
-          return undefined;
-        }
-        simulated.phase = nextOp.phase;
-        if (transition.kind === "commit" && transition.remoteId !== undefined) {
-          simulated.createdRemoteId = transition.remoteId;
-        }
-        return this.saveOperationInternal(simulated, scope, simulated.version ?? simulated.persistenceVersion);
-      }
-
-      nextOp.effects = effects;
+      nextOp.effects = (transition.kind === "failed" || transition.kind === "commit_unknown")
+        ? retainDurableEffectsForRetry(currentEffects)
+        : currentEffects;
       if (transition.kind === "commit" && transition.remoteId !== undefined) {
         nextOp.createdRemoteId = transition.remoteId;
       }
@@ -880,7 +872,7 @@ export class DefaultSyncOperationRepository implements SyncOperationRepository {
           if (
             effect.requestSnapshot &&
             existing.requestSnapshot &&
-            JSON.stringify(effect.requestSnapshot) !== JSON.stringify(existing.requestSnapshot)
+            !areSnapshotsEqual(effect.requestSnapshot, existing.requestSnapshot)
           ) {
             // same revision / different snapshot の場合は拒絶
             return undefined;
@@ -891,6 +883,15 @@ export class DefaultSyncOperationRepository implements SyncOperationRepository {
             operationRevision: revision,
           };
         } else {
+          // planned 状態 (R-10.1):
+          if (
+            effect.requestSnapshot &&
+            existing.requestSnapshot &&
+            !areSnapshotsEqual(effect.requestSnapshot, existing.requestSnapshot)
+          ) {
+            // same revision / different snapshot は拒絶
+            return undefined;
+          }
           effects[existingIndex] = {
             ...effect,
             operationRevision: revision,

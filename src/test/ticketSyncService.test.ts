@@ -474,7 +474,7 @@ suite("TicketSyncService durable lifecycle", () => {
     assert.deepStrictEqual(deleted, [641, 640]);
     assert.strictEqual(queued.phase, "queued");
     assert.strictEqual(queued.createdIssueId, undefined);
-    assert.deepStrictEqual(queued.effects, []);
+    assert.strictEqual(queued.effects?.find((e) => e.effectId === "ticket-create")?.state, "compensated");
   });
 
   test("new ticket child POST timeout は commit_unknown となり自動再送・補償しない", async () => {
@@ -1556,12 +1556,6 @@ suite("TicketSyncService durable lifecycle", () => {
         phase: "preparing",
         createdAt: 1,
         effects: [{
-          effectId: "ticket-update",
-          kind: "ticket_update",
-          operationRevision: 2,
-          state: "committed",
-          target: { ticketId: 423 },
-        }, {
           effectId: "child-create:0",
           kind: "child_create",
           operationRevision: 2,
@@ -1591,6 +1585,7 @@ suite("TicketSyncService durable lifecycle", () => {
 
     assert.strictEqual(outcome.kind, "completed");
     assert.strictEqual(childCreateCalls, 0);
+    assert.strictEqual(parentUpdateCalls, 1, "親チケットの PUT が実行されること");
   });
 
   test("child compensation failure は durable recovery state を保持する", async () => {

@@ -198,6 +198,22 @@ export const hasUncertainDurableSyncEffect = (
   effects: readonly DurableSyncEffect[] | undefined,
 ): boolean => effects?.some((effect) => UNCERTAIN_EFFECT_STATES.has(effect.state)) === true;
 
+export const areSnapshotsEqual = (
+  a?: SyncEffectRequestSnapshot,
+  b?: SyncEffectRequestSnapshot,
+): boolean => {
+  if (!a && !b) {
+    return true;
+  }
+  if (!a || !b) {
+    return false;
+  }
+  if (a.kind !== b.kind) {
+    return false;
+  }
+  return JSON.stringify(a) === JSON.stringify(b);
+};
+
 const actionAllowsSource = (
   action: DurableSyncEffectAction,
   effect: DurableSyncEffect,

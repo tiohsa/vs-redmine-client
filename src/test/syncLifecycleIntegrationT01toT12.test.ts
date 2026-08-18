@@ -157,6 +157,9 @@ suite("T-01 〜 T-24: Sync Lifecycle Integration, Remote Certainty & Completion 
   // T-03: True Restart: Attachment (P1-04, RC-3, INV-U07)
   test("T-03: True Restart: initializeOfflineSyncStore による復元後も committed attachment token が保持され再アップロードされない", async () => {
     let uploadCalls = 0;
+    const tmpFile = path.join(os.tmpdir(), "t03-test.png");
+    fs.writeFileSync(tmpFile, "T03 test file contents");
+
     const mockUpload = async () => {
       uploadCalls++;
       return { token: "durable-token-123", filename: "test.png", contentType: "image/png" };
@@ -178,7 +181,7 @@ suite("T-01 〜 T-24: Sync Lifecycle Integration, Remote Certainty & Completion 
         subject: "Title",
         description: "Body",
         metadata: { tracker: "Bug", priority: "Normal", status: "New", due_date: "", children: [] },
-        attachments: [{ kind: "file", filePath: "/dummy/test.png", filename: "test.png", contentType: "image/png" }],
+        attachments: [{ kind: "file", filePath: tmpFile, filename: "test.png", contentType: "image/png" }],
       },
     }, SCOPE);
 
@@ -340,19 +343,18 @@ suite("T-01 〜 T-24: Sync Lifecycle Integration, Remote Certainty & Completion 
     let hookAfterUpdate = false;
 
     const baseRepo = createSyncOperationRepository();
-    // Custom repository subclass to inject failure specifically at transitionEffect("commit") after updateIssue
+    // Custom repository subclass to inject failure specifically at transitionPrimaryRemoteWrite("commit") after updateIssue
     class FlakyRepo extends DefaultSyncOperationRepository {
-      public override async transitionEffect(
+      public override async transitionPrimaryRemoteWrite(
         key: any,
-        effectId: string,
-        action: any,
+        transition: any,
         scope: string,
         expected?: any,
       ) {
-        if (hookAfterUpdate && action.kind === "commit") {
+        if (hookAfterUpdate && transition.kind === "commit") {
           return undefined; // Simulate checkpoint failure after remote write
         }
-        return super.transitionEffect(key, effectId, action, scope, expected);
+        return super.transitionPrimaryRemoteWrite(key, transition, scope, expected);
       }
     }
 
@@ -1008,11 +1010,11 @@ suite("T-01 〜 T-24: Sync Lifecycle Integration, Remote Certainty & Completion 
   test("T-19: TicketCreate で Primary start checkpoint 永続化失敗時、createIssueCalls === 0 であること", async () => {
     let createIssueCalls = 0;
     class FlakyRepo extends DefaultSyncOperationRepository {
-      public override async transitionEffect(key: any, effectId: string, action: any, scope: string, expected?: any) {
-        if (effectId === "ticket-create" && action.kind === "start") {
+      public override async transitionPrimaryRemoteWrite(key: any, transition: any, scope: string, expected?: any) {
+        if (transition.kind === "start") {
           return undefined; // simulate start transition failure
         }
-        return super.transitionEffect(key, effectId, action, scope, expected);
+        return super.transitionPrimaryRemoteWrite(key, transition, scope, expected);
       }
     }
 
@@ -1059,11 +1061,11 @@ suite("T-01 〜 T-24: Sync Lifecycle Integration, Remote Certainty & Completion 
     let hookAfterCreate = false;
 
     class FlakyRepo extends DefaultSyncOperationRepository {
-      public override async transitionEffect(key: any, effectId: string, action: any, scope: string, expected?: any) {
-        if (hookAfterCreate && effectId === "ticket-create" && action.kind === "commit") {
+      public override async transitionPrimaryRemoteWrite(key: any, transition: any, scope: string, expected?: any) {
+        if (hookAfterCreate && transition.kind === "commit") {
           return undefined; // simulate commit transition failure after createIssue
         }
-        return super.transitionEffect(key, effectId, action, scope, expected);
+        return super.transitionPrimaryRemoteWrite(key, transition, scope, expected);
       }
     }
 
@@ -1114,11 +1116,11 @@ suite("T-01 〜 T-24: Sync Lifecycle Integration, Remote Certainty & Completion 
     let addCommentCalls = 0;
 
     class FlakyStartRepo extends DefaultSyncOperationRepository {
-      public override async transitionEffect(key: any, effectId: string, action: any, scope: string, expected?: any) {
-        if (effectId === "comment-create" && action.kind === "start") {
+      public override async transitionPrimaryRemoteWrite(key: any, transition: any, scope: string, expected?: any) {
+        if (transition.kind === "start") {
           return undefined; // start checkpoint 失敗
         }
-        return super.transitionEffect(key, effectId, action, scope, expected);
+        return super.transitionPrimaryRemoteWrite(key, transition, scope, expected);
       }
     }
 
@@ -1154,11 +1156,11 @@ suite("T-01 〜 T-24: Sync Lifecycle Integration, Remote Certainty & Completion 
     let hookAfterAdd = false;
 
     class FlakyCommitRepo extends DefaultSyncOperationRepository {
-      public override async transitionEffect(key: any, effectId: string, action: any, scope: string, expected?: any) {
-        if (hookAfterAdd && effectId === "comment-create" && action.kind === "commit") {
+      public override async transitionPrimaryRemoteWrite(key: any, transition: any, scope: string, expected?: any) {
+        if (hookAfterAdd && transition.kind === "commit") {
           return undefined; // 1回目commit checkpoint 失敗
         }
-        return super.transitionEffect(key, effectId, action, scope, expected);
+        return super.transitionPrimaryRemoteWrite(key, transition, scope, expected);
       }
     }
 
@@ -1201,11 +1203,11 @@ suite("T-01 〜 T-24: Sync Lifecycle Integration, Remote Certainty & Completion 
     let updateCommentCalls = 0;
 
     class FlakyUpdateStartRepo extends DefaultSyncOperationRepository {
-      public override async transitionEffect(key: any, effectId: string, action: any, scope: string, expected?: any) {
-        if (effectId === "comment-update" && action.kind === "start") {
+      public override async transitionPrimaryRemoteWrite(key: any, transition: any, scope: string, expected?: any) {
+        if (transition.kind === "start") {
           return undefined;
         }
-        return super.transitionEffect(key, effectId, action, scope, expected);
+        return super.transitionPrimaryRemoteWrite(key, transition, scope, expected);
       }
     }
 
@@ -1242,11 +1244,11 @@ suite("T-01 〜 T-24: Sync Lifecycle Integration, Remote Certainty & Completion 
     let hookAfterUpdate = false;
 
     class FlakyUpdateCommitRepo extends DefaultSyncOperationRepository {
-      public override async transitionEffect(key: any, effectId: string, action: any, scope: string, expected?: any) {
-        if (hookAfterUpdate && effectId === "comment-update" && action.kind === "commit") {
+      public override async transitionPrimaryRemoteWrite(key: any, transition: any, scope: string, expected?: any) {
+        if (hookAfterUpdate && transition.kind === "commit") {
           return undefined;
         }
-        return super.transitionEffect(key, effectId, action, scope, expected);
+        return super.transitionPrimaryRemoteWrite(key, transition, scope, expected);
       }
     }
 
@@ -1768,11 +1770,11 @@ suite("T-01 〜 T-24: Sync Lifecycle Integration, Remote Certainty & Completion 
       },
     ];
 
-    // retainDurableEffectsForRetry: committed と commit_unknown は保持、failed は除外
+    // retainDurableEffectsForRetry: committed, commit_unknown, failed はすべて保持 (R-04, F-17)
     const retained = retainDurableEffectsForRetry(effects);
     assert.ok(retained.find((e) => e.effectId === "attachment:0"), "committed attachment:0 は保持される (INV-N11)");
     assert.ok(retained.find((e) => e.effectId === "attachment:2"), "commit_unknown attachment:2 は保持される (INV-N11)");
-    assert.strictEqual(retained.find((e) => e.effectId === "attachment:1"), undefined, "failed attachment:1 は除外される");
+    assert.ok(retained.find((e) => e.effectId === "attachment:1"), "failed attachment:1 も保持される (R-04, F-17)");
 
     // applyGenericTransition(abort_before_remote_write) で effects が retainDurableEffectsForRetry 適用されること
     const preparingOp: any = {
@@ -1811,9 +1813,9 @@ suite("T-01 〜 T-24: Sync Lifecycle Integration, Remote Certainty & Completion 
     const unknownEffect = aborted?.effects?.find((e) => e.effectId === "attachment:2");
     assert.ok(unknownEffect, "commit_unknown な attachment:2 effect が保持されること (INV-N11)");
 
-    // failed attachment:1 は retainDurableEffectsForRetry に含まれないため削除される
+    // failed attachment:1 も retainDurableEffectsForRetry により保持される (R-04, F-17)
     const failedEffect = aborted?.effects?.find((e) => e.effectId === "attachment:1");
-    assert.strictEqual(failedEffect, undefined, "failed な attachment:1 は abort後に削除されること");
+    assert.ok(failedEffect, "failed な attachment:1 も保持されること (R-04, F-17)");
   });
 
   // T-32: Compensation true restart — compensated + createdRemoteId=undefined (INV-N12)

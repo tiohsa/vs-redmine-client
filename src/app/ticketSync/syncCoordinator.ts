@@ -179,8 +179,19 @@ export class SyncCoordinator {
       };
     }
 
-    // INV-04: 純粋な commit_unknown / remote_write_started は通常の sync() から自動再送できない
-    if (operation.phase === "commit_unknown" || operation.phase === "remote_write_started") {
+    // R-04 / INV-04: failed / commit_unknown な Durable Effect を持つ operation は通常の sync() から自動再送できない (explicit recovery のみ)
+    const primaryEffect = operation.effects?.find(
+      (e) => isPrimaryEffectKind(e.kind) || e.effectId === "ticket-create" || e.effectId === "ticket-update" || e.effectId === "comment-create" || e.effectId === "comment-update",
+    );
+    if (primaryEffect?.state === "failed") {
+      return {
+        kind: "failed_before_commit",
+        error: new Error(primaryEffect.failure?.detail ?? "A previous mutation failed. Please resolve or retry explicitly."),
+        ticketId: operation.ticketId,
+        commentId: operation.commentId,
+      };
+    }
+    if (operation.phase === "commit_unknown" || operation.phase === "remote_write_started" || primaryEffect?.state === "commit_unknown") {
       return {
         kind: "commit_unknown",
         operationId: operation.operationId,
@@ -272,14 +283,16 @@ export class SyncCoordinator {
         const secResult = await handler.executeSecondaryEffects(currentOp, prepResult.prepared, handlerCtx, depsWithRepo);
         if (!secResult.ok) {
           const failedSec = secResult;
-          try {
-            await this.repository.transitionOperation(
-              getOpKey(currentOp),
-              { kind: "abort_before_remote_write" },
-              scope,
-            );
-          } catch {
-            // ignore persistence failure
+          if (!secResult.commitUnknown) {
+            try {
+              await this.repository.transitionOperation(
+                getOpKey(currentOp),
+                { kind: "abort_before_remote_write" },
+                scope,
+              );
+            } catch {
+              // ignore persistence failure
+            }
           }
           return {
             kind: "failed_before_commit",
@@ -290,20 +303,7 @@ export class SyncCoordinator {
         }
       }
 
-      // 4. start_normal_remote_write (INV-01: durable checkpoint before mutation)
-      if (currentOp.phase === "queued" || currentOp.phase === "preparing") {
-        const writeStartOp = await this.repository.transitionOperation(
-          getOpKey(currentOp),
-          { kind: "start_normal_remote_write" },
-          scope,
-        );
-        if (!writeStartOp) {
-          return { kind: "failed_before_commit", error: new Error("Failed to transition to remote_write_started") };
-        }
-        currentOp = writeStartOp;
-      }
-
-      // 5. executeRemoteWrite
+      // 4. executeRemoteWrite (Primary Remote mutation start is owned atomically by handler via transitionPrimaryRemoteWrite)
       const remoteResult = await handler.executeRemoteWrite(currentOp, prepResult.prepared, handlerCtx, depsWithRepo);
       if (!remoteResult.ok) {
         const fresh = this.repository.getOperation(getOpKey(currentOp), scope);
@@ -317,7 +317,6 @@ export class SyncCoordinator {
         );
         const isPrimaryCommitted =
           (primaryEffect?.state as string) === "committed" ||
-          (primaryEffect?.state !== "compensated" && fresh?.createdRemoteId !== undefined && fresh.createdRemoteId > 0) ||
           (fresh?.kind === "ticket_update" && ((primaryEffect?.state as string) === "committed" || (fresh.phase as any) === "remote_committed"));
 
         if (isPrimaryCommitted || remoteResult.outcome?.kind === "remote_committed") {
@@ -345,11 +344,6 @@ export class SyncCoordinator {
         }
 
         if (remoteResult.commitUnknown) {
-          await this.repository.transitionOperation(
-            getOpKey(currentOp),
-            { kind: "mark_commit_unknown", message: remoteResult.error.message },
-            scope,
-          );
           return {
             kind: "commit_unknown",
             operationId: currentOp.operationId,
@@ -359,11 +353,6 @@ export class SyncCoordinator {
           };
         }
 
-        await this.repository.transitionOperation(
-          getOpKey(currentOp),
-          { kind: "abort_known_remote_failure" },
-          scope,
-        );
         return {
           kind: "failed_before_commit",
           error: remoteResult.error,
@@ -515,18 +504,40 @@ export class SyncCoordinator {
   public async resolveCommitUnknown(input: {
     key: SyncOperationKey;
     context: SyncContext;
-    resolution?: { kind: "reconcile_remote" } | { kind: "link_remote_comment"; commentId: number; explicitLink?: boolean } | { kind: "link_remote_ticket"; ticketId: number; explicitLink?: boolean } | { kind: "retry_remote_write" };
+    resolution?:
+      | { kind: "reconcile_remote" }
+      | { kind: "link_remote_comment"; commentId: number; explicitLink?: boolean }
+      | { kind: "link_remote_ticket"; ticketId: number; explicitLink?: boolean }
+      | { kind: "link_created_ticket"; ticketId: number; explicitLink?: boolean }
+      | { kind: "assume_update_committed" }
+      | { kind: "retry_remote_write" };
     deps?: OperationHandlerDeps;
   }): Promise<SyncOutcome> {
     const scope = input.context.connectionScope;
     const op = this.repository.getOperation(input.key, scope);
-    if (!op || op.phase !== "commit_unknown") {
+    const primaryEffect = op?.effects?.find(
+      (e) =>
+        e.kind === "ticket_create" ||
+        e.kind === "ticket_update" ||
+        e.kind === "comment_create" ||
+        e.kind === "comment_update" ||
+        e.effectId === "ticket-create" ||
+        e.effectId === "ticket-update" ||
+        e.effectId === "comment-create" ||
+        e.effectId === "comment-update",
+    );
+    const isRecoverable = op && (
+      op.phase === "commit_unknown" ||
+      primaryEffect?.state === "commit_unknown" ||
+      primaryEffect?.state === "failed"
+    );
+    if (!op || !isRecoverable) {
       return {
         kind: "commit_unknown",
         operationId: op?.operationId ?? "",
         ticketId: op?.ticketId,
         commentId: op?.commentId,
-        message: op?.errorMessage ?? "Operation is not in commit_unknown phase",
+        message: op?.errorMessage ?? "Operation is not in commit_unknown or failed state",
       };
     }
 
@@ -540,13 +551,29 @@ export class SyncCoordinator {
     const runner = (input as any).runInConnectionScope ?? runWithConnectionScope;
     const flightPromise = runner(scope, async (): Promise<SyncOutcome> => {
       const freshOp = this.repository.getOperation(input.key, scope);
-      if (!freshOp || freshOp.phase !== "commit_unknown") {
+      const freshPrimaryEffect = freshOp?.effects?.find(
+        (e) =>
+          e.kind === "ticket_create" ||
+          e.kind === "ticket_update" ||
+          e.kind === "comment_create" ||
+          e.kind === "comment_update" ||
+          e.effectId === "ticket-create" ||
+          e.effectId === "ticket-update" ||
+          e.effectId === "comment-create" ||
+          e.effectId === "comment-update",
+      );
+      const isFreshRecoverable = freshOp && (
+        freshOp.phase === "commit_unknown" ||
+        freshPrimaryEffect?.state === "commit_unknown" ||
+        freshPrimaryEffect?.state === "failed"
+      );
+      if (!freshOp || !isFreshRecoverable) {
         return {
           kind: "commit_unknown",
           operationId: freshOp?.operationId ?? op.operationId,
           ticketId: freshOp?.ticketId ?? op.ticketId,
           commentId: freshOp?.commentId ?? op.commentId,
-          message: freshOp?.errorMessage ?? "Operation is no longer in commit_unknown phase",
+          message: freshOp?.errorMessage ?? "Operation is no longer in recoverable state",
         };
       }
 
@@ -600,6 +627,15 @@ export class SyncCoordinator {
           };
         }
 
+        if (primaryEffect?.state === "failed" && primaryEffect.failure?.disposition === "non_retriable") {
+          return {
+            kind: "failed_before_commit",
+            ticketId: freshOp.ticketId,
+            commentId: freshOp.commentId,
+            error: new Error("Cannot retry non-retriable failure."),
+          };
+        }
+
         const prepResult = await handler.prepare(freshOp, handlerCtx, depsWithRepo);
         if (!prepResult.ok) {
           return {
@@ -608,15 +644,6 @@ export class SyncCoordinator {
             ticketId: freshOp.ticketId,
             commentId: freshOp.commentId,
             message: "Preflight preparation failed",
-          };
-        }
-
-        if (primaryEffect?.state === "failed" && primaryEffect.failure?.disposition === "non_retriable") {
-          return {
-            kind: "failed_before_commit",
-            ticketId: freshOp.ticketId,
-            commentId: freshOp.commentId,
-            error: new Error("Cannot retry non-retriable failure."),
           };
         }
 

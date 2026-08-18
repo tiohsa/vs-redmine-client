@@ -361,14 +361,10 @@ export class TicketCreateHandler implements OperationHandler<TicketCreateIntent,
           projectId,
         );
       } catch (err) {
-        if (!deps?.ticketCreate) {
-          resolved = {};
-        } else {
-          return {
-            ok: false,
-            outcome: { kind: "failed_before_commit", error: err as Error },
-          };
-        }
+        return {
+          ok: false,
+          outcome: { kind: "failed_before_commit", error: err as Error },
+        };
       }
 
       const parentId = parsed.metadata?.parent ? Number(parsed.metadata.parent) : undefined;
@@ -535,6 +531,17 @@ export class TicketCreateHandler implements OperationHandler<TicketCreateIntent,
             { operationRevision: revision, sourceState: "started" },
           );
           if (!commitRes) {
+            try {
+              await repo.transitionEffect(
+                opKey,
+                effectId,
+                { kind: "mark_commit_unknown" },
+                context.connectionScope,
+                { operationRevision: revision, sourceState: "started" },
+              );
+            } catch {
+              // ignore persistence failure
+            }
             return { ok: false, error: new Error(`Failed to commit effect ${effectId}`), commitUnknown: true };
           }
           tokens.push({ token: res.token, filename: att.filename ?? res.filename, content_type: att.contentType ?? res.contentType });
@@ -573,6 +580,9 @@ export class TicketCreateHandler implements OperationHandler<TicketCreateIntent,
         if (existingEffect?.requestSnapshot) {
           uploadSnapshot = existingEffect.requestSnapshot as UploadRequestSnapshot;
           spoolFilePath = uploadSnapshot.spoolFilePath;
+          if (!spoolFilePath || !fs.existsSync(spoolFilePath)) {
+            return { ok: false, error: new Error(`Spool file not found for clipboard attachment: ${effectId}`) };
+          }
         } else {
           let buffer: Uint8Array;
           let filename: string;
@@ -583,10 +593,8 @@ export class TicketCreateHandler implements OperationHandler<TicketCreateIntent,
             buffer = parsed.buffer;
             filename = att.filename ?? parsed.filename;
             contentType = att.contentType ?? parsed.contentType;
-          } catch {
-            buffer = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==", "base64");
-            filename = att.filename ?? "clipboard.png";
-            contentType = att.contentType ?? "image/png";
+          } catch (err) {
+            return { ok: false, error: new Error(`Failed to parse clipboard image data: ${(err as Error).message}`) };
           }
           const bufferId = computeBufferHashAndSize(buffer);
           spoolFilePath = path.join(spoolDir, `${bufferId.contentHash}.${contentType.split("/")[1] || "png"}`);
@@ -643,6 +651,17 @@ export class TicketCreateHandler implements OperationHandler<TicketCreateIntent,
             { operationRevision: revision, sourceState: "started" },
           );
           if (!commitClipRes) {
+            try {
+              await repo.transitionEffect(
+                opKey,
+                effectId,
+                { kind: "mark_commit_unknown" },
+                context.connectionScope,
+                { operationRevision: revision, sourceState: "started" },
+              );
+            } catch {
+              // ignore
+            }
             return { ok: false, error: new Error(`Failed to commit effect ${effectId}`), commitUnknown: true };
           }
           tokens.push({ token: res.token, filename: att.filename ?? res.filename, content_type: att.contentType ?? res.contentType });
@@ -706,26 +725,33 @@ export class TicketCreateHandler implements OperationHandler<TicketCreateIntent,
 
     if (!createdId) {
       const isRetry = existingPrimaryEffect?.state === "failed" || existingPrimaryEffect?.state === "commit_unknown";
-      const requestToUse: IssueCreateInput = (existingPrimaryEffect?.requestSnapshot as TicketCreateRequestSnapshot | undefined)?.request
-        ?? prepared.request
-        ?? {
-          projectId: prepared.projectId,
-          subject: prepared.parsed.subject,
-          description: prepared.parsed.description,
-          uploads: prepared.uploadTokens.length > 0 ? prepared.uploadTokens : undefined,
-          statusId: prepared.resolved?.statusId,
-          trackerId: prepared.resolved?.trackerId,
-          priorityId: prepared.resolved?.priorityId,
-          dueDate: prepared.parsed.metadata?.due_date || undefined,
-          parentId: prepared.parsed.metadata?.parent ? Number(prepared.parsed.metadata.parent) : undefined,
-          startDate: prepared.parsed.metadata?.start_date || undefined,
-          doneRatio: prepared.resolved?.doneRatio,
-          estimatedHours: prepared.resolved?.estimatedHours,
-          assigneeId: prepared.resolved?.assigneeId,
-        };
-
-      if (prepared.uploadTokens.length > 0 && (!requestToUse.uploads || requestToUse.uploads.length === 0)) {
-        requestToUse.uploads = prepared.uploadTokens;
+      let requestToUse: IssueCreateInput;
+      const existingSnapshotRequest = (existingPrimaryEffect?.requestSnapshot as TicketCreateRequestSnapshot | undefined)?.request;
+      if (isRetry && existingSnapshotRequest) {
+        requestToUse = existingSnapshotRequest;
+      } else {
+        requestToUse = prepared.request
+          ?? {
+            projectId: prepared.projectId,
+            subject: prepared.parsed.subject,
+            description: prepared.parsed.description,
+            uploads: prepared.uploadTokens.length > 0 ? prepared.uploadTokens : undefined,
+            statusId: prepared.resolved?.statusId,
+            trackerId: prepared.resolved?.trackerId,
+            priorityId: prepared.resolved?.priorityId,
+            dueDate: prepared.parsed.metadata?.due_date || undefined,
+            parentId: prepared.parsed.metadata?.parent ? Number(prepared.parsed.metadata.parent) : undefined,
+            startDate: prepared.parsed.metadata?.start_date || undefined,
+            doneRatio: prepared.resolved?.doneRatio,
+            estimatedHours: prepared.resolved?.estimatedHours,
+            assigneeId: prepared.resolved?.assigneeId,
+          };
+        if (prepared.uploadTokens.length > 0) {
+          requestToUse = {
+            ...requestToUse,
+            uploads: prepared.uploadTokens,
+          };
+        }
       }
 
       const ticketSnapshot: TicketCreateRequestSnapshot = {
@@ -979,7 +1005,14 @@ export class TicketCreateHandler implements OperationHandler<TicketCreateIntent,
                   context.connectionScope,
                   { operationRevision: revision, sourceState: "compensation_started" },
                 );
-                if (!compResult) {
+                if (compResult) {
+                  const currentOpAfterComp = repo.getOperation(opKey, context.connectionScope);
+                  if (currentOpAfterComp) {
+                    currentOpAfterComp.createdRemoteId = undefined;
+                    currentOpAfterComp.phase = "queued";
+                    await repo.saveOperation(currentOpAfterComp, context.connectionScope);
+                  }
+                } else {
                   await repo.transitionEffect(
                     opKey,
                     "ticket-create",
@@ -1319,18 +1352,21 @@ export class TicketCreateHandler implements OperationHandler<TicketCreateIntent,
 
         // Upload retry 前検証: hash / size
         const currentFile = computeFileHashAndSize(filePath);
+        if (!currentFile) {
+          return {
+            kind: "failed_before_commit",
+            error: new Error(`Cannot compute hash for file: ${filePath}`),
+          };
+        }
         const snapshot = effect.requestSnapshot as UploadRequestSnapshot | undefined;
-        if (snapshot?.contentHash && currentFile?.contentHash && snapshot.contentHash !== currentFile.contentHash) {
+        if (snapshot?.contentHash && snapshot.contentHash !== currentFile.contentHash) {
           return {
             kind: "failed_before_commit",
             error: new Error(`File content has changed since snapshot (expected hash ${snapshot.contentHash}, found ${currentFile.contentHash}). Retry rejected.`),
           };
         }
-        const contentHash = currentFile?.contentHash ?? snapshot?.contentHash;
-        const contentSize = currentFile?.contentSize ?? snapshot?.contentSize;
-        if (!contentHash || contentSize === undefined) {
-          return { kind: "failed_before_commit", error: new Error(`Cannot compute hash for file: ${filePath}`) };
-        }
+        const contentHash = currentFile.contentHash;
+        const contentSize = currentFile.contentSize;
 
         const uploadSnapshot: UploadRequestSnapshot = {
           kind: "upload",
@@ -2393,18 +2429,21 @@ export class TicketUpdateHandler implements OperationHandler<TicketUpdateIntent,
         }
 
         const currentFile = computeFileHashAndSize(filePath);
+        if (!currentFile) {
+          return {
+            kind: "failed_before_commit",
+            error: new Error(`Cannot compute hash for file: ${filePath}`),
+          };
+        }
         const snapshot = effect.requestSnapshot as UploadRequestSnapshot | undefined;
-        if (snapshot?.contentHash && currentFile?.contentHash && snapshot.contentHash !== currentFile.contentHash) {
+        if (snapshot?.contentHash && snapshot.contentHash !== currentFile.contentHash) {
           return {
             kind: "failed_before_commit",
             error: new Error(`File content has changed since snapshot. Retry rejected.`),
           };
         }
-        const contentHash = currentFile?.contentHash ?? snapshot?.contentHash;
-        const contentSize = currentFile?.contentSize ?? snapshot?.contentSize;
-        if (!contentHash || contentSize === undefined) {
-          return { kind: "failed_before_commit", error: new Error(`Cannot compute hash for file: ${filePath}`) };
-        }
+        const contentHash = currentFile.contentHash;
+        const contentSize = currentFile.contentSize;
 
         const uploadSnapshot: UploadRequestSnapshot = {
           kind: "upload",
@@ -2837,6 +2876,17 @@ export class CommentCreateHandler implements OperationHandler<CommentCreateInten
           { operationRevision: revision, sourceState: "started" },
         );
         if (!commitImg) {
+          try {
+            await repo.transitionEffect(
+              opKey,
+              effectId,
+              { kind: "mark_commit_unknown" },
+              context.connectionScope,
+              { operationRevision: revision, sourceState: "started" },
+            );
+          } catch {
+            // ignore
+          }
           return { ok: false, error: new Error(`Failed to commit effect ${effectId}`), commitUnknown: true };
         }
         resolvedMap.set(filePath, {
@@ -3154,18 +3204,21 @@ export class CommentCreateHandler implements OperationHandler<CommentCreateInten
         }
 
         const currentFile = computeFileHashAndSize(filePath);
+        if (!currentFile) {
+          return {
+            kind: "failed_before_commit",
+            error: new Error(`Cannot compute hash for image: ${filePath}`),
+          };
+        }
         const snapshot = effect.requestSnapshot as UploadRequestSnapshot | undefined;
-        if (snapshot?.contentHash && currentFile?.contentHash && snapshot.contentHash !== currentFile.contentHash) {
+        if (snapshot?.contentHash && snapshot.contentHash !== currentFile.contentHash) {
           return {
             kind: "failed_before_commit",
             error: new Error(`File content has changed since snapshot. Retry rejected.`),
           };
         }
-        const contentHash = currentFile?.contentHash ?? snapshot?.contentHash;
-        const contentSize = currentFile?.contentSize ?? snapshot?.contentSize;
-        if (!contentHash || contentSize === undefined) {
-          return { kind: "failed_before_commit", error: new Error(`Cannot compute hash for image: ${filePath}`) };
-        }
+        const contentHash = currentFile.contentHash;
+        const contentSize = currentFile.contentSize;
 
         const uploadSnapshot: UploadRequestSnapshot = {
           kind: "upload",
@@ -3416,6 +3469,17 @@ export class CommentUpdateHandler implements OperationHandler<CommentUpdateInten
           { operationRevision: revision, sourceState: "started" },
         );
         if (!commitImg) {
+          try {
+            await repo.transitionEffect(
+              opKey,
+              effectId,
+              { kind: "mark_commit_unknown" },
+              context.connectionScope,
+              { operationRevision: revision, sourceState: "started" },
+            );
+          } catch {
+            // ignore
+          }
           return { ok: false, error: new Error(`Failed to commit effect ${effectId}`), commitUnknown: true };
         }
         resolvedMap.set(filePath, {
@@ -3716,18 +3780,21 @@ export class CommentUpdateHandler implements OperationHandler<CommentUpdateInten
         }
 
         const currentFile = computeFileHashAndSize(filePath);
+        if (!currentFile) {
+          return {
+            kind: "failed_before_commit",
+            error: new Error(`Cannot compute hash for image: ${filePath}`),
+          };
+        }
         const snapshot = effect.requestSnapshot as UploadRequestSnapshot | undefined;
-        if (snapshot?.contentHash && currentFile?.contentHash && snapshot.contentHash !== currentFile.contentHash) {
+        if (snapshot?.contentHash && snapshot.contentHash !== currentFile.contentHash) {
           return {
             kind: "failed_before_commit",
             error: new Error(`File content has changed since snapshot. Retry rejected.`),
           };
         }
-        const contentHash = currentFile?.contentHash ?? snapshot?.contentHash;
-        const contentSize = currentFile?.contentSize ?? snapshot?.contentSize;
-        if (!contentHash || contentSize === undefined) {
-          return { kind: "failed_before_commit", error: new Error(`Cannot compute hash for image: ${filePath}`) };
-        }
+        const contentHash = currentFile.contentHash;
+        const contentSize = currentFile.contentSize;
 
         const uploadSnapshot: UploadRequestSnapshot = {
           kind: "upload",

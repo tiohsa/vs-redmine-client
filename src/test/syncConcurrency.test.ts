@@ -19,9 +19,11 @@ suite("RT-08: Concurrency and CAS Safety (syncConcurrency.test.ts)", () => {
 
     const mockHandler: any = {
       prepare: async () => ({ ok: true, prepared: {} }),
-      executeRemoteWrite: async () => {
+      executeRemoteWrite: async (op: any) => {
         writeCount++;
+        await repo.transitionPrimaryRemoteWrite(op.key, { kind: "start", requestSnapshot: { kind: "ticket_update", request: { issueId: 105, fields: {} } } }, scope, { operationId: op.operationId, revision: 1, sourcePhase: op.phase });
         await writeBlocked;
+        await repo.transitionPrimaryRemoteWrite(op.key, { kind: "commit", remoteId: 105, requestSnapshot: { kind: "ticket_update", request: { issueId: 105, fields: {} } } }, scope, { operationId: op.operationId, revision: 1, sourcePhase: "remote_write_started" });
         return { ok: true, createdRemoteId: 105 };
       },
       reconcileRemote: async () => ({ ok: true, remoteId: 105, canonical: {} }),
@@ -87,7 +89,11 @@ suite("RT-08: Concurrency and CAS Safety (syncConcurrency.test.ts)", () => {
 
     const mockHandler: any = {
       prepare: async () => ({ ok: true, prepared: {} }),
-      executeRemoteWrite: async () => ({ ok: true, createdRemoteId: 106 }),
+      executeRemoteWrite: async (op: any) => {
+        await repo.transitionPrimaryRemoteWrite(op.key, { kind: "start", requestSnapshot: { kind: "ticket_update", request: { issueId: 106, fields: {} } } }, scope, { operationId: op.operationId, revision: 1, sourcePhase: op.phase });
+        await repo.transitionPrimaryRemoteWrite(op.key, { kind: "commit", remoteId: 106, requestSnapshot: { kind: "ticket_update", request: { issueId: 106, fields: {} } } }, scope, { operationId: op.operationId, revision: 1, sourcePhase: "remote_write_started" });
+        return { ok: true, createdRemoteId: 106 };
+      },
       reconcileRemote: async () => ({ ok: true, remoteId: 106, canonical: {} }),
       finalizeLocal: async () => ({ ok: true }),
     };

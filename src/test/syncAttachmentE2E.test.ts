@@ -1,4 +1,7 @@
 import * as assert from "assert";
+import * as fs from "fs";
+import * as os from "os";
+import * as path from "path";
 import * as vscode from "vscode";
 import { SyncCoordinator } from "../app/ticketSync/syncCoordinator";
 import { TicketCreateHandler } from "../app/ticketSync/operationHandlers";
@@ -147,6 +150,9 @@ suite("RT-A: Attachment E2E Pipeline (syncAttachmentE2E.test.ts)", () => {
     const uploadedTokens: string[] = [];
     let createdIssuePayload: any = undefined;
 
+    const tmpFile = path.join(os.tmpdir(), "rt-a-test.png");
+    fs.writeFileSync(tmpFile, "RT-A test content");
+
     const handler = new TicketCreateHandler();
     const coordinator = new SyncCoordinator({
       repository: repo,
@@ -161,7 +167,7 @@ suite("RT-A: Attachment E2E Pipeline (syncAttachmentE2E.test.ts)", () => {
       description: "Description text",
       metadata: { tracker: "Feature", priority: "High", status: "New", start_date: "", due_date: "", children: [] },
       attachments: [
-        { kind: "file", filePath: "/path/to/image1.png", filename: "image1.png", contentType: "image/png" },
+        { kind: "file", filePath: tmpFile, filename: "image1.png", contentType: "image/png" },
         { kind: "token", token: "pre-uploaded-token-123", filename: "existing.png", contentType: "image/png" },
       ],
     };
@@ -187,6 +193,7 @@ suite("RT-A: Attachment E2E Pipeline (syncAttachmentE2E.test.ts)", () => {
     const mockCreateDeps: any = {
       listIssueStatuses: async () => [{ id: 1, name: "New" }],
       listTrackers: async () => [{ id: 2, name: "Feature" }],
+      getProjectTrackers: async () => [{ id: 2, name: "Feature" }],
       listIssuePriorities: async () => [{ id: 3, name: "High" }],
       uploadFile: async (filePath: string) => ({ token: "file-token-999", filename: "image1.png", contentType: "image/png" }),
       createIssue: async (input: any) => {

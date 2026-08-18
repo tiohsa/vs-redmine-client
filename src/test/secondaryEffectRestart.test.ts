@@ -1,4 +1,7 @@
 import * as assert from "assert";
+import * as fs from "fs";
+import * as os from "os";
+import * as path from "path";
 import { SyncCoordinator } from "../app/ticketSync/syncCoordinator";
 import { TicketCreateHandler } from "../app/ticketSync/operationHandlers";
 import { createSyncOperationRepository } from "../app/ticketSync/syncRepository";
@@ -13,6 +16,9 @@ suite("RT-04: Secondary Effect Restart Safety (secondaryEffectRestart.test.ts)",
     const memento = createTestMemento();
     initializeOfflineSyncStore(memento, scope);
     const repo = createSyncOperationRepository();
+
+    const tmpFile = path.join(os.tmpdir(), "rt-04-test.png");
+    fs.writeFileSync(tmpFile, "RT-04 test file");
 
     let uploadCount = 0;
     let createIssueCalls = 0;
@@ -29,7 +35,7 @@ suite("RT-04: Secondary Effect Restart Safety (secondaryEffectRestart.test.ts)",
       description: "Desc",
       metadata: { tracker: "Bug", priority: "Normal", status: "New", start_date: "", due_date: "", children: [] },
       attachments: [
-        { kind: "file", filePath: "/tmp/test.png", filename: "test.png", contentType: "image/png" },
+        { kind: "file", filePath: tmpFile, filename: "test.png", contentType: "image/png" },
       ],
       uploadTokens: [
         // 既にアップロード完了して token が記録されている状態

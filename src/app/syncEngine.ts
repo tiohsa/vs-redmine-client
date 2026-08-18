@@ -3,6 +3,7 @@ import {
   SyncCoordinator,
   type SyncAllStopReason,
 } from "./ticketSync/syncCoordinator";
+import type { SyncOperationRepository } from "./ticketSync/syncRepository";
 import {
   createTicketSyncService,
   type TicketSyncService,
@@ -85,6 +86,10 @@ export class SyncEngine {
 
   public ticketService(): Pick<TicketSyncService, "syncQueueItem" | "syncAll" | "resolveCommitUnknown"> {
     return this.tickets;
+  }
+
+  public getRepository(): SyncOperationRepository {
+    return this.coordinator.getRepository();
   }
 
   public async resolveCommentCommitUnknown(input: {

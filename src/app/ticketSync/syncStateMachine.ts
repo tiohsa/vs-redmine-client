@@ -17,7 +17,7 @@ export const retainDurableEffectsForRetry = (
     (e) =>
       e.state === "committed" ||
       e.state === "commit_unknown" ||
-      (e.state === "failed" && e.failure?.disposition === "retryable") ||
+      e.state === "failed" ||
       e.state === "compensation_started" ||
       e.state === "compensation_unknown",
   );
@@ -30,10 +30,12 @@ const ALLOWED_TRANSITIONS: Record<GenericSyncPhase, GenericLifecycleAction["kind
     "begin_preparation",
     "start_normal_remote_write",
     "abort_before_remote_write",
+    "start_explicit_retry_remote_write",
   ],
   preparing: [
     "start_normal_remote_write",
     "abort_before_remote_write",
+    "start_explicit_retry_remote_write",
   ],
   remote_write_started: [
     "record_remote_commit",

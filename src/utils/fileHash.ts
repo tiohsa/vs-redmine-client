@@ -6,25 +6,25 @@ export interface FileContentIdentity {
   contentSize: number;
 }
 
-export const computeFileHashAndSize = (filePath: string): FileContentIdentity => {
+export const computeFileHashAndSize = (filePath: string): FileContentIdentity | undefined => {
   try {
     if (fs.existsSync(filePath)) {
       const buffer = fs.readFileSync(filePath);
       return computeBufferHashAndSize(buffer);
     }
   } catch {
-    // fallback
+    // ignore
   }
-  return computeBufferHashAndSize(Buffer.from(filePath));
+  return undefined;
 };
 
 export const computeFileHashAndSizeAsync = async (
   filePath: string,
-): Promise<FileContentIdentity> => {
+): Promise<FileContentIdentity | undefined> => {
   return new Promise((resolve) => {
     try {
       if (!fs.existsSync(filePath)) {
-        return resolve(computeBufferHashAndSize(Buffer.from(filePath)));
+        return resolve(undefined);
       }
       const hash = crypto.createHash("sha256");
       let size = 0;
@@ -39,9 +39,9 @@ export const computeFileHashAndSizeAsync = async (
           contentSize: size,
         });
       });
-      stream.on("error", () => resolve(computeBufferHashAndSize(Buffer.from(filePath))));
+      stream.on("error", () => resolve(undefined));
     } catch {
-      resolve(computeBufferHashAndSize(Buffer.from(filePath)));
+      resolve(undefined);
     }
   });
 };
