@@ -13,7 +13,7 @@ import type { TicketSyncOutcome, TicketSyncQueueKey } from "./ticketSync/ticketS
 import type { CommentSaveDependencies } from "../views/commentSaveSync";
 import type { SyncOutcome } from "./ticketSync/syncOperationTypes";
 import { EffectResolution, TicketCreateHandler, TicketUpdateHandler } from "./ticketSync/operationHandlers";
-import type { DurableSyncEffectState } from "./syncEffects";
+import type { DurableSyncEffectState, RecoveryItem } from "./syncEffects";
 
 export type SyncEngineKey =
   | TicketSyncQueueKey
@@ -163,6 +163,10 @@ export class SyncEngine {
         comment: this.comments,
       },
     }) as any;
+  }
+
+  public getRecoveryItems(key: SyncEngineKey, context: SyncContext): RecoveryItem[] {
+    return this.coordinator.getRecoveryItems(key as any, context);
   }
 
   public async syncAll(context: SyncContext, options?: SyncAllEngineOptions): Promise<SyncAllEngineOutcome> {

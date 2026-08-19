@@ -38,6 +38,7 @@ type SyncUnsyncedFileOptions = {
   onTicketCreated?: () => void;
   onSubjectUpdated?: (ticketId: number, subject: string) => void;
   createTicketSyncService?: typeof createTicketSyncService;
+  createSyncEngine?: typeof createSyncEngine;
 };
 
 const normalizeNewTicketSyncFailureMessage = (message?: string): string => {
@@ -151,93 +152,97 @@ const resolveSecondaryEffectsInteractive = async (
   key: UnsyncedFileSyncKey,
   operationScope: string,
 ): Promise<Awaited<ReturnType<typeof engine.syncOne>> | undefined> => {
-  const repo = engine.getRepository();
-  const op = repo.getOperation(key as any, operationScope);
-  if (!op || !op.effects) {
-    return undefined;
-  }
-  const secondaryEffects = op.effects.filter(
-    (e) => !isPrimaryEffectKind(e.kind) && (e.state === "failed" || e.state === "commit_unknown"),
-  );
-  if (secondaryEffects.length === 0) {
+  const syncContext = { connectionScope: operationScope };
+  const items = engine.getRecoveryItems(key as any, syncContext);
+  const secondaryItems = items.filter((item) => !isPrimaryEffectKind(item.effectKind) && item.allowedActions.length > 0);
+  if (secondaryItems.length === 0) {
     return undefined;
   }
 
   const retryLabel = vscode.l10n.t("Retry");
   const linkLabel = vscode.l10n.t("Link existing ID");
 
-  for (const effect of secondaryEffects) {
-    if (effect.state === "failed") {
-      if (effect.failure?.disposition === "retryable") {
-        const choice = await vscode.window.showWarningMessage(
-          vscode.l10n.t("Secondary operation '{0}' failed: {1}. Do you want to retry?", effect.effectId, effect.failure?.detail ?? ""),
-          { modal: true },
-          retryLabel,
-        );
-        if (choice === retryLabel) {
+  let resolvedAny = false;
+
+  for (const item of secondaryItems) {
+    const actions = item.allowedActions;
+    if (actions.length === 0) {
+      continue;
+    }
+
+    if (actions.includes("link_remote_child")) {
+      const choices = [linkLabel];
+      if (actions.includes("retry_effect")) {
+        choices.push(retryLabel);
+      }
+      const choice = await vscode.window.showWarningMessage(
+        vscode.l10n.t("Child issue creation outcome is unknown. Link existing child ticket ID?"),
+        { modal: true },
+        ...choices,
+      );
+      if (choice === linkLabel) {
+        const rawId = await vscode.window.showInputBox({
+          prompt: vscode.l10n.t("Enter the Redmine child ticket ID."),
+          validateInput: (val) => /^\d+$/.test(val) && Number(val) > 0 ? undefined : vscode.l10n.t("Enter a positive ticket ID."),
+        });
+        if (rawId) {
           const outcome = await engine.resolveEffect({
             key: key as any,
-            operationId: op.operationId,
-            operationRevision: effect.operationRevision,
-            effectId: effect.effectId,
-            expectedEffectState: effect.state,
-            context: { connectionScope: operationScope },
-            resolution: { kind: "retry_effect" },
+            operationId: item.operationId,
+            operationRevision: item.operationRevision,
+            effectId: item.effectId,
+            expectedEffectState: item.state,
+            context: syncContext,
+            resolution: { kind: "link_remote_child", remoteId: Number(rawId) },
           });
+          resolvedAny = true;
           if (outcome.kind !== "completed" && outcome.kind !== "no_change" && outcome.kind !== "remote_committed") {
             return outcome;
           }
+        }
+      } else if (choice === retryLabel) {
+        const outcome = await engine.resolveEffect({
+          key: key as any,
+          operationId: item.operationId,
+          operationRevision: item.operationRevision,
+          effectId: item.effectId,
+          expectedEffectState: item.state,
+          context: syncContext,
+          resolution: { kind: "retry_effect" },
+        });
+        resolvedAny = true;
+        if (outcome.kind !== "completed" && outcome.kind !== "no_change" && outcome.kind !== "remote_committed") {
+          return outcome;
         }
       }
-    } else if (effect.state === "commit_unknown") {
-      if (effect.kind === "child_create") {
-        const choice = await vscode.window.showWarningMessage(
-          vscode.l10n.t("Child issue creation outcome is unknown. Link existing child ticket ID?"),
-          { modal: true },
-          linkLabel,
-        );
-        if (choice === linkLabel) {
-          const rawId = await vscode.window.showInputBox({
-            prompt: vscode.l10n.t("Enter the Redmine child ticket ID."),
-            validateInput: (val) => /^\d+$/.test(val) && Number(val) > 0 ? undefined : vscode.l10n.t("Enter a positive ticket ID."),
-          });
-          if (rawId) {
-            const outcome = await engine.resolveEffect({
-              key: key as any,
-              operationId: op.operationId,
-              operationRevision: effect.operationRevision,
-              effectId: effect.effectId,
-              expectedEffectState: effect.state,
-              context: { connectionScope: operationScope },
-              resolution: { kind: "link_remote_child", remoteId: Number(rawId) },
-            });
-            if (outcome.kind !== "completed" && outcome.kind !== "no_change" && outcome.kind !== "remote_committed") {
-              return outcome;
-            }
-          }
-        }
-      } else {
-        const choice = await vscode.window.showWarningMessage(
-          vscode.l10n.t("Upload outcome for '{0}' is unknown. Retry?", effect.effectId),
-          { modal: true },
-          retryLabel,
-        );
-        if (choice === retryLabel) {
-          const outcome = await engine.resolveEffect({
-            key: key as any,
-            operationId: op.operationId,
-            operationRevision: effect.operationRevision,
-            effectId: effect.effectId,
-            expectedEffectState: effect.state,
-            context: { connectionScope: operationScope },
-            resolution: { kind: "retry_effect" },
-          });
-          if (outcome.kind !== "completed" && outcome.kind !== "no_change" && outcome.kind !== "remote_committed") {
-            return outcome;
-          }
+    } else if (actions.includes("retry_effect")) {
+      const choice = await vscode.window.showWarningMessage(
+        item.state === "failed"
+          ? vscode.l10n.t("Secondary operation '{0}' failed: {1}. Do you want to retry?", item.effectId, item.message ?? "")
+          : vscode.l10n.t("Upload outcome for '{0}' is unknown. Retry?", item.effectId),
+        { modal: true },
+        retryLabel,
+      );
+      if (choice === retryLabel) {
+        const outcome = await engine.resolveEffect({
+          key: key as any,
+          operationId: item.operationId,
+          operationRevision: item.operationRevision,
+          effectId: item.effectId,
+          expectedEffectState: item.state,
+          context: syncContext,
+          resolution: { kind: "retry_effect" },
+        });
+        resolvedAny = true;
+        if (outcome.kind !== "completed" && outcome.kind !== "no_change" && outcome.kind !== "remote_committed") {
+          return outcome;
         }
       }
     }
+  }
+
+  if (resolvedAny) {
+    return engine.syncOne(key as any, syncContext);
   }
   return undefined;
 };
@@ -262,12 +267,13 @@ const syncUnsyncedFileAtScope = async (
 ): Promise<SyncUnsyncedFileResult | undefined> => {
   const { syncKey } = item;
   const serviceFactory = options.createTicketSyncService ?? createTicketSyncService;
+  const engineFactory = options.createSyncEngine ?? createSyncEngine;
 
   if (syncKey.kind === "ticket") {
     const previousPhase = getOfflineSyncQueue(operationScope).tickets.get(
       syncKey.ticketId,
     )?.phase;
-    const engine = createSyncEngine({ tickets: serviceFactory() });
+    const engine = engineFactory({ tickets: serviceFactory() });
     let outcome = await engine.syncOne(
       syncKey,
       { connectionScope: operationScope },
@@ -332,7 +338,7 @@ const syncUnsyncedFileAtScope = async (
       (candidate) =>
         syncKey.documentUri && candidate.documentUri === syncKey.documentUri,
     )?.phase;
-    const engine = createSyncEngine({ tickets: serviceFactory({ rewrite: rewriteDeps }) });
+    const engine = engineFactory({ tickets: serviceFactory({ rewrite: rewriteDeps }) });
     let outcome = await engine.syncOne(
       syncKey,
       { connectionScope: operationScope },
@@ -394,12 +400,11 @@ const syncUnsyncedFileAtScope = async (
 
   if (syncKey.kind === "comment") {
     const previousPhase = getOfflineSyncQueue(operationScope).comments.find((comment) =>
-      comment.ticketId === syncKey.ticketId && (
-        (syncKey.commentId !== undefined && comment.commentId === syncKey.commentId) ||
-        (syncKey.commentId === undefined && comment.documentUri === syncKey.documentUri)
-      ),
+      comment.ticketId === syncKey.ticketId &&
+      ((syncKey.commentId !== undefined && comment.commentId === syncKey.commentId) ||
+        (syncKey.documentUri !== undefined && comment.documentUri === syncKey.documentUri)),
     )?.phase;
-    const engine = createSyncEngine();
+    const engine = engineFactory();
     let outcome = await engine.syncOne(syncKey, { connectionScope: operationScope });
     if (
       outcome.kind === "commit_unknown" &&

@@ -25,8 +25,14 @@ import {
   UnifiedSyncOperation,
 } from "./syncOperationTypes";
 import {
+  canRetryEffect,
   DurableSyncEffectState,
+  getEffectsForRevision,
+  getPrimaryEffectForRevision,
+  getRecoveryItemsForOperation,
   isPrimaryEffectKind,
+  isPrimaryRecoveryRequired,
+  RecoveryItem,
 } from "../syncEffects";
 import type { SyncContext } from "./ports";
 
@@ -81,6 +87,15 @@ export class SyncCoordinator {
     return this.repository;
   }
 
+  public getRecoveryItems(key: SyncOperationKey, context: SyncContext): RecoveryItem[] {
+    const scope = context.connectionScope;
+    const op = this.repository.getOperation(key, scope);
+    if (!op) {
+      return [];
+    }
+    return getRecoveryItemsForOperation(op);
+  }
+
   public async sync(
     key: SyncOperationKey,
     context: SyncContext,
@@ -107,20 +122,16 @@ export class SyncCoordinator {
       return { kind: "failed_before_commit", error };
     }
 
+    const currentRevision = operation.intentRevision ?? operation.revision ?? 1;
+    const activeEffects = getEffectsForRevision(operation, currentRevision);
+
     // 1. 親がコミット済みで、不確実・失敗した child effect が存在する場合のみ remote_committed を返して自動同期をブロック (INV-N01, INV-N02)
-    const hasUnresolvedChildEffect = (operation.effects ?? []).some(
+    const hasUnresolvedChildEffect = activeEffects.some(
       (e) =>
         (e.kind === "child_create" || (typeof e.effectId === "string" && e.effectId.startsWith("child-create"))) &&
         (e.state === "commit_unknown" || e.state === "failed" || e.state === "compensation_unknown" || e.state === "compensation_started"),
     );
-    const primary = (operation.effects ?? []).find(
-      (e) =>
-        e.kind === "ticket_create" ||
-        e.kind === "ticket_update" ||
-        e.kind === "comment_create" ||
-        e.kind === "comment_update" ||
-        (typeof e.effectId === "string" && (e.effectId.startsWith("ticket-") || e.effectId.startsWith("comment-"))),
-    );
+    const primary = getPrimaryEffectForRevision(operation, currentRevision);
     // INV-N12: compensated な Primary Effect は committed として誤判定しない
     const isPrimaryCompensated = primary?.state === "compensated";
     const isParentCommitted = !isPrimaryCompensated && (
@@ -167,7 +178,7 @@ export class SyncCoordinator {
       };
     }
 
-    const failedSecondary = (operation.effects ?? []).find(
+    const failedSecondary = activeEffects.find(
       (e) => !isPrimaryEffectKind(e.kind) && e.state === "failed"
     );
     if (failedSecondary) {
@@ -180,18 +191,7 @@ export class SyncCoordinator {
     }
 
     // R-04 / INV-04: failed / commit_unknown な Durable Effect を持つ operation は通常の sync() から自動再送できない (explicit recovery のみ)
-    const primaryEffect = operation.effects?.find(
-      (e) => isPrimaryEffectKind(e.kind) || e.effectId === "ticket-create" || e.effectId === "ticket-update" || e.effectId === "comment-create" || e.effectId === "comment-update",
-    );
-    if (primaryEffect?.state === "failed") {
-      return {
-        kind: "failed_before_commit",
-        error: new Error(primaryEffect.failure?.detail ?? "A previous mutation failed. Please resolve or retry explicitly."),
-        ticketId: operation.ticketId,
-        commentId: operation.commentId,
-      };
-    }
-    if (operation.phase === "commit_unknown" || operation.phase === "remote_write_started" || primaryEffect?.state === "commit_unknown") {
+    if (operation.phase === "commit_unknown" || operation.phase === "remote_write_started") {
       return {
         kind: "commit_unknown",
         operationId: operation.operationId,
@@ -515,22 +515,9 @@ export class SyncCoordinator {
   }): Promise<SyncOutcome> {
     const scope = input.context.connectionScope;
     const op = this.repository.getOperation(input.key, scope);
-    const primaryEffect = op?.effects?.find(
-      (e) =>
-        e.kind === "ticket_create" ||
-        e.kind === "ticket_update" ||
-        e.kind === "comment_create" ||
-        e.kind === "comment_update" ||
-        e.effectId === "ticket-create" ||
-        e.effectId === "ticket-update" ||
-        e.effectId === "comment-create" ||
-        e.effectId === "comment-update",
-    );
-    const isRecoverable = op && (
-      op.phase === "commit_unknown" ||
-      primaryEffect?.state === "commit_unknown" ||
-      primaryEffect?.state === "failed"
-    );
+    const currentRevision = op?.intentRevision ?? op?.revision ?? 1;
+    const primaryEffect = op ? getPrimaryEffectForRevision(op, currentRevision) : undefined;
+    const isRecoverable = op && isPrimaryRecoveryRequired(op, primaryEffect);
     if (!op || !isRecoverable) {
       return {
         kind: "commit_unknown",
@@ -551,22 +538,9 @@ export class SyncCoordinator {
     const runner = (input as any).runInConnectionScope ?? runWithConnectionScope;
     const flightPromise = runner(scope, async (): Promise<SyncOutcome> => {
       const freshOp = this.repository.getOperation(input.key, scope);
-      const freshPrimaryEffect = freshOp?.effects?.find(
-        (e) =>
-          e.kind === "ticket_create" ||
-          e.kind === "ticket_update" ||
-          e.kind === "comment_create" ||
-          e.kind === "comment_update" ||
-          e.effectId === "ticket-create" ||
-          e.effectId === "ticket-update" ||
-          e.effectId === "comment-create" ||
-          e.effectId === "comment-update",
-      );
-      const isFreshRecoverable = freshOp && (
-        freshOp.phase === "commit_unknown" ||
-        freshPrimaryEffect?.state === "commit_unknown" ||
-        freshPrimaryEffect?.state === "failed"
-      );
+      const freshRevision = freshOp?.intentRevision ?? freshOp?.revision ?? 1;
+      const freshPrimaryEffect = freshOp ? getPrimaryEffectForRevision(freshOp, freshRevision) : undefined;
+      const isFreshRecoverable = freshOp && isPrimaryRecoveryRequired(freshOp, freshPrimaryEffect);
       if (!freshOp || !isFreshRecoverable) {
         return {
           kind: "commit_unknown",
@@ -583,8 +557,8 @@ export class SyncCoordinator {
 
       if (input.resolution?.kind === "retry_remote_write") {
         // INV-N03, INV-N04: 未解決の Prerequisite Effect (attachment, image) があれば Primary retry を拒絶
-        const effects = freshOp.effects ?? [];
-        const hasUnresolvedPrereq = effects.some(
+        const activeEffects = getEffectsForRevision(freshOp, freshRevision);
+        const hasUnresolvedPrereq = activeEffects.some(
           (e) =>
             (e.kind === "attachment_upload" || e.kind === "image_upload" || (typeof e.effectId === "string" && (e.effectId.startsWith("attachment") || e.effectId.startsWith("image")))) &&
             (e.state === "started" || e.state === "commit_unknown" || e.state === "compensation_started" || e.state === "compensation_unknown" || e.state === "planned"),
@@ -600,17 +574,7 @@ export class SyncCoordinator {
         }
 
         // Primary が既に committed なら Primary remote write は再実行しない
-        const primaryEffect = effects.find(
-          (e) =>
-            e.kind === "ticket_create" ||
-            e.kind === "ticket_update" ||
-            e.kind === "comment_create" ||
-            e.kind === "comment_update" ||
-            e.effectId === "ticket-create" ||
-            e.effectId === "ticket-update" ||
-            e.effectId === "comment-create" ||
-            e.effectId === "comment-update",
-        );
+        const primaryEffect = getPrimaryEffectForRevision(freshOp, freshRevision);
         // INV-N12: compensated は committed として誤判定しない
         // primaryEffect.state が "committed" の場合、"compensated" には同時になれないため、
         // legacy fallback (effects未記録) のみ createdRemoteId を使う
@@ -627,12 +591,13 @@ export class SyncCoordinator {
           };
         }
 
-        if (primaryEffect?.state === "failed" && primaryEffect.failure?.disposition === "non_retriable") {
+        // D-04 / R-04: Legacy uncertain + identity不足、または non_retriable failure、または missing disposition は retry 拒絶
+        if (primaryEffect && !canRetryEffect(primaryEffect)) {
           return {
             kind: "failed_before_commit",
             ticketId: freshOp.ticketId,
             commentId: freshOp.commentId,
-            error: new Error("Cannot retry non-retriable failure."),
+            error: new Error(primaryEffect.failure?.detail ?? "Cannot retry mutation without verifiable request identity or retryable disposition."),
           };
         }
 
@@ -854,7 +819,7 @@ export class SyncCoordinator {
           input.key,
           { kind: "record_reconciled_identity", remoteId: reconciled.remoteId, projectId: reconciled.projectId, remoteUpdatedAt: reconciled.remoteUpdatedAt },
           scope,
-          { operationId: freshOp.operationId, sourcePhase: "commit_unknown", revision: freshOp.intentRevision ?? freshOp.revision },
+          { operationId: freshOp.operationId, sourcePhase: freshOp.phase, revision: freshOp.intentRevision ?? freshOp.revision },
         );
         if (!transitioned) {
           return { kind: "failed_before_commit", error: new Error("Failed to record reconciled identity") };
@@ -957,7 +922,9 @@ export class SyncCoordinator {
     }
 
     // 4. Effect existence & state fence
-    const effect = (op.effects ?? []).find((e) => e.effectId === input.effectId);
+    const effect = (op.effects ?? []).find(
+      (e) => e.effectId === input.effectId && (e.operationRevision ?? currentRevision) === input.operationRevision,
+    );
     if (!effect) {
       return {
         kind: "failed_before_commit",
@@ -976,6 +943,13 @@ export class SyncCoordinator {
       return {
         kind: "failed_before_commit",
         error: new Error(`Effect revision mismatch: expected ${effect.operationRevision}, got ${input.operationRevision}`),
+      };
+    }
+
+    if (input.resolution.kind === "retry_effect" && !canRetryEffect(effect)) {
+      return {
+        kind: "failed_before_commit",
+        error: new Error(effect.failure?.detail ?? `Effect ${input.effectId} is not retryable without valid identity or retryable disposition.`),
       };
     }
 

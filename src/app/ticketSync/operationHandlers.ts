@@ -47,10 +47,12 @@ import { validateComment } from "../../utils/commentValidation";
 import { resolveUploadSummary } from "../../views/ticketSync/ticketImageUploadSync";
 import { containsConflictMarkers } from "../../utils/threeWayMerge";
 import { computeNotesHash } from "../../utils/notesHash";
-import { computeBufferHashAndSize, computeFileHashAndSize, computeFileHashAndSizeAsync } from "../../utils/fileHash";
+import { computeBufferHashAndSize, computeFileHashAndSizeAsync } from "../../utils/fileHash";
 import { classifyFailureDisposition } from "../../utils/redmineErrors";
 import type { TicketUpdateFields, UploadToken } from "../../redmine/types";
 import {
+  getEffectsForRevision,
+  getPrimaryEffectForRevision,
   isPrimaryEffectKind,
   type ChildTicketCreateRequestSnapshot,
   type CommentCreateRequestSnapshot,
@@ -335,9 +337,7 @@ export class TicketCreateHandler implements OperationHandler<TicketCreateIntent,
       ? { ...defaultCreateDeps, ...deps.ticketCreate, getProjectTrackers: deps.ticketCreate.getProjectTrackers }
       : { ...defaultCreateDeps };
 
-    const primaryEffect = (operation.effects ?? []).find(
-      (e) => e.effectId === "ticket-create" || isPrimaryEffectKind(e.kind),
-    );
+    const primaryEffect = getPrimaryEffectForRevision(operation);
     const isRetry = primaryEffect?.state === "failed" || primaryEffect?.state === "commit_unknown";
 
     let resolved: any = {};
@@ -462,7 +462,7 @@ export class TicketCreateHandler implements OperationHandler<TicketCreateIntent,
       } else if (att.kind === "file") {
         const effectId = `attachment:file:${i}:${att.filePath}`;
         const currentOp = repo.getOperation(opKey, context.connectionScope) ?? operation;
-        const existingEffect = currentOp.effects?.find((e) => e.effectId === effectId);
+        const existingEffect = getEffectsForRevision(currentOp, revision).find((e) => e.effectId === effectId);
 
         if (existingEffect?.state === "committed" && existingEffect.token) {
           if (!tokens.some((t) => t.token === existingEffect.token)) {
@@ -560,7 +560,7 @@ export class TicketCreateHandler implements OperationHandler<TicketCreateIntent,
       } else if (att.kind === "clipboard") {
         const effectId = `attachment:clipboard:${i}`;
         const currentOp = repo.getOperation(opKey, context.connectionScope) ?? operation;
-        const existingEffect = currentOp.effects?.find((e) => e.effectId === effectId);
+        const existingEffect = getEffectsForRevision(currentOp, revision).find((e) => e.effectId === effectId);
 
         if (existingEffect?.state === "committed" && existingEffect.token) {
           if (!tokens.some((t) => t.token === existingEffect.token)) {
@@ -716,9 +716,7 @@ export class TicketCreateHandler implements OperationHandler<TicketCreateIntent,
     const revision = operation.intentRevision ?? operation.revision ?? 1;
 
     let createdId = operation.createdRemoteId ?? currentOp?.createdRemoteId;
-    const existingPrimaryEffect = (currentOp?.effects ?? operation.effects ?? []).find(
-      (e) => e.effectId === "ticket-create" || isPrimaryEffectKind(e.kind),
-    );
+    const existingPrimaryEffect = getPrimaryEffectForRevision(currentOp ?? operation);
     if (existingPrimaryEffect?.state === "committed" && existingPrimaryEffect.remoteId) {
       createdId = existingPrimaryEffect.remoteId;
     }
@@ -834,7 +832,7 @@ export class TicketCreateHandler implements OperationHandler<TicketCreateIntent,
       const effectId = `child-create:${ordinal}`;
 
       const currentOp = repo.getOperation(opKey, context.connectionScope) ?? operation;
-      const existingEffect = currentOp.effects?.find((e) => e.effectId === effectId);
+      const existingEffect = getEffectsForRevision(currentOp, revision).find((e) => e.effectId === effectId);
 
       if (existingEffect?.state === "committed" && existingEffect.remoteId) {
         continue;
@@ -943,7 +941,7 @@ export class TicketCreateHandler implements OperationHandler<TicketCreateIntent,
           for (let prev = ordinal - 1; prev >= 0; prev--) {
             const prevEffectId = `child-create:${prev}`;
             const opAfterFail = repo.getOperation(opKey, context.connectionScope) ?? operation;
-            const prevEffect = opAfterFail.effects?.find((e) => e.effectId === prevEffectId);
+            const prevEffect = getEffectsForRevision(opAfterFail, revision).find((e) => e.effectId === prevEffectId);
             if (prevEffect && prevEffect.state === "committed" && prevEffect.remoteId) {
               const startComp = await repo.transitionEffect(
                 opKey,
@@ -986,7 +984,7 @@ export class TicketCreateHandler implements OperationHandler<TicketCreateIntent,
 
           // 親チケットの補償 (fail-closed: INV-N12, INV-N15)
           const opAfterChildren = repo.getOperation(opKey, context.connectionScope) ?? operation;
-          const parentEffect = opAfterChildren.effects?.find((e) => e.effectId === "ticket-create");
+          const parentEffect = getPrimaryEffectForRevision(opAfterChildren, revision);
           if (parentEffect && parentEffect.state === "committed" && parentEffect.remoteId) {
             const startParentComp = await repo.transitionEffect(
               opKey,
@@ -1033,7 +1031,7 @@ export class TicketCreateHandler implements OperationHandler<TicketCreateIntent,
             }
           }
           const finalCheck = repo.getOperation(opKey, context.connectionScope);
-          const hasCompUnknown = (finalCheck?.effects ?? []).some(
+          const hasCompUnknown = (finalCheck ? getEffectsForRevision(finalCheck, revision) : []).some(
             (e) => e.state === "compensation_unknown" || e.state === "compensation_started",
           );
           if (hasCompUnknown) {
@@ -1059,7 +1057,7 @@ export class TicketCreateHandler implements OperationHandler<TicketCreateIntent,
     }
 
     const finalOp = repo.getOperation(opKey, context.connectionScope) ?? operation;
-    const finalEffects = finalOp.effects ?? [];
+    const finalEffects = getEffectsForRevision(finalOp, revision);
     const hasFailedEffects = finalEffects.some((e) => e.state === "failed");
     const hasUnknownEffects = finalEffects.some(
       (e) =>
@@ -1257,7 +1255,7 @@ export class TicketCreateHandler implements OperationHandler<TicketCreateIntent,
     const repo = deps.repository;
     const revision = operation.intentRevision ?? operation.revision ?? 1;
     const scope = context.connectionScope;
-    const effect = (operation.effects ?? []).find((e) => e.effectId === effectId);
+    const effect = getEffectsForRevision(operation, revision).find((e) => e.effectId === effectId);
     if (!effect) {
       return { kind: "failed_before_commit", error: new Error(`Effect not found: ${effectId}`) };
     }
@@ -1345,20 +1343,26 @@ export class TicketCreateHandler implements OperationHandler<TicketCreateIntent,
         if (effect.state === "failed" && effect.failure?.disposition === "non_retriable") {
           return { kind: "failed_before_commit", error: new Error("Cannot retry non-retriable failure") };
         }
-        const filePath = effect.target.filePath ?? (effect.requestSnapshot as UploadRequestSnapshot | undefined)?.filePath;
+        const snapshot = effect.requestSnapshot as UploadRequestSnapshot | undefined;
+        if (effect.state === "commit_unknown" && (!snapshot?.contentHash || snapshot.contentSize === undefined)) {
+          return {
+            kind: "failed_before_commit",
+            error: new Error(`Cannot retry uncertain upload without snapshot content hash/size for effect ${effectId}`),
+          };
+        }
+        const filePath = effect.target.filePath ?? snapshot?.filePath;
         if (!filePath) {
           return { kind: "failed_before_commit", error: new Error(`Cannot retry attachment without filePath for effect ${effectId}`) };
         }
 
         // Upload retry 前検証: hash / size
-        const currentFile = computeFileHashAndSize(filePath);
+        const currentFile = await computeFileHashAndSizeAsync(filePath);
         if (!currentFile) {
           return {
             kind: "failed_before_commit",
             error: new Error(`Cannot compute hash for file: ${filePath}`),
           };
         }
-        const snapshot = effect.requestSnapshot as UploadRequestSnapshot | undefined;
         if (snapshot?.contentHash && snapshot.contentHash !== currentFile.contentHash) {
           return {
             kind: "failed_before_commit",
@@ -1421,9 +1425,7 @@ export class TicketCreateHandler implements OperationHandler<TicketCreateIntent,
     // 3. child_create recovery
     if (effect.kind === "child_create") {
       const childSnapshot = effect.requestSnapshot as ChildTicketCreateRequestSnapshot | undefined;
-      const parentEffect = (operation.effects ?? []).find(
-        (e) => e.effectId === "ticket-create" || e.kind === "ticket_create",
-      );
+      const parentEffect = getPrimaryEffectForRevision(operation, revision);
       const parentTicketId =
         childSnapshot?.parentTicketId ??
         effect.target.parentTicketId ??
@@ -1582,11 +1584,13 @@ export class TicketCreateHandler implements OperationHandler<TicketCreateIntent,
     context: OperationHandlerContext,
     deps: OperationHandlerDeps & { repository: SyncOperationRepository },
   ): Promise<SyncOutcome> {
-    const parentCommitted = (op.effects ?? []).some(
-      (e) => (e.effectId === "ticket-create" || e.kind === "ticket_create") && e.state === "committed"
-    ) || (op.createdRemoteId !== undefined && op.createdRemoteId > 0);
+    const activeEffects = getEffectsForRevision(op);
+    const primary = getPrimaryEffectForRevision(op);
+    const parentCommitted =
+      primary?.state === "committed" ||
+      (op.createdRemoteId !== undefined && op.createdRemoteId > 0);
 
-    const hasUnresolved = (op.effects ?? []).some(
+    const hasUnresolved = activeEffects.some(
       (e) => e.state === "commit_unknown" || e.state === "failed" || e.state === "started" || e.state === "compensation_started" || e.state === "compensation_unknown"
     );
 
@@ -1673,9 +1677,7 @@ export class TicketUpdateHandler implements OperationHandler<TicketUpdateIntent,
         }
       : { ...defaultTicketDeps };
 
-    const primaryEffect = (operation.effects ?? []).find(
-      (e) => e.effectId === "ticket-update" || isPrimaryEffectKind(e.kind),
-    );
+    const primaryEffect = getPrimaryEffectForRevision(operation);
     const isRetry = primaryEffect?.state === "failed" || primaryEffect?.state === "commit_unknown";
 
     let request: IssueUpdateInput;
@@ -1896,9 +1898,7 @@ export class TicketUpdateHandler implements OperationHandler<TicketUpdateIntent,
     }
 
     const uniqueChildren = prepared.uniqueChildren;
-    const existingPrimaryEffect = (currentOp?.effects ?? operation.effects ?? []).find(
-      (e) => e.effectId === "ticket-update" || isPrimaryEffectKind(e.kind),
-    );
+    const existingPrimaryEffect = getPrimaryEffectForRevision(currentOp ?? operation);
     if (!existingPrimaryEffect || existingPrimaryEffect.state !== "committed") {
       const isRetry = existingPrimaryEffect?.state === "failed" || existingPrimaryEffect?.state === "commit_unknown";
       const requestToUse: IssueUpdateInput = (existingPrimaryEffect?.requestSnapshot as TicketUpdateRequestSnapshot | undefined)?.request
@@ -1982,7 +1982,7 @@ export class TicketUpdateHandler implements OperationHandler<TicketUpdateIntent,
         const effectId = `child-create:${ordinal}`;
 
         const currentOp = repo.getOperation(opKey, context.connectionScope) ?? operation;
-        const existingEffect = currentOp.effects?.find((e) => e.effectId === effectId);
+        const existingEffect = getEffectsForRevision(currentOp, revision).find((e) => e.effectId === effectId);
 
         if (existingEffect?.state === "committed" && existingEffect.remoteId) {
           continue;
@@ -2370,7 +2370,7 @@ export class TicketUpdateHandler implements OperationHandler<TicketUpdateIntent,
     const repo = deps.repository;
     const revision = operation.intentRevision ?? operation.revision ?? 1;
     const scope = context.connectionScope;
-    const effect = (operation.effects ?? []).find((e) => e.effectId === effectId);
+    const effect = getEffectsForRevision(operation, revision).find((e) => e.effectId === effectId);
     if (!effect) {
       return { kind: "failed_before_commit", error: new Error(`Effect not found: ${effectId}`) };
     }
@@ -2423,19 +2423,25 @@ export class TicketUpdateHandler implements OperationHandler<TicketUpdateIntent,
         if (effect.state === "failed" && effect.failure?.disposition === "non_retriable") {
           return { kind: "failed_before_commit", error: new Error("Cannot retry non-retriable failure") };
         }
-        const filePath = effect.target.filePath ?? (effect.requestSnapshot as UploadRequestSnapshot | undefined)?.filePath;
+        const snapshot = effect.requestSnapshot as UploadRequestSnapshot | undefined;
+        if (effect.state === "commit_unknown" && (!snapshot?.contentHash || snapshot.contentSize === undefined)) {
+          return {
+            kind: "failed_before_commit",
+            error: new Error(`Cannot retry uncertain upload without snapshot content hash/size for effect ${effectId}`),
+          };
+        }
+        const filePath = effect.target.filePath ?? snapshot?.filePath;
         if (!filePath) {
           return { kind: "failed_before_commit", error: new Error(`Cannot retry attachment without filePath for effect ${effectId}`) };
         }
 
-        const currentFile = computeFileHashAndSize(filePath);
+        const currentFile = await computeFileHashAndSizeAsync(filePath);
         if (!currentFile) {
           return {
             kind: "failed_before_commit",
             error: new Error(`Cannot compute hash for file: ${filePath}`),
           };
         }
-        const snapshot = effect.requestSnapshot as UploadRequestSnapshot | undefined;
         if (snapshot?.contentHash && snapshot.contentHash !== currentFile.contentHash) {
           return {
             kind: "failed_before_commit",
@@ -2631,11 +2637,11 @@ export class TicketUpdateHandler implements OperationHandler<TicketUpdateIntent,
     context: OperationHandlerContext,
     deps: OperationHandlerDeps & { repository: SyncOperationRepository },
   ): Promise<SyncOutcome> {
-    const parentCommitted = (op.effects ?? []).some(
-      (e) => (e.effectId === "ticket-update" || e.kind === "ticket_update") && e.state === "committed"
-    );
+    const activeEffects = getEffectsForRevision(op);
+    const primary = getPrimaryEffectForRevision(op);
+    const parentCommitted = primary?.state === "committed";
 
-    const hasUnresolved = (op.effects ?? []).some(
+    const hasUnresolved = activeEffects.some(
       (e) => e.state === "commit_unknown" || e.state === "failed" || e.state === "started" || e.state === "compensation_started" || e.state === "compensation_unknown"
     );
 
@@ -2814,7 +2820,7 @@ export class CommentCreateHandler implements OperationHandler<CommentCreateInten
 
       const effectId = `image:markdown:${ordinal}:${filePath}`;
       const currentOp = repo.getOperation(opKey, context.connectionScope) ?? operation;
-      const existingEffect = currentOp.effects?.find((e) => e.effectId === effectId);
+      const existingEffect = getEffectsForRevision(currentOp, revision).find((e) => e.effectId === effectId);
 
       if (existingEffect?.state === "committed" && existingEffect.token) {
         resolvedMap.set(filePath, {
@@ -2825,7 +2831,7 @@ export class CommentCreateHandler implements OperationHandler<CommentCreateInten
         continue;
       }
 
-      const fileId = computeFileHashAndSize(filePath);
+      const fileId = await computeFileHashAndSizeAsync(filePath);
       if (!fileId) {
         return { ok: false, error: new Error(`Failed to compute hash for image: ${filePath}`) };
       }
@@ -2951,9 +2957,7 @@ export class CommentCreateHandler implements OperationHandler<CommentCreateInten
       await repo.saveOperation(operation, context.connectionScope);
     }
 
-    const existingPrimaryEffect = (currentOp?.effects ?? operation.effects ?? []).find(
-      (e) => e.effectId === "comment-create" || isPrimaryEffectKind(e.kind),
-    );
+    const existingPrimaryEffect = getPrimaryEffectForRevision(currentOp ?? operation);
     const isRetry = existingPrimaryEffect?.state === "failed" || existingPrimaryEffect?.state === "commit_unknown";
 
     const requestSnapshot: CommentCreateRequestSnapshot = (existingPrimaryEffect?.requestSnapshot as CommentCreateRequestSnapshot | undefined) ?? {
@@ -3059,7 +3063,7 @@ export class CommentCreateHandler implements OperationHandler<CommentCreateInten
     const commentDeps = { ...defaultCommentDeps, ...deps?.comment };
 
     // INV-03: Actual submitted request を使用して reconcile する (C-02)
-    const primaryEffect = operation.effects?.find((e) => e.effectId === "comment-create" || e.kind === "comment_create");
+    const primaryEffect = getPrimaryEffectForRevision(operation);
     const submittedBody = (primaryEffect?.requestSnapshot as CommentCreateRequestSnapshot | undefined)?.submittedBody
       ?? primaryEffect?.target?.submittedBody
       ?? operation.intent?.body
@@ -3146,7 +3150,7 @@ export class CommentCreateHandler implements OperationHandler<CommentCreateInten
     const repo = deps.repository;
     const revision = operation.intentRevision ?? operation.revision ?? 1;
     const scope = context.connectionScope;
-    const effect = (operation.effects ?? []).find((e) => e.effectId === effectId);
+    const effect = getEffectsForRevision(operation, revision).find((e) => e.effectId === effectId);
     if (!effect) {
       return { kind: "failed_before_commit", error: new Error(`Effect not found: ${effectId}`) };
     }
@@ -3198,19 +3202,25 @@ export class CommentCreateHandler implements OperationHandler<CommentCreateInten
         if (effect.state === "failed" && effect.failure?.disposition === "non_retriable") {
           return { kind: "failed_before_commit", error: new Error("Cannot retry non-retriable failure") };
         }
-        const filePath = effect.target.filePath ?? (effect.requestSnapshot as UploadRequestSnapshot | undefined)?.filePath;
+        const snapshot = effect.requestSnapshot as UploadRequestSnapshot | undefined;
+        if (effect.state === "commit_unknown" && (!snapshot?.contentHash || snapshot.contentSize === undefined)) {
+          return {
+            kind: "failed_before_commit",
+            error: new Error(`Cannot retry uncertain upload without snapshot content hash/size for effect ${effectId}`),
+          };
+        }
+        const filePath = effect.target.filePath ?? snapshot?.filePath;
         if (!filePath) {
           return { kind: "failed_before_commit", error: new Error(`Cannot retry image upload without filePath for effect ${effectId}`) };
         }
 
-        const currentFile = computeFileHashAndSize(filePath);
+        const currentFile = await computeFileHashAndSizeAsync(filePath);
         if (!currentFile) {
           return {
             kind: "failed_before_commit",
             error: new Error(`Cannot compute hash for image: ${filePath}`),
           };
         }
-        const snapshot = effect.requestSnapshot as UploadRequestSnapshot | undefined;
         if (snapshot?.contentHash && snapshot.contentHash !== currentFile.contentHash) {
           return {
             kind: "failed_before_commit",
@@ -3407,7 +3417,7 @@ export class CommentUpdateHandler implements OperationHandler<CommentUpdateInten
 
       const effectId = `image:markdown:${ordinal}:${filePath}`;
       const currentOp = repo.getOperation(opKey, context.connectionScope) ?? operation;
-      const existingEffect = currentOp.effects?.find((e) => e.effectId === effectId);
+      const existingEffect = getEffectsForRevision(currentOp, revision).find((e) => e.effectId === effectId);
 
       if (existingEffect?.state === "committed" && existingEffect.token) {
         resolvedMap.set(filePath, {
@@ -3418,7 +3428,7 @@ export class CommentUpdateHandler implements OperationHandler<CommentUpdateInten
         continue;
       }
 
-      const fileId = computeFileHashAndSize(filePath);
+      const fileId = await computeFileHashAndSizeAsync(filePath);
       if (!fileId) {
         return { ok: false, error: new Error(`Failed to compute hash for image: ${filePath}`) };
       }
@@ -3544,9 +3554,7 @@ export class CommentUpdateHandler implements OperationHandler<CommentUpdateInten
       await repo.saveOperation(operation, context.connectionScope);
     }
 
-    const existingPrimaryEffect = (currentOp?.effects ?? operation.effects ?? []).find(
-      (e) => e.effectId === "comment-update" || isPrimaryEffectKind(e.kind),
-    );
+    const existingPrimaryEffect = getPrimaryEffectForRevision(currentOp ?? operation);
     const isRetry = existingPrimaryEffect?.state === "failed" || existingPrimaryEffect?.state === "commit_unknown";
 
     const requestSnapshot: CommentUpdateRequestSnapshot = (existingPrimaryEffect?.requestSnapshot as CommentUpdateRequestSnapshot | undefined) ?? {
@@ -3666,7 +3674,7 @@ export class CommentUpdateHandler implements OperationHandler<CommentUpdateInten
       }
 
       // INV-03: Actual submitted request を使用して照合 (C-02)
-      const primaryEffect = operation.effects?.find((e) => e.effectId === "comment-update" || e.kind === "comment_update");
+      const primaryEffect = getPrimaryEffectForRevision(operation);
       const expectedBody = (primaryEffect?.requestSnapshot as CommentUpdateRequestSnapshot | undefined)?.submittedBody
         ?? primaryEffect?.target?.submittedBody
         ?? operation.intent?.body
@@ -3722,7 +3730,7 @@ export class CommentUpdateHandler implements OperationHandler<CommentUpdateInten
     const repo = deps.repository;
     const revision = operation.intentRevision ?? operation.revision ?? 1;
     const scope = context.connectionScope;
-    const effect = (operation.effects ?? []).find((e) => e.effectId === effectId);
+    const effect = getEffectsForRevision(operation, revision).find((e) => e.effectId === effectId);
     if (!effect) {
       return { kind: "failed_before_commit", error: new Error(`Effect not found: ${effectId}`) };
     }
@@ -3774,19 +3782,25 @@ export class CommentUpdateHandler implements OperationHandler<CommentUpdateInten
         if (effect.state === "failed" && effect.failure?.disposition === "non_retriable") {
           return { kind: "failed_before_commit", error: new Error("Cannot retry non-retriable failure") };
         }
-        const filePath = effect.target.filePath ?? (effect.requestSnapshot as UploadRequestSnapshot | undefined)?.filePath;
+        const snapshot = effect.requestSnapshot as UploadRequestSnapshot | undefined;
+        if (effect.state === "commit_unknown" && (!snapshot?.contentHash || snapshot.contentSize === undefined)) {
+          return {
+            kind: "failed_before_commit",
+            error: new Error(`Cannot retry uncertain upload without snapshot content hash/size for effect ${effectId}`),
+          };
+        }
+        const filePath = effect.target.filePath ?? snapshot?.filePath;
         if (!filePath) {
           return { kind: "failed_before_commit", error: new Error(`Cannot retry image upload without filePath for effect ${effectId}`) };
         }
 
-        const currentFile = computeFileHashAndSize(filePath);
+        const currentFile = await computeFileHashAndSizeAsync(filePath);
         if (!currentFile) {
           return {
             kind: "failed_before_commit",
             error: new Error(`Cannot compute hash for image: ${filePath}`),
           };
         }
-        const snapshot = effect.requestSnapshot as UploadRequestSnapshot | undefined;
         if (snapshot?.contentHash && snapshot.contentHash !== currentFile.contentHash) {
           return {
             kind: "failed_before_commit",

@@ -26,6 +26,8 @@ export const runWithConnectionScope = <T>(
   operation,
 );
 
+export const getScopedBaseUrl = (): string | undefined => connectionScopeContext.getStore()?.baseUrl;
+
 export interface RequestOptions {
   method: HttpMethod;
   path: string;

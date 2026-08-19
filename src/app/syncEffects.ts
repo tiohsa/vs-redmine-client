@@ -166,6 +166,39 @@ export const canRetryEffect = (effect: DurableSyncEffect): boolean => {
     return effect.failure?.disposition === "retryable";
   }
   if (effect.state === "commit_unknown") {
+    if (
+      isPrimaryEffectKind(effect.kind) ||
+      effect.effectId === "ticket-create" ||
+      effect.effectId === "ticket-update" ||
+      effect.effectId === "comment-create" ||
+      effect.effectId === "comment-update"
+    ) {
+      return effect.requestSnapshot !== undefined;
+    }
+    if (
+      effect.kind === "attachment_upload" ||
+      effect.kind === "image_upload" ||
+      (typeof effect.effectId === "string" &&
+        (effect.effectId.startsWith("attachment") || effect.effectId.startsWith("image")))
+    ) {
+      const snap = effect.requestSnapshot as UploadRequestSnapshot | undefined;
+      return !!(
+        snap &&
+        typeof snap.contentHash === "string" &&
+        snap.contentHash.length > 0 &&
+        typeof snap.contentSize === "number"
+      );
+    }
+    if (
+      effect.kind === "child_create" ||
+      (typeof effect.effectId === "string" && effect.effectId.startsWith("child-create"))
+    ) {
+      // child commit_unknown は blind retry 禁止 (link のみ)
+      return false;
+    }
+    return effect.requestSnapshot !== undefined;
+  }
+  if (effect.state === "compensation_unknown" || effect.state === "compensation_started") {
     return true;
   }
   return false;
@@ -189,6 +222,158 @@ export const isPrimaryEffectKind = (kind: DurableSyncEffectKind): boolean =>
   kind === "ticket_update" ||
   kind === "comment_create" ||
   kind === "comment_update";
+
+export const getEffectsForRevision = (
+  operation: { effects?: DurableSyncEffect[]; revision?: number; intentRevision?: number },
+  targetRevision?: number,
+): DurableSyncEffect[] => {
+  const rev = targetRevision ?? operation.intentRevision ?? operation.revision ?? 1;
+  return (operation.effects ?? []).filter((e) => (e.operationRevision ?? rev) === rev);
+};
+
+export const getPrimaryEffectForRevision = (
+  operation: { effects?: DurableSyncEffect[]; revision?: number; intentRevision?: number },
+  targetRevision?: number,
+): DurableSyncEffect | undefined => {
+  const activeEffects = getEffectsForRevision(operation, targetRevision);
+  return activeEffects.find(
+    (e) =>
+      isPrimaryEffectKind(e.kind) ||
+      e.effectId === "ticket-create" ||
+      e.effectId === "ticket-update" ||
+      e.effectId === "comment-create" ||
+      e.effectId === "comment-update",
+  );
+};
+
+export const isPrimaryRecoveryRequired = (
+  operation?: { phase?: string },
+  primaryEffect?: { state?: DurableSyncEffectState },
+): boolean => {
+  if (!operation) {
+    return false;
+  }
+  if (operation.phase === "commit_unknown") {
+    return true;
+  }
+  if (primaryEffect?.state === "commit_unknown" || primaryEffect?.state === "failed") {
+    return true;
+  }
+  if (operation.phase === "remote_write_started" && primaryEffect?.state === "started") {
+    return true;
+  }
+  return false;
+};
+
+export type RecoveryActionKind =
+  | "retry_remote_write"
+  | "reconcile_remote"
+  | "link_created_ticket"
+  | "link_remote_ticket"
+  | "link_remote_comment"
+  | "assume_update_committed"
+  | "retry_effect"
+  | "link_remote_child";
+
+export type RecoveryItem = {
+  operationId: string;
+  operationRevision: number;
+  effectId: string;
+  effectKind: DurableSyncEffectKind;
+  state: DurableSyncEffectState;
+  message?: string;
+  allowedActions: RecoveryActionKind[];
+};
+
+export const getRecoveryItemsForOperation = (
+  operation: {
+    operationId: string;
+    kind?: string;
+    phase?: string;
+    revision?: number;
+    intentRevision?: number;
+    effects?: DurableSyncEffect[];
+    errorMessage?: string;
+  },
+): RecoveryItem[] => {
+  const currentRevision = operation.intentRevision ?? operation.revision ?? 1;
+  const activeEffects = getEffectsForRevision(operation, currentRevision);
+  const items: RecoveryItem[] = [];
+
+  for (const effect of activeEffects) {
+    const isPrimary =
+      isPrimaryEffectKind(effect.kind) ||
+      effect.effectId === "ticket-create" ||
+      effect.effectId === "ticket-update" ||
+      effect.effectId === "comment-create" ||
+      effect.effectId === "comment-update";
+
+    if (isPrimary) {
+      if (isPrimaryRecoveryRequired(operation, effect)) {
+        const allowedActions: RecoveryActionKind[] = [];
+        if (operation.kind === "ticket_create") {
+          allowedActions.push("link_created_ticket");
+          if (canRetryEffect(effect)) {
+            allowedActions.push("retry_remote_write");
+          }
+        } else if (operation.kind === "comment_create" || operation.kind === "comment_update") {
+          allowedActions.push("reconcile_remote");
+          allowedActions.push("link_remote_comment");
+        } else {
+          allowedActions.push("assume_update_committed");
+          allowedActions.push("reconcile_remote");
+          if (canRetryEffect(effect)) {
+            allowedActions.push("retry_remote_write");
+          }
+        }
+        items.push({
+          operationId: operation.operationId,
+          operationRevision: effect.operationRevision,
+          effectId: effect.effectId,
+          effectKind: effect.kind,
+          state: effect.state,
+          message: effect.failure?.detail ?? effect.detail ?? operation.errorMessage,
+          allowedActions,
+        });
+      }
+    } else {
+      if (
+        effect.state === "failed" ||
+        effect.state === "commit_unknown" ||
+        effect.state === "compensation_unknown" ||
+        effect.state === "compensation_started"
+      ) {
+        const allowedActions: RecoveryActionKind[] = [];
+        if (
+          effect.kind === "child_create" ||
+          (typeof effect.effectId === "string" && effect.effectId.startsWith("child-create"))
+        ) {
+          if (effect.state === "commit_unknown" || effect.state === "compensation_unknown") {
+            allowedActions.push("link_remote_child");
+          }
+          if (effect.state === "failed" && canRetryEffect(effect)) {
+            allowedActions.push("retry_effect");
+          }
+        } else {
+          if (canRetryEffect(effect)) {
+            allowedActions.push("retry_effect");
+          }
+        }
+        items.push({
+          operationId: operation.operationId,
+          operationRevision: effect.operationRevision,
+          effectId: effect.effectId,
+          effectKind: effect.kind,
+          state: effect.state,
+          message: effect.failure?.detail ?? effect.detail,
+          allowedActions,
+        });
+      }
+    }
+  }
+
+  return items;
+};
 
 export const hasUncertainPrimaryDurableSyncEffect = (
   effects: readonly DurableSyncEffect[] | undefined,
@@ -223,7 +408,7 @@ const actionAllowsSource = (
     case "start": return source === "planned";
     case "start_explicit_retry":
       if (source === "failed") {
-        return effect.failure?.disposition !== "non_retriable";
+        return effect.failure?.disposition === "retryable";
       }
       return source === "commit_unknown";
     case "commit": return source === "started";

@@ -732,7 +732,9 @@ export class DefaultSyncOperationRepository implements SyncOperationRepository {
       }
 
       const currentEffects = [...(current.effects ?? [])];
-      const pIndex = currentEffects.findIndex((e) => e.effectId === pId || isPrimaryEffectKind(e.kind));
+      const pIndex = currentEffects.findIndex(
+        (e) => (e.effectId === pId || isPrimaryEffectKind(e.kind)) && (e.operationRevision ?? currentRevision) === currentRevision,
+      );
 
       let updatedEffect: DurableSyncEffect | undefined;
       if (pIndex === -1) {
@@ -760,6 +762,21 @@ export class DefaultSyncOperationRepository implements SyncOperationRepository {
             state: "started",
             target: { documentUri: current.documentUri, ticketId: current.ticketId, commentId: current.commentId },
             requestSnapshot: transition.requestSnapshot,
+          };
+          updatedEffect = transitionDurableSyncEffect(initialEffect, effectAction, {
+            operationRevision: currentRevision,
+            sourceState: "started",
+          });
+          if (updatedEffect) {
+            currentEffects.push(updatedEffect);
+          }
+        } else if (transition.kind === "failed" || transition.kind === "commit_unknown") {
+          const initialEffect: DurableSyncEffect = {
+            effectId: pId,
+            kind: pKind,
+            operationRevision: currentRevision,
+            state: "started",
+            target: { documentUri: current.documentUri, ticketId: current.ticketId, commentId: current.commentId },
           };
           updatedEffect = transitionDurableSyncEffect(initialEffect, effectAction, {
             operationRevision: currentRevision,
@@ -864,7 +881,9 @@ export class DefaultSyncOperationRepository implements SyncOperationRepository {
       const revision = currentRevision;
 
       const effects = [...(current.effects ?? [])];
-      const existingIndex = effects.findIndex((e) => e.effectId === effect.effectId);
+      const existingIndex = effects.findIndex(
+        (e) => e.effectId === effect.effectId && (e.operationRevision ?? currentRevision) === currentRevision,
+      );
       if (existingIndex !== -1) {
         const existing = effects[existingIndex];
         if (existing.state !== "planned" && existing.state !== "compensated") {
@@ -932,8 +951,11 @@ export class DefaultSyncOperationRepository implements SyncOperationRepository {
       }
 
       const currentRevision = current.intentRevision ?? current.revision ?? 1;
+      const targetRevision = expected?.operationRevision ?? currentRevision;
       const effects = [...(current.effects ?? [])];
-      const existingIndex = effects.findIndex((e) => e.effectId === effectId);
+      const existingIndex = effects.findIndex(
+        (e) => e.effectId === effectId && (e.operationRevision ?? targetRevision) === targetRevision,
+      );
 
       let effect: DurableSyncEffect | undefined = existingIndex !== -1 ? effects[existingIndex] : undefined;
       if (!effect) {
@@ -964,7 +986,6 @@ export class DefaultSyncOperationRepository implements SyncOperationRepository {
         }
       }
 
-      const targetRevision = expected?.operationRevision ?? effect.operationRevision ?? currentRevision;
       const nextEffect = transitionDurableSyncEffect(effect, action, {
         operationRevision: targetRevision,
         sourceState: expected?.sourceState ?? effect.state,
