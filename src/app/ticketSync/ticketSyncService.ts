@@ -418,7 +418,8 @@ export class TicketSyncService {
       | { kind: "link_remote_ticket"; ticketId: number }
       | { kind: "assume_update_committed" }
       | { kind: "retry_remote_write" }
-      | { kind: "reconcile_remote" };
+      | { kind: "reconcile_remote" }
+      | { kind: "reconcile_compensation" };
   }): Promise<TicketSyncOutcome> {
     const resolution: any = input.resolution.kind === "link_created_ticket"
       ? { kind: "link_remote_ticket", ticketId: input.resolution.ticketId, explicitLink: true }

@@ -147,7 +147,12 @@ export const restoreDurableSyncEffect = (
 ): DurableSyncEffect => {
   const restored: DurableSyncEffect = {
     ...effect,
-    state: effect.state === "started" ? "commit_unknown" : effect.state,
+    state:
+      effect.state === "started"
+        ? "commit_unknown"
+        : effect.state === "compensation_started"
+        ? "compensation_unknown"
+        : effect.state,
     target: { ...effect.target },
   };
   if (effect.requestSnapshot) {
@@ -253,10 +258,19 @@ export const isPrimaryRecoveryRequired = (
   if (!operation) {
     return false;
   }
-  if (operation.phase === "commit_unknown") {
+  if (
+    operation.phase === "commit_unknown" ||
+    operation.phase === "compensation_unknown" ||
+    operation.phase === "compensation_started"
+  ) {
     return true;
   }
-  if (primaryEffect?.state === "commit_unknown" || primaryEffect?.state === "failed") {
+  if (
+    primaryEffect?.state === "commit_unknown" ||
+    primaryEffect?.state === "failed" ||
+    primaryEffect?.state === "compensation_unknown" ||
+    primaryEffect?.state === "compensation_started"
+  ) {
     return true;
   }
   if (operation.phase === "remote_write_started" && primaryEffect?.state === "started") {
@@ -273,7 +287,8 @@ export type RecoveryActionKind =
   | "link_remote_comment"
   | "assume_update_committed"
   | "retry_effect"
-  | "link_remote_child";
+  | "link_remote_child"
+  | "reconcile_compensation";
 
 export type RecoveryItem = {
   operationId: string;
@@ -311,7 +326,9 @@ export const getRecoveryItemsForOperation = (
     if (isPrimary) {
       if (isPrimaryRecoveryRequired(operation, effect)) {
         const allowedActions: RecoveryActionKind[] = [];
-        if (operation.kind === "ticket_create") {
+        if (effect.state === "compensation_unknown" || effect.state === "compensation_started") {
+          allowedActions.push("reconcile_compensation");
+        } else if (operation.kind === "ticket_create") {
           allowedActions.push("link_created_ticket");
           if (canRetryEffect(effect)) {
             allowedActions.push("retry_remote_write");
@@ -348,14 +365,17 @@ export const getRecoveryItemsForOperation = (
           effect.kind === "child_create" ||
           (typeof effect.effectId === "string" && effect.effectId.startsWith("child-create"))
         ) {
-          if (effect.state === "commit_unknown" || effect.state === "compensation_unknown") {
+          if (effect.state === "compensation_unknown" || effect.state === "compensation_started") {
+            allowedActions.push("reconcile_compensation");
+          } else if (effect.state === "commit_unknown") {
             allowedActions.push("link_remote_child");
-          }
-          if (effect.state === "failed" && canRetryEffect(effect)) {
+          } else if (effect.state === "failed" && canRetryEffect(effect)) {
             allowedActions.push("retry_effect");
           }
         } else {
-          if (canRetryEffect(effect)) {
+          if (effect.state === "compensation_unknown" || effect.state === "compensation_started") {
+            allowedActions.push("reconcile_compensation");
+          } else if (canRetryEffect(effect)) {
             allowedActions.push("retry_effect");
           }
         }

@@ -28,13 +28,15 @@ suite("DurableSyncEffect state machine", () => {
     assert.deepStrictEqual(restored.target, started.target);
   });
 
-  test("restart は started 以外の durable state を保持する", () => {
+  test("restart は started を commit_unknown に、compensation_started を compensation_unknown に正規化し、それ以外の durable state を保持する", () => {
+    assert.strictEqual(restoreDurableSyncEffect({ ...plannedEffect(), state: "started" }).state, "commit_unknown");
+    assert.strictEqual(restoreDurableSyncEffect({ ...plannedEffect(), state: "compensation_started" }).state, "compensation_unknown");
+
     const states: DurableSyncEffectState[] = [
       "planned",
       "failed",
       "committed",
       "commit_unknown",
-      "compensation_started",
       "compensated",
       "compensation_unknown",
     ];

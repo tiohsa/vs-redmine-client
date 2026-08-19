@@ -219,6 +219,7 @@ export type EffectResolution =
   | { kind: "retry_effect" }
   | { kind: "assume_committed"; remoteId?: number; token?: string }
   | { kind: "link_remote_child"; remoteId: number }
+  | { kind: "reconcile_compensation"; remoteId?: number }
   | { kind: "mark_failed"; disposition?: FailureDisposition; category?: string };
 
 export type PreparedTicketCreate = {
@@ -1165,6 +1166,13 @@ export class TicketCreateHandler implements OperationHandler<TicketCreateIntent,
 
     if (operation.documentUri) {
       try {
+        const expectedContent = operation.nextIntent
+          ? (operation.nextIntent as any).content ?? buildTicketEditorContent(parsed)
+          : (operation.intent?.content ?? "");
+        const expectedRevision = operation.nextIntent
+          ? (operation.nextIntent as any).revision ?? (operation.intentRevision ?? operation.revision ?? 1)
+          : (operation.intentRevision ?? operation.revision ?? 1);
+
         if (deps?.documents?.rewriteNewTicket) {
           const res = await deps.documents.rewriteNewTicket({
             documentUri: operation.documentUri,
@@ -1172,12 +1180,12 @@ export class TicketCreateHandler implements OperationHandler<TicketCreateIntent,
             projectId: operation.projectId ?? reconciled?.ticket?.projectId ?? 0,
             replacement: canonicalParsed,
             expected: {
-              content: operation.intent?.content ?? "",
-              operationRevision: operation.intentRevision ?? operation.revision ?? 1,
+              content: expectedContent,
+              operationRevision: expectedRevision,
             },
           });
           if (res.kind !== "applied") {
-            return { ok: false, message: `Document rewrite failed: ${res.kind}`, pending: "local_finalize" };
+            return { ok: false, message: `Document rewrite pending: ${res.kind}`, pending: "local_finalize" };
           }
         } else {
           const doc = (vscode.workspace.textDocuments ?? []).find((d) => d.uri.toString() === operation.documentUri);
@@ -1192,7 +1200,11 @@ export class TicketCreateHandler implements OperationHandler<TicketCreateIntent,
                 parsed: canonicalParsed,
                 lastKnownRemoteUpdatedAt: reconciled?.ticket?.updatedAt,
               });
+            } else {
+              return { ok: false, message: "Document editor is not currently visible", pending: "local_finalize" };
             }
+          } else {
+            return { ok: false, message: "Document is closed or not available", pending: "local_finalize" };
           }
         }
       } catch (err) {
@@ -1431,6 +1443,96 @@ export class TicketCreateHandler implements OperationHandler<TicketCreateIntent,
         effect.target.parentTicketId ??
         parentEffect?.remoteId ??
         operation.createdRemoteId;
+
+      if (
+        effect.state === "compensation_unknown" ||
+        effect.state === "compensation_started" ||
+        resolution.kind === "reconcile_compensation"
+      ) {
+        const remoteChildId = effect.remoteId ?? (resolution as any).remoteId;
+        const getDetail = deps?.ticketCreate?.getIssueDetail ?? createDeps.getIssueDetail ?? getIssueDetail;
+        const deleteIssue = deps?.ticketCreate?.deleteIssue ?? createDeps.deleteIssue;
+
+        if (remoteChildId) {
+          let currentEffectState = effect.state;
+          try {
+            const detail = await getDetail(remoteChildId);
+            if (detail && detail.ticket) {
+              // Remote exists: DELETE を実行
+              const startDel = await repo.transitionEffect(
+                key,
+                effectId,
+                { kind: "start_compensation" },
+                scope,
+                { operationRevision: revision, sourceState: currentEffectState },
+              );
+              if (!startDel) {
+                return { kind: "failed_before_commit", error: new Error(`Failed to transition to start_compensation for ${effectId}`) };
+              }
+              currentEffectState = "compensation_started";
+              if (deleteIssue) {
+                await deleteIssue(remoteChildId);
+              }
+              const compDone = await repo.transitionEffect(
+                key,
+                effectId,
+                { kind: "complete_compensation" },
+                scope,
+                { operationRevision: revision, sourceState: "compensation_started" },
+              );
+              if (!compDone) {
+                await repo.transitionEffect(
+                  key,
+                  effectId,
+                  { kind: "mark_compensation_unknown", detail: "complete_compensation failed to persist" },
+                  scope,
+                  { operationRevision: revision, sourceState: "compensation_started" },
+                );
+                return { kind: "commit_unknown", operationId: operation.operationId, message: "Child compensation DELETE succeeded on remote but checkpoint failed" };
+              }
+              return this.finalizeOperationIfReady(compDone as UnifiedSyncOperation<TicketCreateIntent>, context, deps);
+            }
+          } catch (err: any) {
+            if (err?.status === 404 || err?.message?.includes("404") || err?.message?.toLowerCase().includes("not found")) {
+              // Remote absent: 404 -> complete_compensation
+              const compDone = await repo.transitionEffect(
+                key,
+                effectId,
+                { kind: "complete_compensation" },
+                scope,
+                { operationRevision: revision, sourceState: currentEffectState },
+              );
+              if (compDone) {
+                return this.finalizeOperationIfReady(compDone as UnifiedSyncOperation<TicketCreateIntent>, context, deps);
+              }
+            }
+            const isUnknown = isRemoteCommitUnknownError(err);
+            if (isUnknown || err?.code === "ETIMEDOUT") {
+              await repo.transitionEffect(
+                key,
+                effectId,
+                { kind: "mark_compensation_unknown", detail: (err as Error).message },
+                scope,
+                { operationRevision: revision, sourceState: currentEffectState },
+              );
+              return { kind: "commit_unknown", operationId: operation.operationId, message: (err as Error).message };
+            }
+            return { kind: "failed_before_commit", error: err as Error };
+          }
+        } else {
+          // remoteChildId がない場合は直接 complete_compensation
+          const compDone = await repo.transitionEffect(
+            key,
+            effectId,
+            { kind: "complete_compensation" },
+            scope,
+            { operationRevision: revision, sourceState: effect.state },
+          );
+          if (compDone) {
+            return this.finalizeOperationIfReady(compDone as UnifiedSyncOperation<TicketCreateIntent>, context, deps);
+          }
+        }
+      }
 
       if (resolution.kind === "link_remote_child" || (resolution.kind === "assume_committed" && resolution.remoteId)) {
         const remoteChildId = resolution.kind === "link_remote_child" ? resolution.remoteId : resolution.remoteId!;
@@ -2301,33 +2403,35 @@ export class TicketUpdateHandler implements OperationHandler<TicketUpdateIntent,
           )
         : canonical;
 
+      const source = operation.nextIntent
+        ? {
+            subject: operation.nextIntent.subject,
+            description: operation.nextIntent.description,
+            metadata: operation.nextIntent.metadata,
+            layout: operation.nextIntent.layout,
+            metadataBlock: operation.nextIntent.metadataBlock,
+            controlFields: operation.nextIntent.controlFields,
+          }
+        : {
+            subject: operation.intent?.subject ?? "",
+            description: operation.intent?.description ?? "",
+            metadata: operation.intent?.metadata ?? { tracker: "", priority: "", status: "", due_date: "", children: [] },
+            layout: operation.intent?.layout,
+            metadataBlock: operation.intent?.metadataBlock,
+            controlFields: operation.intent?.controlFields,
+          };
+      const expectedContent = (operation.nextIntent as any)?.content ?? buildTicketEditorContent(source);
+      const expectedRevision = (operation.nextIntent as any)?.revision ?? (operation.intentRevision ?? operation.revision ?? 1);
+
       if (deps?.documents?.rewriteTicket) {
-        const openDoc = deps.documents.findOpenDocument?.(documentUri);
-        const source = operation.nextIntent
-          ? {
-              subject: operation.nextIntent.subject,
-              description: operation.nextIntent.description,
-              metadata: operation.nextIntent.metadata,
-              layout: operation.nextIntent.layout,
-              metadataBlock: operation.nextIntent.metadataBlock,
-              controlFields: operation.nextIntent.controlFields,
-            }
-          : {
-              subject: operation.intent?.subject ?? "",
-              description: operation.intent?.description ?? "",
-              metadata: operation.intent?.metadata ?? { tracker: "", priority: "", status: "", due_date: "", children: [] },
-              layout: operation.intent?.layout,
-              metadataBlock: operation.intent?.metadataBlock,
-              controlFields: operation.intent?.controlFields,
-            };
         const rewriteRes = await deps.documents.rewriteTicket({
           documentUri,
           ticketId,
           projectId: operation.projectId ?? reconciled?.ticket?.projectId,
           replacement,
           expected: {
-            content: openDoc?.getText() ?? buildTicketEditorContent(source),
-            operationRevision: (operation.nextIntent as any)?.revision ?? operation.revision,
+            content: expectedContent,
+            operationRevision: expectedRevision,
           },
         });
         if (rewriteRes.kind !== "applied") {
@@ -2342,15 +2446,17 @@ export class TicketUpdateHandler implements OperationHandler<TicketUpdateIntent,
             documentUri,
             ticketId,
             projectId: operation.projectId ?? reconciled?.ticket?.projectId,
-            replacement: canonical,
+            replacement,
             expected: {
-              content: openDoc.getText(),
-              operationRevision: operation.revision,
+              content: expectedContent,
+              operationRevision: expectedRevision,
             },
           });
           if (rewriteRes.kind !== "applied") {
             return { ok: false, message: `Editor rewrite pending: ${rewriteRes.kind}`, pending: "local_finalize" };
           }
+        } else {
+          return { ok: false, message: "Document is closed or not available", pending: "local_finalize" };
         }
       }
     }
@@ -2504,6 +2610,95 @@ export class TicketUpdateHandler implements OperationHandler<TicketUpdateIntent,
     if (effect.kind === "child_create") {
       const childSnapshot = effect.requestSnapshot as ChildTicketCreateRequestSnapshot | undefined;
       const parentTicketId = childSnapshot?.parentTicketId ?? effect.target.parentTicketId ?? operation.ticketId;
+
+      if (
+        effect.state === "compensation_unknown" ||
+        effect.state === "compensation_started" ||
+        resolution.kind === "reconcile_compensation"
+      ) {
+        const remoteChildId = effect.remoteId ?? (resolution as any).remoteId;
+        const getDetail = deps?.ticketUpdate?.getIssueDetail ?? saveDeps.getIssueDetail ?? getIssueDetail;
+        const deleteIssue = deps?.ticketUpdate?.deleteIssue ?? saveDeps.deleteIssue;
+
+        if (remoteChildId) {
+          let currentEffectState = effect.state;
+          try {
+            const detail = await getDetail(remoteChildId);
+            if (detail && detail.ticket) {
+              // Remote exists: DELETE を実行
+              const startDel = await repo.transitionEffect(
+                key,
+                effectId,
+                { kind: "start_compensation" },
+                scope,
+                { operationRevision: revision, sourceState: currentEffectState },
+              );
+              if (!startDel) {
+                return { kind: "failed_before_commit", error: new Error(`Failed to transition to start_compensation for ${effectId}`) };
+              }
+              currentEffectState = "compensation_started";
+              if (deleteIssue) {
+                await deleteIssue(remoteChildId);
+              }
+              const compDone = await repo.transitionEffect(
+                key,
+                effectId,
+                { kind: "complete_compensation" },
+                scope,
+                { operationRevision: revision, sourceState: "compensation_started" },
+              );
+              if (!compDone) {
+                await repo.transitionEffect(
+                  key,
+                  effectId,
+                  { kind: "mark_compensation_unknown", detail: "complete_compensation failed to persist" },
+                  scope,
+                  { operationRevision: revision, sourceState: "compensation_started" },
+                );
+                return { kind: "commit_unknown", operationId: operation.operationId, message: "Child compensation DELETE succeeded on remote but checkpoint failed" };
+              }
+              return this.finalizeOperationIfReady(compDone as UnifiedSyncOperation<TicketUpdateIntent>, context, deps);
+            }
+          } catch (err: any) {
+            if (err?.status === 404 || err?.message?.includes("404") || err?.message?.toLowerCase().includes("not found")) {
+              // Remote absent: 404 -> complete_compensation
+              const compDone = await repo.transitionEffect(
+                key,
+                effectId,
+                { kind: "complete_compensation" },
+                scope,
+                { operationRevision: revision, sourceState: currentEffectState },
+              );
+              if (compDone) {
+                return this.finalizeOperationIfReady(compDone as UnifiedSyncOperation<TicketUpdateIntent>, context, deps);
+              }
+            }
+            const isUnknown = isRemoteCommitUnknownError(err);
+            if (isUnknown || err?.code === "ETIMEDOUT") {
+              await repo.transitionEffect(
+                key,
+                effectId,
+                { kind: "mark_compensation_unknown", detail: (err as Error).message },
+                scope,
+                { operationRevision: revision, sourceState: currentEffectState },
+              );
+              return { kind: "commit_unknown", operationId: operation.operationId, message: (err as Error).message };
+            }
+            return { kind: "failed_before_commit", error: err as Error };
+          }
+        } else {
+          const compDone = await repo.transitionEffect(
+            key,
+            effectId,
+            { kind: "complete_compensation" },
+            scope,
+            { operationRevision: revision, sourceState: effect.state },
+          );
+          if (compDone) {
+            return this.finalizeOperationIfReady(compDone as UnifiedSyncOperation<TicketUpdateIntent>, context, deps);
+          }
+        }
+      }
 
       if (resolution.kind === "link_remote_child" || (resolution.kind === "assume_committed" && resolution.remoteId)) {
         const remoteChildId = resolution.kind === "link_remote_child" ? resolution.remoteId : resolution.remoteId!;

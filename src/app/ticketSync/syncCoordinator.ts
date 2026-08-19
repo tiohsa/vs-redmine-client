@@ -510,7 +510,8 @@ export class SyncCoordinator {
       | { kind: "link_remote_ticket"; ticketId: number; explicitLink?: boolean }
       | { kind: "link_created_ticket"; ticketId: number; explicitLink?: boolean }
       | { kind: "assume_update_committed" }
-      | { kind: "retry_remote_write" };
+      | { kind: "retry_remote_write" }
+      | { kind: "reconcile_compensation" };
     deps?: OperationHandlerDeps;
   }): Promise<SyncOutcome> {
     const scope = input.context.connectionScope;
@@ -549,6 +550,23 @@ export class SyncCoordinator {
           commentId: freshOp?.commentId ?? op.commentId,
           message: freshOp?.errorMessage ?? "Operation is no longer in recoverable state",
         };
+      }
+
+      if (
+        input.resolution?.kind === "reconcile_compensation" ||
+        freshPrimaryEffect?.state === "compensation_unknown" ||
+        freshPrimaryEffect?.state === "compensation_started"
+      ) {
+        return this.resolveEffect({
+          key: input.key,
+          operationId: freshOp.operationId,
+          operationRevision: freshRevision,
+          effectId: freshPrimaryEffect?.effectId ?? "ticket-create",
+          expectedEffectState: freshPrimaryEffect?.state ?? "compensation_unknown",
+          context: input.context,
+          resolution: { kind: "reconcile_compensation" },
+          deps: input.deps,
+        });
       }
 
       const handler = this.handlers[freshOp.kind];
@@ -1024,12 +1042,24 @@ export class SyncCoordinator {
       try {
         const outcome = await this.sync(key, context, options);
         results.push({ key, outcome });
-        if (outcome.kind === "commit_unknown") {
+        if (outcome.kind === "completed" || outcome.kind === "no_change") {
+          // terminal success: continue to next item
+          continue;
+        } else if (
+          outcome.kind === "remote_committed" ||
+          outcome.kind === "commit_unknown" ||
+          outcome.kind === "conflict" ||
+          outcome.kind === "queued"
+        ) {
           stopReason = "blocked_by_recovery";
           remaining.push(...plan.slice(i + 1));
           break;
         } else if (outcome.kind === "failed_before_commit") {
           stopReason = "failed";
+          remaining.push(...plan.slice(i + 1));
+          break;
+        } else {
+          stopReason = "blocked_by_recovery";
           remaining.push(...plan.slice(i + 1));
           break;
         }

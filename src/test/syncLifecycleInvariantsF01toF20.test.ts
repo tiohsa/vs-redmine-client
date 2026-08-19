@@ -1303,7 +1303,7 @@ suite("F-01 〜 F-20: Reproduction & Invariant Tests", () => {
     assert.strictEqual(restored.find((e) => e.effectId === "e-failed")?.state, "failed", "F-18: failed は保持される");
     assert.strictEqual(restored.find((e) => e.effectId === "e-unknown")?.state, "commit_unknown", "F-18: commit_unknown は保持される");
     assert.strictEqual(restored.find((e) => e.effectId === "e-committed")?.state, "committed", "F-18: committed は保持される");
-    assert.strictEqual(restored.find((e) => e.effectId === "e-comp-started")?.state, "compensation_started", "F-18: compensation_started は保持される");
+    assert.strictEqual(restored.find((e) => e.effectId === "e-comp-started")?.state, "compensation_unknown", "F-18: compensation_started は restart で compensation_unknown に正規化される");
     assert.strictEqual(restored.find((e) => e.effectId === "e-comp-unknown")?.state, "compensation_unknown", "F-18: compensation_unknown は保持される");
 
     // Retained effects filter test: none of durable states are deleted

@@ -44,6 +44,7 @@ export type TicketUpdateIntentSnapshot = {
   subject: string;
   description: string;
   metadata: IssueMetadata;
+  content?: string;
   layout?: TicketEditorLayout;
   metadataBlock?: TicketEditorMetadataBlock;
   controlFields?: FrontmatterControlFields;
@@ -646,12 +647,25 @@ const normalizeTicketUpdate = (
   ticketId: number,
   update: OfflineTicketUpdate,
 ): OfflineTicketUpdate => {
+  const revision = update.revision ?? 1;
+  const phase = update.phase === "remote_write_started" ? "commit_unknown" : update.phase ?? "queued";
+  const effects = normalizeOperationEffects({
+    kind: "ticketUpdate",
+    revision,
+    phase,
+    payload: update,
+    effects: update.effects,
+  });
+  const restoredPhase = hasUncertainPrimaryDurableSyncEffect(effects) &&
+    (phase === "preparing" || phase === "queued")
+    ? "commit_unknown"
+    : phase;
   const restored: OfflineTicketUpdate = {
     ...update,
     operationId: update.operationId ?? `ticket:${ticketId}`,
-    phase: update.phase === "remote_write_started" ? "commit_unknown" : update.phase ?? "queued",
-    revision: update.revision ?? 1,
-    effects: update.effects,
+    phase: restoredPhase,
+    revision,
+    effects,
   };
   const hasRemoteChild = restored.effects?.some((effect) => effect.kind === "child_create" && [
     "committed",

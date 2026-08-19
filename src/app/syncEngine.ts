@@ -110,7 +110,13 @@ export class SyncEngine {
   public async resolveTicketCommitUnknown(input: {
     key: Extract<SyncEngineKey, { kind: "ticket" | "newTicket" }>;
     context: SyncContext;
-    resolution?: { kind: "reconcile_remote" } | { kind: "link_remote_ticket"; ticketId: number } | { kind: "retry_remote_write" };
+    resolution?:
+      | { kind: "reconcile_remote" }
+      | { kind: "link_remote_ticket"; ticketId: number }
+      | { kind: "link_created_ticket"; ticketId: number }
+      | { kind: "assume_update_committed" }
+      | { kind: "retry_remote_write" }
+      | { kind: "reconcile_compensation" };
   }): Promise<SyncEngineOutcome> {
     return this.coordinator.resolveCommitUnknown({
       key: input.key,
