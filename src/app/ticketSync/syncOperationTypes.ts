@@ -79,6 +79,7 @@ export interface TicketUpdateIntent {
   subject: string;
   description: string;
   metadata: IssueMetadata;
+  content?: string;
   revision?: number;
   attachments?: IssueAttachmentSource[];
   uploadTokens?: IssueUploadInput[];

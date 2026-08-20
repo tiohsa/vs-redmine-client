@@ -91,12 +91,23 @@ export const queueTicketDraft = async (
     documentUri: input.documentUri,
   });
 
+  const clearedMetadata: IssueMetadata = { ...parsed.metadata, children: [] };
+  const normalizedContent = buildTicketEditorContent({
+    subject,
+    description: parsed.description,
+    metadata: input.editor ? clearedMetadata : parsed.metadata,
+    layout: parsed.layout,
+    metadataBlock: parsed.metadataBlock,
+    controlFields: parsed.controlFields,
+  });
+
   addOfflineTicketUpdate(input.ticketId, {
     ticketId: input.ticketId,
     baseSubject: draft.baseSubject,
     baseDescription: draft.baseDescription,
     baseMetadata: draft.baseMetadata,
     lastKnownRemoteUpdatedAt: draft.lastKnownRemoteUpdatedAt,
+    content: normalizedContent,
     subject,
     description: parsed.description,
     metadata: parsed.metadata,
@@ -114,15 +125,7 @@ export const queueTicketDraft = async (
   }
   markDraftStatus(input.ticketId, "Dirty", input.operationScope);
   if (input.editor) {
-    const clearedMetadata: IssueMetadata = { ...parsed.metadata, children: [] };
-    const nextContent = buildTicketEditorContent({
-      subject,
-      description: parsed.description,
-      metadata: clearedMetadata,
-      layout: parsed.layout,
-      metadataBlock: parsed.metadataBlock,
-    });
-    await applyEditorContent(input.editor, nextContent);
+    await applyEditorContent(input.editor, normalizedContent);
     setEditorDisplaySource(input.editor, "saved");
   }
   if (hasChanges && input.onSubjectUpdated) {

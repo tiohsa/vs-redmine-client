@@ -50,10 +50,34 @@ const normalizeNewTicketSyncFailureMessage = (message?: string): string => {
 
 const resolveCommitUnknownInteractive = async (
   service: ReturnType<ReturnType<typeof createSyncEngine>["ticketService"]>,
+  engine: ReturnType<typeof createSyncEngine>,
   key: TicketSyncQueueKey,
   operationScope: string,
 ): Promise<TicketSyncOutcome | undefined> => {
+  const syncContext = { connectionScope: operationScope };
+  const items = engine.getRecoveryItems(key as any, syncContext);
+  const primaryItem = items.find((item) => isPrimaryEffectKind(item.effectKind));
+  const actions = primaryItem?.allowedActions ?? [];
+
   const retryLabel = vscode.l10n.t("Retry remote write");
+  const compLabel = vscode.l10n.t("Clean up remote write (Reconcile compensation)");
+
+  if (actions.includes("reconcile_compensation") || primaryItem?.state === "compensation_unknown" || primaryItem?.state === "compensation_started") {
+    const choice = await vscode.window.showWarningMessage(
+      vscode.l10n.t("The previous operation has pending compensation on Redmine. Reconcile compensation to clean up remote side?"),
+      { modal: true },
+      compLabel,
+    );
+    if (choice === compLabel) {
+      return service.resolveCommitUnknown({
+        key,
+        context: syncContext,
+        resolution: { kind: "reconcile_compensation" },
+      });
+    }
+    return undefined;
+  }
+
   if (key.kind === "newTicket") {
     const linkLabel = vscode.l10n.t("Link existing ticket");
     const choice = await vscode.window.showWarningMessage(
@@ -74,14 +98,14 @@ const resolveCommitUnknownInteractive = async (
       }
       return service.resolveCommitUnknown({
         key,
-        context: { connectionScope: operationScope },
+        context: syncContext,
         resolution: { kind: "link_created_ticket", ticketId: Number(rawTicketId) },
       });
     }
     if (choice === retryLabel) {
       return service.resolveCommitUnknown({
         key,
-        context: { connectionScope: operationScope },
+        context: syncContext,
         resolution: { kind: "retry_remote_write" },
       });
     }
@@ -98,14 +122,14 @@ const resolveCommitUnknownInteractive = async (
   if (choice === committedLabel) {
     return service.resolveCommitUnknown({
       key,
-      context: { connectionScope: operationScope },
+      context: syncContext,
       resolution: { kind: "assume_update_committed" },
     });
   }
   if (choice === retryLabel) {
     return service.resolveCommitUnknown({
       key,
-      context: { connectionScope: operationScope },
+      context: syncContext,
       resolution: { kind: "retry_remote_write" },
     });
   }
@@ -161,6 +185,7 @@ const resolveSecondaryEffectsInteractive = async (
 
   const retryLabel = vscode.l10n.t("Retry");
   const linkLabel = vscode.l10n.t("Link existing ID");
+  const compLabel = vscode.l10n.t("Clean up remote issue (Reconcile compensation)");
 
   let resolvedAny = false;
 
@@ -170,7 +195,28 @@ const resolveSecondaryEffectsInteractive = async (
       continue;
     }
 
-    if (actions.includes("link_remote_child")) {
+    if (actions.includes("reconcile_compensation") || item.state === "compensation_unknown" || item.state === "compensation_started") {
+      const choice = await vscode.window.showWarningMessage(
+        vscode.l10n.t("Child issue creation failed or timed out and requires compensation on Redmine. Reconcile compensation?"),
+        { modal: true },
+        compLabel,
+      );
+      if (choice === compLabel) {
+        const outcome = await engine.resolveEffect({
+          key: key as any,
+          operationId: item.operationId,
+          operationRevision: item.operationRevision,
+          effectId: item.effectId,
+          expectedEffectState: item.state,
+          context: syncContext,
+          resolution: { kind: "reconcile_compensation" },
+        });
+        resolvedAny = true;
+        if (outcome.kind !== "completed" && outcome.kind !== "no_change" && outcome.kind !== "remote_committed") {
+          return outcome;
+        }
+      }
+    } else if (actions.includes("link_remote_child")) {
       const choices = [linkLabel];
       if (actions.includes("retry_effect")) {
         choices.push(retryLabel);
@@ -278,16 +324,19 @@ const syncUnsyncedFileAtScope = async (
       syncKey,
       { connectionScope: operationScope },
     );
+    const recoveryItems = engine.getRecoveryItems(syncKey, { connectionScope: operationScope });
+    const hasPrimaryRecovery = recoveryItems.some((item) => isPrimaryEffectKind(item.effectKind) && item.allowedActions.length > 0);
     if (
       (outcome.kind === "commit_unknown" &&
         (previousPhase === "commit_unknown" || previousPhase === "remote_write_started")) ||
+      (outcome.kind === "failed_before_commit" && hasPrimaryRecovery) ||
       (outcome.kind === "remote_committed" && outcome.pending === "remote_reconcile" &&
         (previousPhase === "remote_committed" || previousPhase === "reconciliation_pending"))
     ) {
-      outcome = await resolveCommitUnknownInteractive(engine.ticketService(), syncKey, operationScope)
+      outcome = await resolveCommitUnknownInteractive(engine.ticketService(), engine, syncKey, operationScope)
         ?? outcome;
     }
-    if (outcome.kind === "failed_before_commit" || outcome.kind === "remote_committed") {
+    if (outcome.kind === "failed_before_commit" || outcome.kind === "remote_committed" || outcome.kind === "commit_unknown") {
       const secOutcome = await resolveSecondaryEffectsInteractive(engine, syncKey, operationScope);
       if (secOutcome) {
         outcome = secOutcome;
@@ -343,14 +392,17 @@ const syncUnsyncedFileAtScope = async (
       syncKey,
       { connectionScope: operationScope },
     );
+    const recoveryItems = engine.getRecoveryItems(syncKey, { connectionScope: operationScope });
+    const hasPrimaryRecovery = recoveryItems.some((item) => isPrimaryEffectKind(item.effectKind) && item.allowedActions.length > 0);
     if (
-      outcome.kind === "commit_unknown" &&
-      (previousPhase === "commit_unknown" || previousPhase === "remote_write_started")
+      (outcome.kind === "commit_unknown" &&
+        (previousPhase === "commit_unknown" || previousPhase === "remote_write_started")) ||
+      (outcome.kind === "failed_before_commit" && hasPrimaryRecovery)
     ) {
-      outcome = await resolveCommitUnknownInteractive(engine.ticketService(), syncKey, operationScope)
+      outcome = await resolveCommitUnknownInteractive(engine.ticketService(), engine, syncKey, operationScope)
         ?? outcome;
     }
-    if (outcome.kind === "failed_before_commit" || outcome.kind === "remote_committed") {
+    if (outcome.kind === "failed_before_commit" || outcome.kind === "remote_committed" || outcome.kind === "commit_unknown") {
       const secOutcome = await resolveSecondaryEffectsInteractive(engine, syncKey, operationScope);
       if (secOutcome) {
         outcome = secOutcome;

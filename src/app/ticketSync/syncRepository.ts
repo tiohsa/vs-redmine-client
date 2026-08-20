@@ -152,6 +152,7 @@ export const toUnifiedOperationFromTicket = (
     subject: ticket.subject ?? (ticket as any).baseSubject ?? "",
     description: ticket.description ?? (ticket as any).baseDescription ?? "",
     metadata: ticket.metadata ?? ticket.baseMetadata,
+    content: ticket.content,
     attachments: (ticket as any).attachments,
     uploadTokens: (ticket as any).uploadTokens,
     childTickets: (ticket as any).childTickets,
@@ -169,6 +170,7 @@ export const toUnifiedOperationFromTicket = (
     baseMetadata: ticket.baseMetadata,
     subject: ticket.nextIntent.subject,
     description: ticket.nextIntent.description,
+    content: ticket.nextIntent.content,
     metadata: ticket.nextIntent.metadata,
     revision: ticket.nextIntent.revision,
     layout: ticket.nextIntent.layout ?? ticket.layout,
@@ -452,7 +454,7 @@ export class DefaultSyncOperationRepository implements SyncOperationRepository {
         version: nextVersion,
         persistenceVersion: nextVersion,
         projectId: operation.projectId ?? (intent?.metadata as any)?.project_id,
-        content: intent?.description,
+        content: intent?.content ?? intent?.description,
         subject: intent?.subject,
         description: intent?.description,
         createdChildIds: operation.createdChildIds,
@@ -469,6 +471,7 @@ export class DefaultSyncOperationRepository implements SyncOperationRepository {
           revision: nextIntent.revision ?? (intentRevision + 1),
           subject: nextIntent.subject,
           description: nextIntent.description,
+          content: nextIntent.content ?? nextIntent.description,
           metadata: nextIntent.metadata,
           layout: nextIntent.layout,
           metadataBlock: nextIntent.metadataBlock,
@@ -999,15 +1002,24 @@ export class DefaultSyncOperationRepository implements SyncOperationRepository {
       } else {
         effects.push(nextEffect);
       }
+
+      const isPrimaryCompensated =
+        (nextEffect.kind === "ticket_create" || nextEffect.kind === "ticket_update" || nextEffect.effectId === "ticket-create" || nextEffect.effectId === "ticket-update") &&
+        nextEffect.state === "compensated";
+
       const updated: UnifiedSyncOperation = {
         ...current,
+        phase: isPrimaryCompensated && (current.phase === "commit_unknown" || current.phase === "remote_write_started" || current.phase === "remote_committed" || current.phase === "reconciliation_pending" || current.phase === "preparing")
+          ? "queued"
+          : current.phase,
         effects,
         createdRemoteId:
           nextEffect.kind === "ticket_create" && nextEffect.state === "committed" && nextEffect.remoteId !== undefined
             ? nextEffect.remoteId
-            : nextEffect.kind === "ticket_create" && nextEffect.state === "compensated"
+            : isPrimaryCompensated
               ? undefined  // compensation完了時にatomicにcreatedRemoteIdを消去
               : current.createdRemoteId,
+        createdChildIds: isPrimaryCompensated ? undefined : current.createdChildIds,
       };
       try {
         return await this.saveOperationInternal(updated, scope, current.version ?? current.persistenceVersion);

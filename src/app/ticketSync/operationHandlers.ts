@@ -134,6 +134,33 @@ export const reconcileTicketCandidate = async (
   }
 };
 
+export const verifyCompensationIdentity = (
+  remoteTicket: { id: number; projectId?: number; parentId?: number; subject?: string },
+  expected: { projectId?: number; parentId?: number; subject?: string },
+): { ok: true } | { ok: false; reason: string } => {
+  if (expected.projectId !== undefined && expected.projectId > 0 && remoteTicket.projectId !== undefined && remoteTicket.projectId > 0 && remoteTicket.projectId !== expected.projectId) {
+    return {
+      ok: false,
+      reason: `Project mismatch: ticket #${remoteTicket.id} belongs to project #${remoteTicket.projectId}, expected #${expected.projectId}.`,
+    };
+  }
+  if (expected.parentId !== undefined && expected.parentId > 0 && remoteTicket.parentId !== undefined && remoteTicket.parentId > 0 && remoteTicket.parentId !== expected.parentId) {
+    return {
+      ok: false,
+      reason: `Parent ticket ID mismatch: ticket #${remoteTicket.id} has parent #${remoteTicket.parentId}, expected #${expected.parentId}.`,
+    };
+  }
+  if (expected.subject !== undefined && expected.subject.trim().length > 0 && remoteTicket.subject !== undefined) {
+    if (normalizeTicketText(remoteTicket.subject) !== normalizeTicketText(expected.subject)) {
+      return {
+        ok: false,
+        reason: `Subject mismatch: ticket #${remoteTicket.id} subject "${remoteTicket.subject}" does not match expected "${expected.subject}".`,
+      };
+    }
+  }
+  return { ok: true };
+};
+
 export interface OperationHandlerContext {
   connectionScope: string;
 }
@@ -1139,9 +1166,18 @@ export class TicketCreateHandler implements OperationHandler<TicketCreateIntent,
 
     const effectiveIntent = operation.nextIntent ?? operation.intent;
     const effectiveContent = (effectiveIntent as any)?.content;
-    const baseParsed = effectiveContent
-      ? parseTicketEditorContent(effectiveContent, { allowMissingMetadata: true, allowMissingSubject: true })
-      : undefined;
+    let baseParsed: TicketEditorContent | undefined;
+    if (effectiveContent) {
+      try {
+        baseParsed = parseTicketEditorContent(effectiveContent, {
+          allowMissingMetadata: true,
+          allowMissingSubject: true,
+          fallbackMetadata: (effectiveIntent as any)?.metadata ?? { tracker: "", priority: "", status: "", due_date: "", children: [] },
+        });
+      } catch {
+        baseParsed = undefined;
+      }
+    }
     const parsed: TicketEditorContent = baseParsed
       ? {
           ...baseParsed,
@@ -1295,21 +1331,37 @@ export class TicketCreateHandler implements OperationHandler<TicketCreateIntent,
     }
 
     // 1. ticket-create compensation recovery
-    if (effectId === "ticket-create" && (effect.state === "compensation_unknown" || effect.state === "compensation_started")) {
-      const remoteTicketId = effect.remoteId ?? operation.createdRemoteId;
+    if (effectId === "ticket-create" && (effect.state === "compensation_unknown" || effect.state === "compensation_started" || resolution.kind === "reconcile_compensation")) {
+      const remoteTicketId = effect.remoteId ?? (resolution as any).remoteId ?? operation.createdRemoteId;
       if (!remoteTicketId) {
         return { kind: "failed_before_commit", error: new Error("Missing remoteId for ticket compensation recovery") };
       }
+      const getDetail = deps?.ticketCreate?.getIssueDetail ?? (deps as any)?.getIssueDetail ?? createDeps.getIssueDetail ?? getIssueDetail;
+      const deleteIssue = deps?.ticketCreate?.deleteIssue ?? (deps as any)?.deleteIssue ?? createDeps.deleteIssue;
+
       try {
-        const getDetail = deps?.ticketCreate?.getIssueDetail ?? createDeps.getIssueDetail ?? getIssueDetail;
         const detail = await getDetail(remoteTicketId);
         if (detail && detail.ticket) {
+          // Verify identity before DELETE (INV-R05, INV-R06)
+          const snapshot = effect.requestSnapshot as TicketCreateRequestSnapshot | undefined;
+          const expectedProject = snapshot?.request?.projectId ?? operation.projectId;
+          const expectedSubject = snapshot?.request?.subject ?? (operation.intent as any)?.subject;
+          const idCheck = verifyCompensationIdentity(detail.ticket, {
+            projectId: expectedProject,
+            subject: expectedSubject,
+          });
+          if (!idCheck.ok) {
+            return { kind: "failed_before_commit", error: new Error(`Compensation rejected due to identity mismatch: ${idCheck.reason}`) };
+          }
+
           // Remote present: DELETE を再実行
           const startDel = await repo.transitionEffect(key, effectId, { kind: "start_compensation" }, scope, { operationRevision: revision, sourceState: effect.state });
           if (!startDel) {
             return { kind: "failed_before_commit", error: new Error("Failed to transition to start_compensation") };
           }
-          await createDeps.deleteIssue?.(remoteTicketId);
+          if (deleteIssue) {
+            await deleteIssue(remoteTicketId);
+          }
           const compDone = await repo.transitionEffect(key, effectId, { kind: "complete_compensation" }, scope, { operationRevision: revision, sourceState: "compensation_started" });
           if (!compDone) {
             await repo.transitionEffect(key, effectId, { kind: "mark_compensation_unknown", detail: "complete_compensation failed to persist" }, scope, { operationRevision: revision, sourceState: "compensation_started" });
@@ -1325,6 +1377,7 @@ export class TicketCreateHandler implements OperationHandler<TicketCreateIntent,
             return { kind: "no_change", ticketId: remoteTicketId };
           }
         }
+        await repo.transitionEffect(key, effectId, { kind: "mark_compensation_unknown", detail: (err as Error).message }, scope, { operationRevision: revision, sourceState: effect.state === "started" || effect.state === "compensation_started" ? effect.state : "compensation_started" });
         return { kind: "commit_unknown", operationId: operation.operationId, message: (err as Error).message };
       }
     }
@@ -1450,14 +1503,26 @@ export class TicketCreateHandler implements OperationHandler<TicketCreateIntent,
         resolution.kind === "reconcile_compensation"
       ) {
         const remoteChildId = effect.remoteId ?? (resolution as any).remoteId;
-        const getDetail = deps?.ticketCreate?.getIssueDetail ?? createDeps.getIssueDetail ?? getIssueDetail;
-        const deleteIssue = deps?.ticketCreate?.deleteIssue ?? createDeps.deleteIssue;
+        const getDetail = deps?.ticketCreate?.getIssueDetail ?? (deps as any)?.getIssueDetail ?? createDeps.getIssueDetail ?? getIssueDetail;
+        const deleteIssue = deps?.ticketCreate?.deleteIssue ?? (deps as any)?.deleteIssue ?? createDeps.deleteIssue;
 
         if (remoteChildId) {
           let currentEffectState = effect.state;
           try {
             const detail = await getDetail(remoteChildId);
             if (detail && detail.ticket) {
+              // Verify identity before DELETE (INV-R05, INV-R06)
+              const expectedProj = childSnapshot?.projectId ?? operation.projectId;
+              const expectedSubject = childSnapshot?.subject;
+              const idCheck = verifyCompensationIdentity(detail.ticket, {
+                projectId: expectedProj,
+                parentId: parentTicketId,
+                subject: expectedSubject,
+              });
+              if (!idCheck.ok) {
+                return { kind: "failed_before_commit", error: new Error(`Child compensation rejected due to identity mismatch: ${idCheck.reason}`) };
+              }
+
               // Remote exists: DELETE を実行
               const startDel = await repo.transitionEffect(
                 key,
@@ -2617,14 +2682,26 @@ export class TicketUpdateHandler implements OperationHandler<TicketUpdateIntent,
         resolution.kind === "reconcile_compensation"
       ) {
         const remoteChildId = effect.remoteId ?? (resolution as any).remoteId;
-        const getDetail = deps?.ticketUpdate?.getIssueDetail ?? saveDeps.getIssueDetail ?? getIssueDetail;
-        const deleteIssue = deps?.ticketUpdate?.deleteIssue ?? saveDeps.deleteIssue;
+        const getDetail = deps?.ticketUpdate?.getIssueDetail ?? (deps as any)?.getIssueDetail ?? saveDeps.getIssueDetail ?? getIssueDetail;
+        const deleteIssue = deps?.ticketUpdate?.deleteIssue ?? (deps as any)?.deleteIssue ?? saveDeps.deleteIssue;
 
         if (remoteChildId) {
           let currentEffectState = effect.state;
           try {
             const detail = await getDetail(remoteChildId);
             if (detail && detail.ticket) {
+              // Verify identity before DELETE (INV-R05, INV-R06)
+              const expectedProj = childSnapshot?.projectId ?? operation.projectId;
+              const expectedSubject = childSnapshot?.subject;
+              const idCheck = verifyCompensationIdentity(detail.ticket, {
+                projectId: expectedProj,
+                parentId: parentTicketId,
+                subject: expectedSubject,
+              });
+              if (!idCheck.ok) {
+                return { kind: "failed_before_commit", error: new Error(`Child compensation rejected due to identity mismatch: ${idCheck.reason}`) };
+              }
+
               // Remote exists: DELETE を実行
               const startDel = await repo.transitionEffect(
                 key,

@@ -61,6 +61,7 @@ export type OfflineTicketUpdate = {
   subject: string;
   description: string;
   metadata: IssueMetadata;
+  content?: string;
   layout?: TicketEditorLayout;
   metadataBlock?: TicketEditorMetadataBlock;
   controlFields?: FrontmatterControlFields;
@@ -608,6 +609,7 @@ const promoteTicketIntent = (operation: OfflineTicketUpdate): OfflineTicketUpdat
     ...operation,
     subject: next.subject,
     description: next.description,
+    content: next.content ?? operation.content,
     metadata: next.metadata,
     layout: next.layout,
     metadataBlock: next.metadataBlock,
@@ -986,6 +988,7 @@ export const mergeOfflineTicketUpdate = (
         revision,
         subject: update.subject,
         description: update.description,
+        content: update.content ?? update.description,
         metadata: update.metadata,
         layout: update.layout,
         metadataBlock: update.metadataBlock,
@@ -998,6 +1001,7 @@ export const mergeOfflineTicketUpdate = (
   return {
     ...(existing ?? update),
     ...update,
+    content: update.content ?? existing?.content ?? update.description,
     baseSubject: existing?.baseSubject ?? update.baseSubject,
     baseDescription: existing?.baseDescription ?? update.baseDescription,
     baseMetadata: existing?.baseMetadata ?? update.baseMetadata,
