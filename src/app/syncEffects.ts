@@ -300,6 +300,43 @@ export type RecoveryItem = {
   allowedActions: RecoveryActionKind[];
 };
 
+export type OperationRecoveryMode =
+  | "normal"
+  | "commit_uncertainty"
+  | "compensation_uncertainty";
+
+export const getOperationRecoveryMode = (operation: {
+  phase?: string;
+  effects?: DurableSyncEffect[];
+  revision?: number;
+  intentRevision?: number;
+}): OperationRecoveryMode => {
+  const currentRevision = operation.intentRevision ?? operation.revision ?? 1;
+  const primaryEffect = getPrimaryEffectForRevision(operation, currentRevision);
+
+  const isPrimaryCompensation =
+    operation.phase === "compensation_unknown" ||
+    operation.phase === "compensation_started" ||
+    primaryEffect?.state === "compensation_unknown" ||
+    primaryEffect?.state === "compensation_started";
+
+  if (isPrimaryCompensation) {
+    return "compensation_uncertainty";
+  }
+
+  const isCommitUncertain =
+    operation.phase === "commit_unknown" ||
+    operation.phase === "remote_write_started" ||
+    primaryEffect?.state === "commit_unknown" ||
+    primaryEffect?.state === "started";
+
+  if (isCommitUncertain) {
+    return "commit_uncertainty";
+  }
+
+  return "normal";
+};
+
 export const getRecoveryItemsForOperation = (
   operation: {
     operationId: string;
@@ -313,6 +350,7 @@ export const getRecoveryItemsForOperation = (
 ): RecoveryItem[] => {
   const currentRevision = operation.intentRevision ?? operation.revision ?? 1;
   const activeEffects = getEffectsForRevision(operation, currentRevision);
+  const recoveryMode = getOperationRecoveryMode(operation);
   const items: RecoveryItem[] = [];
 
   for (const effect of activeEffects) {
@@ -339,6 +377,7 @@ export const getRecoveryItemsForOperation = (
         } else {
           allowedActions.push("assume_update_committed");
           allowedActions.push("reconcile_remote");
+          allowedActions.push("link_remote_ticket");
           if (canRetryEffect(effect)) {
             allowedActions.push("retry_remote_write");
           }
@@ -361,22 +400,31 @@ export const getRecoveryItemsForOperation = (
         effect.state === "compensation_started"
       ) {
         const allowedActions: RecoveryActionKind[] = [];
-        if (
-          effect.kind === "child_create" ||
-          (typeof effect.effectId === "string" && effect.effectId.startsWith("child-create"))
-        ) {
+        // Dominance rule (R-01, R-02, DR-01):
+        // If operation is in compensation uncertainty, secondary forward actions (retry_effect, link_remote_child)
+        // are forbidden. Only secondary reconcile_compensation is allowed if secondary is itself in compensation state.
+        if (recoveryMode === "compensation_uncertainty") {
           if (effect.state === "compensation_unknown" || effect.state === "compensation_started") {
             allowedActions.push("reconcile_compensation");
-          } else if (effect.state === "commit_unknown") {
-            allowedActions.push("link_remote_child");
-          } else if (effect.state === "failed" && canRetryEffect(effect)) {
-            allowedActions.push("retry_effect");
           }
         } else {
-          if (effect.state === "compensation_unknown" || effect.state === "compensation_started") {
-            allowedActions.push("reconcile_compensation");
-          } else if (canRetryEffect(effect)) {
-            allowedActions.push("retry_effect");
+          if (
+            effect.kind === "child_create" ||
+            (typeof effect.effectId === "string" && effect.effectId.startsWith("child-create"))
+          ) {
+            if (effect.state === "compensation_unknown" || effect.state === "compensation_started") {
+              allowedActions.push("reconcile_compensation");
+            } else if (effect.state === "commit_unknown") {
+              allowedActions.push("link_remote_child");
+            } else if (effect.state === "failed" && canRetryEffect(effect)) {
+              allowedActions.push("retry_effect");
+            }
+          } else {
+            if (effect.state === "compensation_unknown" || effect.state === "compensation_started") {
+              allowedActions.push("reconcile_compensation");
+            } else if (canRetryEffect(effect)) {
+              allowedActions.push("retry_effect");
+            }
           }
         }
         items.push({

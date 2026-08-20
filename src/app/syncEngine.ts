@@ -51,6 +51,7 @@ export interface SyncEngineDependencies {
   };
   comments?: Partial<CommentSaveDependencies>;
   coordinator?: SyncCoordinator;
+  documents?: any;
 }
 
 export class SyncEngine {
@@ -59,10 +60,12 @@ export class SyncEngine {
   private readonly explicitTickets?: Pick<TicketSyncService, "syncQueueItem" | "syncAll" | "resolveCommitUnknown">;
   private readonly comments: Partial<CommentSaveDependencies>;
   private readonly rawTicketDeps?: any;
+  private readonly documents?: any;
 
   public constructor(deps: SyncEngineDependencies = {}) {
     const rawTickets = deps.tickets as any;
     const isServiceLike = rawTickets && typeof rawTickets.syncQueueItem === "function";
+    this.documents = deps.documents ?? rawTickets?.rewrite;
 
     if (rawTickets && !isServiceLike) {
       this.rawTicketDeps = rawTickets;
@@ -126,6 +129,7 @@ export class SyncEngine {
         ticketCreate: this.rawTicketDeps,
         ticketUpdate: this.rawTicketDeps,
         comment: this.comments,
+        documents: this.documents,
       },
     });
   }
@@ -151,6 +155,7 @@ export class SyncEngine {
         ticketCreate: this.rawTicketDeps,
         ticketUpdate: this.rawTicketDeps,
         comment: this.comments,
+        documents: this.documents,
       },
     }) as any;
   }
@@ -167,6 +172,7 @@ export class SyncEngine {
         ticketCreate: this.rawTicketDeps,
         ticketUpdate: this.rawTicketDeps,
         comment: this.comments,
+        documents: this.documents,
       },
     }) as any;
   }

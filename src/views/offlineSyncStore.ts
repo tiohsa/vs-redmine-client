@@ -2,6 +2,7 @@ import { randomUUID } from "crypto";
 import type { Memento } from "vscode";
 import { IssueMetadata } from "./ticketMetadataTypes";
 import {
+  buildTicketEditorContent,
   TicketEditorContent,
   TicketEditorLayout,
   TicketEditorMetadataBlock,
@@ -981,6 +982,7 @@ export const mergeOfflineTicketUpdate = (
       existing.revision ?? 1,
       existing.nextIntent?.revision ?? 0,
     ) + 1;
+    const fallbackNextContent = update.content ?? (update.subject ? buildTicketEditorContent(update) : update.description);
     return {
       ...existing,
       documentUri: existing.documentUri ?? update.documentUri,
@@ -988,7 +990,7 @@ export const mergeOfflineTicketUpdate = (
         revision,
         subject: update.subject,
         description: update.description,
-        content: update.content ?? update.description,
+        content: fallbackNextContent,
         metadata: update.metadata,
         layout: update.layout,
         metadataBlock: update.metadataBlock,
@@ -998,10 +1000,11 @@ export const mergeOfflineTicketUpdate = (
       },
     };
   }
+  const fallbackContent = update.content ?? existing?.content ?? (update.subject ? buildTicketEditorContent(update) : update.description);
   return {
     ...(existing ?? update),
     ...update,
-    content: update.content ?? existing?.content ?? update.description,
+    content: fallbackContent,
     baseSubject: existing?.baseSubject ?? update.baseSubject,
     baseDescription: existing?.baseDescription ?? update.baseDescription,
     baseMetadata: existing?.baseMetadata ?? update.baseMetadata,
@@ -1775,6 +1778,7 @@ export const completeOfflineTicketUpdateAsync = async (
       subject: next.subject,
       description: next.description,
       metadata: next.metadata,
+      content: next.content ?? current.content,
       layout: next.layout ?? canonical?.layout ?? current.layout,
       metadataBlock: next.metadataBlock ?? canonical?.metadataBlock ?? current.metadataBlock,
       controlFields: next.controlFields ?? canonical?.controlFields ?? current.controlFields,

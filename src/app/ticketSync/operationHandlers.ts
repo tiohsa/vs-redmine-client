@@ -134,30 +134,65 @@ export const reconcileTicketCandidate = async (
   }
 };
 
+export type CompensationIdentityVerificationResult =
+  | { ok: true }
+  | { ok: false; reason: string; kind: "mismatch" | "insufficient_identity" };
+
 export const verifyCompensationIdentity = (
   remoteTicket: { id: number; projectId?: number; parentId?: number; subject?: string },
   expected: { projectId?: number; parentId?: number; subject?: string },
-): { ok: true } | { ok: false; reason: string } => {
-  if (expected.projectId !== undefined && expected.projectId > 0 && remoteTicket.projectId !== undefined && remoteTicket.projectId > 0 && remoteTicket.projectId !== expected.projectId) {
-    return {
-      ok: false,
-      reason: `Project mismatch: ticket #${remoteTicket.id} belongs to project #${remoteTicket.projectId}, expected #${expected.projectId}.`,
-    };
+): CompensationIdentityVerificationResult => {
+  if (expected.projectId !== undefined && expected.projectId > 0) {
+    if (remoteTicket.projectId === undefined || remoteTicket.projectId === 0) {
+      return {
+        ok: false,
+        kind: "insufficient_identity",
+        reason: `Remote ticket #${remoteTicket.id} is missing projectId, expected #${expected.projectId}.`,
+      };
+    }
+    if (remoteTicket.projectId !== expected.projectId) {
+      return {
+        ok: false,
+        kind: "mismatch",
+        reason: `Project mismatch: ticket #${remoteTicket.id} belongs to project #${remoteTicket.projectId}, expected #${expected.projectId}.`,
+      };
+    }
   }
-  if (expected.parentId !== undefined && expected.parentId > 0 && remoteTicket.parentId !== undefined && remoteTicket.parentId > 0 && remoteTicket.parentId !== expected.parentId) {
-    return {
-      ok: false,
-      reason: `Parent ticket ID mismatch: ticket #${remoteTicket.id} has parent #${remoteTicket.parentId}, expected #${expected.parentId}.`,
-    };
+
+  if (expected.parentId !== undefined && expected.parentId > 0) {
+    if (remoteTicket.parentId === undefined || remoteTicket.parentId === 0) {
+      return {
+        ok: false,
+        kind: "insufficient_identity",
+        reason: `Remote ticket #${remoteTicket.id} is missing parentId, expected #${expected.parentId}.`,
+      };
+    }
+    if (remoteTicket.parentId !== expected.parentId) {
+      return {
+        ok: false,
+        kind: "mismatch",
+        reason: `Parent ticket ID mismatch: ticket #${remoteTicket.id} has parent #${remoteTicket.parentId}, expected #${expected.parentId}.`,
+      };
+    }
   }
-  if (expected.subject !== undefined && expected.subject.trim().length > 0 && remoteTicket.subject !== undefined) {
+
+  if (expected.subject !== undefined && expected.subject.trim().length > 0) {
+    if (remoteTicket.subject === undefined || remoteTicket.subject === null) {
+      return {
+        ok: false,
+        kind: "insufficient_identity",
+        reason: `Remote ticket #${remoteTicket.id} is missing subject, expected "${expected.subject}".`,
+      };
+    }
     if (normalizeTicketText(remoteTicket.subject) !== normalizeTicketText(expected.subject)) {
       return {
         ok: false,
+        kind: "mismatch",
         reason: `Subject mismatch: ticket #${remoteTicket.id} subject "${remoteTicket.subject}" does not match expected "${expected.subject}".`,
       };
     }
   }
+
   return { ok: true };
 };
 
@@ -804,17 +839,19 @@ export class TicketCreateHandler implements OperationHandler<TicketCreateIntent,
       }
 
       try {
-        createdId = await createDeps.createIssue(requestToUse);
+        const rawCreated = await createDeps.createIssue(requestToUse);
+        const resolvedId = typeof rawCreated === "number" ? rawCreated : (rawCreated?.id ?? Number(rawCreated));
 
-        if (!createdId) {
+        if (!resolvedId || isNaN(resolvedId)) {
           throw new Error("Failed to create issue");
         }
+        createdId = resolvedId;
 
         const committed = await repo.transitionPrimaryRemoteWrite(
           opKey,
           {
             kind: "commit",
-            remoteId: createdId,
+            remoteId: resolvedId,
             projectId: requestToUse.projectId,
             requestSnapshot: ticketSnapshot,
           },
@@ -855,6 +892,15 @@ export class TicketCreateHandler implements OperationHandler<TicketCreateIntent,
     const children = prepared.parsed.metadata?.children ?? [];
     const uniqueChildren = Array.from(new Set(children.map((c) => c.trim()).filter((c) => c.length > 0)));
 
+    if (uniqueChildren.length > 0 && !createdId) {
+      return {
+        ok: false,
+        commitUnknown: false,
+        error: new Error("Missing parent ticket ID for child creation"),
+      };
+    }
+    const parentTicketId = createdId ?? 0;
+
     for (let ordinal = 0; ordinal < uniqueChildren.length; ordinal++) {
       const subject = uniqueChildren[ordinal];
       const effectId = `child-create:${ordinal}`;
@@ -880,12 +926,12 @@ export class TicketCreateHandler implements OperationHandler<TicketCreateIntent,
       const childRequest: IssueCreateInput = {
         subject,
         description: "",
-        parentId: createdId,
+        parentId: parentTicketId,
         projectId: prepared.projectId,
       };
       const childSnapshot: ChildTicketCreateRequestSnapshot = {
         kind: "child_create",
-        parentTicketId: createdId,
+        parentTicketId,
         projectId: prepared.projectId,
         subject,
         description: "",
@@ -900,7 +946,7 @@ export class TicketCreateHandler implements OperationHandler<TicketCreateIntent,
           kind: "child_create",
           operationRevision: revision,
           state: "planned",
-          target: { parentTicketId: createdId, ordinal },
+          target: { parentTicketId, ordinal },
           requestSnapshot: childSnapshot,
         },
         context.connectionScope,
@@ -2485,7 +2531,9 @@ export class TicketUpdateHandler implements OperationHandler<TicketUpdateIntent,
             metadataBlock: operation.intent?.metadataBlock,
             controlFields: operation.intent?.controlFields,
           };
-      const expectedContent = (operation.nextIntent as any)?.content ?? buildTicketEditorContent(source);
+      const expectedContent = operation.nextIntent
+        ? ((operation.nextIntent as any).content ?? buildTicketEditorContent(source))
+        : (operation.intent?.content ?? buildTicketEditorContent(source));
       const expectedRevision = (operation.nextIntent as any)?.revision ?? (operation.intentRevision ?? operation.revision ?? 1);
 
       if (deps?.documents?.rewriteTicket) {

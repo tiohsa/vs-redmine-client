@@ -28,6 +28,7 @@ import {
   canRetryEffect,
   DurableSyncEffectState,
   getEffectsForRevision,
+  getOperationRecoveryMode,
   getPrimaryEffectForRevision,
   getRecoveryItemsForOperation,
   isPrimaryEffectKind,
@@ -986,7 +987,23 @@ export class SyncCoordinator {
       };
     }
 
-    // 6. Single-flight concurrency control (R23)
+    // 6. Operation Recovery Safety Gate (R-01, R-03, DR-01)
+    const opRecoveryMode = getOperationRecoveryMode(op);
+    if (opRecoveryMode === "compensation_uncertainty" && !isPrimaryEffect) {
+      if (
+        input.resolution.kind === "retry_effect" ||
+        input.resolution.kind === "link_remote_child" ||
+        (input.resolution as any).kind === "start" ||
+        (input.resolution as any).kind === "assume_committed"
+      ) {
+        return {
+          kind: "failed_before_commit",
+          error: new Error("Secondary forward recovery is blocked by primary compensation uncertainty. Reconcile primary compensation first."),
+        };
+      }
+    }
+
+    // 7. Single-flight concurrency control (R23)
     const flightKey = `${scope}:resolveEffect:${op.operationId}:${input.operationRevision}:${input.effectId}`;
     if (this.inFlight.has(flightKey)) {
       return this.inFlight.get(flightKey)!;

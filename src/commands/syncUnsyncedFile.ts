@@ -178,6 +178,15 @@ const resolveSecondaryEffectsInteractive = async (
 ): Promise<Awaited<ReturnType<typeof engine.syncOne>> | undefined> => {
   const syncContext = { connectionScope: operationScope };
   const items = engine.getRecoveryItems(key as any, syncContext);
+  const primaryItem = items.find((item) => isPrimaryEffectKind(item.effectKind));
+  if (
+    primaryItem &&
+    (primaryItem.state === "compensation_unknown" ||
+      primaryItem.state === "compensation_started" ||
+      primaryItem.allowedActions.includes("reconcile_compensation"))
+  ) {
+    return undefined;
+  }
   const secondaryItems = items.filter((item) => !isPrimaryEffectKind(item.effectKind) && item.allowedActions.length > 0);
   if (secondaryItems.length === 0) {
     return undefined;
@@ -326,6 +335,7 @@ const syncUnsyncedFileAtScope = async (
     );
     const recoveryItems = engine.getRecoveryItems(syncKey, { connectionScope: operationScope });
     const hasPrimaryRecovery = recoveryItems.some((item) => isPrimaryEffectKind(item.effectKind) && item.allowedActions.length > 0);
+    let primaryResolved = false;
     if (
       (outcome.kind === "commit_unknown" &&
         (previousPhase === "commit_unknown" || previousPhase === "remote_write_started")) ||
@@ -333,13 +343,18 @@ const syncUnsyncedFileAtScope = async (
       (outcome.kind === "remote_committed" && outcome.pending === "remote_reconcile" &&
         (previousPhase === "remote_committed" || previousPhase === "reconciliation_pending"))
     ) {
-      outcome = await resolveCommitUnknownInteractive(engine.ticketService(), engine, syncKey, operationScope)
-        ?? outcome;
+      const resolved = await resolveCommitUnknownInteractive(engine.ticketService(), engine, syncKey, operationScope);
+      if (resolved) {
+        outcome = resolved;
+        primaryResolved = true;
+      }
     }
-    if (outcome.kind === "failed_before_commit" || outcome.kind === "remote_committed" || outcome.kind === "commit_unknown") {
-      const secOutcome = await resolveSecondaryEffectsInteractive(engine, syncKey, operationScope);
-      if (secOutcome) {
-        outcome = secOutcome;
+    if (!hasPrimaryRecovery || primaryResolved) {
+      if (outcome.kind === "failed_before_commit" || outcome.kind === "remote_committed" || outcome.kind === "commit_unknown") {
+        const secOutcome = await resolveSecondaryEffectsInteractive(engine, syncKey, operationScope);
+        if (secOutcome) {
+          outcome = secOutcome;
+        }
       }
     }
     if (outcome.kind === "completed" || outcome.kind === "no_change") {
@@ -394,18 +409,24 @@ const syncUnsyncedFileAtScope = async (
     );
     const recoveryItems = engine.getRecoveryItems(syncKey, { connectionScope: operationScope });
     const hasPrimaryRecovery = recoveryItems.some((item) => isPrimaryEffectKind(item.effectKind) && item.allowedActions.length > 0);
+    let primaryResolved = false;
     if (
       (outcome.kind === "commit_unknown" &&
         (previousPhase === "commit_unknown" || previousPhase === "remote_write_started")) ||
       (outcome.kind === "failed_before_commit" && hasPrimaryRecovery)
     ) {
-      outcome = await resolveCommitUnknownInteractive(engine.ticketService(), engine, syncKey, operationScope)
-        ?? outcome;
+      const resolved = await resolveCommitUnknownInteractive(engine.ticketService(), engine, syncKey, operationScope);
+      if (resolved) {
+        outcome = resolved;
+        primaryResolved = true;
+      }
     }
-    if (outcome.kind === "failed_before_commit" || outcome.kind === "remote_committed" || outcome.kind === "commit_unknown") {
-      const secOutcome = await resolveSecondaryEffectsInteractive(engine, syncKey, operationScope);
-      if (secOutcome) {
-        outcome = secOutcome;
+    if (!hasPrimaryRecovery || primaryResolved) {
+      if (outcome.kind === "failed_before_commit" || outcome.kind === "remote_committed" || outcome.kind === "commit_unknown") {
+        const secOutcome = await resolveSecondaryEffectsInteractive(engine, syncKey, operationScope);
+        if (secOutcome) {
+          outcome = secOutcome;
+        }
       }
     }
     if (outcome.kind === "completed") {

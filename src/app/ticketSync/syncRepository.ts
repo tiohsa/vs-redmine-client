@@ -1109,6 +1109,7 @@ export class DefaultSyncOperationRepository implements SyncOperationRepository {
             lastKnownRemoteUpdatedAt: completion?.remoteUpdatedAt ?? current.remoteUpdatedAt ?? new Date().toISOString(),
             subject: parsedNext.subject ?? next.subject ?? "",
             description: parsedNext.description ?? next.description ?? "",
+            content: nextContent,
             metadata: parsedNext.metadata ?? next.metadata ?? { tracker: "", priority: "", status: "", due_date: "", children: [] },
             layout: parsedNext.layout ?? next.layout,
             metadataBlock: parsedNext.metadataBlock ?? next.metadataBlock,
