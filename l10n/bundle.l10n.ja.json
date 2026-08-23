@@ -297,5 +297,12 @@
     "A previous remote write outcome is unknown. Please resolve or reconcile before retrying.": "前回のリモート書込み結果が不明です。再試行する前に解決または照合してください。",
     "Ticket #{0} was created, but local finalization is pending.": "チケット #{0} は作成されましたが、ローカルの完了処理が保留中です。",
     "Recovery completed. The item is queued for synchronization.": "復旧が完了しました。対象は同期キューに戻され、再同期できます。",
-    "Sync completed. Synced: {0}; recovery queued: {1}.": "同期が完了しました。同期済み: {0}件、復旧待ち: {1}件。"
+    "Sync completed. Synced: {0}; recovery queued: {1}.": "同期が完了しました。同期済み: {0}件、復旧待ち: {1}件。",
+    "Failed to persist the compensated Attempt closure.": "補償済みAttemptの終了状態を永続化できませんでした。",
+    "The compensated Attempt was closed without a remote mutation. Run sync again to process the queued Attempt.": "リモートを変更せずに補償済みAttemptを終了しました。キューに戻ったAttemptを処理するには、もう一度同期してください。",
+    "Primary compensation has unresolved rollback obligations; reconcile compensation before forwarding this operation.": "Primary補償後に未解決のロールバック義務があります。この操作を先へ進める前に補償を照合してください。",
+    "Only reconcile_compensation is allowed while primary compensation has unresolved rollback obligations.": "Primary補償後に未解決のロールバック義務がある間は、reconcile_compensation のみ実行できます。",
+    "Primary compensation has unresolved rollback obligations; forward ticket creation is blocked.": "Primary補償後に未解決のロールバック義務があるため、チケット作成を先へ進められません。",
+    "Primary compensation has unresolved rollback obligations; reconcile compensation before forwarding the ticket mutation.": "Primary補償後に未解決のロールバック義務があります。チケット変更を先へ進める前に補償を照合してください。",
+    "Primary compensation has unresolved rollback obligations; forward finalization is blocked.": "Primary補償後に未解決のロールバック義務があるため、ローカル完了処理を先へ進められません。"
 }

@@ -1818,8 +1818,8 @@ suite("T-01 〜 T-24: Sync Lifecycle Integration, Remote Certainty & Completion 
     assert.ok(failedEffect, "failed な attachment:1 も保持されること (R-04, F-17)");
   });
 
-  // T-32: Compensation true restart — compensated + createdRemoteId=undefined (INV-N12)
-  test("T-32: compensation 完了後の createdRemoteId=undefined で committed 誤判定しない (INV-N12)", async () => {
+  // T-32: Compensation evidence must close atomically before a new Attempt can write.
+  test("T-32: compensated evidence が残る間は new Primary CREATE を開始しない (INV-N12)", async () => {
     const ticketId = 3200;
     const key = { kind: "newTicket" as const, queueId: "t32-queue" };
     const repo = createSyncOperationRepository();
@@ -1832,6 +1832,7 @@ suite("T-01 〜 T-24: Sync Lifecycle Integration, Remote Certainty & Completion 
       connectionScope: SCOPE,
       phase: "queued",
       revision: 2,
+      attemptGeneration: 1,
       persistenceVersion: 1,
       createdRemoteId: undefined,  // compensation 後は undefined
       effects: [
@@ -1840,6 +1841,7 @@ suite("T-01 〜 T-24: Sync Lifecycle Integration, Remote Certainty & Completion 
           kind: "ticket_create" as any,
           state: "compensated",  // INV-N12: compensated
           operationRevision: 2,
+          attemptGeneration: 1,
           target: {},
           remoteId: undefined,  // compensation 後は undefined
         },
@@ -1871,10 +1873,13 @@ suite("T-01 〜 T-24: Sync Lifecycle Integration, Remote Certainty & Completion 
     });
 
     const outcome = await engine.syncOne(key, { connectionScope: SCOPE });
-    // INV-N12: compensated + createdRemoteId=undefined なら Primary committed 判定しない
-    // → createIssue が呼ばれること (re-create)
-    assert.strictEqual(createIssueCalls, 1, "compensated 後は Primary re-create が実行されること (INV-N12)");
-    void outcome;
+    // Persisted compensation evidence is still generation 1. Repository closure
+    // must advance to generation 2 and clear it atomically before a new CREATE.
+    assert.strictEqual(createIssueCalls, 0, "closure 前の compensated Primary から再CREATEしないこと (INV-N12)");
+    assert.strictEqual(outcome.kind, "remote_committed");
+    const retained = repo.getOperation(key, SCOPE);
+    assert.strictEqual(retained?.attemptGeneration, 1);
+    assert.strictEqual(retained?.effects?.[0]?.state, "compensated");
   });
 
   // T-33: Compensation completion checkpoint failure → recovery-required state (INV-N12, INV-07)
@@ -1953,4 +1958,3 @@ suite("T-01 〜 T-24: Sync Lifecycle Integration, Remote Certainty & Completion 
     assert.strictEqual(deleteIssueCalls, 1, "compensation_unknown 後は再DELETE しない (INV-N12)");
   });
 });
-

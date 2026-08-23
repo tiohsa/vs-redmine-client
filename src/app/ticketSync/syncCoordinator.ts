@@ -28,6 +28,7 @@ import {
 import {
   canRetryEffect,
   DurableSyncEffectState,
+  evaluateAttemptClosure,
   getAttemptGeneration,
   getEffectsForRevision,
   getOperationRecoveryMode,
@@ -127,6 +128,52 @@ export class SyncCoordinator {
 
     const currentRevision = operation.intentRevision ?? operation.revision ?? 1;
     const activeEffects = getEffectsForRevision(operation, currentRevision);
+    const recoveryMode = getOperationRecoveryMode(operation);
+
+    // INV-N07: Primary compensated + semantic rollback blocker is rollback-only.
+    // Do this before any preparation/secondary/primary path so a stale parent ID
+    // cannot reach a remote mutation through normal sync.
+    if (recoveryMode === "compensation_blocked") {
+      const closureDecision = evaluateAttemptClosure(
+        operation,
+        currentRevision,
+        getAttemptGeneration(operation),
+      );
+      const compensatedPrimary = getPrimaryEffectForRevision(operation, currentRevision);
+      if (closureDecision.closable && compensatedPrimary?.state === "compensated") {
+        const closed = await this.repository.transitionEffect(
+          key,
+          compensatedPrimary.effectId,
+          { kind: "complete_compensation" },
+          scope,
+          {
+            operationRevision: currentRevision,
+            attemptGeneration: getAttemptGeneration(operation),
+            sourceState: "compensated",
+          },
+        );
+        if (!closed) {
+          return {
+            kind: "failed_before_commit",
+            error: new Error(vscode.l10n.t("Failed to persist the compensated Attempt closure.")),
+          };
+        }
+        return {
+          kind: "remote_committed",
+          ticketId: 0,
+          commentId: operation.commentId,
+          pending: "remote_reconcile",
+          message: vscode.l10n.t("The compensated Attempt was closed without a remote mutation. Run sync again to process the queued Attempt."),
+        };
+      }
+      return {
+        kind: "remote_committed",
+        ticketId: 0,
+        commentId: operation.commentId,
+        pending: "remote_reconcile",
+        message: vscode.l10n.t("Primary compensation has unresolved rollback obligations; reconcile compensation before forwarding this operation."),
+      };
+    }
 
     // 1. 親がコミット済みで、不確実・失敗した child effect が存在する場合のみ remote_committed を返して自動同期をブロック (INV-N01, INV-N02)
     const hasUnresolvedChildEffect = activeEffects.some(
@@ -576,6 +623,15 @@ export class SyncCoordinator {
       };
     }
 
+    if (getOperationRecoveryMode(op) === "compensation_blocked" && input.resolution?.kind !== "reconcile_compensation") {
+      return {
+        kind: "failed_before_commit",
+        ticketId: op.ticketId,
+        commentId: op.commentId,
+        error: new Error(vscode.l10n.t("Only reconcile_compensation is allowed while primary compensation has unresolved rollback obligations.")),
+      };
+    }
+
     const resKind = input.resolution?.kind ?? "reconcile";
     const flightKey = `${scope}:resolve:${op.operationId}:${currentRevision}:${currentAttemptGeneration}:${resKind}`;
     const activeFlight = this.inFlight.get(flightKey);
@@ -597,6 +653,15 @@ export class SyncCoordinator {
           ticketId: freshOp?.ticketId ?? op.ticketId,
           commentId: freshOp?.commentId ?? op.commentId,
           message: freshOp?.errorMessage ?? "Operation is no longer in recoverable state",
+        };
+      }
+
+      if (getOperationRecoveryMode(freshOp) === "compensation_blocked" && input.resolution?.kind !== "reconcile_compensation") {
+        return {
+          kind: "failed_before_commit",
+          ticketId: freshOp.ticketId,
+          commentId: freshOp.commentId,
+          error: new Error(vscode.l10n.t("Only reconcile_compensation is allowed while primary compensation has unresolved rollback obligations.")),
         };
       }
 
@@ -1081,6 +1146,13 @@ export class SyncCoordinator {
 
     // 6. Operation Recovery Safety Gate (R-01, R-03, DR-01)
     const opRecoveryMode = getOperationRecoveryMode(op);
+    if (opRecoveryMode === "compensation_blocked" && input.resolution.kind !== "reconcile_compensation") {
+      return {
+        kind: "failed_before_commit",
+        error: new Error(vscode.l10n.t("Only reconcile_compensation is allowed while primary compensation has unresolved rollback obligations.")),
+      };
+    }
+
     if (opRecoveryMode === "compensation_uncertainty" && !isPrimaryEffect) {
       if (
         input.resolution.kind === "retry_effect" ||

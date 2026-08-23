@@ -298,6 +298,89 @@ suite("M01 〜 M10: Attempt Generation Recovery Tests", () => {
     assert.strictEqual(getOfflineSyncQueue(SCOPE).tickets.get(42)?.attemptGeneration, 4);
   });
 
+  test("Ticket Update の committed Child が 404 の場合は二段階checkpointで補償完了する", async () => {
+    const ticketId = 84;
+    const childId = 850;
+    const operationId = `${SCOPE}:ticket:${ticketId}`;
+    const operation: OfflineTicketUpdate = {
+      ticketId,
+      operationId,
+      phase: "remote_created" as any,
+      revision: 1,
+      attemptGeneration: 1,
+      baseSubject: "Base",
+      baseDescription: "Base description",
+      baseMetadata: { tracker: "Bug", priority: "Normal", status: "New", due_date: "", children: [] },
+      subject: "Updated",
+      description: "Updated description",
+      metadata: { tracker: "Bug", priority: "Normal", status: "New", due_date: "", children: [] },
+      effects: [
+        {
+          effectId: "ticket-update",
+          kind: "ticket_update",
+          operationRevision: 1,
+          attemptGeneration: 1,
+          state: "compensated",
+          target: { ticketId },
+        },
+        {
+          effectId: "child-create:0",
+          kind: "child_create",
+          operationRevision: 1,
+          attemptGeneration: 1,
+          state: "committed",
+          remoteId: childId,
+          target: { parentTicketId: ticketId, ordinal: 0 },
+          requestSnapshot: {
+            kind: "child_create",
+            parentTicketId: ticketId,
+            projectId: 1,
+            subject: "Child",
+            request: { projectId: 1, subject: "Child", description: "Child" },
+          },
+        },
+      ],
+    };
+    const queue = getOfflineSyncQueue(SCOPE);
+    queue.tickets.set(ticketId, operation);
+    await replaceOfflineSyncQueueAsync(queue, SCOPE);
+
+    let detailCalls = 0;
+    let deleteCalls = 0;
+    const engine = createSyncEngine({
+      tickets: {
+        getIssueDetail: async () => {
+          detailCalls++;
+          const notFound = new Error("404 Not Found") as Error & { status: number };
+          notFound.status = 404;
+          throw notFound;
+        },
+        deleteIssue: async () => {
+          deleteCalls++;
+        },
+      },
+    });
+    const outcome = await engine.resolveEffect({
+      key: { kind: "ticket", ticketId },
+      operationId,
+      operationRevision: 1,
+      attemptGeneration: 1,
+      effectId: "child-create:0",
+      expectedEffectState: "committed",
+      context: { connectionScope: SCOPE },
+      resolution: { kind: "reconcile_compensation" },
+    });
+
+    assert.notStrictEqual(outcome.kind, "failed_before_commit");
+    assert.strictEqual(detailCalls, 1);
+    assert.strictEqual(deleteCalls, 0, "404 のため DELETE は送信しないこと");
+    const closed = getOfflineSyncQueue(SCOPE).tickets.get(ticketId);
+    assert.ok(closed);
+    assert.strictEqual(closed.attemptGeneration, 2);
+    assert.strictEqual(closed.phase, "queued");
+    assert.deepStrictEqual(closed.effects, []);
+  });
+
   test("M08: 既存 v3 スナップショットで attemptGeneration が欠落していても世代 1 として復元される", async () => {
     const legacyEffect = {
       effectId: "ticket-create",

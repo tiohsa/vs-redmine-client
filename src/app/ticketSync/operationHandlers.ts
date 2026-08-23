@@ -53,7 +53,9 @@ import type { TicketUpdateFields, UploadToken } from "../../redmine/types";
 import {
   getAttemptGeneration,
   getEffectsForRevision,
+  getOperationRecoveryMode,
   getPrimaryEffectForRevision,
+  isEffectBlockingNormalSync,
   isPrimaryEffectKind,
   type ChildTicketCreateRequestSnapshot,
   type CommentCreateRequestSnapshot,
@@ -300,6 +302,18 @@ export class TicketCreateHandler implements OperationHandler<TicketCreateIntent,
     context: OperationHandlerContext,
     deps?: OperationHandlerDeps,
   ): Promise<{ ok: true; prepared: PreparedTicketCreate } | { ok: false; outcome: SyncOutcome }> {
+    if (getOperationRecoveryMode(operation) === "compensation_blocked") {
+      return {
+        ok: false,
+        outcome: {
+          kind: "remote_committed",
+          ticketId: 0,
+          pending: "remote_reconcile",
+          message: vscode.l10n.t("Primary compensation has unresolved rollback obligations; forward ticket creation is blocked."),
+        },
+      };
+    }
+
     const intent = operation.intent;
     if (!intent) {
       return { ok: false, outcome: { kind: "failed_before_commit", error: new Error("Missing TicketCreateIntent") } };
@@ -505,6 +519,13 @@ export class TicketCreateHandler implements OperationHandler<TicketCreateIntent,
     context: OperationHandlerContext,
     deps?: OperationHandlerDeps,
   ): Promise<{ ok: true; uploadTokens?: IssueUploadInput[] } | { ok: false; error: Error; commitUnknown?: boolean }> {
+    if (getOperationRecoveryMode(operation) === "compensation_blocked") {
+      return {
+        ok: false,
+        error: new Error("Forward secondary effects are blocked while primary compensation has unresolved rollback obligations."),
+      };
+    }
+
     const attachments = operation.intent?.attachments ?? [];
     const tokens: IssueUploadInput[] = [...prepared.uploadTokens];
     const createDeps = { ...defaultCreateDeps, ...deps?.ticketCreate };
@@ -764,6 +785,20 @@ export class TicketCreateHandler implements OperationHandler<TicketCreateIntent,
     error: Error;
     outcome?: SyncOutcome;
   }> {
+    if (getOperationRecoveryMode(operation) === "compensation_blocked") {
+      return {
+        ok: false,
+        commitUnknown: false,
+        error: new Error("Forward ticket mutations are blocked while primary compensation has unresolved rollback obligations."),
+        outcome: {
+          kind: "remote_committed",
+          ticketId: 0,
+          pending: "remote_reconcile",
+          message: vscode.l10n.t("Primary compensation has unresolved rollback obligations; reconcile compensation before forwarding the ticket mutation."),
+        },
+      };
+    }
+
     const createDeps: any = deps?.ticketCreate
       ? { ...defaultCreateDeps, ...deps.ticketCreate, getProjectTrackers: deps.ticketCreate.getProjectTrackers }
       : { ...defaultCreateDeps };
@@ -1356,6 +1391,14 @@ export class TicketCreateHandler implements OperationHandler<TicketCreateIntent,
       return { kind: "failed_before_commit", error: new Error(`Effect not found: ${effectId}`) };
     }
 
+    const recoveryMode = getOperationRecoveryMode(operation);
+    if (recoveryMode === "compensation_blocked" && resolution.kind !== "reconcile_compensation") {
+      return {
+        kind: "failed_before_commit",
+        error: new Error(vscode.l10n.t("Only reconcile_compensation is allowed while primary compensation has unresolved rollback obligations.")),
+      };
+    }
+
     const createDeps = { ...defaultCreateDeps, ...deps.ticketCreate };
 
     // mark_failed
@@ -1614,6 +1657,19 @@ export class TicketCreateHandler implements OperationHandler<TicketCreateIntent,
           } catch (err: any) {
             if (err?.status === 404 || err?.message?.includes("404") || err?.message?.toLowerCase().includes("not found")) {
               // Remote absent: 404 -> complete_compensation
+              if (currentEffectState === "committed") {
+                const startComp = await repo.transitionEffect(
+                  key,
+                  effectId,
+                  { kind: "start_compensation" },
+                  scope,
+                  { operationRevision: revision, sourceState: "committed" },
+                );
+                if (!startComp) {
+                  return { kind: "failed_before_commit", error: new Error(`Failed to transition to start_compensation for ${effectId}`) };
+                }
+                currentEffectState = "compensation_started";
+              }
               const compDone = await repo.transitionEffect(
                 key,
                 effectId,
@@ -1810,13 +1866,21 @@ export class TicketCreateHandler implements OperationHandler<TicketCreateIntent,
     }
     const activeEffects = getEffectsForRevision(op);
     const primary = getPrimaryEffectForRevision(op);
-    const parentCommitted =
-      primary?.state === "committed" ||
-      (op.createdRemoteId !== undefined && op.createdRemoteId > 0);
+    const recoveryMode = getOperationRecoveryMode(op);
+    if (recoveryMode === "compensation_blocked") {
+      return {
+        kind: "remote_committed",
+        ticketId: 0,
+        pending: "remote_reconcile",
+        message: vscode.l10n.t("Primary compensation has unresolved rollback obligations; forward finalization is blocked."),
+      };
+    }
 
-    const hasUnresolved = activeEffects.some(
-      (e) => e.state === "commit_unknown" || e.state === "failed" || e.state === "started" || e.state === "compensation_started" || e.state === "compensation_unknown"
-    );
+    const parentCommitted =
+      primary?.state === "committed" &&
+      getAttemptGeneration(primary) === getAttemptGeneration(op);
+
+    const hasUnresolved = activeEffects.some(isEffectBlockingNormalSync);
 
     if (!parentCommitted || hasUnresolved) {
       return {
@@ -2798,6 +2862,19 @@ export class TicketUpdateHandler implements OperationHandler<TicketUpdateIntent,
           } catch (err: any) {
             if (err?.status === 404 || err?.message?.includes("404") || err?.message?.toLowerCase().includes("not found")) {
               // Remote absent: 404 -> complete_compensation
+              if (currentEffectState === "committed") {
+                const startComp = await repo.transitionEffect(
+                  key,
+                  effectId,
+                  { kind: "start_compensation" },
+                  scope,
+                  { operationRevision: revision, sourceState: "committed" },
+                );
+                if (!startComp) {
+                  return { kind: "failed_before_commit", error: new Error(`Failed to transition to start_compensation for ${effectId}`) };
+                }
+                currentEffectState = "compensation_started";
+              }
               const compDone = await repo.transitionEffect(
                 key,
                 effectId,

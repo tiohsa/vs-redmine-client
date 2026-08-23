@@ -54,7 +54,7 @@ suite("F-01 〜 F-20: Reproduction & Invariant Tests", () => {
   // F-01: planEffect monotonicity
   test("F-01: planEffect monotonicity (committed/started/failed な Effect は planned で上書き・巻戻しされない)", async () => {
     const repo = createSyncOperationRepository();
-    addOfflineNewTicketAsync(
+    await addOfflineNewTicketAsync(
       {
         queueId: "f01-op",
         content: "Test Content",
@@ -127,7 +127,7 @@ suite("F-01 〜 F-20: Reproduction & Invariant Tests", () => {
   // F-02: failed(non_retriable) normal retry禁止
   test("F-02: failed(non_retriable) な Effect を持つ Operation は normal sync で再送されない", async () => {
     let createIssueCalls = 0;
-    addOfflineNewTicketAsync(
+    await addOfflineNewTicketAsync(
       {
         queueId: "f02-op",
         content: "Non-retriable fail ticket",
@@ -179,7 +179,7 @@ suite("F-01 〜 F-20: Reproduction & Invariant Tests", () => {
   // F-03: failed(retryable) explicit only (normal sync retry = 0)
   test("F-03: failed(retryable) な Effect は normal sync から自動再送されず 0 回である", async () => {
     let createIssueCalls = 0;
-    addOfflineNewTicketAsync(
+    await addOfflineNewTicketAsync(
       {
         queueId: "f03-op",
         content: "Retryable fail ticket",
@@ -278,7 +278,7 @@ suite("F-01 〜 F-20: Reproduction & Invariant Tests", () => {
       },
     });
 
-    await coordinator.resolveCommitUnknown({
+    const outcome = await coordinator.resolveCommitUnknown({
       key: { kind: "newTicket", queueId: "f06-op" },
       operationId: "f06-op",
       operationRevision: 1,
@@ -299,6 +299,7 @@ suite("F-01 〜 F-20: Reproduction & Invariant Tests", () => {
       },
     });
 
+    assert.strictEqual(outcome.kind, "completed", "F-06: explicit retry が frozen snapshot で完了すること");
     assert.ok(passedInput, "createIssue が呼ばれていること");
     assert.strictEqual(passedInput.subject, "Original Frozen Subject", "F-06: retry 時に保存された snapshot の subject が使われること");
     assert.strictEqual(passedInput.parentId, 42, "F-06: parentId が保存された snapshot から保持されること");
@@ -310,7 +311,7 @@ suite("F-01 〜 F-20: Reproduction & Invariant Tests", () => {
     let capturedInput: any = undefined;
     const repo = createSyncOperationRepository();
 
-    addOfflineNewTicketAsync(
+    await addOfflineNewTicketAsync(
       {
         queueId: "f07-op",
         content: "Subject: Ticket with full metadata\nTracker: Feature\nPriority: High\nStatus: In Progress\nDue Date: 2026-12-31\nStart Date: 2026-01-01\nParent: 99\n\nTicket body here",
@@ -534,7 +535,7 @@ suite("F-01 〜 F-20: Reproduction & Invariant Tests", () => {
   // F-16: Primary atomic checkpoint
   test("F-16: transitionPrimaryRemoteWrite で Operation phase と Primary effect state が1回の persistence で atomic に遷移する", async () => {
     const repo = createSyncOperationRepository();
-    addOfflineNewTicketAsync(
+    await addOfflineNewTicketAsync(
       {
         queueId: "f16-op",
         content: "Atomic Checkpoint Ticket",

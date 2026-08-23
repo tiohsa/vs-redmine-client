@@ -95,10 +95,6 @@ export class SyncEngine {
     return this.coordinator.getRepository();
   }
 
-  private currentAttemptGeneration(key: SyncEngineKey, context: SyncContext): number {
-    return getAttemptGeneration(this.coordinator.getRepository().getOperation(key as any, context.connectionScope));
-  }
-
   private currentRecoveryIdentity(key: SyncEngineKey, context: SyncContext): {
     operationId: string;
     operationRevision: number;
@@ -165,17 +161,25 @@ export class SyncEngine {
     key: SyncEngineKey;
     operationId: string;
     operationRevision: number;
+    /** Core recovery callbacks must provide the Attempt generation explicitly. */
     attemptGeneration?: number;
     effectId: string;
     expectedEffectState: DurableSyncEffectState;
     context: SyncContext;
     resolution: EffectResolution;
   }): Promise<SyncEngineOutcome> {
+    const attemptGeneration = input.attemptGeneration;
+    if (typeof attemptGeneration !== "number" || !Number.isInteger(attemptGeneration) || attemptGeneration <= 0) {
+      return {
+        kind: "failed_before_commit",
+        error: new Error("Recovery attemptGeneration is required and must be a positive integer."),
+      };
+    }
     return this.coordinator.resolveEffect({
       key: input.key as any,
       operationId: input.operationId,
       operationRevision: input.operationRevision,
-      attemptGeneration: input.attemptGeneration ?? this.currentAttemptGeneration(input.key, input.context),
+      attemptGeneration,
       effectId: input.effectId,
       expectedEffectState: input.expectedEffectState,
       context: input.context,

@@ -6,7 +6,7 @@ import type {
 import {
   type DurableSyncEffect,
   getAttemptGeneration,
-  isAttemptClosureSafe,
+  evaluateAttemptClosure,
   normalizeAttemptGeneration,
   restoreDurableSyncEffect,
 } from "../syncEffects";
@@ -181,9 +181,12 @@ export const applyGenericTransition = (
       next.createdRemoteId = undefined;
       next.createdChildIds = undefined;
       // INV-N11, F-17: Primaryが完全補償され、Current Generationの全Effectが安全な場合だけ閉じる。
-      const canCloseAttempt =
-        primaryIsCompensated &&
-        isAttemptClosureSafe(currentGenerationEffects);
+      const closureDecision = evaluateAttemptClosure(
+        { ...next, effects: next.effects ?? [] },
+        next.intentRevision ?? next.revision,
+        currentAttemptGeneration,
+      );
+      const canCloseAttempt = primaryIsCompensated && closureDecision.closable;
       if (primaryIsCompensated && !canCloseAttempt) {
         // Current Generation に unsafe な Effect が残る間は、compensated Primary と
         // Remote identity も含めて evidence を保持する。
@@ -200,6 +203,8 @@ export const applyGenericTransition = (
         : retainDurableEffectsForRetry(next.effects ?? []);
       if (canCloseAttempt) {
         next.attemptGeneration = currentAttemptGeneration + 1;
+        next.remoteUpdatedAt = undefined;
+        next.errorMessage = undefined;
       }
       if ((!primaryIsCompensated || canCloseAttempt) && next.nextIntent) {
         // 次の intent があれば昇格 (INV-07)

@@ -297,5 +297,12 @@
     "A previous remote write outcome is unknown. Please resolve or reconcile before retrying.": "A previous remote write outcome is unknown. Please resolve or reconcile before retrying.",
     "Ticket #{0} was created, but local finalization is pending.": "Ticket #{0} was created, but local finalization is pending.",
     "Recovery completed. The item is queued for synchronization.": "Recovery completed. The item is queued for synchronization.",
-    "Sync completed. Synced: {0}; recovery queued: {1}.": "Sync completed. Synced: {0}; recovery queued: {1}."
+    "Sync completed. Synced: {0}; recovery queued: {1}.": "Sync completed. Synced: {0}; recovery queued: {1}.",
+    "Failed to persist the compensated Attempt closure.": "Failed to persist the compensated Attempt closure.",
+    "The compensated Attempt was closed without a remote mutation. Run sync again to process the queued Attempt.": "The compensated Attempt was closed without a remote mutation. Run sync again to process the queued Attempt.",
+    "Primary compensation has unresolved rollback obligations; reconcile compensation before forwarding this operation.": "Primary compensation has unresolved rollback obligations; reconcile compensation before forwarding this operation.",
+    "Only reconcile_compensation is allowed while primary compensation has unresolved rollback obligations.": "Only reconcile_compensation is allowed while primary compensation has unresolved rollback obligations.",
+    "Primary compensation has unresolved rollback obligations; forward ticket creation is blocked.": "Primary compensation has unresolved rollback obligations; forward ticket creation is blocked.",
+    "Primary compensation has unresolved rollback obligations; reconcile compensation before forwarding the ticket mutation.": "Primary compensation has unresolved rollback obligations; reconcile compensation before forwarding the ticket mutation.",
+    "Primary compensation has unresolved rollback obligations; forward finalization is blocked.": "Primary compensation has unresolved rollback obligations; forward finalization is blocked."
 }

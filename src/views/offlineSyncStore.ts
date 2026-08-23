@@ -1,4 +1,5 @@
 import { randomUUID } from "crypto";
+import { AsyncLocalStorage } from "async_hooks";
 import type { Memento } from "vscode";
 import { IssueMetadata } from "./ticketMetadataTypes";
 import {
@@ -11,10 +12,9 @@ import type { FrontmatterControlFields } from "./ticketMetadataControlFields";
 import { computeNotesHash } from "../utils/notesHash";
 import {
   getAttemptGeneration,
+  evaluateAttemptClosure,
   hasUncertainDurableSyncEffect,
   hasUncertainPrimaryDurableSyncEffect,
-  isAttemptClosureSafe,
-  isPrimaryEffectKind,
   normalizeAttemptGeneration,
   restoreDurableSyncEffect,
   transitionDurableSyncEffect,
@@ -267,6 +267,62 @@ export const getActiveScope = (): string => activeScope;
 const queuesByScope = new Map<string, OfflineSyncQueue>();
 const persistenceByScope = new Map<string, Promise<void>>();
 const pendingSnapshotByScope = new Map<string, SerializedQueue>();
+
+/**
+ * Scope単位の永続 mutation mutex。
+ *
+ * Lifecycle の CAS は「現在値の読込」から「Memento成功後のmemory commit」までを
+ * 一つの臨界区間として扱う必要がある。Repository からこのstoreへ再入する経路も
+ * あるため、AsyncLocalStorageで同一scopeの再入だけを許可する。
+ */
+const mutationContext = new AsyncLocalStorage<Set<string>>();
+const mutationByScope = new Map<string, Promise<unknown>>();
+
+const runScopeMutation = <T>(scope: string, mutation: () => Promise<T>): Promise<T> => {
+  const activeScopes = mutationContext.getStore();
+  if (activeScopes?.has(scope)) {
+    return mutation();
+  }
+
+  const previous = mutationByScope.get(scope);
+  if (!previous) {
+    const nextScopes = new Set(activeScopes ?? []);
+    nextScopes.add(scope);
+    const current = mutationContext.run(nextScopes, mutation);
+    const pending = current.catch(() => undefined);
+    mutationByScope.set(scope, pending);
+    void pending.then(() => {
+      if (mutationByScope.get(scope) === pending) {
+        mutationByScope.delete(scope);
+      }
+    });
+    return current;
+  }
+
+  // mutationByScope stores a rejection-swallowing promise, so attaching a
+  // single continuation keeps the first mutation observable in the next
+  // microtask (and preserves the existing async mutation contract).
+  const current = previous.then(() => {
+    const nextScopes = new Set(activeScopes ?? []);
+    nextScopes.add(scope);
+    return mutationContext.run(nextScopes, mutation);
+  });
+  const pending = current.catch(() => undefined);
+  mutationByScope.set(scope, pending);
+  void pending.then(
+    () => {
+      if (mutationByScope.get(scope) === pending) {
+        mutationByScope.delete(scope);
+      }
+    },
+    () => {
+      if (mutationByScope.get(scope) === pending) {
+        mutationByScope.delete(scope);
+      }
+    },
+  );
+  return current;
+};
 
 const emptyQueue = (): OfflineSyncQueue => ({
   tickets: new Map<number, OfflineTicketUpdate>(),
@@ -928,6 +984,7 @@ export const planOfflineSyncEffectAsync = async (
   scope: string,
   expectedRevision: number,
 ): Promise<DurableSyncEffect | undefined> => {
+  return runScopeMutation(scope, async () => {
   const operation = findStoredOperation(getQueue(scope), operationId);
   if (
     !operation ||
@@ -951,9 +1008,16 @@ export const planOfflineSyncEffectAsync = async (
     attemptGeneration: getAttemptGeneration(operation),
     target: { ...effect.target },
   };
-  operation.effects = [...(operation.effects ?? []), planned];
-  await persistAsync(scope);
+  const nextOperation = {
+    ...operation,
+    effects: [...(operation.effects ?? []), planned],
+  } as StoredOfflineOperation;
+  await replaceOfflineSyncQueueAsync(
+    replaceStoredOperationInQueue(getQueue(scope), operation, nextOperation),
+    scope,
+  );
   return { ...planned, target: { ...planned.target } };
+  });
 };
 
 export const transitionOfflineSyncEffectAsync = async (
@@ -967,6 +1031,7 @@ export const transitionOfflineSyncEffectAsync = async (
     sourceState: DurableSyncEffectState;
   },
 ): Promise<DurableSyncEffect | undefined> => {
+  return runScopeMutation(scope, async () => {
   const operation = findStoredOperation(getQueue(scope), operationId);
   if (
     !operation ||
@@ -990,9 +1055,20 @@ export const transitionOfflineSyncEffectAsync = async (
   if (!transitioned) { return undefined; }
   const nextEffects = [...effects];
   nextEffects[index] = transitioned;
-  operation.effects = nextEffects;
-  await persistAsync(scope);
+  const nextOperation = {
+    ...operation,
+    effects: nextEffects,
+  } as StoredOfflineOperation;
+  try {
+    await replaceOfflineSyncQueueAsync(
+      replaceStoredOperationInQueue(getQueue(scope), operation, nextOperation),
+      scope,
+    );
+  } catch {
+    return undefined;
+  }
   return { ...transitioned, target: { ...transitioned.target } };
+  });
 };
 
 function loadQueue(storage: Memento, storageKey: string): OfflineSyncQueue {
@@ -1237,6 +1313,7 @@ export const addOfflineNewTicketAsync = async (
   update: Omit<OfflineNewTicket, "queueId"> & { queueId?: string },
   scope: string,
 ): Promise<OfflineNewTicket> => {
+  return runScopeMutation(scope, async () => {
   const queue = getQueue(scope);
   const index = update.documentUri
     ? queue.newTickets.findIndex(
@@ -1278,13 +1355,15 @@ export const addOfflineNewTicketAsync = async (
         queueId,
         revision: existing?.revision ?? update.revision ?? 1,
       };
+  const nextQueue = cloneQueueForMutation(queue);
   if (index === -1) {
-    queue.newTickets.unshift(entry);
+    nextQueue.newTickets.unshift(entry);
   } else {
-    queue.newTickets[index] = entry;
+    nextQueue.newTickets[index] = entry;
   }
-  await persistAsync(scope);
+  await replaceOfflineSyncQueueAsync(nextQueue, scope);
   return entry;
+  });
 };
 
 export const getOfflineSyncQueue = (scope = activeScope): OfflineSyncQueue => {
@@ -1294,6 +1373,42 @@ export const getOfflineSyncQueue = (scope = activeScope): OfflineSyncQueue => {
     comments: [...queue.comments],
     newTickets: [...queue.newTickets],
   };
+};
+
+/**
+ * Lifecycle transition は persistence 成功まで live queue を変更しない。
+ * Entry 自体は各遷移が immutable な新 object として構築するため、ここでは
+ * queue のコンテナだけを複製して、scope の他の operation を保持する。
+ */
+const cloneQueueForMutation = (queue: OfflineSyncQueue): OfflineSyncQueue => ({
+  tickets: new Map(queue.tickets),
+  comments: [...queue.comments],
+  newTickets: [...queue.newTickets],
+});
+
+type StoredOfflineOperation = OfflineNewTicket | OfflineTicketUpdate | OfflineCommentUpdate;
+
+const replaceStoredOperationInQueue = (
+  queue: OfflineSyncQueue,
+  current: StoredOfflineOperation,
+  next: StoredOfflineOperation,
+): OfflineSyncQueue => {
+  const nextQueue = cloneQueueForMutation(queue);
+  const newTicketIndex = nextQueue.newTickets.findIndex((entry) => entry === current);
+  if (newTicketIndex !== -1) {
+    nextQueue.newTickets[newTicketIndex] = next as OfflineNewTicket;
+    return nextQueue;
+  }
+  const ticketEntry = Array.from(nextQueue.tickets.entries()).find(([, entry]) => entry === current);
+  if (ticketEntry) {
+    nextQueue.tickets.set(ticketEntry[0], next as OfflineTicketUpdate);
+    return nextQueue;
+  }
+  const commentIndex = nextQueue.comments.findIndex((entry) => entry === current);
+  if (commentIndex !== -1) {
+    nextQueue.comments[commentIndex] = next as OfflineCommentUpdate;
+  }
+  return nextQueue;
 };
 
 export const getOfflineNewTicket = (
@@ -1324,7 +1439,7 @@ export const replaceOfflineSyncQueue = (
   persist(scope);
 };
 
-export const replaceOfflineSyncQueueAsync = async (
+const replaceOfflineSyncQueueAsyncInternal = async (
   next: OfflineSyncQueue,
   scope = activeScope,
 ): Promise<void> => {
@@ -1339,6 +1454,14 @@ export const replaceOfflineSyncQueueAsync = async (
   queue.newTickets = [...next.newTickets];
   notifyQueueChanged();
 };
+
+export const replaceOfflineSyncQueueAsync = (
+  next: OfflineSyncQueue,
+  scope = activeScope,
+): Promise<void> => runScopeMutation(
+  scope,
+  () => replaceOfflineSyncQueueAsyncInternal(next, scope),
+);
 
 export const removeOfflineTicketUpdate = (ticketId: number, scope = activeScope): void => {
   const queue = getQueue(scope);
@@ -1376,8 +1499,13 @@ export const updateOfflineNewTicketAsync = async (
     return undefined;
   }
   const next = { ...queue.newTickets[index], ...updates };
-  queue.newTickets[index] = next;
-  await persistAsync(scope);
+  const nextQueue = cloneQueueForMutation(queue);
+  nextQueue.newTickets[index] = next;
+  try {
+    await replaceOfflineSyncQueueAsync(nextQueue, scope);
+  } catch {
+    return undefined;
+  }
   return next;
 };
 
@@ -1412,6 +1540,7 @@ export const transitionOfflineNewTicketLifecycleAsync = async (
   scope: string,
   expected: LifecycleTransitionExpectation<NewTicketSyncPhase>,
 ): Promise<OfflineNewTicket | undefined> => {
+  return runScopeMutation(scope, async () => {
   const queue = getQueue(scope);
   const index = findNewTicketIndex(queue, key);
   const current = index === -1 ? undefined : queue.newTickets[index];
@@ -1496,29 +1625,51 @@ export const transitionOfflineNewTicketLifecycleAsync = async (
       break;
     case "complete_compensation":
       {
-        const currentGenerationEffects = (current.effects ?? []).filter(
-          (effect) => normalizeAttemptGeneration(effect.attemptGeneration) === getAttemptGeneration(current),
+        const currentAttemptGeneration = getAttemptGeneration(current);
+        const closureDecision = evaluateAttemptClosure(
+          current,
+          current.revision,
+          currentAttemptGeneration,
         );
-        const primaryEffect = currentGenerationEffects.find(
-          (effect) => isPrimaryEffectKind(effect.kind) || effect.effectId === "ticket-create",
-        );
-        if (primaryEffect?.state !== "compensated" || !isAttemptClosureSafe(currentGenerationEffects)) {
+        if (!closureDecision.closable) {
           return undefined;
         }
+        const futureEffects = (current.effects ?? []).filter(
+          (effect) => normalizeAttemptGeneration(effect.attemptGeneration) > currentAttemptGeneration,
+        );
+        const promoted = current.nextIntent
+          ? {
+            ...current,
+            content: current.nextIntent.content,
+            projectId: current.nextIntent.projectId ?? current.projectId,
+            documentUri: current.nextIntent.documentUri ?? current.documentUri,
+            baseDir: current.nextIntent.baseDir ?? current.baseDir,
+            revision: current.nextIntent.revision,
+            nextIntent: undefined,
+          }
+          : { ...current, nextIntent: undefined };
+        next = {
+          ...promoted,
+          createdIssueId: undefined,
+          createdChildIds: undefined,
+          status: undefined,
+          remoteUpdatedAt: undefined,
+          attemptGeneration: currentAttemptGeneration + 1,
+          phase: "queued",
+          effects: futureEffects,
+        };
       }
-      next = promoteNewTicketIntent({
-        ...current,
-        createdIssueId: undefined,
-        createdChildIds: undefined,
-        attemptGeneration: getAttemptGeneration(current) + 1,
-        phase: "queued",
-        effects: [],
-      });
       break;
   }
-  queue.newTickets[index] = next;
-  await persistAsync(scope);
+  const nextQueue = cloneQueueForMutation(queue);
+  nextQueue.newTickets[index] = next;
+  try {
+    await replaceOfflineSyncQueueAsync(nextQueue, scope);
+  } catch {
+    return undefined;
+  }
   return next;
+  });
 };
 
 export const abortOfflineNewTicketBeforeRemoteWriteAsync = async (
@@ -1533,8 +1684,13 @@ export const abortOfflineNewTicketBeforeRemoteWriteAsync = async (
     return undefined;
   }
   const next = promoteNewTicketIntent(current);
-  queue.newTickets[index] = next;
-  await persistAsync(scope);
+  const nextQueue = cloneQueueForMutation(queue);
+  nextQueue.newTickets[index] = next;
+  try {
+    await replaceOfflineSyncQueueAsync(nextQueue, scope);
+  } catch {
+    return undefined;
+  }
   return next;
 };
 
@@ -1560,15 +1716,16 @@ export const removeOfflineNewTicketAsync = async (
   scope: string,
 ): Promise<void> => {
   const queue = getQueue(scope);
-  const previousLength = queue.newTickets.length;
-  queue.newTickets = queue.newTickets.filter((ticket) => {
+  const nextQueue = cloneQueueForMutation(queue);
+  const previousLength = nextQueue.newTickets.length;
+  nextQueue.newTickets = nextQueue.newTickets.filter((ticket) => {
     if (key.queueId && ticket.queueId === key.queueId) {
       return false;
     }
     return !sameDocumentIdentity(ticket.documentUri, key.documentUri);
   });
-  if (queue.newTickets.length !== previousLength) {
-    await persistAsync(scope);
+  if (nextQueue.newTickets.length !== previousLength) {
+    await replaceOfflineSyncQueueAsync(nextQueue, scope);
   }
 };
 
@@ -1586,12 +1743,22 @@ export const discardOfflineNewTicketAsync = async (
     if (!operation.nextIntent) {
       return "recovery_required";
     }
-    queue.newTickets[index] = { ...operation, nextIntent: undefined };
-    await persistAsync(scope);
+    const nextQueue = cloneQueueForMutation(queue);
+    nextQueue.newTickets[index] = { ...operation, nextIntent: undefined };
+    try {
+      await replaceOfflineSyncQueueAsync(nextQueue, scope);
+    } catch {
+      return "recovery_required";
+    }
     return "discarded_next";
   }
-  queue.newTickets.splice(index, 1);
-  await persistAsync(scope);
+  const nextQueue = cloneQueueForMutation(queue);
+  nextQueue.newTickets.splice(index, 1);
+  try {
+    await replaceOfflineSyncQueueAsync(nextQueue, scope);
+  } catch {
+    return "recovery_required";
+  }
   return "discarded";
 };
 
@@ -1646,8 +1813,13 @@ export const updateOfflineTicketUpdateAsync = async (
     return undefined;
   }
   const next = { ...current, ...updates };
-  queue.tickets.set(ticketId, next);
-  await persistAsync(scope);
+  const nextQueue = cloneQueueForMutation(queue);
+  nextQueue.tickets.set(ticketId, next);
+  try {
+    await replaceOfflineSyncQueueAsync(nextQueue, scope);
+  } catch {
+    return undefined;
+  }
   return next;
 };
 
@@ -1681,6 +1853,7 @@ export const transitionOfflineTicketUpdateLifecycleAsync = async (
   scope: string,
   expected: LifecycleTransitionExpectation<TicketUpdateSyncPhase>,
 ): Promise<OfflineTicketUpdate | undefined> => {
+  return runScopeMutation(scope, async () => {
   const queue = getQueue(scope);
   const current = queue.tickets.get(ticketId);
   if (
@@ -1777,9 +1950,15 @@ export const transitionOfflineTicketUpdateLifecycleAsync = async (
       next = { ...current, phase: "reconciliation_pending" };
       break;
   }
-  queue.tickets.set(ticketId, next);
-  await persistAsync(scope);
+  const nextQueue = cloneQueueForMutation(queue);
+  nextQueue.tickets.set(ticketId, next);
+  try {
+    await replaceOfflineSyncQueueAsync(nextQueue, scope);
+  } catch {
+    return undefined;
+  }
   return next;
+  });
 };
 
 export const abortOfflineTicketUpdateBeforeRemoteWriteAsync = async (
@@ -1793,8 +1972,13 @@ export const abortOfflineTicketUpdateBeforeRemoteWriteAsync = async (
     return undefined;
   }
   const next = promoteTicketIntent(current);
-  queue.tickets.set(ticketId, next);
-  await persistAsync(scope);
+  const nextQueue = cloneQueueForMutation(queue);
+  nextQueue.tickets.set(ticketId, next);
+  try {
+    await replaceOfflineSyncQueueAsync(nextQueue, scope);
+  } catch {
+    return undefined;
+  }
   return next;
 };
 
@@ -1803,8 +1987,10 @@ export const removeOfflineTicketUpdateAsync = async (
   scope: string,
 ): Promise<void> => {
   const queue = getQueue(scope);
-  if (queue.tickets.delete(ticketId)) {
-    await persistAsync(scope);
+  if (queue.tickets.has(ticketId)) {
+    const nextQueue = cloneQueueForMutation(queue);
+    nextQueue.tickets.delete(ticketId);
+    await replaceOfflineSyncQueueAsync(nextQueue, scope);
   }
 };
 
@@ -1817,8 +2003,13 @@ export const discardOfflineTicketUpdateAsync = async (
   if (!operation) {
     return "not_found";
   }
-  queue.tickets.delete(ticketId);
-  await persistAsync(scope);
+  const nextQueue = cloneQueueForMutation(queue);
+  nextQueue.tickets.delete(ticketId);
+  try {
+    await replaceOfflineSyncQueueAsync(nextQueue, scope);
+  } catch {
+    return "recovery_required";
+  }
   return "discarded";
 };
 
@@ -1922,6 +2113,7 @@ export const transitionOfflineCommentLifecycleAsync = async (
   scope: string,
   expected: LifecycleTransitionExpectation<TicketUpdateSyncPhase>,
 ): Promise<OfflineCommentUpdate | undefined> => {
+  return runScopeMutation(scope, async () => {
   const queue = getQueue(scope);
   const index = findCommentIndex(queue, key);
   const current = index === -1 ? undefined : queue.comments[index];
@@ -2026,9 +2218,15 @@ export const transitionOfflineCommentLifecycleAsync = async (
       next = { ...current, phase: "local_finalize_pending" };
       break;
   }
-  queue.comments[index] = next;
-  await persistAsync(scope);
+  const nextQueue = cloneQueueForMutation(queue);
+  nextQueue.comments[index] = next;
+  try {
+    await replaceOfflineSyncQueueAsync(nextQueue, scope);
+  } catch {
+    return undefined;
+  }
   return next;
+  });
 };
 
 export const completeOfflineCommentAsync = async (
