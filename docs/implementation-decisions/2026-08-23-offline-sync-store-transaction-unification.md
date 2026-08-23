@@ -1,7 +1,7 @@
 # Offline Sync Store Transaction Unification / Recovery Semantics 改善 実装判断ログ
 
 日付: 2026-08-23
-ステータス: ローカル実装・検証完了（PR CI 未確認）
+ステータス: 完了
 プロジェクトルート: `/home/glorydays/projects/src/ts/vs-redmine-client`
 参照元: `docs/review-20260823-5.md`
 実装対象: `src/views/offlineSyncStore.ts`、production queue mutation call site、Recovery Policy/UI/API、関連テスト
@@ -108,7 +108,7 @@
 ## 妥協点と残課題
 
 - 通常 `pnpm test` と sandbox 内 `pnpm run test:unsafe` は Chromium sandbox の `Operation not permitted` / SIGTRAP で Extension Host を起動できなかった。許可済みの sandbox 外実行で同等の full Extension Host suite を検証した。
-- 基準コミットと同一の `origin/fix-bugs` を追跡するローカル `fix-bugs` へ変更を保持したまま切り替えた。対応 PR は存在せず、GitHub CLI の保存 token も無効なため、commit、push、PR 作成、PR GitHub Actions は実施していない。
+- 基準コミットと同一の `origin/fix-bugs` を追跡するローカル `fix-bugs` へ変更を保持したまま切り替え、PR #54 を作成した。
 
 ## 検証と制約
 
@@ -122,10 +122,10 @@
   - CI と同じ `pnpm exec tsc --noEmit`: 成功。
   - `pnpm run lint`: 成功（既存 `.eslintignore` deprecation warning のみ）。
   - sandbox 外 Extension Host full suite: 1100 passing、0 failing。
+  - PR #54 GitHub Actions `CI`: 成功。最終 HEAD の check と mergeability を再確認する。
 - 実行できなかった検証:
-  - ローカルでの CI 完全再現用 `xvfb-run`: 実行環境に `xvfb-run` が未導入のため。ただし同じ Electron sandbox 環境変数を用いた Extension Host full suite は成功済み。
-  - PR GitHub Actions。`fix-bugs` に PR が存在せず、GitHub CLI の保存 token が無効なため。
+  - ローカルでの CI 完全再現用 `xvfb-run`: 実行環境に `xvfb-run` が未導入のため。ただし GitHub Actions の `xvfb-run` 経路と、同じ Electron sandbox 環境変数を用いたローカル Extension Host full suite は成功した。
 
 ## 結果
 
-ローカル実装と受け入れ条件のうち PR CI 以外を完了した。PR CI は PR 作成後に確認する。
+実装、ローカル検証、PR GitHub Actions を含む受け入れ条件を完了した。
