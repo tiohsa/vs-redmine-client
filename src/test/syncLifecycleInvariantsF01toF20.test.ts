@@ -280,7 +280,10 @@ suite("F-01 〜 F-20: Reproduction & Invariant Tests", () => {
 
     await coordinator.resolveCommitUnknown({
       key: { kind: "newTicket", queueId: "f06-op" },
+      operationId: "f06-op",
+      operationRevision: 1,
       context: { connectionScope: SCOPE },
+      attemptGeneration: 1,
       resolution: { kind: "retry_remote_write" },
       deps: {
         ticketCreate: {
@@ -965,7 +968,10 @@ suite("F-01 〜 F-20: Reproduction & Invariant Tests", () => {
     // 3. Explicit recovery retry: Remote call = 1 and succeeds
     const outcome3 = await coordinator.resolveCommitUnknown({
       key: { kind: "newTicket", queueId: "f09-op" },
+      operationId: "f09-op",
+      operationRevision: 1,
       context: { connectionScope: SCOPE },
+      attemptGeneration: 1,
       resolution: { kind: "retry_remote_write" },
       deps: {
         ticketCreate: {
@@ -1011,7 +1017,10 @@ suite("F-01 〜 F-20: Reproduction & Invariant Tests", () => {
     let nonRetriableCalls = 0;
     const outcome4 = await coordinator.resolveCommitUnknown({
       key: { kind: "newTicket", queueId: "f09-non-retriable" },
+      operationId: "f09-non-retriable",
+      operationRevision: 1,
       context: { connectionScope: SCOPE },
+      attemptGeneration: 1,
       resolution: { kind: "retry_remote_write" },
       deps: {
         ticketCreate: {
@@ -1371,7 +1380,10 @@ suite("F-01 〜 F-20: Reproduction & Invariant Tests", () => {
       coordinator.sync({ kind: "newTicket", queueId: "f19-op" }, { connectionScope: SCOPE }, { deps: createDeps }),
       coordinator.resolveCommitUnknown({
         key: { kind: "newTicket", queueId: "f19-op" },
+        operationId: "f19-op",
+        operationRevision: 1,
         context: { connectionScope: SCOPE },
+        attemptGeneration: 1,
         resolution: { kind: "retry_remote_write" },
         deps: createDeps,
       }),

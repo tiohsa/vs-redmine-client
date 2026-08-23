@@ -3,7 +3,13 @@ import type {
   GenericSyncPhase,
   UnifiedSyncOperation,
 } from "./syncOperationTypes";
-import { type DurableSyncEffect, restoreDurableSyncEffect } from "../syncEffects";
+import {
+  type DurableSyncEffect,
+  getAttemptGeneration,
+  isAttemptClosureSafe,
+  normalizeAttemptGeneration,
+  restoreDurableSyncEffect,
+} from "../syncEffects";
 
 /**
  * abort/retry rollback時にdurableなEffectを保持するフィルター (INV-N11, F-17)
@@ -134,17 +140,28 @@ export const applyGenericTransition = (
       // INV-N11, F-17: committed/commit_unknown/failed/compensation_* なEffectは保持する
       next.effects = retainDurableEffectsForRetry(next.effects ?? []);
       if (next.nextIntent) {
-        next.intent = next.nextIntent;
+        const promotedIntent = next.nextIntent;
+        next.intent = promotedIntent;
         next.nextIntent = undefined;
-        next.intentRevision = (next.intentRevision ?? next.revision ?? 0) + 1;
+        next.intentRevision = (promotedIntent as { revision?: number }).revision ?? (next.intentRevision ?? next.revision ?? 0) + 1;
         next.revision = next.intentRevision;
+        if ("projectId" in promotedIntent) {
+          next.projectId = promotedIntent.projectId ?? next.projectId;
+        }
+        if ("documentUri" in promotedIntent) {
+          next.documentUri = promotedIntent.documentUri ?? next.documentUri;
+        }
       }
       return next;
     }
 
     case "abort_known_remote_failure": {
       // Primary Remote mutation 自体が既知失敗した場合専用
-      const primaryEffect = (next.effects ?? []).find(
+      const currentAttemptGeneration = getAttemptGeneration(next);
+      const currentGenerationEffects = (next.effects ?? []).filter(
+        (effect) => normalizeAttemptGeneration(effect.attemptGeneration) === currentAttemptGeneration,
+      );
+      const primaryEffect = currentGenerationEffects.find(
         (e) =>
           e.kind === "ticket_create" ||
           e.kind === "ticket_update" ||
@@ -159,17 +176,44 @@ export const applyGenericTransition = (
         // Primary が既に committed なら Primary 証拠を失わせてはならない (INV-N01)
         return undefined;
       }
+      const primaryIsCompensated = primaryEffect?.state === "compensated";
       next.phase = "queued";
       next.createdRemoteId = undefined;
       next.createdChildIds = undefined;
-      // INV-N11, F-17: Primaryが完全補償された場合は全Effectをリセット。それ以外は committed/commit_unknown/failed/compensation_* を保持
-      next.effects = primaryEffect?.state === "compensated" ? [] : retainDurableEffectsForRetry(next.effects ?? []);
-      if (next.nextIntent) {
+      // INV-N11, F-17: Primaryが完全補償され、Current Generationの全Effectが安全な場合だけ閉じる。
+      const canCloseAttempt =
+        primaryIsCompensated &&
+        isAttemptClosureSafe(currentGenerationEffects);
+      if (primaryIsCompensated && !canCloseAttempt) {
+        // Current Generation に unsafe な Effect が残る間は、compensated Primary と
+        // Remote identity も含めて evidence を保持する。
+        next.phase = operation.phase;
+        next.createdRemoteId = operation.createdRemoteId;
+        next.createdChildIds = operation.createdChildIds;
+        next.effects = next.effects ?? [];
+        return next;
+      }
+      next.effects = canCloseAttempt
+        ? (next.effects ?? []).filter(
+            (effect) => normalizeAttemptGeneration(effect.attemptGeneration) > currentAttemptGeneration,
+          )
+        : retainDurableEffectsForRetry(next.effects ?? []);
+      if (canCloseAttempt) {
+        next.attemptGeneration = currentAttemptGeneration + 1;
+      }
+      if ((!primaryIsCompensated || canCloseAttempt) && next.nextIntent) {
         // 次の intent があれば昇格 (INV-07)
-        next.intent = next.nextIntent;
+        const promotedIntent = next.nextIntent;
+        next.intent = promotedIntent;
         next.nextIntent = undefined;
-        next.intentRevision = (next.intentRevision ?? next.revision ?? 0) + 1;
+        next.intentRevision = (promotedIntent as { revision?: number }).revision ?? (next.intentRevision ?? next.revision ?? 0) + 1;
         next.revision = next.intentRevision;
+        if ("projectId" in promotedIntent) {
+          next.projectId = promotedIntent.projectId ?? next.projectId;
+        }
+        if ("documentUri" in promotedIntent) {
+          next.documentUri = promotedIntent.documentUri ?? next.documentUri;
+        }
       }
       return next;
     }
@@ -246,10 +290,17 @@ export const normalizeOperationOnRestart = (
     // 準備中だったものは queued に巻き戻し、nextIntent があれば昇格
     normalized.phase = "queued";
     if (normalized.nextIntent) {
-      normalized.intent = normalized.nextIntent;
+      const promotedIntent = normalized.nextIntent;
+      normalized.intent = promotedIntent;
       normalized.nextIntent = undefined;
-      normalized.intentRevision = (normalized.intentRevision ?? normalized.revision ?? 0) + 1;
+      normalized.intentRevision = (promotedIntent as { revision?: number }).revision ?? (normalized.intentRevision ?? normalized.revision ?? 0) + 1;
       normalized.revision = normalized.intentRevision;
+      if ("projectId" in promotedIntent) {
+        normalized.projectId = promotedIntent.projectId ?? normalized.projectId;
+      }
+      if ("documentUri" in promotedIntent) {
+        normalized.documentUri = promotedIntent.documentUri ?? normalized.documentUri;
+      }
     }
   }
 
@@ -260,4 +311,3 @@ export const normalizeOperationOnRestart = (
 
   return normalized;
 };
-

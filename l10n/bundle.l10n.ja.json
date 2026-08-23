@@ -295,5 +295,7 @@
     "Secondary operation '{0}' failed: {1}. Do you want to retry?": "セカンダリ操作 '{0}' が失敗しました: {1}。再試行しますか？",
     "Upload outcome for '{0}' is unknown. Retry?": "'{0}' のアップロード結果が不明です。再試行しますか？",
     "A previous remote write outcome is unknown. Please resolve or reconcile before retrying.": "前回のリモート書込み結果が不明です。再試行する前に解決または照合してください。",
-    "Ticket #{0} was created, but local finalization is pending.": "チケット #{0} は作成されましたが、ローカルの完了処理が保留中です。"
+    "Ticket #{0} was created, but local finalization is pending.": "チケット #{0} は作成されましたが、ローカルの完了処理が保留中です。",
+    "Recovery completed. The item is queued for synchronization.": "復旧が完了しました。対象は同期キューに戻され、再同期できます。",
+    "Sync completed. Synced: {0}; recovery queued: {1}.": "同期が完了しました。同期済み: {0}件、復旧待ち: {1}件。"
 }

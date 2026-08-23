@@ -13,7 +13,7 @@ import type { TicketSyncOutcome, TicketSyncQueueKey } from "./ticketSync/ticketS
 import type { CommentSaveDependencies } from "../views/commentSaveSync";
 import type { SyncOutcome } from "./ticketSync/syncOperationTypes";
 import { EffectResolution, TicketCreateHandler, TicketUpdateHandler } from "./ticketSync/operationHandlers";
-import type { DurableSyncEffectState, RecoveryItem } from "./syncEffects";
+import { getAttemptGeneration, type DurableSyncEffectState, type RecoveryItem } from "./syncEffects";
 
 export type SyncEngineKey =
   | TicketSyncQueueKey
@@ -95,16 +95,36 @@ export class SyncEngine {
     return this.coordinator.getRepository();
   }
 
+  private currentAttemptGeneration(key: SyncEngineKey, context: SyncContext): number {
+    return getAttemptGeneration(this.coordinator.getRepository().getOperation(key as any, context.connectionScope));
+  }
+
+  private currentRecoveryIdentity(key: SyncEngineKey, context: SyncContext): {
+    operationId: string;
+    operationRevision: number;
+    attemptGeneration: number;
+  } {
+    const operation = this.coordinator.getRepository().getOperation(key as any, context.connectionScope);
+    return {
+      operationId: operation?.operationId ?? "",
+      operationRevision: operation?.intentRevision ?? operation?.revision ?? 1,
+      attemptGeneration: getAttemptGeneration(operation),
+    };
+  }
+
   public async resolveCommentCommitUnknown(input: {
     key: Extract<SyncEngineKey, { kind: "comment" }>;
     context: SyncContext;
     attemptGeneration?: number;
     resolution?: { kind: "reconcile_remote" } | { kind: "link_remote_comment"; commentId: number };
   }): Promise<SyncEngineOutcome> {
+    const identity = this.currentRecoveryIdentity(input.key, input.context);
     return this.coordinator.resolveCommitUnknown({
       key: input.key,
+      operationId: identity.operationId,
+      operationRevision: identity.operationRevision,
       context: input.context,
-      attemptGeneration: input.attemptGeneration,
+      attemptGeneration: input.attemptGeneration ?? identity.attemptGeneration,
       resolution: input.resolution,
       deps: {
         comment: this.comments,
@@ -124,10 +144,13 @@ export class SyncEngine {
       | { kind: "retry_remote_write" }
       | { kind: "reconcile_compensation" };
   }): Promise<SyncEngineOutcome> {
+    const identity = this.currentRecoveryIdentity(input.key, input.context);
     return this.coordinator.resolveCommitUnknown({
       key: input.key,
+      operationId: identity.operationId,
+      operationRevision: identity.operationRevision,
       context: input.context,
-      attemptGeneration: input.attemptGeneration,
+      attemptGeneration: input.attemptGeneration ?? identity.attemptGeneration,
       resolution: input.resolution,
       deps: {
         ticketCreate: this.rawTicketDeps,
@@ -152,7 +175,7 @@ export class SyncEngine {
       key: input.key as any,
       operationId: input.operationId,
       operationRevision: input.operationRevision,
-      attemptGeneration: input.attemptGeneration,
+      attemptGeneration: input.attemptGeneration ?? this.currentAttemptGeneration(input.key, input.context),
       effectId: input.effectId,
       expectedEffectState: input.expectedEffectState,
       context: input.context,

@@ -44,6 +44,7 @@ import {
 import { parseTicketEditorContent } from "../../views/ticketEditorContent";
 import { editorContentFromTicket } from "../../views/ticketSync/ticketRemoteContent";
 import type { TicketCreateIntent } from "./syncOperationTypes";
+import { getAttemptGeneration } from "../syncEffects";
 
 const defaultDocumentPort = (rewriteDeps: RewriteDocumentDeps = {}): DocumentPort => ({
   rewriteNewTicket: ({ documentUri, ticketId, projectId, replacement, expected }) =>
@@ -422,6 +423,8 @@ export class TicketSyncService {
       | { kind: "reconcile_remote" }
       | { kind: "reconcile_compensation" };
   }): Promise<TicketSyncOutcome> {
+    const operation = this.coordinator.getRepository().getOperation(input.key as any, input.context.connectionScope);
+    const attemptGeneration = input.attemptGeneration ?? getAttemptGeneration(operation);
     const resolution: any = input.resolution.kind === "link_created_ticket"
       ? { kind: "link_remote_ticket", ticketId: input.resolution.ticketId, explicitLink: true }
       : (input.resolution.kind === "assume_update_committed"
@@ -429,8 +432,10 @@ export class TicketSyncService {
         : input.resolution);
     return this.coordinator.resolveCommitUnknown({
       key: input.key as any,
+      operationId: operation?.operationId ?? "",
+      operationRevision: operation?.intentRevision ?? operation?.revision ?? 1,
       context: input.context,
-      attemptGeneration: input.attemptGeneration,
+      attemptGeneration,
       resolution,
       deps: {
         ticketCreate: this.createDeps,

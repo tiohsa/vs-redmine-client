@@ -155,6 +155,22 @@ const UNCERTAIN_EFFECT_STATES: ReadonlySet<DurableSyncEffectState> = new Set([
   "compensation_unknown",
 ]);
 
+const ATTEMPT_TERMINAL_SAFE_STATES: ReadonlySet<DurableSyncEffectState> = new Set([
+  "planned",
+  "failed",
+  "compensated",
+]);
+
+/**
+ * Attempt closure may discard the current generation's durable evidence only
+ * when every effect is known not to require another remote decision.
+ * A committed effect is intentionally not terminal-safe here: during a
+ * compensation workflow it is still a rollback target.
+ */
+export const isAttemptClosureSafe = (
+  effects: readonly DurableSyncEffect[] | undefined,
+): boolean => effects?.every((effect) => ATTEMPT_TERMINAL_SAFE_STATES.has(effect.state)) ?? true;
+
 export const restoreDurableSyncEffect = (
   effect: DurableSyncEffect,
 ): DurableSyncEffect => {

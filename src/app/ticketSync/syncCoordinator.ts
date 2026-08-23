@@ -289,6 +289,9 @@ export class SyncCoordinator {
       if (handler.executeSecondaryEffects && (currentOp.phase === "queued" || currentOp.phase === "preparing")) {
         const secResult = await handler.executeSecondaryEffects(currentOp, prepResult.prepared, handlerCtx, depsWithRepo);
         if (!secResult.ok) {
+          if (secResult.outcome) {
+            return secResult.outcome;
+          }
           const failedSec = secResult;
           if (!secResult.commitUnknown) {
             try {
@@ -510,8 +513,10 @@ export class SyncCoordinator {
 
   public async resolveCommitUnknown(input: {
     key: SyncOperationKey;
+    operationId: string;
+    operationRevision: number;
     context: SyncContext;
-    attemptGeneration?: number;
+    attemptGeneration: number;
     resolution?:
       | { kind: "reconcile_remote" }
       | { kind: "link_remote_comment"; commentId: number; explicitLink?: boolean }
@@ -523,13 +528,36 @@ export class SyncCoordinator {
     deps?: OperationHandlerDeps;
   }): Promise<SyncOutcome> {
     const scope = input.context.connectionScope;
+    if (!input.operationId || !Number.isInteger(input.operationRevision) || input.operationRevision <= 0) {
+      return {
+        kind: "failed_before_commit",
+        error: new Error("Recovery operationId and operationRevision are required."),
+      };
+    }
+    if (!Number.isInteger(input.attemptGeneration) || input.attemptGeneration <= 0) {
+      return {
+        kind: "failed_before_commit",
+        error: new Error("Recovery attemptGeneration is required and must be a positive integer."),
+      };
+    }
     const op = this.repository.getOperation(input.key, scope);
+    if (op && op.operationId !== input.operationId) {
+      return {
+        kind: "failed_before_commit",
+        error: new Error(`Operation ID mismatch: expected "${op.operationId}", got "${input.operationId}"`),
+      };
+    }
     const currentRevision = op?.intentRevision ?? op?.revision ?? 1;
+    if (op && currentRevision !== input.operationRevision) {
+      return {
+        kind: "failed_before_commit",
+        error: new Error(`Operation revision mismatch: expected ${currentRevision}, got ${input.operationRevision}`),
+      };
+    }
     const currentAttemptGeneration = getAttemptGeneration(op);
     if (
       op &&
-      input.attemptGeneration !== undefined &&
-      currentAttemptGeneration !== getAttemptGeneration({ attemptGeneration: input.attemptGeneration })
+      currentAttemptGeneration !== input.attemptGeneration
     ) {
       return {
         kind: "failed_before_commit",
@@ -573,9 +601,10 @@ export class SyncCoordinator {
       }
 
       if (
+        freshOp.operationId !== input.operationId ||
+        freshRevision !== input.operationRevision ||
         freshAttemptGeneration !== currentAttemptGeneration ||
-        (input.attemptGeneration !== undefined &&
-          freshAttemptGeneration !== getAttemptGeneration({ attemptGeneration: input.attemptGeneration }))
+        freshAttemptGeneration !== input.attemptGeneration
       ) {
         return {
           kind: "failed_before_commit",
@@ -943,7 +972,7 @@ export class SyncCoordinator {
     key: SyncOperationKey;
     operationId: string;
     operationRevision: number;
-    attemptGeneration?: number;
+    attemptGeneration: number;
     effectId: string;
     expectedEffectState: DurableSyncEffectState;
     context: SyncContext;
@@ -951,6 +980,12 @@ export class SyncCoordinator {
     deps?: OperationHandlerDeps;
   }): Promise<SyncOutcome> {
     const scope = input.context.connectionScope;
+    if (!Number.isInteger(input.attemptGeneration) || input.attemptGeneration <= 0) {
+      return {
+        kind: "failed_before_commit",
+        error: new Error("Recovery attemptGeneration is required and must be a positive integer."),
+      };
+    }
     const op = this.repository.getOperation(input.key, scope);
     if (!op) {
       return {
@@ -986,8 +1021,7 @@ export class SyncCoordinator {
 
     const currentAttemptGeneration = getAttemptGeneration(op);
     if (
-      input.attemptGeneration !== undefined &&
-      currentAttemptGeneration !== getAttemptGeneration({ attemptGeneration: input.attemptGeneration })
+      currentAttemptGeneration !== input.attemptGeneration
     ) {
       return {
         kind: "failed_before_commit",

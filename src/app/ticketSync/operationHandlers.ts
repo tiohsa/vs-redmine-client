@@ -224,7 +224,7 @@ export interface OperationHandler<TIntent extends SyncIntent = any, TPrepared = 
     prepared: TPrepared,
     context: OperationHandlerContext,
     deps?: OperationHandlerDeps,
-  ): Promise<{ ok: true; uploadTokens?: IssueUploadInput[] } | { ok: false; error: Error; commitUnknown?: boolean }>;
+  ): Promise<{ ok: true; uploadTokens?: IssueUploadInput[] } | { ok: false; error: Error; commitUnknown?: boolean; outcome?: SyncOutcome }>;
 
   executeRemoteWrite(
     operation: UnifiedSyncOperation<TIntent>,
@@ -1078,14 +1078,15 @@ export class TicketCreateHandler implements OperationHandler<TicketCreateIntent,
                   context.connectionScope,
                   { operationRevision: revision, sourceState: "compensation_started" },
                 );
-                if (compResult) {
-                  const currentOpAfterComp = repo.getOperation(opKey, context.connectionScope);
-                  if (currentOpAfterComp) {
-                    currentOpAfterComp.createdRemoteId = undefined;
-                    currentOpAfterComp.phase = "queued";
-                    await repo.saveOperation(currentOpAfterComp, context.connectionScope);
-                  }
-                } else {
+                if (compResult && getAttemptGeneration(compResult) > getAttemptGeneration(operation)) {
+                  return {
+                    ok: false,
+                    error: err as Error,
+                    commitUnknown: false,
+                    outcome: { kind: "queued" },
+                  };
+                }
+                if (!compResult) {
                   await repo.transitionEffect(
                     opKey,
                     "ticket-create",
@@ -1804,6 +1805,9 @@ export class TicketCreateHandler implements OperationHandler<TicketCreateIntent,
     context: OperationHandlerContext,
     deps: OperationHandlerDeps & { repository: SyncOperationRepository },
   ): Promise<SyncOutcome> {
+    if (op.phase === "queued" && getEffectsForRevision(op).length === 0) {
+      return { kind: "queued" };
+    }
     const activeEffects = getEffectsForRevision(op);
     const primary = getPrimaryEffectForRevision(op);
     const parentCommitted =
@@ -2964,6 +2968,9 @@ export class TicketUpdateHandler implements OperationHandler<TicketUpdateIntent,
     context: OperationHandlerContext,
     deps: OperationHandlerDeps & { repository: SyncOperationRepository },
   ): Promise<SyncOutcome> {
+    if (op.phase === "queued" && getEffectsForRevision(op).length === 0) {
+      return { kind: "queued" };
+    }
     const activeEffects = getEffectsForRevision(op);
     const primary = getPrimaryEffectForRevision(op);
     const parentCommitted = primary?.state === "committed";

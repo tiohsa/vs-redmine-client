@@ -98,12 +98,23 @@ export class DashboardUnsyncedService {
     }
 
     const synced = results.filter((result) => result?.status === "success").length;
+    const queued = results.filter((result) => result?.status === "queued").length;
     if (synced === 0) {
-      this.deps.context.notifySuccess(requestId, vscode.l10n.t("No changes."));
+      this.deps.context.notifySuccess(
+        requestId,
+        queued > 0
+          ? vscode.l10n.t("Recovery completed. The item is queued for synchronization.")
+          : vscode.l10n.t("No changes."),
+      );
       return;
     }
     this.deps.context.onTicketsRefreshed();
-    this.deps.context.notifySuccess(requestId, vscode.l10n.t("Sync completed. Synced: {0}.", synced));
+    this.deps.context.notifySuccess(
+      requestId,
+      queued > 0
+        ? vscode.l10n.t("Sync completed. Synced: {0}; recovery queued: {1}.", synced, queued)
+        : vscode.l10n.t("Sync completed. Synced: {0}.", synced),
+    );
   }
 
   async handleDiscardOne(requestId: string, key: DashboardUnsyncedKey): Promise<void> {
@@ -215,6 +226,9 @@ export class DashboardUnsyncedService {
         break;
       case "no_change":
         this.deps.context.notifySuccess(requestId, vscode.l10n.t("No changes."));
+        break;
+      case "queued":
+        this.deps.context.notifySuccess(requestId, vscode.l10n.t("Recovery completed. The item is queued for synchronization."));
         break;
       case "conflict":
         this.deps.context.notifyError(requestId, vscode.l10n.t("Conflicts with remote changes detected. Open the file to review."));

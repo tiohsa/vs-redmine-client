@@ -13,6 +13,8 @@ import {
   getAttemptGeneration,
   hasUncertainDurableSyncEffect,
   hasUncertainPrimaryDurableSyncEffect,
+  isAttemptClosureSafe,
+  isPrimaryEffectKind,
   normalizeAttemptGeneration,
   restoreDurableSyncEffect,
   transitionDurableSyncEffect,
@@ -1493,25 +1495,25 @@ export const transitionOfflineNewTicketLifecycleAsync = async (
       next = { ...current, phase: "reconciliation_pending" };
       break;
     case "complete_compensation":
-      if (
-        current.effects?.find((effect) => effect.effectId === "ticket-create")?.state !==
-          "compensated" ||
-        current.effects?.some((effect) =>
-          effect.kind === "child_create" &&
-          effect.state !== "compensated" &&
-          effect.state !== "failed"
-        )
-      ) {
-        return undefined;
+      {
+        const currentGenerationEffects = (current.effects ?? []).filter(
+          (effect) => normalizeAttemptGeneration(effect.attemptGeneration) === getAttemptGeneration(current),
+        );
+        const primaryEffect = currentGenerationEffects.find(
+          (effect) => isPrimaryEffectKind(effect.kind) || effect.effectId === "ticket-create",
+        );
+        if (primaryEffect?.state !== "compensated" || !isAttemptClosureSafe(currentGenerationEffects)) {
+          return undefined;
+        }
       }
-      next = {
+      next = promoteNewTicketIntent({
         ...current,
         createdIssueId: undefined,
         createdChildIds: undefined,
         attemptGeneration: getAttemptGeneration(current) + 1,
         phase: "queued",
         effects: [],
-      };
+      });
       break;
   }
   queue.newTickets[index] = next;

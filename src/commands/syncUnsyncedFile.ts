@@ -30,6 +30,7 @@ export type SyncFailureReason =
 
 export type SyncUnsyncedFileResult =
   | { status: "success"; kind: "ticket" | "newTicket" | "comment"; id?: number }
+  | { status: "queued"; kind: "ticket" | "newTicket" | "comment"; id?: number }
   | { status: "no_change"; kind: "ticket" | "newTicket" | "comment"; id?: number }
   | { status: "conflict"; kind: "ticket" | "newTicket" | "comment"; id?: number }
   | { status: "failed"; kind: "ticket" | "newTicket" | "comment"; message?: string; reason?: SyncFailureReason };
@@ -247,6 +248,9 @@ const resolveSecondaryEffectsInteractive = async (
           resolution: { kind: "reconcile_compensation" },
         });
         resolvedAny = true;
+        if (outcome.kind === "queued") {
+          return outcome;
+        }
         if (outcome.kind !== "completed" && outcome.kind !== "no_change" && outcome.kind !== "remote_committed") {
           return outcome;
         }
@@ -278,6 +282,9 @@ const resolveSecondaryEffectsInteractive = async (
             resolution: { kind: "link_remote_child", remoteId: Number(rawId) },
           });
           resolvedAny = true;
+          if (outcome.kind === "queued") {
+            return outcome;
+          }
           if (outcome.kind !== "completed" && outcome.kind !== "no_change" && outcome.kind !== "remote_committed") {
             return outcome;
           }
@@ -294,6 +301,9 @@ const resolveSecondaryEffectsInteractive = async (
           resolution: { kind: "retry_effect" },
         });
         resolvedAny = true;
+        if (outcome.kind === "queued") {
+          return outcome;
+        }
         if (outcome.kind !== "completed" && outcome.kind !== "no_change" && outcome.kind !== "remote_committed") {
           return outcome;
         }
@@ -318,6 +328,9 @@ const resolveSecondaryEffectsInteractive = async (
           resolution: { kind: "retry_effect" },
         });
         resolvedAny = true;
+        if (outcome.kind === "queued") {
+          return outcome;
+        }
         if (outcome.kind !== "completed" && outcome.kind !== "no_change" && outcome.kind !== "remote_committed") {
           return outcome;
         }
@@ -402,6 +415,9 @@ const syncUnsyncedFileAtScope = async (
         kind: "ticket",
         id: syncKey.ticketId,
       };
+    } else if (outcome.kind === "queued") {
+      showInfo(vscode.l10n.t("Recovery completed. The item is queued for synchronization."));
+      return { status: "queued", kind: "ticket", id: syncKey.ticketId };
     } else if (outcome.kind === "conflict") {
       showWarning(vscode.l10n.t("Conflicts with remote changes detected. Open the file to review."));
       return { status: "conflict", kind: "ticket", id: syncKey.ticketId };
@@ -462,6 +478,10 @@ const syncUnsyncedFileAtScope = async (
       options.onTicketCreated?.();
       showInfo(vscode.l10n.t("New ticket created."));
       return { status: "success", kind: "newTicket", id: outcome.ticketId };
+    }
+    if (outcome.kind === "queued") {
+      showInfo(vscode.l10n.t("Recovery completed. The item is queued for synchronization."));
+      return { status: "queued", kind: "newTicket" };
     }
     if (outcome.kind === "remote_committed") {
       const message = outcome.message ?? vscode.l10n.t(
@@ -534,6 +554,9 @@ const syncUnsyncedFileAtScope = async (
         kind: "comment",
         id: (outcome as { commentId?: number }).commentId,
       };
+    } else if (outcome.kind === "queued") {
+      showInfo(vscode.l10n.t("Recovery completed. The item is queued for synchronization."));
+      return { status: "queued", kind: "comment" };
     } else if (outcome.kind === "conflict") {
       showWarning(vscode.l10n.t("Conflicts with remote changes detected. Open the file to review."));
       return { status: "conflict", kind: "comment" };

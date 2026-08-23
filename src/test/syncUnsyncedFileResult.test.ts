@@ -93,4 +93,27 @@ suite("syncUnsyncedFileResult — 構造化戻り値", () => {
     assert.ok(["success", "no_change", "conflict", "failed"].includes(result!.status));
     assert.strictEqual(result!.kind, "ticket");
   });
+
+  test("queued outcome は failed/Unknown error に変換せず、再同期を自動開始しない", async () => {
+    let syncOneCalls = 0;
+    const fakeEngine = {
+      syncOne: async () => {
+        syncOneCalls++;
+        return { kind: "queued" as const };
+      },
+      getRecoveryItems: () => [],
+      ticketService: () => ({}),
+    } as unknown as ReturnType<typeof import("../app/syncEngine").createSyncEngine>;
+
+    const result = await syncUnsyncedFile(
+      { syncKey: { kind: "ticket", ticketId: 123 } },
+      {
+        createTicketSyncService: (() => ({})) as never,
+        createSyncEngine: (() => fakeEngine) as never,
+      },
+    );
+
+    assert.deepStrictEqual(result, { status: "queued", kind: "ticket", id: 123 });
+    assert.strictEqual(syncOneCalls, 1);
+  });
 });
