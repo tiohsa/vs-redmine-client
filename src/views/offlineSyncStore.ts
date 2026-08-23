@@ -10,8 +10,10 @@ import {
 import type { FrontmatterControlFields } from "./ticketMetadataControlFields";
 import { computeNotesHash } from "../utils/notesHash";
 import {
+  getAttemptGeneration,
   hasUncertainDurableSyncEffect,
   hasUncertainPrimaryDurableSyncEffect,
+  normalizeAttemptGeneration,
   restoreDurableSyncEffect,
   transitionDurableSyncEffect,
   type DurableSyncEffect,
@@ -71,6 +73,7 @@ export type OfflineTicketUpdate = {
   operationId?: string;
   connectionScope?: string;
   phase?: TicketUpdateSyncPhase;
+  attemptGeneration?: number;
   remoteUpdatedAt?: string;
   createdChildIds?: number[];
   revision?: number;
@@ -92,6 +95,7 @@ export type OfflineCommentUpdate = {
   operationId?: string;
   connectionScope?: string;
   phase?: TicketUpdateSyncPhase;
+  attemptGeneration?: number;
   revision?: number;
   effects?: DurableSyncEffect[];
   remoteProjectId?: number;
@@ -117,6 +121,7 @@ export type SyncOperation = {
   kind: SyncOperationKind;
   connectionScope: string;
   revision: number;
+  attemptGeneration?: number;
   phase: NewTicketSyncPhase | TicketUpdateSyncPhase | "queued";
   documentUri?: string;
   createdAt: number;
@@ -143,6 +148,7 @@ export type OfflineNewTicket = {
   status?: "queued" | "created_rewrite_failed";
   phase?: NewTicketSyncPhase;
   connectionScope?: string;
+  attemptGeneration?: number;
   remoteUpdatedAt?: string;
   createdChildIds?: number[];
   revision?: number;
@@ -205,6 +211,7 @@ export type CommentLifecycleAction =
 export type LifecycleTransitionExpectation<Phase extends string> = {
   operationId: string;
   revision: number;
+  attemptGeneration?: number;
   sourcePhase: Phase;
 };
 
@@ -285,11 +292,16 @@ const primaryEffectId = (kind: SyncOperationKind): string => {
 
 const withPlannedPrimaryEffect = <T extends {
   revision?: number;
+  attemptGeneration?: number;
   effects?: DurableSyncEffect[];
 }>(operation: T, kind: SyncOperationKind, target: DurableSyncEffect["target"]): T => {
   const revision = operation.revision ?? 1;
+  const attemptGeneration = getAttemptGeneration(operation);
   const effectId = primaryEffectId(kind);
-  if (operation.effects?.some((effect) => effect.effectId === effectId)) {
+  if (operation.effects?.some((effect) =>
+    effect.effectId === effectId &&
+    normalizeAttemptGeneration(effect.attemptGeneration) === attemptGeneration
+  )) {
     return operation;
   }
   return {
@@ -298,6 +310,7 @@ const withPlannedPrimaryEffect = <T extends {
       effectId,
       kind: primaryEffectKind(kind),
       operationRevision: revision,
+      attemptGeneration,
       state: "planned",
       target,
     }],
@@ -306,6 +319,7 @@ const withPlannedPrimaryEffect = <T extends {
 
 const withPrimaryEffectTransition = <T extends {
   revision?: number;
+  attemptGeneration?: number;
   effects?: DurableSyncEffect[];
 }>(
   operation: T,
@@ -314,13 +328,18 @@ const withPrimaryEffectTransition = <T extends {
   sourceState: DurableSyncEffectState,
 ): T | undefined => {
   const effectId = primaryEffectId(kind);
+  const attemptGeneration = getAttemptGeneration(operation);
   let effects = operation.effects ?? [];
-  let index = effects.findIndex((effect) => effect.effectId === effectId);
+  let index = effects.findIndex((effect) =>
+    effect.effectId === effectId &&
+    normalizeAttemptGeneration(effect.attemptGeneration) === attemptGeneration
+  );
   if (index === -1 && sourceState !== "planned") {
     effects = [...effects, {
       effectId,
       kind: primaryEffectKind(kind),
       operationRevision: operation.revision ?? 1,
+      attemptGeneration,
       state: sourceState,
       target: {},
     }];
@@ -335,6 +354,7 @@ const withPrimaryEffectTransition = <T extends {
   }
   const transitioned = transitionDurableSyncEffect(effects[index], action, {
     operationRevision: operation.revision ?? 1,
+    attemptGeneration,
     sourceState,
   });
   if (!transitioned) {
@@ -348,16 +368,24 @@ const withPrimaryEffectTransition = <T extends {
 const normalizeOperationEffects = (input: {
   kind: SyncOperationKind;
   revision: number;
+  attemptGeneration?: number;
   phase: SyncOperation["phase"];
   payload: OfflineNewTicket | OfflineTicketUpdate | OfflineCommentUpdate;
   effects?: DurableSyncEffect[];
 }): DurableSyncEffect[] => {
+  const attemptGeneration = normalizeAttemptGeneration(input.attemptGeneration);
   if (Array.isArray(input.effects)) {
-    return input.effects.map(restoreDurableSyncEffect);
+    return input.effects.map((effect) => ({
+      ...restoreDurableSyncEffect(effect),
+      attemptGeneration: normalizeAttemptGeneration(effect.attemptGeneration ?? attemptGeneration),
+    }));
   }
   const payloadEffects = input.payload.effects;
   if (Array.isArray(payloadEffects)) {
-    return payloadEffects.map(restoreDurableSyncEffect);
+    return payloadEffects.map((effect) => ({
+      ...restoreDurableSyncEffect(effect),
+      attemptGeneration: normalizeAttemptGeneration(effect.attemptGeneration ?? attemptGeneration),
+    }));
   }
   const remoteId = input.kind === "ticketCreate"
     ? (input.payload as OfflineNewTicket).createdIssueId
@@ -377,6 +405,7 @@ const normalizeOperationEffects = (input: {
       effectId: primaryEffectId(input.kind),
       kind: primaryEffectKind(input.kind),
       operationRevision: input.revision,
+      attemptGeneration,
       state: uncertain ? "commit_unknown" : "committed",
       target: input.kind === "ticketUpdate" || input.kind === "commentCreate" ||
         input.kind === "commentUpdate"
@@ -394,6 +423,7 @@ const normalizeOperationEffects = (input: {
         effectId: `legacy-child:${childId}`,
         kind: "child_create",
         operationRevision: input.revision,
+        attemptGeneration,
         state: "committed",
         target: { ordinal },
         remoteId: childId,
@@ -410,6 +440,7 @@ const businessPayload = <T extends OfflineNewTicket | OfflineTicketUpdate | Offl
   delete copy.operationId;
   delete copy.connectionScope;
   delete copy.phase;
+  delete copy.attemptGeneration;
   delete copy.revision;
   delete copy.createdAt;
   delete copy.effects;
@@ -427,10 +458,11 @@ const operationFromTicketUpdate = (
   kind: "ticketUpdate",
   connectionScope: update.connectionScope ?? scope,
   revision,
+  attemptGeneration: getAttemptGeneration(update),
   phase,
   documentUri: update.documentUri,
   createdAt: update.createdAt ?? 0,
-  effects: normalizeOperationEffects({ kind: "ticketUpdate", revision, phase, payload: update, effects: update.effects }),
+  effects: normalizeOperationEffects({ kind: "ticketUpdate", revision, attemptGeneration: getAttemptGeneration(update), phase, payload: update, effects: update.effects }),
   payload: businessPayload(update),
   });
 };
@@ -446,10 +478,11 @@ const operationFromNewTicket = (
   kind: "ticketCreate",
   connectionScope: ticket.connectionScope ?? scope,
   revision,
+  attemptGeneration: getAttemptGeneration(ticket),
   phase,
   documentUri: ticket.documentUri,
   createdAt: ticket.createdAt ?? 0,
-  effects: normalizeOperationEffects({ kind: "ticketCreate", revision, phase, payload: ticket, effects: ticket.effects }),
+  effects: normalizeOperationEffects({ kind: "ticketCreate", revision, attemptGeneration: getAttemptGeneration(ticket), phase, payload: ticket, effects: ticket.effects }),
   payload: businessPayload(ticket),
   });
 };
@@ -475,10 +508,11 @@ const operationFromComment = (
   kind,
   connectionScope: comment.connectionScope ?? scope,
   revision,
+  attemptGeneration: getAttemptGeneration(comment),
   phase,
   documentUri: comment.documentUri,
   createdAt: comment.createdAt ?? 0,
-  effects: normalizeOperationEffects({ kind, revision, phase, payload: comment, effects: comment.effects }),
+  effects: normalizeOperationEffects({ kind, revision, attemptGeneration: getAttemptGeneration(comment), phase, payload: comment, effects: comment.effects }),
   payload: businessPayload(comment),
   });
 };
@@ -499,9 +533,10 @@ const queueFromOperations = (operations: SyncOperation[]): OfflineSyncQueue => {
           operationId: operation.operationId,
           connectionScope: operation.connectionScope,
           revision: operation.revision,
+          attemptGeneration: operation.attemptGeneration,
           phase: operation.phase as NewTicketSyncPhase,
           createdAt: operation.createdAt,
-          effects: normalizeOperationEffects({ ...operation, effects: operation.effects }),
+          effects: normalizeOperationEffects({ ...operation, attemptGeneration: operation.attemptGeneration, effects: operation.effects }),
         }));
         break;
       case "ticketUpdate": {
@@ -510,9 +545,10 @@ const queueFromOperations = (operations: SyncOperation[]): OfflineSyncQueue => {
           operationId: operation.operationId,
           connectionScope: operation.connectionScope,
           revision: operation.revision,
+          attemptGeneration: operation.attemptGeneration,
           phase: operation.phase as TicketUpdateSyncPhase,
           createdAt: operation.createdAt,
-          effects: normalizeOperationEffects({ ...operation, effects: operation.effects }),
+          effects: normalizeOperationEffects({ ...operation, attemptGeneration: operation.attemptGeneration, effects: operation.effects }),
         };
         queue.tickets.set(update.ticketId, normalizeTicketUpdate(update.ticketId, update));
         break;
@@ -524,9 +560,10 @@ const queueFromOperations = (operations: SyncOperation[]): OfflineSyncQueue => {
           operationId: operation.operationId,
           connectionScope: operation.connectionScope,
           revision: operation.revision,
+          attemptGeneration: operation.attemptGeneration,
           phase: (operation.phase === "remote_write_started" ? "commit_unknown" : operation.phase) as TicketUpdateSyncPhase,
           createdAt: operation.createdAt,
-          effects: normalizeOperationEffects({ ...operation, effects: operation.effects }),
+          effects: normalizeOperationEffects({ ...operation, attemptGeneration: operation.attemptGeneration, effects: operation.effects }),
         }, operation.connectionScope, queue.comments.length);
         queue.comments.push(comment);
         break;
@@ -651,10 +688,12 @@ const normalizeTicketUpdate = (
   update: OfflineTicketUpdate,
 ): OfflineTicketUpdate => {
   const revision = update.revision ?? 1;
+  const attemptGeneration = getAttemptGeneration(update);
   const phase = update.phase === "remote_write_started" ? "commit_unknown" : update.phase ?? "queued";
   const effects = normalizeOperationEffects({
     kind: "ticketUpdate",
     revision,
+    attemptGeneration,
     phase,
     payload: update,
     effects: update.effects,
@@ -668,6 +707,7 @@ const normalizeTicketUpdate = (
     operationId: update.operationId ?? `ticket:${ticketId}`,
     phase: restoredPhase,
     revision,
+    attemptGeneration,
     effects,
   };
   const hasRemoteChild = restored.effects?.some((effect) => effect.kind === "child_create" && [
@@ -686,6 +726,7 @@ const normalizeTicketUpdate = (
 
 const normalizeNewTicket = (ticket: OfflineNewTicket): OfflineNewTicket => {
   const revision = ticket.revision ?? 1;
+  const attemptGeneration = getAttemptGeneration(ticket);
   const phase = ticket.phase === "remote_write_started" ? "commit_unknown" : ticket.phase ?? (
     ticket.createdIssueId !== undefined || ticket.status === "created_rewrite_failed"
       ? "local_finalize_pending"
@@ -694,6 +735,7 @@ const normalizeNewTicket = (ticket: OfflineNewTicket): OfflineNewTicket => {
   const effects = normalizeOperationEffects({
     kind: "ticketCreate",
     revision,
+    attemptGeneration,
     phase,
     payload: ticket,
     effects: ticket.effects,
@@ -706,6 +748,7 @@ const normalizeNewTicket = (ticket: OfflineNewTicket): OfflineNewTicket => {
     ...ticket,
     operationId: ticket.operationId ?? ticket.queueId,
     revision,
+    attemptGeneration,
     phase: restoredPhase,
     effects,
   };
@@ -752,6 +795,7 @@ const normalizeComment = (
   scope: string,
   index: number,
 ): OfflineCommentUpdate => {
+  const attemptGeneration = getAttemptGeneration(comment);
   const durablePrimaryKind = comment.effects?.find((effect) =>
     effect.kind === "comment_create" || effect.kind === "comment_update"
   )?.kind;
@@ -767,6 +811,7 @@ const normalizeComment = (
   const effects = normalizeOperationEffects({
     kind,
     revision,
+    attemptGeneration,
     phase,
     payload: comment,
     effects: comment.effects,
@@ -781,6 +826,7 @@ const normalizeComment = (
       `comment:${comment.ticketId}:${comment.commentId ?? comment.documentUri ?? index}`,
     connectionScope: comment.connectionScope ?? scope,
     revision,
+    attemptGeneration,
     phase: restoredPhase,
     effects,
   };
@@ -885,17 +931,27 @@ export const planOfflineSyncEffectAsync = async (
     !operation ||
     operation.revision !== expectedRevision ||
     effect.operationRevision !== expectedRevision ||
+    (effect.attemptGeneration !== undefined &&
+      normalizeAttemptGeneration(effect.attemptGeneration) !== getAttemptGeneration(operation)) ||
     (operation.connectionScope !== undefined && operation.connectionScope !== scope)
   ) {
     return undefined;
   }
-  const existing = operation.effects?.find((candidate) => candidate.effectId === effect.effectId);
+  const existing = operation.effects?.find((candidate) =>
+    candidate.effectId === effect.effectId &&
+    normalizeAttemptGeneration(candidate.attemptGeneration) === getAttemptGeneration(operation)
+  );
   if (existing) {
     return existing.operationRevision === expectedRevision ? { ...existing } : undefined;
   }
-  operation.effects = [...(operation.effects ?? []), { ...effect, target: { ...effect.target } }];
+  const planned = {
+    ...effect,
+    attemptGeneration: getAttemptGeneration(operation),
+    target: { ...effect.target },
+  };
+  operation.effects = [...(operation.effects ?? []), planned];
   await persistAsync(scope);
-  return { ...effect, target: { ...effect.target } };
+  return { ...planned, target: { ...planned.target } };
 };
 
 export const transitionOfflineSyncEffectAsync = async (
@@ -905,6 +961,7 @@ export const transitionOfflineSyncEffectAsync = async (
   scope: string,
   expected: {
     operationRevision: number;
+    attemptGeneration?: number;
     sourceState: DurableSyncEffectState;
   },
 ): Promise<DurableSyncEffect | undefined> => {
@@ -912,14 +969,22 @@ export const transitionOfflineSyncEffectAsync = async (
   if (
     !operation ||
     operation.revision !== expected.operationRevision ||
+    (expected.attemptGeneration !== undefined &&
+      getAttemptGeneration(operation) !== normalizeAttemptGeneration(expected.attemptGeneration)) ||
     (operation.connectionScope !== undefined && operation.connectionScope !== scope)
   ) {
     return undefined;
   }
   const effects = operation.effects ?? [];
-  const index = effects.findIndex((effect) => effect.effectId === effectId);
+  const index = effects.findIndex((effect) =>
+    effect.effectId === effectId &&
+    normalizeAttemptGeneration(effect.attemptGeneration) === getAttemptGeneration(operation)
+  );
   if (index === -1) { return undefined; }
-  const transitioned = transitionDurableSyncEffect(effects[index], action, expected);
+  const transitioned = transitionDurableSyncEffect(effects[index], action, {
+    ...expected,
+    attemptGeneration: expected.attemptGeneration ?? getAttemptGeneration(operation),
+  });
   if (!transitioned) { return undefined; }
   const nextEffects = [...effects];
   nextEffects[index] = transitioned;
@@ -1352,6 +1417,8 @@ export const transitionOfflineNewTicketLifecycleAsync = async (
     !current ||
     (current.operationId !== undefined && expected.operationId !== undefined && current.operationId !== expected.operationId) ||
     current.revision !== expected.revision ||
+    (expected.attemptGeneration !== undefined &&
+      getAttemptGeneration(current) !== normalizeAttemptGeneration(expected.attemptGeneration)) ||
     current.phase !== expected.sourcePhase ||
     (current.connectionScope !== undefined && current.connectionScope !== scope) ||
     !newTicketActionAllowsSource(action, expected.sourcePhase)
@@ -1441,6 +1508,7 @@ export const transitionOfflineNewTicketLifecycleAsync = async (
         ...current,
         createdIssueId: undefined,
         createdChildIds: undefined,
+        attemptGeneration: getAttemptGeneration(current) + 1,
         phase: "queued",
         effects: [],
       };
@@ -1617,6 +1685,8 @@ export const transitionOfflineTicketUpdateLifecycleAsync = async (
     !current ||
     current.operationId !== expected.operationId ||
     current.revision !== expected.revision ||
+    (expected.attemptGeneration !== undefined &&
+      getAttemptGeneration(current) !== normalizeAttemptGeneration(expected.attemptGeneration)) ||
     current.phase !== expected.sourcePhase ||
     (current.connectionScope !== undefined && current.connectionScope !== scope) ||
     !ticketUpdateActionAllowsSource(action, expected.sourcePhase)
@@ -1857,6 +1927,8 @@ export const transitionOfflineCommentLifecycleAsync = async (
     !current ||
     current.operationId !== expected.operationId ||
     current.revision !== expected.revision ||
+    (expected.attemptGeneration !== undefined &&
+      getAttemptGeneration(current) !== normalizeAttemptGeneration(expected.attemptGeneration)) ||
     current.phase !== expected.sourcePhase ||
     (current.connectionScope !== undefined && current.connectionScope !== scope) ||
     !commentActionAllowsSource(action, expected.sourcePhase)

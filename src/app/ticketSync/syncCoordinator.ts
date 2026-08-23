@@ -17,6 +17,7 @@ import { reconcileCommentCommitUnknown } from "../../views/commentSaveSync";
 import {
   createSyncOperationRepository,
   SyncOperationRepository,
+  withAttemptGenerationFence,
 } from "./syncRepository";
 import {
   GenericSyncPhase,
@@ -27,6 +28,7 @@ import {
 import {
   canRetryEffect,
   DurableSyncEffectState,
+  getAttemptGeneration,
   getEffectsForRevision,
   getOperationRecoveryMode,
   getPrimaryEffectForRevision,
@@ -237,7 +239,11 @@ export class SyncCoordinator {
     }
 
     const handlerCtx: OperationHandlerContext = { connectionScope: scope };
-    const depsWithRepo = { repository: this.repository, ...options.deps };
+    const repository = withAttemptGenerationFence(
+      options.deps?.repository ?? this.repository,
+      getAttemptGeneration(initialOp),
+    );
+    const depsWithRepo = { ...options.deps, repository };
     let currentOp = initialOp;
 
     const getOpKey = (op: UnifiedSyncOperation): SyncOperationKey =>
@@ -255,7 +261,7 @@ export class SyncCoordinator {
     if (currentOp.phase === "queued" || currentOp.phase === "preparing") {
       // 1. begin_preparation (queued の場合のみ)
       if (currentOp.phase === "queued") {
-        const prepOp = await this.repository.transitionOperation(
+        const prepOp = await repository.transitionOperation(
           getOpKey(currentOp),
           { kind: "begin_preparation" },
           scope,
@@ -270,7 +276,7 @@ export class SyncCoordinator {
       prepResult = await handler.prepare(currentOp, handlerCtx, depsWithRepo);
       if (!prepResult.ok) {
         if (currentOp.phase === "preparing") {
-          await this.repository.transitionOperation(
+          await repository.transitionOperation(
             getOpKey(currentOp),
             { kind: "abort_before_remote_write" },
             scope,
@@ -286,7 +292,7 @@ export class SyncCoordinator {
           const failedSec = secResult;
           if (!secResult.commitUnknown) {
             try {
-              await this.repository.transitionOperation(
+              await repository.transitionOperation(
                 getOpKey(currentOp),
                 { kind: "abort_before_remote_write" },
                 scope,
@@ -307,7 +313,7 @@ export class SyncCoordinator {
       // 4. executeRemoteWrite (Primary Remote mutation start is owned atomically by handler via transitionPrimaryRemoteWrite)
       const remoteResult = await handler.executeRemoteWrite(currentOp, prepResult.prepared, handlerCtx, depsWithRepo);
       if (!remoteResult.ok) {
-        const fresh = this.repository.getOperation(getOpKey(currentOp), scope);
+        const fresh = repository.getOperation(getOpKey(currentOp), scope);
         const primaryEffect = fresh?.effects?.find(
           (e) =>
             e.effectId === "ticket-create" ||
@@ -327,7 +333,7 @@ export class SyncCoordinator {
             (remoteResult.outcome as any)?.ticketId ??
             currentOp.ticketId ??
             0;
-          await this.repository.transitionOperation(
+          await repository.transitionOperation(
             getOpKey(currentOp),
             {
               kind: "record_remote_commit",
@@ -363,9 +369,9 @@ export class SyncCoordinator {
       }
 
       // 6. record_remote_commit
-      let committedOp = this.repository.getOperation(getOpKey(currentOp), scope);
+      let committedOp = repository.getOperation(getOpKey(currentOp), scope);
       if (!committedOp || committedOp.phase !== "remote_committed") {
-        committedOp = await this.repository.transitionOperation(
+        committedOp = await repository.transitionOperation(
           getOpKey(currentOp),
           {
             kind: "record_remote_commit",
@@ -406,7 +412,7 @@ export class SyncCoordinator {
       }
 
       const isRecovery = currentOp.phase === "reconciliation_pending";
-      const reconcilOp = await this.repository.transitionOperation(
+      const reconcilOp = await repository.transitionOperation(
         getOpKey(currentOp),
         { kind: "mark_reconciliation_pending" },
         scope,
@@ -415,7 +421,7 @@ export class SyncCoordinator {
         currentOp = reconcilOp;
       }
 
-      const reconcileResult = await handler.reconcileRemote(currentOp, handlerCtx, options.deps);
+      const reconcileResult = await handler.reconcileRemote(currentOp, handlerCtx, depsWithRepo);
       if (!reconcileResult.ok) {
         return {
           kind: "remote_committed",
@@ -428,7 +434,7 @@ export class SyncCoordinator {
       reconcileCanonical = reconcileResult.canonical;
 
       // 8. mark_local_finalize_pending or record_reconciled_identity
-      const finalizeOp = await this.repository.transitionOperation(
+      const finalizeOp = await repository.transitionOperation(
         getOpKey(currentOp),
         reconcileResult.ok && reconcileResult.remoteId
           ? {
@@ -457,7 +463,7 @@ export class SyncCoordinator {
     // Step C: Local Finalize (local_finalize_pending からの再開または後続)
     if (currentOp.phase === "local_finalize_pending") {
       const canonical = reconcileCanonical ?? (currentOp as any).canonical;
-      const finalizeResult = await handler.finalizeLocal(currentOp, canonical, handlerCtx, options.deps);
+      const finalizeResult = await handler.finalizeLocal(currentOp, canonical, handlerCtx, depsWithRepo);
       if (!finalizeResult.ok) {
         return {
           kind: "remote_committed",
@@ -469,7 +475,7 @@ export class SyncCoordinator {
       }
 
       // 9. complete (INV-11, INV-N07)
-      const compRes = await this.repository.completeOperation(
+      const compRes = await repository.completeOperation(
         getOpKey(currentOp),
         scope,
         undefined,
@@ -505,6 +511,7 @@ export class SyncCoordinator {
   public async resolveCommitUnknown(input: {
     key: SyncOperationKey;
     context: SyncContext;
+    attemptGeneration?: number;
     resolution?:
       | { kind: "reconcile_remote" }
       | { kind: "link_remote_comment"; commentId: number; explicitLink?: boolean }
@@ -518,6 +525,17 @@ export class SyncCoordinator {
     const scope = input.context.connectionScope;
     const op = this.repository.getOperation(input.key, scope);
     const currentRevision = op?.intentRevision ?? op?.revision ?? 1;
+    const currentAttemptGeneration = getAttemptGeneration(op);
+    if (
+      op &&
+      input.attemptGeneration !== undefined &&
+      currentAttemptGeneration !== getAttemptGeneration({ attemptGeneration: input.attemptGeneration })
+    ) {
+      return {
+        kind: "failed_before_commit",
+        error: new Error(`Operation attempt generation mismatch: expected ${currentAttemptGeneration}, got ${input.attemptGeneration}`),
+      };
+    }
     const primaryEffect = op ? getPrimaryEffectForRevision(op, currentRevision) : undefined;
     const isRecoverable = op && isPrimaryRecoveryRequired(op, primaryEffect);
     if (!op || !isRecoverable) {
@@ -531,7 +549,7 @@ export class SyncCoordinator {
     }
 
     const resKind = input.resolution?.kind ?? "reconcile";
-    const flightKey = `${scope}:resolve:${op.operationId}:${resKind}`;
+    const flightKey = `${scope}:resolve:${op.operationId}:${currentRevision}:${currentAttemptGeneration}:${resKind}`;
     const activeFlight = this.inFlight.get(flightKey);
     if (activeFlight) {
       return activeFlight;
@@ -541,6 +559,7 @@ export class SyncCoordinator {
     const flightPromise = runner(scope, async (): Promise<SyncOutcome> => {
       const freshOp = this.repository.getOperation(input.key, scope);
       const freshRevision = freshOp?.intentRevision ?? freshOp?.revision ?? 1;
+      const freshAttemptGeneration = getAttemptGeneration(freshOp);
       const freshPrimaryEffect = freshOp ? getPrimaryEffectForRevision(freshOp, freshRevision) : undefined;
       const isFreshRecoverable = freshOp && isPrimaryRecoveryRequired(freshOp, freshPrimaryEffect);
       if (!freshOp || !isFreshRecoverable) {
@@ -554,6 +573,17 @@ export class SyncCoordinator {
       }
 
       if (
+        freshAttemptGeneration !== currentAttemptGeneration ||
+        (input.attemptGeneration !== undefined &&
+          freshAttemptGeneration !== getAttemptGeneration({ attemptGeneration: input.attemptGeneration }))
+      ) {
+        return {
+          kind: "failed_before_commit",
+          error: new Error("Operation attempt generation changed while preparing recovery"),
+        };
+      }
+
+      if (
         input.resolution?.kind === "reconcile_compensation" ||
         freshPrimaryEffect?.state === "compensation_unknown" ||
         freshPrimaryEffect?.state === "compensation_started"
@@ -562,6 +592,7 @@ export class SyncCoordinator {
           key: input.key,
           operationId: freshOp.operationId,
           operationRevision: freshRevision,
+          attemptGeneration: freshAttemptGeneration,
           effectId: freshPrimaryEffect?.effectId ?? "ticket-create",
           expectedEffectState: freshPrimaryEffect?.state ?? "compensation_unknown",
           context: input.context,
@@ -572,7 +603,19 @@ export class SyncCoordinator {
 
       const handler = this.handlers[freshOp.kind];
       const handlerCtx: OperationHandlerContext = { connectionScope: scope };
-      const depsWithRepo = { ...input.deps, repository: this.repository };
+      const repository = withAttemptGenerationFence(this.repository, freshAttemptGeneration);
+      const depsWithRepo = { ...input.deps, repository };
+
+      if (
+        input.resolution?.kind === "link_remote_ticket" &&
+        freshOp.kind === "ticket_update"
+      ) {
+        return {
+          kind: "failed_before_commit",
+          ticketId: freshOp.ticketId,
+          error: new Error("Ticket Update recovery must use reconcile_remote; link_remote_ticket is not allowed."),
+        };
+      }
 
       if (input.resolution?.kind === "retry_remote_write") {
         // INV-N03, INV-N04: 未解決の Prerequisite Effect (attachment, image) があれば Primary retry を拒絶
@@ -650,7 +693,7 @@ export class SyncCoordinator {
           };
         }
 
-        const committedOp = this.repository.getOperation(input.key, scope) ?? freshOp;
+        const committedOp = repository.getOperation(input.key, scope) ?? freshOp;
 
         const reconciled = await handler.reconcileRemote(committedOp, handlerCtx, depsWithRepo);
         if (!reconciled.ok) {
@@ -664,7 +707,7 @@ export class SyncCoordinator {
 
         const fin = await handler.finalizeLocal(committedOp, reconciled.canonical, handlerCtx, depsWithRepo);
         if (fin.ok) {
-          const compOp = await this.repository.completeOperation(input.key, scope, undefined, { canonical: reconciled.canonical, remoteUpdatedAt: committedOp.remoteUpdatedAt });
+          const compOp = await repository.completeOperation(input.key, scope, undefined, { canonical: reconciled.canonical, remoteUpdatedAt: committedOp.remoteUpdatedAt });
           if (compOp) {
             return {
               kind: "completed",
@@ -759,7 +802,7 @@ export class SyncCoordinator {
           }
         }
 
-        const transitioned = await this.repository.transitionOperation(
+        const transitioned = await repository.transitionOperation(
           input.key,
           { kind: "record_reconciled_identity", remoteId },
           scope,
@@ -776,7 +819,7 @@ export class SyncCoordinator {
         }
         const fin = await handler.finalizeLocal(transitioned, detail, handlerCtx, depsWithRepo);
         if (fin.ok) {
-          const compOp = await this.repository.completeOperation(input.key, scope, undefined, { canonical: detail, remoteUpdatedAt: transitioned.remoteUpdatedAt });
+          const compOp = await repository.completeOperation(input.key, scope, undefined, { canonical: detail, remoteUpdatedAt: transitioned.remoteUpdatedAt });
           if (compOp) {
             return {
               kind: "completed",
@@ -790,7 +833,7 @@ export class SyncCoordinator {
       }
 
       if ((input.resolution as any)?.kind === "assume_remote_commit" || (input.resolution as any)?.kind === "assume_update_committed") {
-        const assumed = await this.repository.transitionOperation(
+        const assumed = await repository.transitionOperation(
           input.key,
           { kind: "assume_remote_commit" },
           scope,
@@ -808,7 +851,7 @@ export class SyncCoordinator {
         const reconciled = await handler.reconcileRemote(assumed, handlerCtx, depsWithRepo);
         const fin = await handler.finalizeLocal(assumed, reconciled.ok ? reconciled.canonical : undefined, handlerCtx, depsWithRepo);
         if (fin.ok) {
-          const compOp = await this.repository.completeOperation(input.key, scope, undefined, { canonical: reconciled.ok ? reconciled.canonical : undefined, remoteUpdatedAt: assumed.remoteUpdatedAt });
+          const compOp = await repository.completeOperation(input.key, scope, undefined, { canonical: reconciled.ok ? reconciled.canonical : undefined, remoteUpdatedAt: assumed.remoteUpdatedAt });
           if (compOp) {
             return {
               kind: "completed",
@@ -834,7 +877,7 @@ export class SyncCoordinator {
       // reconcile_remote
       const reconciled = await handler.reconcileRemote(freshOp, handlerCtx, depsWithRepo);
       if (reconciled.ok && reconciled.remoteId) {
-        const transitioned = await this.repository.transitionOperation(
+        const transitioned = await repository.transitionOperation(
           input.key,
           { kind: "record_reconciled_identity", remoteId: reconciled.remoteId, projectId: reconciled.projectId, remoteUpdatedAt: reconciled.remoteUpdatedAt },
           scope,
@@ -845,7 +888,7 @@ export class SyncCoordinator {
         }
         const fin = await handler.finalizeLocal(transitioned, reconciled.canonical, handlerCtx, depsWithRepo);
         if (fin.ok) {
-          const compOp = await this.repository.completeOperation(input.key, scope, undefined, { canonical: reconciled.canonical, remoteUpdatedAt: transitioned.remoteUpdatedAt });
+          const compOp = await repository.completeOperation(input.key, scope, undefined, { canonical: reconciled.canonical, remoteUpdatedAt: transitioned.remoteUpdatedAt });
           if (compOp) {
             return {
               kind: "completed",
@@ -900,6 +943,7 @@ export class SyncCoordinator {
     key: SyncOperationKey;
     operationId: string;
     operationRevision: number;
+    attemptGeneration?: number;
     effectId: string;
     expectedEffectState: DurableSyncEffectState;
     context: SyncContext;
@@ -940,9 +984,23 @@ export class SyncCoordinator {
       };
     }
 
+    const currentAttemptGeneration = getAttemptGeneration(op);
+    if (
+      input.attemptGeneration !== undefined &&
+      currentAttemptGeneration !== getAttemptGeneration({ attemptGeneration: input.attemptGeneration })
+    ) {
+      return {
+        kind: "failed_before_commit",
+        error: new Error(`Operation attempt generation mismatch: expected ${currentAttemptGeneration}, got ${input.attemptGeneration}`),
+      };
+    }
+
     // 4. Effect existence & state fence
     const effect = (op.effects ?? []).find(
-      (e) => e.effectId === input.effectId && (e.operationRevision ?? currentRevision) === input.operationRevision,
+      (e) =>
+        e.effectId === input.effectId &&
+        (e.operationRevision ?? currentRevision) === input.operationRevision &&
+        getAttemptGeneration({ attemptGeneration: e.attemptGeneration }) === currentAttemptGeneration,
     );
     if (!effect) {
       return {
@@ -1004,7 +1062,7 @@ export class SyncCoordinator {
     }
 
     // 7. Single-flight concurrency control (R23)
-    const flightKey = `${scope}:resolveEffect:${op.operationId}:${input.operationRevision}:${input.effectId}`;
+    const flightKey = `${scope}:resolveEffect:${op.operationId}:${input.operationRevision}:${currentAttemptGeneration}:${input.effectId}`;
     if (this.inFlight.has(flightKey)) {
       return this.inFlight.get(flightKey)!;
     }
@@ -1012,7 +1070,8 @@ export class SyncCoordinator {
     const flightPromise: Promise<SyncOutcome> = (async (): Promise<SyncOutcome> => {
       const handler = this.handlers[op.kind];
       const handlerCtx: OperationHandlerContext = { connectionScope: scope };
-      const depsWithRepo = { repository: this.repository, ...input.deps };
+      const repository = withAttemptGenerationFence(this.repository, currentAttemptGeneration);
+      const depsWithRepo = { ...input.deps, repository };
 
       if (handler && handler.resolveEffect) {
         return handler.resolveEffect({

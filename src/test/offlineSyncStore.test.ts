@@ -351,6 +351,7 @@ suite("offlineSyncStore — workspaceState 永続化", () => {
       effectId: "ticket-create",
       kind: "ticket_create",
       operationRevision: 1,
+      attemptGeneration: 1,
       state: "committed",
       target: {},
       remoteId: 88,

@@ -1,6 +1,17 @@
 import type { IssueCreateInput, IssueUpdateInput, IssueUploadInput } from "../redmine/issues";
 import type { UploadToken } from "../redmine/types";
 
+export const DEFAULT_ATTEMPT_GENERATION = 1;
+
+export const normalizeAttemptGeneration = (value: number | undefined): number =>
+  value !== undefined && Number.isInteger(value) && value > 0
+    ? value
+    : DEFAULT_ATTEMPT_GENERATION;
+
+export const getAttemptGeneration = (
+  operation: { attemptGeneration?: number } | undefined,
+): number => normalizeAttemptGeneration(operation?.attemptGeneration);
+
 export type DurableSyncEffectKind =
   | "ticket_create"
   | "ticket_update"
@@ -110,6 +121,7 @@ export type DurableSyncEffect = {
   effectId: string;
   kind: DurableSyncEffectKind;
   operationRevision: number;
+  attemptGeneration?: number;
   state: DurableSyncEffectState;
   target: DurableSyncEffectTarget;
   requestSnapshot?: SyncEffectRequestSnapshot;
@@ -121,6 +133,7 @@ export type DurableSyncEffect = {
 
 export type DurableSyncEffectExpectation = {
   operationRevision: number;
+  attemptGeneration?: number;
   sourceState: DurableSyncEffectState;
 };
 
@@ -147,6 +160,7 @@ export const restoreDurableSyncEffect = (
 ): DurableSyncEffect => {
   const restored: DurableSyncEffect = {
     ...effect,
+    attemptGeneration: normalizeAttemptGeneration(effect.attemptGeneration),
     state:
       effect.state === "started"
         ? "commit_unknown"
@@ -229,15 +243,33 @@ export const isPrimaryEffectKind = (kind: DurableSyncEffectKind): boolean =>
   kind === "comment_update";
 
 export const getEffectsForRevision = (
-  operation: { effects?: DurableSyncEffect[]; revision?: number; intentRevision?: number },
+  operation: {
+    effects?: DurableSyncEffect[];
+    revision?: number;
+    intentRevision?: number;
+    attemptGeneration?: number;
+  },
   targetRevision?: number,
+  targetAttemptGeneration?: number,
 ): DurableSyncEffect[] => {
   const rev = targetRevision ?? operation.intentRevision ?? operation.revision ?? 1;
-  return (operation.effects ?? []).filter((e) => (e.operationRevision ?? rev) === rev);
+  const attemptGeneration = normalizeAttemptGeneration(
+    targetAttemptGeneration ?? operation.attemptGeneration,
+  );
+  return (operation.effects ?? []).filter(
+    (e) =>
+      (e.operationRevision ?? rev) === rev &&
+      normalizeAttemptGeneration(e.attemptGeneration) === attemptGeneration,
+  );
 };
 
 export const getPrimaryEffectForRevision = (
-  operation: { effects?: DurableSyncEffect[]; revision?: number; intentRevision?: number },
+  operation: {
+    effects?: DurableSyncEffect[];
+    revision?: number;
+    intentRevision?: number;
+    attemptGeneration?: number;
+  },
   targetRevision?: number,
 ): DurableSyncEffect | undefined => {
   const activeEffects = getEffectsForRevision(operation, targetRevision);
@@ -283,7 +315,6 @@ export type RecoveryActionKind =
   | "retry_remote_write"
   | "reconcile_remote"
   | "link_created_ticket"
-  | "link_remote_ticket"
   | "link_remote_comment"
   | "assume_update_committed"
   | "retry_effect"
@@ -293,6 +324,7 @@ export type RecoveryActionKind =
 export type RecoveryItem = {
   operationId: string;
   operationRevision: number;
+  attemptGeneration: number;
   effectId: string;
   effectKind: DurableSyncEffectKind;
   state: DurableSyncEffectState;
@@ -310,6 +342,7 @@ export const getOperationRecoveryMode = (operation: {
   effects?: DurableSyncEffect[];
   revision?: number;
   intentRevision?: number;
+  attemptGeneration?: number;
 }): OperationRecoveryMode => {
   const currentRevision = operation.intentRevision ?? operation.revision ?? 1;
   const primaryEffect = getPrimaryEffectForRevision(operation, currentRevision);
@@ -344,6 +377,7 @@ export const getRecoveryItemsForOperation = (
     phase?: string;
     revision?: number;
     intentRevision?: number;
+    attemptGeneration?: number;
     effects?: DurableSyncEffect[];
     errorMessage?: string;
   },
@@ -377,7 +411,6 @@ export const getRecoveryItemsForOperation = (
         } else {
           allowedActions.push("assume_update_committed");
           allowedActions.push("reconcile_remote");
-          allowedActions.push("link_remote_ticket");
           if (canRetryEffect(effect)) {
             allowedActions.push("retry_remote_write");
           }
@@ -385,6 +418,9 @@ export const getRecoveryItemsForOperation = (
         items.push({
           operationId: operation.operationId,
           operationRevision: effect.operationRevision,
+          attemptGeneration: normalizeAttemptGeneration(
+            operation.attemptGeneration ?? effect.attemptGeneration,
+          ),
           effectId: effect.effectId,
           effectKind: effect.kind,
           state: effect.state,
@@ -430,6 +466,9 @@ export const getRecoveryItemsForOperation = (
         items.push({
           operationId: operation.operationId,
           operationRevision: effect.operationRevision,
+          attemptGeneration: normalizeAttemptGeneration(
+            operation.attemptGeneration ?? effect.attemptGeneration,
+          ),
           effectId: effect.effectId,
           effectKind: effect.kind,
           state: effect.state,
@@ -496,6 +535,9 @@ export const transitionDurableSyncEffect = (
 ): DurableSyncEffect | undefined => {
   if (
     effect.operationRevision !== expected.operationRevision ||
+    (expected.attemptGeneration !== undefined &&
+      normalizeAttemptGeneration(effect.attemptGeneration) !==
+        normalizeAttemptGeneration(expected.attemptGeneration)) ||
     effect.state !== expected.sourceState ||
     !actionAllowsSource(action, effect)
   ) {

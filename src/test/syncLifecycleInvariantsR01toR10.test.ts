@@ -313,11 +313,12 @@ suite("R01 〜 R10: Invariant & Lifecycle Recovery Tests", () => {
     });
 
     assert.strictEqual(deleteCalls, 0, "Already deleted on remote, deleteIssue not needed");
-    assert.strictEqual(outcome.kind, "no_change", "Successfully resolved compensation to clean state");
+    assert.strictEqual(outcome.kind, "queued", "Successfully resolved compensation starts a fresh queued attempt");
 
     const opAfter = repo.getOperation(key, SCOPE);
     const primaryEffect = opAfter?.effects?.find((e) => e.effectId === "ticket-create");
-    assert.strictEqual(primaryEffect?.state, "compensated");
+    assert.strictEqual(primaryEffect, undefined);
+    assert.strictEqual(opAfter?.attemptGeneration, 2);
   });
 
   // R06: Upload Recovery (INV-05, INV-06)

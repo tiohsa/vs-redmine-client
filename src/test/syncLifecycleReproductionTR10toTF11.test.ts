@@ -265,8 +265,9 @@ suite("T-R10 〜 T-R15 & T-F05 〜 T-F11: Lifecycle, Recovery, and Freshness Con
     const op = repo.getOperation({ kind: "newTicket", queueId: "q-tr12" }, SCOPE);
     assert.ok(op, "Operation が存在すること");
     const primaryEffect = op.effects?.find((e) => e.effectId === "ticket-create");
-    assert.strictEqual(primaryEffect?.state, "compensated", "Primary effect は compensated であること (INV-R07)");
+    assert.strictEqual(primaryEffect, undefined, "完全補償後は旧世代の Primary effect が active set から除去されること (M02)");
     assert.strictEqual(op.createdRemoteId, undefined, "createdRemoteId は消去されていること (INV-R07)");
+    assert.strictEqual(op.attemptGeneration, 2, "完全補償後は Attempt generation が進むこと (M01)");
     assert.ok(
       op.phase === "queued" || op.phase === "completed",
       `Operation phase は retry-safe (queued または completed) であること, actual: ${op.phase}`,
@@ -451,25 +452,6 @@ suite("T-R10 〜 T-R15 & T-F05 〜 T-F11: Lifecycle, Recovery, and Freshness Con
           resolution: { kind: "link_created_ticket", ticketId: 803 },
         }),
       },
-      link_remote_ticket: {
-        createFixture: () => ({
-          op: {
-            operationId: `${SCOPE}:ticket:804`,
-            kind: "ticket_update",
-            phase: "commit_unknown",
-            revision: 1,
-            ticketId: 804,
-            effects: [{ effectId: "ticket-update", kind: "ticket_update" as const, operationRevision: 1, state: "commit_unknown" as const, target: {} }],
-          },
-          effectId: "ticket-update",
-          expectedState: "commit_unknown",
-        }),
-        executorCall: async (engine) => engine.resolveTicketCommitUnknown({
-          key: { kind: "ticket", ticketId: 804 },
-          context: { connectionScope: SCOPE },
-          resolution: { kind: "link_remote_ticket", ticketId: 804 },
-        }),
-      },
       link_remote_comment: {
         createFixture: () => ({
           op: {
@@ -608,7 +590,7 @@ suite("T-R10 〜 T-R15 & T-F05 〜 T-F11: Lifecycle, Recovery, and Freshness Con
     };
 
     const actionKeys = Object.keys(allActions) as RecoveryActionKind[];
-    assert.strictEqual(actionKeys.length, 9, "全 9 種類の RecoveryActionKind が網羅されていること");
+    assert.strictEqual(actionKeys.length, 8, "全 8 種類の RecoveryActionKind が網羅されていること");
 
     for (const actionKey of actionKeys) {
       const entry = allActions[actionKey];

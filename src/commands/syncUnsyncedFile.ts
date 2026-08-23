@@ -72,6 +72,7 @@ const resolveCommitUnknownInteractive = async (
       return service.resolveCommitUnknown({
         key,
         context: syncContext,
+        attemptGeneration: primaryItem?.attemptGeneration,
         resolution: { kind: "reconcile_compensation" },
       });
     }
@@ -80,11 +81,14 @@ const resolveCommitUnknownInteractive = async (
 
   if (key.kind === "newTicket") {
     const linkLabel = vscode.l10n.t("Link existing ticket");
+    const createChoices = [
+      ...(actions.includes("link_created_ticket") ? [linkLabel] : []),
+      ...(actions.includes("retry_remote_write") ? [retryLabel] : []),
+    ];
     const choice = await vscode.window.showWarningMessage(
       vscode.l10n.t("The previous ticket creation may have reached Redmine. Link the created ticket ID, or retry only after confirming that no ticket was created."),
       { modal: true },
-      linkLabel,
-      retryLabel,
+      ...createChoices,
     );
     if (choice === linkLabel) {
       const rawTicketId = await vscode.window.showInputBox({
@@ -99,6 +103,7 @@ const resolveCommitUnknownInteractive = async (
       return service.resolveCommitUnknown({
         key,
         context: syncContext,
+        attemptGeneration: primaryItem?.attemptGeneration,
         resolution: { kind: "link_created_ticket", ticketId: Number(rawTicketId) },
       });
     }
@@ -106,6 +111,7 @@ const resolveCommitUnknownInteractive = async (
       return service.resolveCommitUnknown({
         key,
         context: syncContext,
+        attemptGeneration: primaryItem?.attemptGeneration,
         resolution: { kind: "retry_remote_write" },
       });
     }
@@ -113,16 +119,22 @@ const resolveCommitUnknownInteractive = async (
   }
 
   const committedLabel = vscode.l10n.t("Treat as committed");
+  const reconcileLabel = vscode.l10n.t("Reconcile from Redmine");
+  const updateChoices = [
+    ...(actions.includes("reconcile_remote") ? [reconcileLabel] : []),
+    ...(actions.includes("assume_update_committed") ? [committedLabel] : []),
+    ...(actions.includes("retry_remote_write") ? [retryLabel] : []),
+  ];
   const choice = await vscode.window.showWarningMessage(
     vscode.l10n.t("The previous ticket update may have reached Redmine. Reconcile from Redmine, or retry only after confirming that the update was not applied."),
     { modal: true },
-    committedLabel,
-    retryLabel,
+    ...updateChoices,
   );
   if (choice === committedLabel) {
     return service.resolveCommitUnknown({
       key,
       context: syncContext,
+      attemptGeneration: primaryItem?.attemptGeneration,
       resolution: { kind: "assume_update_committed" },
     });
   }
@@ -130,7 +142,16 @@ const resolveCommitUnknownInteractive = async (
     return service.resolveCommitUnknown({
       key,
       context: syncContext,
+      attemptGeneration: primaryItem?.attemptGeneration,
       resolution: { kind: "retry_remote_write" },
+    });
+  }
+  if (choice === reconcileLabel) {
+    return service.resolveCommitUnknown({
+      key,
+      context: syncContext,
+      attemptGeneration: primaryItem?.attemptGeneration,
+      resolution: { kind: "reconcile_remote" },
     });
   }
   return undefined;
@@ -141,6 +162,8 @@ const resolveCommentCommitUnknownInteractive = async (
   key: Extract<UnsyncedFileSyncKey, { kind: "comment" }>,
   operationScope: string,
 ): Promise<Awaited<ReturnType<typeof engine.syncOne>> | undefined> => {
+  const recoveryItems = engine.getRecoveryItems(key as any, { connectionScope: operationScope });
+  const primaryItem = recoveryItems.find((item) => isPrimaryEffectKind(item.effectKind));
   const reconcileLabel = vscode.l10n.t("Reconcile from Redmine");
   const linkLabel = vscode.l10n.t("Link comment journal");
   const choice = await vscode.window.showWarningMessage(
@@ -160,6 +183,7 @@ const resolveCommentCommitUnknownInteractive = async (
     return engine.resolveCommentCommitUnknown({
       key,
       context: { connectionScope: operationScope },
+      attemptGeneration: primaryItem?.attemptGeneration,
       resolution: { kind: "link_remote_comment", commentId: Number(rawCommentId) },
     });
   }
@@ -167,6 +191,7 @@ const resolveCommentCommitUnknownInteractive = async (
   return engine.resolveCommentCommitUnknown({
     key,
     context: { connectionScope: operationScope },
+    attemptGeneration: primaryItem?.attemptGeneration,
     resolution: { kind: "reconcile_remote" },
   });
 };
@@ -215,6 +240,7 @@ const resolveSecondaryEffectsInteractive = async (
           key: key as any,
           operationId: item.operationId,
           operationRevision: item.operationRevision,
+          attemptGeneration: item.attemptGeneration,
           effectId: item.effectId,
           expectedEffectState: item.state,
           context: syncContext,
@@ -245,6 +271,7 @@ const resolveSecondaryEffectsInteractive = async (
             key: key as any,
             operationId: item.operationId,
             operationRevision: item.operationRevision,
+            attemptGeneration: item.attemptGeneration,
             effectId: item.effectId,
             expectedEffectState: item.state,
             context: syncContext,
@@ -260,6 +287,7 @@ const resolveSecondaryEffectsInteractive = async (
           key: key as any,
           operationId: item.operationId,
           operationRevision: item.operationRevision,
+          attemptGeneration: item.attemptGeneration,
           effectId: item.effectId,
           expectedEffectState: item.state,
           context: syncContext,
@@ -283,6 +311,7 @@ const resolveSecondaryEffectsInteractive = async (
           key: key as any,
           operationId: item.operationId,
           operationRevision: item.operationRevision,
+          attemptGeneration: item.attemptGeneration,
           effectId: item.effectId,
           expectedEffectState: item.state,
           context: syncContext,

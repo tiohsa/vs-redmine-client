@@ -283,5 +283,17 @@
     "The previous comment write may have reached Redmine. Check Redmine for one uniquely matching journal without sending the comment again.": "前回のコメント書込みがRedmineへ到達した可能性があります。コメントを再送せず、一意に一致するジャーナルがあるかRedmineで照合します。",
     "Link comment journal": "コメントジャーナルを紐付け",
     "Enter the Redmine comment journal ID to verify and link.": "検証して紐付けるRedmineコメントのジャーナルIDを入力してください。",
-    "Enter a positive comment journal ID.": "正のコメントジャーナルIDを入力してください。"
+    "Enter a positive comment journal ID.": "正のコメントジャーナルIDを入力してください。",
+    "Clean up remote write (Reconcile compensation)": "リモート書き込みのクリーンアップ (補償の照合)",
+    "The previous operation has pending compensation on Redmine. Reconcile compensation to clean up remote side?": "前回の操作はRedmine上に未完了の補償があります。リモート側をクリーンアップするために補償を照合しますか？",
+    "Child issue creation failed or timed out and requires compensation on Redmine. Reconcile compensation?": "子チケットの作成が失敗またはタイムアウトし、Redmine上で補償が必要です。補償を照合しますか？",
+    "Clean up remote issue (Reconcile compensation)": "リモートチケットのクリーンアップ (補償の照合)",
+    "Retry": "再試行",
+    "Link existing ID": "既存IDを紐付け",
+    "Child issue creation outcome is unknown. Link existing child ticket ID?": "子チケットの作成結果が不明です。既存の子チケットIDを紐付けますか？",
+    "Enter the Redmine child ticket ID.": "Redmineの子チケットIDを入力してください。",
+    "Secondary operation '{0}' failed: {1}. Do you want to retry?": "セカンダリ操作 '{0}' が失敗しました: {1}。再試行しますか？",
+    "Upload outcome for '{0}' is unknown. Retry?": "'{0}' のアップロード結果が不明です。再試行しますか？",
+    "A previous remote write outcome is unknown. Please resolve or reconcile before retrying.": "前回のリモート書込み結果が不明です。再試行する前に解決または照合してください。",
+    "Ticket #{0} was created, but local finalization is pending.": "チケット #{0} は作成されましたが、ローカルの完了処理が保留中です。"
 }

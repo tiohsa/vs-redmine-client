@@ -41,6 +41,7 @@ export type GenericLifecycleAction =
 export interface LifecycleExpectation {
   operationId: string;
   revision: number;
+  attemptGeneration?: number;
   sourcePhase: GenericSyncPhase;
 }
 
@@ -197,6 +198,8 @@ export interface UnifiedSyncOperation<I extends SyncIntent = SyncIntent> {
   connectionScope: string;
   phase: GenericSyncPhase;
   revision: number;
+  /** Remote execution Attempt generation. Legacy persisted operations default to 1. */
+  attemptGeneration?: number;
   intentRevision?: number;
   version?: number;
   persistenceVersion: number;
@@ -214,4 +217,3 @@ export interface UnifiedSyncOperation<I extends SyncIntent = SyncIntent> {
   updatedAt?: number | string;
   errorMessage?: string;
 }
-

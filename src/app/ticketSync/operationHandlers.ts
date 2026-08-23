@@ -51,6 +51,7 @@ import { computeBufferHashAndSize, computeFileHashAndSizeAsync } from "../../uti
 import { classifyFailureDisposition } from "../../utils/redmineErrors";
 import type { TicketUpdateFields, UploadToken } from "../../redmine/types";
 import {
+  getAttemptGeneration,
   getEffectsForRevision,
   getPrimaryEffectForRevision,
   isPrimaryEffectKind,
@@ -1413,6 +1414,9 @@ export class TicketCreateHandler implements OperationHandler<TicketCreateIntent,
             await repo.transitionEffect(key, effectId, { kind: "mark_compensation_unknown", detail: "complete_compensation failed to persist" }, scope, { operationRevision: revision, sourceState: "compensation_started" });
             return { kind: "commit_unknown", operationId: operation.operationId, message: "Compensation completed on remote but checkpoint failed" };
           }
+          if (getAttemptGeneration(compDone) > getAttemptGeneration(operation)) {
+            return { kind: "queued" };
+          }
           return { kind: "no_change", ticketId: remoteTicketId };
         }
       } catch (err: any) {
@@ -1420,6 +1424,9 @@ export class TicketCreateHandler implements OperationHandler<TicketCreateIntent,
           // Remote absent: 既に削除済み → complete_compensation
           const compDone = await repo.transitionEffect(key, effectId, { kind: "complete_compensation" }, scope, { operationRevision: revision, sourceState: effect.state });
           if (compDone) {
+            if (getAttemptGeneration(compDone) > getAttemptGeneration(operation)) {
+              return { kind: "queued" };
+            }
             return { kind: "no_change", ticketId: remoteTicketId };
           }
         }

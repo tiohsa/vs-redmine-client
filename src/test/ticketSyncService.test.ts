@@ -474,7 +474,12 @@ suite("TicketSyncService durable lifecycle", () => {
     assert.deepStrictEqual(deleted, [641, 640]);
     assert.strictEqual(queued.phase, "queued");
     assert.strictEqual(queued.createdIssueId, undefined);
-    assert.strictEqual(queued.effects?.find((e) => e.effectId === "ticket-create")?.state, "compensated");
+    assert.strictEqual(queued.attemptGeneration, 2);
+    assert.strictEqual(
+      queued.effects?.find((e) => e.effectId === "ticket-create"),
+      undefined,
+      "完全補償済みの親 Effect は次世代の復旧対象に残さないこと",
+    );
   });
 
   test("new ticket child POST timeout は commit_unknown となり自動再送・補償しない", async () => {

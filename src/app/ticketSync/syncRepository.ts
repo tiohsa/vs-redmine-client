@@ -21,6 +21,8 @@ import {
   DurableSyncEffectAction,
   DurableSyncEffectState,
   EffectFailureInfo,
+  getAttemptGeneration,
+  normalizeAttemptGeneration,
   isPrimaryEffectKind,
   SyncEffectRequestSnapshot,
   transitionDurableSyncEffect,
@@ -115,13 +117,18 @@ export interface SyncOperationRepository {
     effectId: string,
     action: DurableSyncEffectAction,
     scope: string,
-    expected?: { operationRevision?: number; sourceState: DurableSyncEffectState },
+    expected?: {
+      operationRevision?: number;
+      attemptGeneration?: number;
+      sourceState: DurableSyncEffectState;
+    },
   ): Promise<UnifiedSyncOperation | undefined>;
   completeOperation(
     key: SyncOperationKey,
     scope: string,
     expectedRevision?: number,
     completion?: { canonical?: any; remoteUpdatedAt?: string },
+    expectedAttemptGeneration?: number,
   ): Promise<boolean>;
   deleteOperation(key: SyncOperationKey, scope: string): Promise<boolean>;
 }
@@ -139,6 +146,7 @@ export const toUnifiedOperationFromTicket = (
   intentRevision: (ticket as any).intentRevision ?? ticket.revision ?? 1,
   version: (ticket as any).version ?? (ticket as any).persistenceVersion ?? ticket.revision ?? 1,
   persistenceVersion: (ticket as any).persistenceVersion ?? (ticket as any).version ?? ticket.revision ?? 1,
+  attemptGeneration: getAttemptGeneration(ticket),
   ticketId: ticket.ticketId,
   projectId: (ticket as any).projectId ?? (ticket as any).metadata?.project_id,
   documentUri: ticket.documentUri,
@@ -239,6 +247,7 @@ export const toUnifiedOperationFromNewTicket = (
     intentRevision: (ticket as any).intentRevision ?? (ticket.revision !== undefined && ticket.revision > 0 ? ticket.revision : 1),
     version: (ticket as any).version ?? (ticket as any).persistenceVersion ?? ticket.revision ?? 1,
     persistenceVersion: (ticket as any).persistenceVersion ?? (ticket as any).version ?? ticket.revision ?? 1,
+    attemptGeneration: getAttemptGeneration(ticket),
     projectId: ticket.projectId,
     documentUri: ticket.documentUri,
     createdRemoteId: ticket.createdIssueId,
@@ -289,6 +298,7 @@ export const toUnifiedOperationFromComment = (
   intentRevision: (comment as any).intentRevision ?? comment.revision ?? 1,
   version: (comment as any).version ?? (comment as any).persistenceVersion ?? comment.revision ?? 1,
   persistenceVersion: (comment as any).persistenceVersion ?? (comment as any).version ?? comment.revision ?? 1,
+  attemptGeneration: getAttemptGeneration(comment),
   ticketId: comment.ticketId,
   commentId: comment.commentId,
   documentUri: comment.documentUri,
@@ -412,6 +422,7 @@ export class DefaultSyncOperationRepository implements SyncOperationRepository {
     operation: UnifiedSyncOperation,
     scope: string,
     expectedPersistenceVersion?: number,
+    allowAttemptGenerationAdvance = false,
   ): Promise<UnifiedSyncOperation | undefined> {
     const queue = getOfflineSyncQueue(scope);
     const key = operation.key ?? {
@@ -434,8 +445,23 @@ export class DefaultSyncOperationRepository implements SyncOperationRepository {
       ? operation.version
       : (current?.version ?? current?.persistenceVersion ?? 0) + 1;
     const intentRevision = operation.intentRevision ?? operation.revision ?? current?.intentRevision ?? current?.revision ?? 1;
+    const attemptGeneration = getAttemptGeneration(operation);
+    if (
+      current &&
+      operation.attemptGeneration !== undefined &&
+      normalizeAttemptGeneration(operation.attemptGeneration) !==
+        getAttemptGeneration(current)
+    ) {
+      if (
+        !allowAttemptGenerationAdvance ||
+        normalizeAttemptGeneration(operation.attemptGeneration) !== getAttemptGeneration(current) + 1
+      ) {
+        return undefined;
+      }
+    }
     const updated: UnifiedSyncOperation = {
       ...operation,
+      attemptGeneration,
       intentRevision,
       version: nextVersion,
       persistenceVersion: nextVersion,
@@ -450,6 +476,7 @@ export class DefaultSyncOperationRepository implements SyncOperationRepository {
         operationId: operation.operationId,
         phase: operation.phase as any,
         revision: intentRevision,
+        attemptGeneration,
         intentRevision,
         version: nextVersion,
         persistenceVersion: nextVersion,
@@ -517,6 +544,7 @@ export class DefaultSyncOperationRepository implements SyncOperationRepository {
         operationId: operation.operationId,
         phase: operation.phase as any,
         revision: intentRevision,
+        attemptGeneration,
         intentRevision,
         version: nextVersion,
         persistenceVersion: nextVersion,
@@ -558,6 +586,7 @@ export class DefaultSyncOperationRepository implements SyncOperationRepository {
         operationId: operation.operationId,
         phase: operation.phase as any,
         revision: intentRevision,
+        attemptGeneration,
         intentRevision,
         version: nextVersion,
         persistenceVersion: nextVersion,
@@ -632,6 +661,12 @@ export class DefaultSyncOperationRepository implements SyncOperationRepository {
             return undefined;
           }
         }
+        if (
+          expected.attemptGeneration !== undefined &&
+          getAttemptGeneration(current) !== normalizeAttemptGeneration(expected.attemptGeneration)
+        ) {
+          return undefined;
+        }
       }
 
       const next = applyGenericTransition(current, action);
@@ -676,9 +711,16 @@ export class DefaultSyncOperationRepository implements SyncOperationRepository {
             return undefined;
           }
         }
+        if (
+          expected.attemptGeneration !== undefined &&
+          getAttemptGeneration(current) !== normalizeAttemptGeneration(expected.attemptGeneration)
+        ) {
+          return undefined;
+        }
       }
 
       const currentRevision = current.revision ?? current.intentRevision ?? 1;
+      const currentAttemptGeneration = getAttemptGeneration(current);
       const pId = current.kind === "ticket_create"
         ? "ticket-create"
         : current.kind === "ticket_update"
@@ -736,7 +778,10 @@ export class DefaultSyncOperationRepository implements SyncOperationRepository {
 
       const currentEffects = [...(current.effects ?? [])];
       const pIndex = currentEffects.findIndex(
-        (e) => (e.effectId === pId || isPrimaryEffectKind(e.kind)) && (e.operationRevision ?? currentRevision) === currentRevision,
+        (e) =>
+          (e.effectId === pId || isPrimaryEffectKind(e.kind)) &&
+          (e.operationRevision ?? currentRevision) === currentRevision &&
+          normalizeAttemptGeneration(e.attemptGeneration) === currentAttemptGeneration,
       );
 
       let updatedEffect: DurableSyncEffect | undefined;
@@ -746,12 +791,14 @@ export class DefaultSyncOperationRepository implements SyncOperationRepository {
             effectId: pId,
             kind: pKind,
             operationRevision: currentRevision,
+            attemptGeneration: currentAttemptGeneration,
             state: "planned",
             target: { documentUri: current.documentUri, ticketId: current.ticketId, commentId: current.commentId },
             requestSnapshot: transition.requestSnapshot,
           };
           updatedEffect = transitionDurableSyncEffect(initialEffect, effectAction, {
             operationRevision: currentRevision,
+            attemptGeneration: currentAttemptGeneration,
             sourceState: "planned",
           });
           if (updatedEffect) {
@@ -762,12 +809,14 @@ export class DefaultSyncOperationRepository implements SyncOperationRepository {
             effectId: pId,
             kind: pKind,
             operationRevision: currentRevision,
+            attemptGeneration: currentAttemptGeneration,
             state: "started",
             target: { documentUri: current.documentUri, ticketId: current.ticketId, commentId: current.commentId },
             requestSnapshot: transition.requestSnapshot,
           };
           updatedEffect = transitionDurableSyncEffect(initialEffect, effectAction, {
             operationRevision: currentRevision,
+            attemptGeneration: currentAttemptGeneration,
             sourceState: "started",
           });
           if (updatedEffect) {
@@ -778,11 +827,13 @@ export class DefaultSyncOperationRepository implements SyncOperationRepository {
             effectId: pId,
             kind: pKind,
             operationRevision: currentRevision,
+            attemptGeneration: currentAttemptGeneration,
             state: "started",
             target: { documentUri: current.documentUri, ticketId: current.ticketId, commentId: current.commentId },
           };
           updatedEffect = transitionDurableSyncEffect(initialEffect, effectAction, {
             operationRevision: currentRevision,
+            attemptGeneration: currentAttemptGeneration,
             sourceState: "started",
           });
           if (updatedEffect) {
@@ -791,9 +842,10 @@ export class DefaultSyncOperationRepository implements SyncOperationRepository {
         }
       } else {
         const existing = currentEffects[pIndex];
-        updatedEffect = transitionDurableSyncEffect(existing, effectAction, {
-          operationRevision: currentRevision,
-          sourceState: existing.state,
+          updatedEffect = transitionDurableSyncEffect(existing, effectAction, {
+            operationRevision: currentRevision,
+            attemptGeneration: currentAttemptGeneration,
+            sourceState: existing.state,
         });
         if (updatedEffect) {
           currentEffects[pIndex] = updatedEffect;
@@ -882,10 +934,20 @@ export class DefaultSyncOperationRepository implements SyncOperationRepository {
         return undefined;
       }
       const revision = currentRevision;
+      const attemptGeneration = getAttemptGeneration(current);
+      if (
+        effect.attemptGeneration !== undefined &&
+        normalizeAttemptGeneration(effect.attemptGeneration) !== attemptGeneration
+      ) {
+        return undefined;
+      }
 
       const effects = [...(current.effects ?? [])];
       const existingIndex = effects.findIndex(
-        (e) => e.effectId === effect.effectId && (e.operationRevision ?? currentRevision) === currentRevision,
+        (e) =>
+          e.effectId === effect.effectId &&
+          (e.operationRevision ?? currentRevision) === currentRevision &&
+          normalizeAttemptGeneration(e.attemptGeneration) === attemptGeneration,
       );
       if (existingIndex !== -1) {
         const existing = effects[existingIndex];
@@ -903,6 +965,7 @@ export class DefaultSyncOperationRepository implements SyncOperationRepository {
           effects[existingIndex] = {
             ...existing,
             operationRevision: revision,
+            attemptGeneration,
           };
         } else {
           // planned 状態 (R-10.1):
@@ -917,6 +980,7 @@ export class DefaultSyncOperationRepository implements SyncOperationRepository {
           effects[existingIndex] = {
             ...effect,
             operationRevision: revision,
+            attemptGeneration,
             state: "planned",
           };
         }
@@ -924,6 +988,7 @@ export class DefaultSyncOperationRepository implements SyncOperationRepository {
         effects.push({
           ...effect,
           operationRevision: revision,
+          attemptGeneration,
           state: "planned",
         });
       }
@@ -933,7 +998,11 @@ export class DefaultSyncOperationRepository implements SyncOperationRepository {
         effects,
       };
       try {
-        return await this.saveOperationInternal(updated, scope, current.version ?? current.persistenceVersion);
+        return await this.saveOperationInternal(
+          updated,
+          scope,
+          current.version ?? current.persistenceVersion,
+        );
       } catch {
         return undefined;
       }
@@ -945,7 +1014,11 @@ export class DefaultSyncOperationRepository implements SyncOperationRepository {
     effectId: string,
     action: DurableSyncEffectAction,
     scope: string,
-    expected?: { operationRevision?: number; sourceState: DurableSyncEffectState },
+    expected?: {
+      operationRevision?: number;
+      attemptGeneration?: number;
+      sourceState: DurableSyncEffectState;
+    },
   ): Promise<UnifiedSyncOperation | undefined> {
     return this.runExclusive(scope, async () => {
       const current = this.getOperation(key, scope);
@@ -954,10 +1027,20 @@ export class DefaultSyncOperationRepository implements SyncOperationRepository {
       }
 
       const currentRevision = current.intentRevision ?? current.revision ?? 1;
+      const currentAttemptGeneration = getAttemptGeneration(current);
       const targetRevision = expected?.operationRevision ?? currentRevision;
+      const targetAttemptGeneration = normalizeAttemptGeneration(
+        expected?.attemptGeneration ?? currentAttemptGeneration,
+      );
+      if (targetAttemptGeneration !== currentAttemptGeneration) {
+        return undefined;
+      }
       const effects = [...(current.effects ?? [])];
       const existingIndex = effects.findIndex(
-        (e) => e.effectId === effectId && (e.operationRevision ?? targetRevision) === targetRevision,
+        (e) =>
+          e.effectId === effectId &&
+          (e.operationRevision ?? targetRevision) === targetRevision &&
+          normalizeAttemptGeneration(e.attemptGeneration) === targetAttemptGeneration,
       );
 
       let effect: DurableSyncEffect | undefined = existingIndex !== -1 ? effects[existingIndex] : undefined;
@@ -967,6 +1050,7 @@ export class DefaultSyncOperationRepository implements SyncOperationRepository {
             effectId,
             kind: effectId.includes("comment") ? (effectId.includes("update") ? "comment_update" : "comment_create") : (effectId.includes("update") ? "ticket_update" : "ticket_create"),
             operationRevision: currentRevision,
+            attemptGeneration: currentAttemptGeneration,
             state: "planned",
             target: { documentUri: current.documentUri, ticketId: current.ticketId, commentId: current.commentId },
             requestSnapshot: (action as any).requestSnapshot,
@@ -988,9 +1072,13 @@ export class DefaultSyncOperationRepository implements SyncOperationRepository {
           return undefined;
         }
       }
+      if (normalizeAttemptGeneration(effect.attemptGeneration) !== targetAttemptGeneration) {
+        return undefined;
+      }
 
       const nextEffect = transitionDurableSyncEffect(effect, action, {
         operationRevision: targetRevision,
+        attemptGeneration: targetAttemptGeneration,
         sourceState: expected?.sourceState ?? effect.state,
       });
       if (!nextEffect) {
@@ -1007,12 +1095,23 @@ export class DefaultSyncOperationRepository implements SyncOperationRepository {
         (nextEffect.kind === "ticket_create" || nextEffect.kind === "ticket_update" || nextEffect.effectId === "ticket-create" || nextEffect.effectId === "ticket-update") &&
         nextEffect.state === "compensated";
 
+      const closesAttempt = isPrimaryCompensated;
+      const nextAttemptGeneration = closesAttempt
+        ? currentAttemptGeneration + 1
+        : currentAttemptGeneration;
+      const activeEffects = closesAttempt
+        ? effects.filter((candidate) =>
+          normalizeAttemptGeneration(candidate.attemptGeneration) > currentAttemptGeneration
+        )
+        : effects;
+      const currentPhase = current.phase as string;
       const updated: UnifiedSyncOperation = {
         ...current,
-        phase: isPrimaryCompensated && (current.phase === "commit_unknown" || current.phase === "remote_write_started" || current.phase === "remote_committed" || current.phase === "reconciliation_pending" || current.phase === "preparing")
+        attemptGeneration: nextAttemptGeneration,
+        phase: isPrimaryCompensated && (currentPhase === "commit_unknown" || currentPhase === "compensation_unknown" || currentPhase === "compensation_started" || currentPhase === "remote_write_started" || currentPhase === "remote_committed" || currentPhase === "reconciliation_pending" || currentPhase === "preparing" || currentPhase === "local_finalize_pending")
           ? "queued"
           : current.phase,
-        effects,
+        effects: activeEffects,
         createdRemoteId:
           nextEffect.kind === "ticket_create" && nextEffect.state === "committed" && nextEffect.remoteId !== undefined
             ? nextEffect.remoteId
@@ -1020,9 +1119,21 @@ export class DefaultSyncOperationRepository implements SyncOperationRepository {
               ? undefined  // compensation完了時にatomicにcreatedRemoteIdを消去
               : current.createdRemoteId,
         createdChildIds: isPrimaryCompensated ? undefined : current.createdChildIds,
+        errorMessage: isPrimaryCompensated ? undefined : current.errorMessage,
       };
+      if (closesAttempt && current.nextIntent) {
+        updated.intent = current.nextIntent;
+        updated.nextIntent = undefined;
+        updated.intentRevision = (current.nextIntent as { revision?: number }).revision ?? currentRevision + 1;
+        updated.revision = updated.intentRevision;
+      }
       try {
-        return await this.saveOperationInternal(updated, scope, current.version ?? current.persistenceVersion);
+        return await this.saveOperationInternal(
+          updated,
+          scope,
+          current.version ?? current.persistenceVersion,
+          closesAttempt,
+        );
       } catch {
         return undefined;
       }
@@ -1034,10 +1145,19 @@ export class DefaultSyncOperationRepository implements SyncOperationRepository {
     scope: string,
     expectedRevision?: number,
     completion?: { canonical?: any; remoteUpdatedAt?: string },
+    expectedAttemptGeneration?: number,
   ): Promise<boolean> {
     return this.runExclusive(scope, async () => {
       const current = this.getOperation(key, scope);
       const revision = expectedRevision ?? current?.revision ?? 1;
+
+      if (
+        current &&
+        expectedAttemptGeneration !== undefined &&
+        getAttemptGeneration(current) !== normalizeAttemptGeneration(expectedAttemptGeneration)
+      ) {
+        return false;
+      }
 
       if (current) {
         const completedOp: UnifiedSyncOperation = {
@@ -1167,6 +1287,146 @@ export class DefaultSyncOperationRepository implements SyncOperationRepository {
   }
 }
 
+/**
+ * Handler が保持している operation snapshot の Attempt 世代を、すべての
+ * 永続 transition に付与する。Remote write 後に次 Attempt が開始されても、
+ * 古い callback は generation mismatch で fail-closed になる。
+ */
+export class AttemptGenerationFencedRepository implements SyncOperationRepository {
+  public constructor(
+    private readonly repository: SyncOperationRepository,
+    private readonly attemptGeneration: number,
+  ) {}
+
+  public getOperation<I extends SyncIntent = SyncIntent>(key: SyncOperationKey, scope: string): UnifiedSyncOperation<I> | undefined {
+    return this.repository.getOperation<I>(key, scope);
+  }
+
+  public listOperations(scope: string): UnifiedSyncOperation[] {
+    return this.repository.listOperations(scope);
+  }
+
+  public saveOperation(
+    operation: UnifiedSyncOperation,
+    scope: string,
+    expectedPersistenceVersion?: number,
+  ): Promise<UnifiedSyncOperation | undefined> {
+    if (getAttemptGeneration(operation) !== this.attemptGeneration) {
+      return Promise.resolve(undefined);
+    }
+    return this.repository.saveOperation(
+      { ...operation, attemptGeneration: this.attemptGeneration },
+      scope,
+      expectedPersistenceVersion,
+    );
+  }
+
+  public transitionOperation(
+    key: SyncOperationKey,
+    action: GenericLifecycleAction,
+    scope: string,
+    expected?: LifecycleExpectation,
+  ): Promise<UnifiedSyncOperation | undefined> {
+    return this.repository.transitionOperation(
+      key,
+      action,
+      scope,
+      { ...expected, attemptGeneration: this.attemptGeneration } as LifecycleExpectation,
+    );
+  }
+
+  public transitionPrimaryRemoteWrite(
+    key: SyncOperationKey,
+    transition: PrimaryRemoteTransition,
+    scope: string,
+    expected?: LifecycleExpectation,
+  ): Promise<UnifiedSyncOperation | undefined> {
+    return this.repository.transitionPrimaryRemoteWrite(
+      key,
+      transition,
+      scope,
+      { ...expected, attemptGeneration: this.attemptGeneration } as LifecycleExpectation,
+    );
+  }
+
+  public planEffect(
+    key: SyncOperationKey,
+    effect: DurableSyncEffect,
+    scope: string,
+    expectedRevision?: number,
+  ): Promise<UnifiedSyncOperation | undefined> {
+    if (
+      effect.attemptGeneration !== undefined &&
+      normalizeAttemptGeneration(effect.attemptGeneration) !== this.attemptGeneration
+    ) {
+      return Promise.resolve(undefined);
+    }
+    return this.repository.planEffect(
+      key,
+      { ...effect, attemptGeneration: this.attemptGeneration },
+      scope,
+      expectedRevision,
+    );
+  }
+
+  public transitionEffect(
+    key: SyncOperationKey,
+    effectId: string,
+    action: DurableSyncEffectAction,
+    scope: string,
+    expected?: {
+      operationRevision?: number;
+      attemptGeneration?: number;
+      sourceState: DurableSyncEffectState;
+    },
+  ): Promise<UnifiedSyncOperation | undefined> {
+    if (
+      expected?.attemptGeneration !== undefined &&
+      normalizeAttemptGeneration(expected.attemptGeneration) !== this.attemptGeneration
+    ) {
+      return Promise.resolve(undefined);
+    }
+    return this.repository.transitionEffect(
+      key,
+      effectId,
+      action,
+      scope,
+      { ...expected, attemptGeneration: this.attemptGeneration } as {
+        operationRevision?: number;
+        attemptGeneration?: number;
+        sourceState: DurableSyncEffectState;
+      },
+    );
+  }
+
+  public completeOperation(
+    key: SyncOperationKey,
+    scope: string,
+    expectedRevision?: number,
+    completion?: { canonical?: any; remoteUpdatedAt?: string },
+    _expectedAttemptGeneration?: number,
+  ): Promise<boolean> {
+    return this.repository.completeOperation(
+      key,
+      scope,
+      expectedRevision,
+      completion,
+      this.attemptGeneration,
+    );
+  }
+
+  public deleteOperation(key: SyncOperationKey, scope: string): Promise<boolean> {
+    return this.repository.deleteOperation(key, scope);
+  }
+}
+
+export const withAttemptGenerationFence = (
+  repository: SyncOperationRepository,
+  attemptGeneration: number | undefined,
+): SyncOperationRepository => new AttemptGenerationFencedRepository(
+  repository,
+  normalizeAttemptGeneration(attemptGeneration),
+);
+
 export const createSyncOperationRepository = (): SyncOperationRepository =>
   new DefaultSyncOperationRepository();
-

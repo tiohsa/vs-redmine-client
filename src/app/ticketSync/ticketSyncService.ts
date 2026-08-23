@@ -413,6 +413,7 @@ export class TicketSyncService {
   public resolveCommitUnknown(input: {
     key: TicketSyncQueueKey;
     context: SyncContext;
+    attemptGeneration?: number;
     resolution:
       | { kind: "link_created_ticket"; ticketId: number }
       | { kind: "link_remote_ticket"; ticketId: number }
@@ -429,6 +430,7 @@ export class TicketSyncService {
     return this.coordinator.resolveCommitUnknown({
       key: input.key as any,
       context: input.context,
+      attemptGeneration: input.attemptGeneration,
       resolution,
       deps: {
         ticketCreate: this.createDeps,

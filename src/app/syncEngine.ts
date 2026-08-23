@@ -98,11 +98,13 @@ export class SyncEngine {
   public async resolveCommentCommitUnknown(input: {
     key: Extract<SyncEngineKey, { kind: "comment" }>;
     context: SyncContext;
+    attemptGeneration?: number;
     resolution?: { kind: "reconcile_remote" } | { kind: "link_remote_comment"; commentId: number };
   }): Promise<SyncEngineOutcome> {
     return this.coordinator.resolveCommitUnknown({
       key: input.key,
       context: input.context,
+      attemptGeneration: input.attemptGeneration,
       resolution: input.resolution,
       deps: {
         comment: this.comments,
@@ -113,6 +115,7 @@ export class SyncEngine {
   public async resolveTicketCommitUnknown(input: {
     key: Extract<SyncEngineKey, { kind: "ticket" | "newTicket" }>;
     context: SyncContext;
+    attemptGeneration?: number;
     resolution?:
       | { kind: "reconcile_remote" }
       | { kind: "link_remote_ticket"; ticketId: number }
@@ -124,6 +127,7 @@ export class SyncEngine {
     return this.coordinator.resolveCommitUnknown({
       key: input.key,
       context: input.context,
+      attemptGeneration: input.attemptGeneration,
       resolution: input.resolution,
       deps: {
         ticketCreate: this.rawTicketDeps,
@@ -138,6 +142,7 @@ export class SyncEngine {
     key: SyncEngineKey;
     operationId: string;
     operationRevision: number;
+    attemptGeneration?: number;
     effectId: string;
     expectedEffectState: DurableSyncEffectState;
     context: SyncContext;
@@ -147,6 +152,7 @@ export class SyncEngine {
       key: input.key as any,
       operationId: input.operationId,
       operationRevision: input.operationRevision,
+      attemptGeneration: input.attemptGeneration,
       effectId: input.effectId,
       expectedEffectState: input.expectedEffectState,
       context: input.context,
