@@ -1,5 +1,5 @@
 import * as assert from "assert";
-import { initializeOfflineSyncStore, addOfflineCommentUpdate, getOfflineSyncQueue } from "../views/offlineSyncStore";
+import { initializeOfflineSyncStore, addOfflineCommentUpdateAsync, getOfflineSyncQueue } from "../views/offlineSyncStore";
 import { createSyncEngine } from "../app/syncEngine";
 import { createTestMemento } from "./helpers/vscodeMemento";
 
@@ -9,7 +9,7 @@ suite("RT-01: Comment Update Recovery Correctness (commentUpdateRecovery.test.ts
   test("RT-01: remote update timeout 後、remote body が古い（未コミット）場合は reconcile しても completed にならず queue を保持し、自動再送しない", async () => {
     initializeOfflineSyncStore(createTestMemento(), SCOPE);
     const documentUri = "file:///tmp/comment-update-recovery-fail.md";
-    addOfflineCommentUpdate({
+    await addOfflineCommentUpdateAsync({
       ticketId: 100,
       commentId: 200,
       baseBody: "Old remote body",
@@ -73,7 +73,7 @@ suite("RT-01: Comment Update Recovery Correctness (commentUpdateRecovery.test.ts
 
   test("RT-01: remote update timeout 後、remote body が更新後の値と一致する場合のみ recovery 成功 (completed) となる", async () => {
     initializeOfflineSyncStore(createTestMemento(), SCOPE);
-    addOfflineCommentUpdate({
+    await addOfflineCommentUpdateAsync({
       ticketId: 101,
       commentId: 201,
       baseBody: "Old remote body",

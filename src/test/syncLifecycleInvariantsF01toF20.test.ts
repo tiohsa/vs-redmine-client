@@ -5,9 +5,9 @@ import * as path from "path";
 import * as vscode from "vscode";
 import {
   initializeOfflineSyncStore,
-  addOfflineTicketUpdate,
+  addOfflineTicketUpdateAsync,
   addOfflineNewTicketAsync,
-  addOfflineCommentUpdate,
+  addOfflineCommentUpdateAsync,
   getOfflineSyncQueue,
 } from "../views/offlineSyncStore";
 import { createSyncEngine } from "../app/syncEngine";
@@ -374,7 +374,7 @@ suite("F-01 〜 F-20: Reproduction & Invariant Tests", () => {
     let capturedUpdateInput: any = undefined;
     const repo = createSyncOperationRepository();
 
-    addOfflineTicketUpdate(
+    await addOfflineTicketUpdateAsync(
       100,
       {
         ticketId: 100,

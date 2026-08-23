@@ -3,7 +3,6 @@ import { getDefaultProjectId, getOfflineSyncMode } from "../../config/settings";
 import { getProjectSelection } from "../../config/projectSelection";
 import { processMarkdownImageUploads } from "../../utils/markdownImageUpload";
 import { resolveEditorBaseDir } from "../../utils/editorBaseDir";
-import { removeOfflineNewTicket } from "../offlineSyncStore";
 import { markNewTicketDraftFailed, markNewTicketDraftSynced, markNewTicketDraftSyncing } from "../newTicketDraftStore";
 import { parseTicketEditorContent, type TicketEditorContent } from "../ticketEditorContent";
 import { updateDraftAfterSave } from "../ticketDraftStore";

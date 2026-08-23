@@ -1,7 +1,7 @@
 import * as assert from "assert";
 import { SyncEngine } from "../app/syncEngine";
 import { SyncCoordinator } from "../app/ticketSync/syncCoordinator";
-import { initializeOfflineSyncStore, addOfflineTicketUpdate, addOfflineNewTicketAsync } from "../views/offlineSyncStore";
+import { initializeOfflineSyncStore, addOfflineTicketUpdateAsync, addOfflineNewTicketAsync } from "../views/offlineSyncStore";
 import { createTestMemento } from "./helpers/vscodeMemento";
 
 suite("RT-02: Sync Lifecycle Ownership (syncLifecycleOwnership.test.ts)", () => {

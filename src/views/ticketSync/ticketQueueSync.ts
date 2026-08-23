@@ -1,7 +1,7 @@
 import * as vscode from "vscode";
 import {
-  addOfflineNewTicket,
-  addOfflineTicketUpdate,
+  addOfflineNewTicketAsync,
+  addOfflineTicketUpdateAsync,
 } from "../offlineSyncStore";
 import { buildTicketEditorContent, parseTicketEditorContent } from "../ticketEditorContent";
 import { getTicketDraft, markDraftStatus, setTicketDraftContent, updateDraftAfterSave } from "../ticketDraftStore";
@@ -101,7 +101,7 @@ export const queueTicketDraft = async (
     controlFields: parsed.controlFields,
   });
 
-  addOfflineTicketUpdate(input.ticketId, {
+  await addOfflineTicketUpdateAsync(input.ticketId, {
     ticketId: input.ticketId,
     baseSubject: draft.baseSubject,
     baseDescription: draft.baseDescription,
@@ -547,10 +547,10 @@ export const applyQueuedTicketUpdate = async (input: {
 /**
  * Ctrl+S local save path. Does not call Redmine APIs.
  */
-export const saveTicketDraftLocally = (
+export const saveTicketDraftLocally = async (
   editor: vscode.TextEditor,
   operationScope?: string,
-): TicketSaveResult | undefined => {
+): Promise<TicketSaveResult | undefined> => {
   if (!isTicketEditor(editor)) { return undefined; }
   if (getEditorContentType(editor) !== "ticket") { return undefined; }
 
@@ -558,7 +558,7 @@ export const saveTicketDraftLocally = (
   if (!ticketId) { return undefined; }
 
   if (ticketId === NEW_TICKET_DRAFT_ID) {
-    addOfflineNewTicket({
+    await addOfflineNewTicketAsync({
       content: editor.document.getText(),
       documentUri: editor.document.uri.toString(),
     }, operationScope);
@@ -581,7 +581,7 @@ export const saveTicketDraftLocally = (
     markDraftStatus(ticketId, "Dirty", operationScope);
     const draft = getTicketDraft(ticketId, operationScope);
     if (draft) {
-      addOfflineTicketUpdate(ticketId, {
+      await addOfflineTicketUpdateAsync(ticketId, {
         ticketId,
         baseSubject: draft.baseSubject,
         baseDescription: draft.baseDescription,
@@ -613,7 +613,7 @@ export const handleTicketEditorSave = async (
     return undefined;
   }
 
-  const result = saveTicketDraftLocally(editor, options.operationScope);
+  const result = await saveTicketDraftLocally(editor, options.operationScope);
   if (result !== undefined) {
     return result;
   }
@@ -663,7 +663,7 @@ export const queueNewTicketDraft = async (input: {
   if (validation) {
     return validation;
   }
-  addOfflineNewTicket({
+  await addOfflineNewTicketAsync({
     content,
     projectId: resolveProjectIdForEditor(input.editor),
     documentUri: input.editor.document.uri.toString(),
@@ -683,7 +683,7 @@ export const queueNewTicketDraftContent = async (input: {
   if (validation) {
     return validation;
   }
-  addOfflineNewTicket({
+  await addOfflineNewTicketAsync({
     content: input.content,
     projectId: input.projectId,
     documentUri: input.documentUri?.toString(),

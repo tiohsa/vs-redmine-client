@@ -49,6 +49,20 @@ const normalizeNewTicketSyncFailureMessage = (message?: string): string => {
   return message ?? vscode.l10n.t("Unknown error");
 };
 
+const showManualRepairRequired = (
+  items: ReturnType<ReturnType<typeof createSyncEngine>["getRecoveryItems"]>,
+): boolean => {
+  const manualItem = items.find((item) => item.disposition === "manual_repair_required");
+  if (!manualItem) {
+    return false;
+  }
+  showWarning(vscode.l10n.t(
+    "Manual repair required. Automatic recovery is disabled to avoid a duplicate remote mutation. Details: {0}",
+    manualItem.message ?? manualItem.manualRepairReason ?? vscode.l10n.t("Unknown recovery state"),
+  ));
+  return true;
+};
+
 const resolveCommitUnknownInteractive = async (
   service: ReturnType<ReturnType<typeof createSyncEngine>["ticketService"]>,
   engine: ReturnType<typeof createSyncEngine>,
@@ -57,6 +71,9 @@ const resolveCommitUnknownInteractive = async (
 ): Promise<TicketSyncOutcome | undefined> => {
   const syncContext = { connectionScope: operationScope };
   const items = engine.getRecoveryItems(key as any, syncContext);
+  if (showManualRepairRequired(items)) {
+    return undefined;
+  }
   const primaryItem = items.find((item) => isPrimaryEffectKind(item.effectKind));
   const actions = primaryItem?.allowedActions ?? [];
 
@@ -164,6 +181,9 @@ const resolveCommentCommitUnknownInteractive = async (
   operationScope: string,
 ): Promise<Awaited<ReturnType<typeof engine.syncOne>> | undefined> => {
   const recoveryItems = engine.getRecoveryItems(key as any, { connectionScope: operationScope });
+  if (showManualRepairRequired(recoveryItems)) {
+    return undefined;
+  }
   const primaryItem = recoveryItems.find((item) => isPrimaryEffectKind(item.effectKind));
   const reconcileLabel = vscode.l10n.t("Reconcile from Redmine");
   const linkLabel = vscode.l10n.t("Link comment journal");
@@ -204,6 +224,9 @@ const resolveSecondaryEffectsInteractive = async (
 ): Promise<Awaited<ReturnType<typeof engine.syncOne>> | undefined> => {
   const syncContext = { connectionScope: operationScope };
   const items = engine.getRecoveryItems(key as any, syncContext);
+  if (showManualRepairRequired(items)) {
+    return undefined;
+  }
   const primaryItem = items.find((item) => isPrimaryEffectKind(item.effectKind));
   if (
     primaryItem &&

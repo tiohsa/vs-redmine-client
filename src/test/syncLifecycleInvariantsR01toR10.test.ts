@@ -5,9 +5,9 @@ import * as path from "path";
 import * as vscode from "vscode";
 import {
   initializeOfflineSyncStore,
-  addOfflineTicketUpdate,
+  addOfflineTicketUpdateAsync,
   addOfflineNewTicketAsync,
-  addOfflineCommentUpdate,
+  addOfflineCommentUpdateAsync,
   getOfflineSyncQueue,
 } from "../views/offlineSyncStore";
 import { createSyncEngine } from "../app/syncEngine";
@@ -39,7 +39,7 @@ suite("R01 〜 R10: Invariant & Lifecycle Recovery Tests", () => {
 
     const doc = await vscode.workspace.openTextDocument(vscode.Uri.file(commentFile));
 
-    addOfflineCommentUpdate({
+    await addOfflineCommentUpdateAsync({
       ticketId: 101,
       body: rawBody,
       baseDir: tmpDir,
@@ -88,7 +88,7 @@ suite("R01 〜 R10: Invariant & Lifecycle Recovery Tests", () => {
 
   // R02: Preflight validation on TicketUpdate (INV-08)
   test("R02: child ticket を持つ TicketUpdate で projectId が解決できない場合、Primary PUT を呼ばずに failed_before_commit となる (INV-08)", async () => {
-    addOfflineTicketUpdate(202, {
+    await addOfflineTicketUpdateAsync(202, {
       ticketId: 202,
       baseSubject: "Parent Issue",
       baseDescription: "Desc",
@@ -138,7 +138,7 @@ suite("R01 〜 R10: Invariant & Lifecycle Recovery Tests", () => {
 
     const rawBody = `Images: ![A](${imgA}) and ![B](${imgB})`;
 
-    addOfflineCommentUpdate({
+    await addOfflineCommentUpdateAsync({
       ticketId: 303,
       body: rawBody,
       baseDir: tmpDir,

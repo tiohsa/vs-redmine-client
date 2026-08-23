@@ -10,7 +10,10 @@ import {
     markDraftStatus,
     updateDraftAfterSave,
 } from "./ticketDraftStore";
-import { removeOfflineCommentEntry, removeOfflineTicketUpdate } from "./offlineSyncStore";
+import {
+  removeOfflineCommentEntryAsync,
+  removeOfflineTicketUpdateAsync,
+} from "./offlineSyncStore";
 import { registerConflictContext } from "./conflictDiffProvider";
 import { buildTicketEditorContent, parseTicketEditorContent } from "./ticketEditorContent";
 import { mergeThreeWay } from "../utils/threeWayMerge";
@@ -102,7 +105,7 @@ export async function applyRemoteContent(
     if (result.status === "success") {
         // The queued local snapshot was the source of this conflict. It must not
         // be retried after the editor has been replaced with the remote state.
-        removeOfflineTicketUpdate(context.ticketId, operationScope);
+        await removeOfflineTicketUpdateAsync(context.ticketId, operationScope);
     }
     return result;
 }
@@ -190,7 +193,7 @@ export async function mergeTicketContent(
     // A queued update still carries the pre-merge remote timestamp. Keeping it
     // would cause Sync All / dashboard sync to raise the same conflict again.
     // The user must review the editor and save, which queues a new snapshot.
-    removeOfflineTicketUpdate(context.ticketId, operationScope);
+    await removeOfflineTicketUpdateAsync(context.ticketId, operationScope);
     markDraftStatus(context.ticketId, "Dirty", operationScope);
     return {
         status: "merged",
@@ -311,7 +314,7 @@ export async function applyRemoteCommentContent(
 ): Promise<CommentSaveResult> {
     await applyEditorContent(editor, context.remoteBody);
     updateCommentEdit(context.commentId, context.remoteBody, undefined, operationScope);
-    removeOfflineCommentEntry({ commentId: context.commentId }, operationScope);
+    await removeOfflineCommentEntryAsync({ commentId: context.commentId }, operationScope);
     return { status: "success", message: vscode.l10n.t("Overwritten with remote content.") };
 }
 
@@ -375,7 +378,7 @@ export async function mergeCommentContent(
         operationScope,
     );
     await applyEditorContent(editor, merged.content);
-    removeOfflineCommentEntry({ commentId: context.commentId }, operationScope);
+    await removeOfflineCommentEntryAsync({ commentId: context.commentId }, operationScope);
     return {
         status: "merged",
         message: merged.hasConflicts

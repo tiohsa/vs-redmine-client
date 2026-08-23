@@ -6,8 +6,8 @@ import * as vscode from "vscode";
 import {
   initializeOfflineSyncStore,
   addOfflineNewTicketAsync,
-  addOfflineTicketUpdate,
-  addOfflineCommentUpdate,
+  addOfflineTicketUpdateAsync,
+  addOfflineCommentUpdateAsync,
   getOfflineSyncQueue,
   replaceOfflineSyncQueueAsync,
 } from "../views/offlineSyncStore";

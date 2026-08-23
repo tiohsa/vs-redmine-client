@@ -631,6 +631,8 @@ export type RecoveryActionKind =
   | "link_remote_child"
   | "reconcile_compensation";
 
+export type RecoveryDisposition = "actionable" | "manual_repair_required";
+
 export type RecoveryItem = {
   operationId: string;
   operationRevision: number;
@@ -640,6 +642,8 @@ export type RecoveryItem = {
   state: DurableSyncEffectState;
   message?: string;
   allowedActions: RecoveryActionKind[];
+  disposition: RecoveryDisposition;
+  manualRepairReason?: AttemptClosureBlockerReason;
 };
 
 export type OperationRecoveryMode =
@@ -707,7 +711,13 @@ export const getRecoveryItemsForOperation = (
   const classificationsByEffectId = new Map(
     closureDecision.classifications.map((classification) => [classification.effectId, classification]),
   );
+  const blockersByEffectId = new Map(
+    closureDecision.blockers.map((blocker) => [blocker.effectId, blocker]),
+  );
   const items: RecoveryItem[] = [];
+
+  const manualRepairMessage = (detail?: string): string => detail ??
+    "Manual repair required. A committed remote effect cannot be proven safe to retry or to belong to the compensated parent operation. Automatic recovery is disabled to avoid a duplicate remote mutation.";
 
   for (const effect of activeEffects) {
     const isPrimary = isPrimaryEffect(effect);
@@ -743,6 +753,13 @@ export const getRecoveryItemsForOperation = (
           state: effect.state,
           message: effect.failure?.detail ?? effect.detail ?? operation.errorMessage,
           allowedActions,
+          disposition: allowedActions.length > 0 ? "actionable" : "manual_repair_required",
+          ...(allowedActions.length === 0
+            ? {
+              manualRepairReason: blockersByEffectId.get(effect.effectId)?.reason ?? "RECOVERY_REQUIRED",
+              message: manualRepairMessage(blockersByEffectId.get(effect.effectId)?.detail),
+            }
+            : {}),
         });
       }
     } else {
@@ -796,6 +813,8 @@ export const getRecoveryItemsForOperation = (
             }
           }
         }
+        const blocker = blockersByEffectId.get(effect.effectId);
+        const requiresManualRepair = allowedActions.length === 0;
         items.push({
           operationId: operation.operationId,
           operationRevision: effect.operationRevision,
@@ -805,11 +824,38 @@ export const getRecoveryItemsForOperation = (
           effectId: effect.effectId,
           effectKind: effect.kind,
           state: effect.state,
-          message: effect.failure?.detail ?? effect.detail,
+          message: requiresManualRepair
+            ? manualRepairMessage(blocker?.detail)
+            : effect.failure?.detail ?? effect.detail,
           allowedActions,
+          disposition: requiresManualRepair ? "manual_repair_required" : "actionable",
+          ...(requiresManualRepair
+            ? { manualRepairReason: blocker?.reason ?? "RECOVERY_REQUIRED" }
+            : {}),
         });
       }
     }
+  }
+
+  for (const blocker of recoveryMode === "compensation_blocked"
+    ? closureDecision.blockers
+    : []) {
+    if (items.some((item) => item.effectId === blocker.effectId)) {
+      continue;
+    }
+    const effect = activeEffects.find((candidate) => candidate.effectId === blocker.effectId);
+    items.push({
+      operationId: operation.operationId,
+      operationRevision: blocker.operationRevision ?? currentRevision,
+      attemptGeneration: blocker.attemptGeneration ?? normalizeAttemptGeneration(operation.attemptGeneration),
+      effectId: blocker.effectId,
+      effectKind: blocker.effectKind ?? effect?.kind ?? "local_finalize",
+      state: blocker.state ?? effect?.state ?? "failed",
+      message: manualRepairMessage(blocker.detail),
+      allowedActions: [],
+      disposition: "manual_repair_required",
+      manualRepairReason: blocker.reason,
+    });
   }
 
   return items;

@@ -304,5 +304,7 @@
     "Only reconcile_compensation is allowed while primary compensation has unresolved rollback obligations.": "Primary補償後に未解決のロールバック義務がある間は、reconcile_compensation のみ実行できます。",
     "Primary compensation has unresolved rollback obligations; forward ticket creation is blocked.": "Primary補償後に未解決のロールバック義務があるため、チケット作成を先へ進められません。",
     "Primary compensation has unresolved rollback obligations; reconcile compensation before forwarding the ticket mutation.": "Primary補償後に未解決のロールバック義務があります。チケット変更を先へ進める前に補償を照合してください。",
-    "Primary compensation has unresolved rollback obligations; forward finalization is blocked.": "Primary補償後に未解決のロールバック義務があるため、ローカル完了処理を先へ進められません。"
+    "Primary compensation has unresolved rollback obligations; forward finalization is blocked.": "Primary補償後に未解決のロールバック義務があるため、ローカル完了処理を先へ進められません。",
+    "Manual repair required. Automatic recovery is disabled to avoid a duplicate remote mutation. Details: {0}": "手動修復が必要です。リモート変更の重複を避けるため、自動復旧は無効です。詳細: {0}",
+    "Unknown recovery state": "不明な復旧状態"
 }

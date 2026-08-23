@@ -1,15 +1,15 @@
 import * as assert from "assert";
 import { DefaultSyncOperationRepository } from "../app/ticketSync/syncRepository";
 import { UnifiedSyncOperation, TicketUpdateIntent } from "../app/ticketSync/syncOperationTypes";
-import { clearOfflineSyncQueue, initializeOfflineSyncStore } from "../views/offlineSyncStore";
+import { clearOfflineSyncQueueAsync, initializeOfflineSyncStore } from "../views/offlineSyncStore";
 import { createTestMemento } from "./helpers/vscodeMemento";
 
 suite("RT-E: Version & IntentRevision Separation (syncVersionSeparation.test.ts)", () => {
   const scope = "test-scope-rt-e";
 
-  setup(() => {
+  setup(async () => {
     initializeOfflineSyncStore(createTestMemento(), scope);
-    clearOfflineSyncQueue(scope);
+    await clearOfflineSyncQueueAsync(scope);
   });
 
   test("RT-E: 状態遷移を繰り返しても intentRevision は不変であり CAS version のみが増加すること", async () => {

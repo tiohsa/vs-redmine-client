@@ -6,7 +6,7 @@ import * as vscode from "vscode";
 import {
   initializeOfflineSyncStore,
   addOfflineNewTicketAsync,
-  addOfflineCommentUpdate,
+  addOfflineCommentUpdateAsync,
   getOfflineSyncQueue,
 } from "../views/offlineSyncStore";
 import { createSyncEngine } from "../app/syncEngine";
@@ -206,7 +206,7 @@ suite("R11 〜 R23: Invariant & Lifecycle Recovery Tests", () => {
     fs.writeFileSync(commentFile, rawBody);
     const doc = await vscode.workspace.openTextDocument(vscode.Uri.file(commentFile));
 
-    addOfflineCommentUpdate({
+    await addOfflineCommentUpdateAsync({
       ticketId: 401,
       body: rawBody,
       baseDir: tmpDir,
@@ -630,7 +630,7 @@ suite("R11 〜 R23: Invariant & Lifecycle Recovery Tests", () => {
     fs.writeFileSync(commentFile, rawBody);
     const doc = await vscode.workspace.openTextDocument(vscode.Uri.file(commentFile));
 
-    addOfflineCommentUpdate({
+    await addOfflineCommentUpdateAsync({
       ticketId: 501,
       body: rawBody,
       baseDir: tmpDir,
@@ -690,7 +690,7 @@ suite("R11 〜 R23: Invariant & Lifecycle Recovery Tests", () => {
     fs.writeFileSync(commentFile, rawBody);
     const doc = await vscode.workspace.openTextDocument(vscode.Uri.file(commentFile));
 
-    addOfflineCommentUpdate({
+    await addOfflineCommentUpdateAsync({
       ticketId: 502,
       body: rawBody,
       baseDir: tmpDir,

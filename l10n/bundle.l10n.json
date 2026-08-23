@@ -304,5 +304,7 @@
     "Only reconcile_compensation is allowed while primary compensation has unresolved rollback obligations.": "Only reconcile_compensation is allowed while primary compensation has unresolved rollback obligations.",
     "Primary compensation has unresolved rollback obligations; forward ticket creation is blocked.": "Primary compensation has unresolved rollback obligations; forward ticket creation is blocked.",
     "Primary compensation has unresolved rollback obligations; reconcile compensation before forwarding the ticket mutation.": "Primary compensation has unresolved rollback obligations; reconcile compensation before forwarding the ticket mutation.",
-    "Primary compensation has unresolved rollback obligations; forward finalization is blocked.": "Primary compensation has unresolved rollback obligations; forward finalization is blocked."
+    "Primary compensation has unresolved rollback obligations; forward finalization is blocked.": "Primary compensation has unresolved rollback obligations; forward finalization is blocked.",
+    "Manual repair required. Automatic recovery is disabled to avoid a duplicate remote mutation. Details: {0}": "Manual repair required. Automatic recovery is disabled to avoid a duplicate remote mutation. Details: {0}",
+    "Unknown recovery state": "Unknown recovery state"
 }

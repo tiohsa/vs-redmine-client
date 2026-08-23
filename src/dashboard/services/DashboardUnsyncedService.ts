@@ -6,7 +6,7 @@ import { syncUnsyncedFile } from "../../commands/syncUnsyncedFile";
 import type { SyncUnsyncedFileResult } from "../../commands/syncUnsyncedFile";
 import {
   getOfflineSyncQueue,
-  removeOfflineCommentEntry,
+  removeOfflineCommentEntryAsync,
   discardOfflineNewTicketAsync,
   discardOfflineTicketUpdateAsync,
 } from "../../views/offlineSyncStore";
@@ -144,7 +144,7 @@ export class DashboardUnsyncedService {
       );
       recoveryRequired = result === "recovery_required";
     } else if (key.kind === "comment") {
-      removeOfflineCommentEntry(
+      await removeOfflineCommentEntryAsync(
         { commentId: key.commentId, documentUri: key.documentUri },
         operationScope,
       );

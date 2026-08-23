@@ -5,9 +5,9 @@ import * as path from "path";
 import * as vscode from "vscode";
 import {
   initializeOfflineSyncStore,
-  addOfflineTicketUpdate,
+  addOfflineTicketUpdateAsync,
   addOfflineNewTicketAsync,
-  addOfflineCommentUpdate,
+  addOfflineCommentUpdateAsync,
   getOfflineSyncQueue,
   replaceOfflineSyncQueueAsync,
 } from "../views/offlineSyncStore";
@@ -59,7 +59,7 @@ suite("T-01 〜 T-24: Sync Lifecycle Integration, Remote Certainty & Completion 
     const doc = await vscode.workspace.openTextDocument(vscode.Uri.file(commentFile));
     await vscode.window.showTextDocument(doc);
 
-    addOfflineCommentUpdate({
+    await addOfflineCommentUpdateAsync({
       ticketId: 50,
       commentId: 100,
       body: initialBody,
@@ -108,7 +108,7 @@ suite("T-01 〜 T-24: Sync Lifecycle Integration, Remote Certainty & Completion 
   // T-02: Child success → Primary known failure (P1-05, RC-1, INV-U13, DR-02)
   test("T-02: TicketUpdate で Primary PUT が既知失敗した場合、child の二重作成や ledger 消失を起こさない (Primary -> Child 順序)", async () => {
     const ticketId = 200;
-    addOfflineTicketUpdate(ticketId, {
+    await addOfflineTicketUpdateAsync(ticketId, {
       ticketId,
       baseSubject: "Parent",
       baseDescription: "Desc",
@@ -280,7 +280,7 @@ suite("T-01 〜 T-24: Sync Lifecycle Integration, Remote Certainty & Completion 
   // T-05: Persistence failure before mutation (P1-03, RC-2, INV-U03)
   test("T-05: started checkpoint の永続化失敗時に Remote mutation が呼ばれず、メモリと永続層の整合性が保たれる", async () => {
     const ticketId = 300;
-    addOfflineTicketUpdate(ticketId, {
+    await addOfflineTicketUpdateAsync(ticketId, {
       ticketId,
       baseSubject: "Subj",
       baseDescription: "Desc",
@@ -327,7 +327,7 @@ suite("T-01 〜 T-24: Sync Lifecycle Integration, Remote Certainty & Completion 
   // T-06: Persistence failure after Remote success (P1-02, RC-2, INV-U04)
   test("T-06: Remote mutation 成功後の checkpoint 永続化失敗時に updateCalls === 1 であり completed にならず、自動再送されない", async () => {
     const ticketId = 350;
-    addOfflineTicketUpdate(ticketId, {
+    await addOfflineTicketUpdateAsync(ticketId, {
       ticketId,
       baseSubject: "Subj",
       baseDescription: "Desc",
@@ -671,7 +671,7 @@ suite("T-01 〜 T-24: Sync Lifecycle Integration, Remote Certainty & Completion 
   // T-13: Primary success → child known failure (INV-N01, INV-N02, P1-01)
   test("T-13: TicketUpdate で Primary PUT 成功後に child が既知失敗した場合、Primary commit ledger を保持し failed_before_commit に巻き戻さない", async () => {
     const ticketId = 1300;
-    addOfflineTicketUpdate(ticketId, {
+    await addOfflineTicketUpdateAsync(ticketId, {
       ticketId,
       baseSubject: "Parent T13",
       baseDescription: "Desc",
@@ -731,7 +731,7 @@ suite("T-01 〜 T-24: Sync Lifecycle Integration, Remote Certainty & Completion 
   // T-14: Primary success → child unknown (INV-N01, INV-N02)
   test("T-14: TicketUpdate で Primary PUT 成功後に child が timeout した場合、Primary committed & child commit_unknown を維持し自動再送しない", async () => {
     const ticketId = 1400;
-    addOfflineTicketUpdate(ticketId, {
+    await addOfflineTicketUpdateAsync(ticketId, {
       ticketId,
       baseSubject: "Parent T14",
       baseDescription: "Desc",
@@ -1606,7 +1606,7 @@ suite("T-01 〜 T-24: Sync Lifecycle Integration, Remote Certainty & Completion 
     };
 
     initializeOfflineSyncStore(faultyMemento as any, SCOPE);
-    addOfflineTicketUpdate(ticketId, {
+    await addOfflineTicketUpdateAsync(ticketId, {
       ticketId,
       baseSubject: "T27 base",
       baseDescription: "",
@@ -1878,8 +1878,8 @@ suite("T-01 〜 T-24: Sync Lifecycle Integration, Remote Certainty & Completion 
     assert.strictEqual(createIssueCalls, 0, "closure 前の compensated Primary から再CREATEしないこと (INV-N12)");
     assert.strictEqual(outcome.kind, "remote_committed");
     const retained = repo.getOperation(key, SCOPE);
-    assert.strictEqual(retained?.attemptGeneration, 1);
-    assert.strictEqual(retained?.effects?.[0]?.state, "compensated");
+    assert.strictEqual(retained?.attemptGeneration, 2);
+    assert.deepStrictEqual(retained?.effects, []);
   });
 
   // T-33: Compensation completion checkpoint failure → recovery-required state (INV-N12, INV-07)

@@ -50,9 +50,9 @@ export const reloadTicketEditor = async (input: {
   deps?: TicketReloadDependencies;
 }): Promise<TicketSaveResult> => reloadTicketEditorInternal(input);
 
-export const saveTicketDraftLocally = (
+export const saveTicketDraftLocally = async (
   editor: vscode.TextEditor,
-): TicketSaveResult | undefined => saveTicketDraftLocallyInternal(editor);
+): Promise<TicketSaveResult | undefined> => saveTicketDraftLocallyInternal(editor);
 
 export const handleTicketEditorSave = async (
   editor: vscode.TextEditor,

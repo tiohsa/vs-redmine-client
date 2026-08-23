@@ -29,16 +29,15 @@ import {
   transitionDurableSyncEffect,
 } from "../syncEffects";
 import {
-  addOfflineCommentUpdate,
+  addOfflineCommentUpdateAsync,
   addOfflineNewTicketAsync,
-  addOfflineTicketUpdate,
+  addOfflineTicketUpdateAsync,
   completeOfflineCommentAsync,
   completeOfflineNewTicketAsync,
   completeOfflineTicketUpdateAsync,
   getOfflineSyncQueue,
-  replaceOfflineSyncQueue,
-  replaceOfflineSyncQueueAsync,
-  removeOfflineCommentEntry,
+  mutateOfflineSyncQueueAsync,
+  removeOfflineCommentEntryAsync,
   removeOfflineNewTicketAsync,
   removeOfflineTicketUpdateAsync,
   sameDocumentIdentity,
@@ -362,38 +361,45 @@ export const toUnifiedOperationFromComment = (
   updatedAt: comment.createdAt ?? Date.now(),
 });
 
+const getOperationFromQueue = (
+  queue: ReturnType<typeof getOfflineSyncQueue>,
+  key: SyncOperationKey,
+  scope: string,
+): UnifiedSyncOperation | undefined => {
+  if (key.kind === "ticket") {
+    const ticket = queue.tickets.get(key.ticketId);
+    return ticket ? toUnifiedOperationFromTicket(ticket, scope) : undefined;
+  }
+  if (key.kind === "newTicket") {
+    const ticket = key.documentUri
+      ? queue.newTickets.find((candidate) =>
+        candidate.documentUri !== undefined &&
+        sameDocumentIdentity(candidate.documentUri, key.documentUri))
+      : key.queueId !== undefined
+        ? queue.newTickets.find((candidate) =>
+          candidate.queueId === key.queueId ||
+          candidate.operationId === key.queueId ||
+          Boolean(candidate.operationId?.endsWith(`:${key.queueId}`)))
+        : queue.newTickets[0];
+    return ticket ? toUnifiedOperationFromNewTicket(ticket, scope) : undefined;
+  }
+  const comment = queue.comments.find((candidate) =>
+    (key.documentUri !== undefined && candidate.documentUri === key.documentUri) ||
+    (candidate.ticketId === key.ticketId &&
+      ((key.commentId !== undefined && candidate.commentId === key.commentId) ||
+        (key.commentId === undefined && candidate.commentId === undefined))),
+  );
+  return comment ? toUnifiedOperationFromComment(comment, scope) : undefined;
+};
+
 export class DefaultSyncOperationRepository implements SyncOperationRepository {
   private readonly mutexByScope = new Map<string, Promise<any>>();
 
   public getOperation<I extends SyncIntent = SyncIntent>(key: SyncOperationKey, scope: string): UnifiedSyncOperation<I> | undefined {
     const queue = getOfflineSyncQueue(scope);
-    if (key.kind === "ticket") {
-      const ticket = queue.tickets.get(key.ticketId);
-      if (ticket) {
-        return toUnifiedOperationFromTicket(ticket, scope) as any;
-      }
-    }
-    if (key.kind === "newTicket") {
-      const ticket = key.documentUri
-        ? queue.newTickets.find((t) => t.documentUri !== undefined && sameDocumentIdentity(t.documentUri, key.documentUri))
-        : (key.queueId !== undefined
-            ? queue.newTickets.find((t) => t.queueId === key.queueId || t.operationId === key.queueId || (t.operationId && t.operationId.endsWith(`:${key.queueId}`)))
-            : queue.newTickets[0]);
-      if (ticket) {
-        return toUnifiedOperationFromNewTicket(ticket, scope) as any;
-      }
-    }
-    if (key.kind === "comment") {
-      const comment = queue.comments.find(
-        (c) =>
-          (key.documentUri !== undefined && c.documentUri !== undefined && c.documentUri === key.documentUri) ||
-          (c.ticketId === key.ticketId &&
-            ((key.commentId !== undefined && c.commentId === key.commentId) ||
-              (key.commentId === undefined && c.commentId === undefined))),
-      );
-      if (comment) {
-        return toUnifiedOperationFromComment(comment, scope) as any;
-      }
+    const operation = getOperationFromQueue(queue, key, scope);
+    if (operation) {
+      return operation as UnifiedSyncOperation<I>;
     }
     const cacheKey = `${scope}:${getOpKeyString(key)}`;
     return this.completedOperations.get(cacheKey) as UnifiedSyncOperation<I> | undefined;
@@ -444,14 +450,10 @@ export class DefaultSyncOperationRepository implements SyncOperationRepository {
     allowAttemptGenerationAdvance = false,
     options?: SaveOperationOptions,
   ): Promise<UnifiedSyncOperation | undefined> {
-    const queue = getOfflineSyncQueue(scope);
-    const nextQueue = {
-      tickets: new Map(queue.tickets),
-      comments: [...queue.comments],
-      newTickets: [...queue.newTickets],
-    };
+    try {
+      return await mutateOfflineSyncQueueAsync(scope, (nextQueue) => {
     const key = getOperationKey(operation);
-    const current = this.getOperation(key, scope);
+    const current = getOperationFromQueue(nextQueue, key, scope);
 
     if (options?.requireExisting && !current) {
       return undefined;
@@ -646,9 +648,8 @@ export class DefaultSyncOperationRepository implements SyncOperationRepository {
       }
     }
 
-    try {
-      await replaceOfflineSyncQueueAsync(nextQueue, scope);
       return updated;
+      });
     } catch {
       return undefined;
     }
@@ -926,7 +927,7 @@ export class DefaultSyncOperationRepository implements SyncOperationRepository {
           return undefined;
         }
         if (key.kind === "ticket") {
-          addOfflineTicketUpdate(key.ticketId, {
+          await addOfflineTicketUpdateAsync(key.ticketId, {
             ticketId: key.ticketId,
             phase: "queued",
             revision: expectedRevision ?? 1,
@@ -946,7 +947,7 @@ export class DefaultSyncOperationRepository implements SyncOperationRepository {
             content: "",
           }, scope);
         } else if (key.kind === "comment") {
-          addOfflineCommentUpdate({
+          await addOfflineCommentUpdateAsync({
             ticketId: key.ticketId,
             commentId: key.commentId,
             documentUri: key.documentUri,
@@ -1350,7 +1351,7 @@ export class DefaultSyncOperationRepository implements SyncOperationRepository {
         return true;
       }
       if (key.kind === "comment") {
-        removeOfflineCommentEntry(
+        await removeOfflineCommentEntryAsync(
           { commentId: key.commentId, documentUri: key.documentUri },
           scope,
         );

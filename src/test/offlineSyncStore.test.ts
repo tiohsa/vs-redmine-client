@@ -1,13 +1,12 @@
 import * as assert from "assert";
 import {
   initializeOfflineSyncStore,
-  addOfflineTicketUpdate,
-  addOfflineCommentUpdate,
-  addOfflineNewTicket,
+  addOfflineTicketUpdateAsync,
+  addOfflineCommentUpdateAsync,
   addOfflineNewTicketAsync,
-  clearOfflineSyncQueue,
-  replaceOfflineSyncQueue,
-  removeOfflineTicketUpdate,
+  clearOfflineSyncQueueAsync,
+  replaceOfflineSyncQueueAsync,
+  removeOfflineTicketUpdateAsync,
   getOfflineSyncQueue,
   switchOfflineSyncStore,
   discardOfflineNewTicketAsync,
@@ -39,22 +38,22 @@ const ticketUpdate = (ticketId: number) => {
 };
 
 suite("offlineSyncStore — workspaceState 永続化", () => {
-  setup(() => {
+  setup(async () => {
     initializeOfflineSyncStore(createTestMemento());
   });
 
-  test("空の memento から初期化するとキューは空になる", () => {
+  test("空の memento から初期化するとキューは空になる", async () => {
     const q = getOfflineSyncQueue();
     assert.strictEqual(q.tickets.size, 0);
     assert.strictEqual(q.comments.length, 0);
     assert.strictEqual(q.newTickets.length, 0);
   });
 
-  test("チケット更新を追加後に同じ memento で再初期化するとデータが復元される", () => {
+  test("チケット更新を追加後に同じ memento で再初期化するとデータが復元される", async () => {
     const memento = createTestMemento();
     initializeOfflineSyncStore(memento);
 
-    addOfflineTicketUpdate(123, ticketUpdate(123));
+    await addOfflineTicketUpdateAsync(123, ticketUpdate(123));
 
     initializeOfflineSyncStore(memento);
     const q = getOfflineSyncQueue();
@@ -66,8 +65,8 @@ suite("offlineSyncStore — workspaceState 永続化", () => {
   test("v3 永続形式は effects を envelope の単一sourceとして保存する", async () => {
     const memento = createTestMemento();
     initializeOfflineSyncStore(memento);
-    addOfflineTicketUpdate(123, ticketUpdate(123));
-    addOfflineCommentUpdate({ ticketId: 123, commentId: 8, body: "comment" });
+    await addOfflineTicketUpdateAsync(123, ticketUpdate(123));
+    await addOfflineCommentUpdateAsync({ ticketId: 123, commentId: 8, body: "comment" });
 
     await new Promise<void>((resolve) => setTimeout(resolve, 0));
 
@@ -102,11 +101,11 @@ suite("offlineSyncStore — workspaceState 永続化", () => {
     assert.strictEqual(getOfflineSyncQueue().tickets.get(55)?.subject, "Updated");
   });
 
-  test("commentId あり コメント更新を追加後に復元される", () => {
+  test("commentId あり コメント更新を追加後に復元される", async () => {
     const memento = createTestMemento();
     initializeOfflineSyncStore(memento);
 
-    addOfflineCommentUpdate({
+    await addOfflineCommentUpdateAsync({
       ticketId: 10,
       commentId: 99,
       body: "comment body",
@@ -120,11 +119,11 @@ suite("offlineSyncStore — workspaceState 永続化", () => {
     assert.strictEqual(q.comments[0].ticketId, 10);
   });
 
-  test("commentId なし（新規コメント）を追加後に復元される", () => {
+  test("commentId なし（新規コメント）を追加後に復元される", async () => {
     const memento = createTestMemento();
     initializeOfflineSyncStore(memento);
 
-    addOfflineCommentUpdate({
+    await addOfflineCommentUpdateAsync({
       ticketId: 20,
       body: "new comment",
       documentUri: "file:///tmp/nc.md",
@@ -137,11 +136,11 @@ suite("offlineSyncStore — workspaceState 永続化", () => {
     assert.strictEqual(q.comments[0].ticketId, 20);
   });
 
-  test("新規チケットを追加後に復元される", () => {
+  test("新規チケットを追加後に復元される", async () => {
     const memento = createTestMemento();
     initializeOfflineSyncStore(memento);
 
-    addOfflineNewTicket({ content: "# New ticket", documentUri: "file:///tmp/nt.md" });
+    await addOfflineNewTicketAsync({ content: "# New ticket", documentUri: "file:///tmp/nt.md" });
 
     initializeOfflineSyncStore(memento);
     const q = getOfflineSyncQueue();
@@ -149,15 +148,15 @@ suite("offlineSyncStore — workspaceState 永続化", () => {
     assert.strictEqual(q.newTickets[0].documentUri, "file:///tmp/nt.md");
   });
 
-  test("clearOfflineSyncQueue 後に再初期化すると空のキューになる", () => {
+  test("clearOfflineSyncQueueAsync 後に再初期化すると空のキューになる", async () => {
     const memento = createTestMemento();
     initializeOfflineSyncStore(memento);
 
-    addOfflineTicketUpdate(1, ticketUpdate(1));
-    addOfflineCommentUpdate({ ticketId: 1, body: "body" });
-    addOfflineNewTicket({ content: "ticket", documentUri: "file:///tmp/t.md" });
+    await addOfflineTicketUpdateAsync(1, ticketUpdate(1));
+    await addOfflineCommentUpdateAsync({ ticketId: 1, body: "body" });
+    await addOfflineNewTicketAsync({ content: "ticket", documentUri: "file:///tmp/t.md" });
 
-    clearOfflineSyncQueue();
+    await clearOfflineSyncQueueAsync();
 
     initializeOfflineSyncStore(memento);
     const q = getOfflineSyncQueue();
@@ -166,14 +165,14 @@ suite("offlineSyncStore — workspaceState 永続化", () => {
     assert.strictEqual(q.newTickets.length, 0);
   });
 
-  test("replaceOfflineSyncQueue 後に再初期化すると置換後のデータが復元される", () => {
+  test("replaceOfflineSyncQueueAsync 後に再初期化すると置換後のデータが復元される", async () => {
     const memento = createTestMemento();
     initializeOfflineSyncStore(memento);
 
-    addOfflineTicketUpdate(1, ticketUpdate(1));
-    addOfflineTicketUpdate(2, ticketUpdate(2));
+    await addOfflineTicketUpdateAsync(1, ticketUpdate(1));
+    await addOfflineTicketUpdateAsync(2, ticketUpdate(2));
 
-    replaceOfflineSyncQueue({
+    await replaceOfflineSyncQueueAsync({
       tickets: new Map([[2, ticketUpdate(2)]]),
       comments: [],
       newTickets: [],
@@ -186,19 +185,19 @@ suite("offlineSyncStore — workspaceState 永続化", () => {
     assert.ok(!q.tickets.has(1));
   });
 
-  test("initializeOfflineSyncStore 未呼び出しでも変異関数が throw しない", () => {
+  test("initializeOfflineSyncStore 未呼び出しでも変異関数が throw しない", async () => {
     initializeOfflineSyncStore(createTestMemento());
-    clearOfflineSyncQueue();
+    await clearOfflineSyncQueueAsync();
 
-    assert.doesNotThrow(() => {
-      addOfflineTicketUpdate(99, ticketUpdate(99));
-      addOfflineCommentUpdate({ ticketId: 99, body: "body" });
-      addOfflineNewTicket({ content: "ticket" });
-      clearOfflineSyncQueue();
+    await assert.doesNotReject(async () => {
+      await addOfflineTicketUpdateAsync(99, ticketUpdate(99));
+      await addOfflineCommentUpdateAsync({ ticketId: 99, body: "body" });
+      await addOfflineNewTicketAsync({ content: "ticket" });
+      await clearOfflineSyncQueueAsync();
     });
   });
 
-  test("不正データが保存されていても initializeOfflineSyncStore が throw せず空キューになる", () => {
+  test("不正データが保存されていても initializeOfflineSyncStore が throw せず空キューになる", async () => {
     const memento = createTestMemento();
     void memento.update("redmine.offlineSyncQueue", {
       tickets: null,
@@ -216,14 +215,14 @@ suite("offlineSyncStore — workspaceState 永続化", () => {
     assert.strictEqual(q.newTickets.length, 0);
   });
 
-  test("baseUrlごとに未送信キューを隔離し、切り戻しと再起動で復元する", () => {
+  test("baseUrlごとに未送信キューを隔離し、切り戻しと再起動で復元する", async () => {
     const memento = createTestMemento();
     initializeOfflineSyncStore(memento, "https://old.example/redmine");
-    addOfflineTicketUpdate(1, ticketUpdate(1));
+    await addOfflineTicketUpdateAsync(1, ticketUpdate(1));
 
     switchOfflineSyncStore("https://new.example/redmine");
     assert.strictEqual(getOfflineSyncQueue().tickets.size, 0);
-    addOfflineTicketUpdate(2, ticketUpdate(2));
+    await addOfflineTicketUpdateAsync(2, ticketUpdate(2));
 
     switchOfflineSyncStore("https://old.example/redmine");
     assert.deepStrictEqual(Array.from(getOfflineSyncQueue().tickets.keys()), [1]);
@@ -232,15 +231,15 @@ suite("offlineSyncStore — workspaceState 永続化", () => {
     assert.deepStrictEqual(Array.from(getOfflineSyncQueue().tickets.keys()), [2]);
   });
 
-  test("同一IDを持つ接続先別キューを明示スコープで独立操作する", () => {
+  test("同一IDを持つ接続先別キューを明示スコープで独立操作する", async () => {
     const memento = createTestMemento();
     const scopeA = "https://a.example/redmine/";
     const scopeB = "https://b.example/redmine/";
     initializeOfflineSyncStore(memento, scopeA);
-    addOfflineTicketUpdate(1, { ...ticketUpdate(1), subject: "A" }, scopeA);
-    addOfflineTicketUpdate(1, { ...ticketUpdate(1), subject: "B" }, scopeB);
+    await addOfflineTicketUpdateAsync(1, { ...ticketUpdate(1), subject: "A" }, scopeA);
+    await addOfflineTicketUpdateAsync(1, { ...ticketUpdate(1), subject: "B" }, scopeB);
 
-    removeOfflineTicketUpdate(1, scopeA);
+    await removeOfflineTicketUpdateAsync(1, scopeA);
 
     assert.strictEqual(getOfflineSyncQueue(scopeA).tickets.has(1), false);
     assert.strictEqual(getOfflineSyncQueue(scopeB).tickets.get(1)?.subject, "B");
@@ -251,10 +250,10 @@ suite("offlineSyncStore — workspaceState 永続化", () => {
     const scopeA = "https://a.example/redmine/";
     const scopeB = "https://b.example/redmine/";
     initializeOfflineSyncStore(memento, scopeA);
-    addOfflineTicketUpdate(1, ticketUpdate(1), scopeA);
-    addOfflineTicketUpdate(1, ticketUpdate(1), scopeB);
+    await addOfflineTicketUpdateAsync(1, ticketUpdate(1), scopeA);
+    await addOfflineTicketUpdateAsync(1, ticketUpdate(1), scopeB);
 
-    const oldCompletion = Promise.resolve().then(() => removeOfflineTicketUpdate(1, scopeA));
+    const oldCompletion = Promise.resolve().then(() => removeOfflineTicketUpdateAsync(1, scopeA));
     switchOfflineSyncStore(scopeB);
     await oldCompletion;
 
@@ -262,7 +261,7 @@ suite("offlineSyncStore — workspaceState 永続化", () => {
     assert.strictEqual(getOfflineSyncQueue(scopeB).tickets.has(1), true);
   });
 
-  test("旧形式キューを現在スコープへ移行し再起動後も復元する", () => {
+  test("旧形式キューを現在スコープへ移行し再起動後も復元する", async () => {
     const memento = createTestMemento();
     void memento.update("redmine.offlineSyncQueue", {
       tickets: [[5, ticketUpdate(5)]],
@@ -281,7 +280,7 @@ suite("offlineSyncStore — workspaceState 永続化", () => {
     assert.strictEqual(getOfflineSyncQueue(scope).tickets.get(5)?.operationId, "ticket:5");
   });
 
-  test("scoped legacy existing queue を canonical lifecycle operation として復元する", () => {
+  test("scoped legacy existing queue を canonical lifecycle operation として復元する", async () => {
     const memento = createTestMemento();
     const scope = "https://scoped-legacy.example/redmine/";
     void memento.update(`redmine.offlineSyncQueue.${encodeURIComponent(scope)}`, {
@@ -298,7 +297,7 @@ suite("offlineSyncStore — workspaceState 永続化", () => {
     assert.strictEqual(restored?.phase, "queued");
   });
 
-  test("明示済み existing operationId は load normalization で変更しない", () => {
+  test("明示済み existing operationId は load normalization で変更しない", async () => {
     const memento = createTestMemento();
     void memento.update("redmine.offlineSyncQueue", {
       tickets: [[7, { ...ticketUpdate(7), operationId: "custom-operation", revision: 3 }]],
@@ -313,7 +312,7 @@ suite("offlineSyncStore — workspaceState 永続化", () => {
     assert.strictEqual(restored?.revision, 3);
   });
 
-  test("created_rewrite_failed の legacy entry を local_finalize_pending として復元する", () => {
+  test("created_rewrite_failed の legacy entry を local_finalize_pending として復元する", async () => {
     const memento = createTestMemento();
     void memento.update("redmine.offlineSyncQueue", {
       tickets: [],
@@ -332,7 +331,7 @@ suite("offlineSyncStore — workspaceState 永続化", () => {
     assert.strictEqual(restored.operationId, "legacy-new-1");
   });
 
-  test("legacy createdIssueId は committed parent effect として復元する", () => {
+  test("legacy createdIssueId は committed parent effect として復元する", async () => {
     const memento = createTestMemento();
     void memento.update("redmine.offlineSyncQueue", {
       tickets: [],
@@ -358,7 +357,7 @@ suite("offlineSyncStore — workspaceState 永続化", () => {
     }]);
   });
 
-  test("legacy remote_write_started は primary effect の commit_unknown として復元する", () => {
+  test("legacy remote_write_started は primary effect の commit_unknown として復元する", async () => {
     const memento = createTestMemento();
     void memento.update("redmine.offlineSyncQueue", {
       tickets: [[9, { ...ticketUpdate(9), phase: "remote_write_started", revision: 2 }]],
@@ -375,7 +374,7 @@ suite("offlineSyncStore — workspaceState 永続化", () => {
     assert.strictEqual(operation.effects[0].state, "commit_unknown");
   });
 
-  test("restart 時は preparing の後続 intent を queued active、remote_write_started を commit_unknown に正規化する", () => {
+  test("restart 時は preparing の後続 intent を queued active、remote_write_started を commit_unknown に正規化する", async () => {
     const memento = createTestMemento();
     void memento.update("redmine.offlineSyncQueue", {
       tickets: [[1, {
@@ -401,7 +400,7 @@ suite("offlineSyncStore — workspaceState 永続化", () => {
     assert.strictEqual(getOfflineSyncQueue().newTickets[0].phase, "commit_unknown");
   });
 
-  test("I-14 restart は preparing 中に committed 済みの child effect を破棄しない", () => {
+  test("I-14 restart は preparing 中に committed 済みの child effect を破棄しない", async () => {
     const memento = createTestMemento();
     const payload = ticketUpdate(21);
     void memento.update("redmine.offlineSyncQueue", {
@@ -447,7 +446,7 @@ suite("offlineSyncStore — workspaceState 永続化", () => {
     assert.strictEqual(restored?.effects?.[2]?.state, "commit_unknown");
   });
 
-  test("restart は new-ticket の primary effect が不確定なまま queued に戻るのを防ぐ", () => {
+  test("restart は new-ticket の primary effect が不確定なまま queued に戻るのを防ぐ", async () => {
     const memento = createTestMemento();
     void memento.update("redmine.offlineSyncQueue", {
       version: 3,
@@ -476,7 +475,7 @@ suite("offlineSyncStore — workspaceState 永続化", () => {
     assert.strictEqual(restored.effects?.[0]?.state, "commit_unknown");
   });
 
-  test("restart は new-comment の primary effect が不確定なまま queued に戻るのを防ぐ", () => {
+  test("restart は new-comment の primary effect が不確定なまま queued に戻るのを防ぐ", async () => {
     const memento = createTestMemento();
     void memento.update("redmine.offlineSyncQueue", {
       version: 3,
@@ -505,7 +504,7 @@ suite("offlineSyncStore — workspaceState 永続化", () => {
     assert.strictEqual(restored.effects?.[0]?.state, "commit_unknown");
   });
 
-  test("restart 時も commit_unknown active revision と later nextIntent をそのまま保持する", () => {
+  test("restart 時も commit_unknown active revision と later nextIntent をそのまま保持する", async () => {
     const memento = createTestMemento();
     void memento.update("redmine.offlineSyncQueue", {
       tickets: [[7, {
@@ -570,13 +569,12 @@ suite("offlineSyncStore — workspaceState 永続化", () => {
     };
     const scope = "migration-lane";
     initializeOfflineSyncStore(memento as import("vscode").Memento, scope);
-    addOfflineTicketUpdate(2, ticketUpdate(2), scope);
+    const pendingMutation = addOfflineTicketUpdateAsync(2, ticketUpdate(2), scope);
     await Promise.resolve();
 
     assert.strictEqual(writes.length, 1);
     releaseFirst?.();
-    await new Promise<void>((resolve) => setImmediate(resolve));
-    await new Promise<void>((resolve) => setImmediate(resolve));
+    await pendingMutation;
 
     assert.deepStrictEqual(writes.map((write) => write.key), [
       "redmine.offlineSyncQueue.migration-lane",
@@ -611,10 +609,10 @@ suite("offlineSyncStore — workspaceState 永続化", () => {
     assert.strictEqual(completed, true);
   });
 
-  test("untitled/file URI variants は同一 document operation として扱う", () => {
+  test("untitled/file URI variants は同一 document operation として扱う", async () => {
     const stale = "untitled:/tmp/same-ticket.md";
     const saved = "file:///tmp/same-ticket.md";
-    addOfflineNewTicket({
+    await addOfflineNewTicketAsync({
       content: "# First",
       documentUri: stale,
       createdIssueId: 321,
@@ -622,20 +620,20 @@ suite("offlineSyncStore — workspaceState 永続化", () => {
     });
     const operationId = getOfflineSyncQueue().newTickets[0].operationId;
 
-    addOfflineNewTicket({ content: "# Saved", documentUri: saved });
+    await addOfflineNewTicketAsync({ content: "# Saved", documentUri: saved });
     const queue = getOfflineSyncQueue();
     assert.strictEqual(queue.newTickets.length, 1);
     assert.strictEqual(queue.newTickets[0].operationId, operationId);
     assert.strictEqual(queue.newTickets[0].createdIssueId, 321);
   });
 
-  test("remote committed ticket update に後続 save が来ても pending phase を queued へ戻さない", () => {
-    addOfflineTicketUpdate(901, {
+  test("remote committed ticket update に後続 save が来ても pending phase を queued へ戻さない", async () => {
+    await addOfflineTicketUpdateAsync(901, {
       ...ticketUpdate(901),
       phase: "reconciliation_pending",
       operationId: "ticket-901",
     });
-    addOfflineTicketUpdate(901, {
+    await addOfflineTicketUpdateAsync(901, {
       ...ticketUpdate(901),
       description: "Saved while pending",
       phase: "queued",
@@ -646,15 +644,15 @@ suite("offlineSyncStore — workspaceState 永続化", () => {
     assert.strictEqual(restored?.operationId, "ticket-901");
   });
 
-  test("remote committed ticket update の active payload を後続 save が上書きしない", () => {
-    addOfflineTicketUpdate(902, {
+  test("remote committed ticket update の active payload を後続 save が上書きしない", async () => {
+    await addOfflineTicketUpdateAsync(902, {
       ...ticketUpdate(902),
       description: "Already sent",
       phase: "reconciliation_pending",
       operationId: "ticket-902",
     });
 
-    addOfflineTicketUpdate(902, {
+    await addOfflineTicketUpdateAsync(902, {
       ...ticketUpdate(902),
       description: "Edited while reconciliation is pending",
       phase: "queued",
@@ -669,15 +667,15 @@ suite("offlineSyncStore — workspaceState 永続化", () => {
     assert.ok((operation?.nextIntent?.revision ?? 0) > (operation?.revision ?? 0));
   });
 
-  test("preparing 中の後続 save は active revision を変更せず nextIntent に保持する", () => {
-    addOfflineTicketUpdate(9021, {
+  test("preparing 中の後続 save は active revision を変更せず nextIntent に保持する", async () => {
+    await addOfflineTicketUpdateAsync(9021, {
       ...ticketUpdate(9021),
       description: "Revision A",
       phase: "preparing",
       revision: 4,
     });
 
-    addOfflineTicketUpdate(9021, {
+    await addOfflineTicketUpdateAsync(9021, {
       ...ticketUpdate(9021),
       description: "Revision B",
       phase: "queued",
@@ -691,24 +689,24 @@ suite("offlineSyncStore — workspaceState 永続化", () => {
   });
 
   test("pre-remote abort は後続 intent を queued active へ昇格する", async () => {
-    addOfflineTicketUpdate(9023, {
+    await addOfflineTicketUpdateAsync(9023, {
       ...ticketUpdate(9023),
       description: "Revision A",
       phase: "preparing",
       revision: 4,
     });
-    addOfflineTicketUpdate(9023, {
+    await addOfflineTicketUpdateAsync(9023, {
       ...ticketUpdate(9023),
       description: "Revision B",
       phase: "queued",
     });
-    addOfflineNewTicket({
+    await addOfflineNewTicketAsync({
       content: "A",
       documentUri: "file:///tmp/abort-new.md",
       phase: "preparing",
       revision: 4,
     });
-    addOfflineNewTicket({
+    await addOfflineNewTicketAsync({
       content: "B",
       documentUri: "file:///tmp/abort-new.md",
       phase: "queued",
@@ -730,7 +728,7 @@ suite("offlineSyncStore — workspaceState 永続化", () => {
   });
 
   test("stale revision の durable mutation と completion は拒否する", async () => {
-    addOfflineTicketUpdate(9022, {
+    await addOfflineTicketUpdateAsync(9022, {
       ...ticketUpdate(9022),
       phase: "preparing",
       revision: 4,
@@ -750,7 +748,7 @@ suite("offlineSyncStore — workspaceState 永続化", () => {
   });
 
   test("parent remote write の phase transition と effect checkpoint を同時に永続化する", async () => {
-    addOfflineNewTicket({
+    await addOfflineNewTicketAsync({
       content: "# Effect checkpoint",
       documentUri: "file:///tmp/effect-checkpoint.md",
     });
@@ -795,13 +793,13 @@ suite("offlineSyncStore — workspaceState 永続化", () => {
   });
 
   test("generic phase=queued mutation は nextIntent を昇格せず invariant 違反を拒否する", async () => {
-    addOfflineTicketUpdate(9024, {
+    await addOfflineTicketUpdateAsync(9024, {
       ...ticketUpdate(9024),
       description: "Active A",
       phase: "commit_unknown",
       revision: 4,
     });
-    addOfflineTicketUpdate(9024, {
+    await addOfflineTicketUpdateAsync(9024, {
       ...ticketUpdate(9024),
       description: "Later B",
     });
@@ -822,13 +820,13 @@ suite("offlineSyncStore — workspaceState 永続化", () => {
   });
 
   test("new-ticket Retry と Link の同一source CASは一方だけ成功する", async () => {
-    addOfflineNewTicket({
+    await addOfflineNewTicketAsync({
       content: "Active A",
       documentUri: "file:///tmp/recovery-race.md",
       phase: "commit_unknown",
       revision: 4,
     });
-    addOfflineNewTicket({
+    await addOfflineNewTicketAsync({
       content: "Later B",
       documentUri: "file:///tmp/recovery-race.md",
     });
@@ -862,7 +860,7 @@ suite("offlineSyncStore — workspaceState 永続化", () => {
   });
 
   test("existing-ticket Retry と Assume の同一source CASは一方だけ成功する", async () => {
-    addOfflineTicketUpdate(9025, {
+    await addOfflineTicketUpdateAsync(9025, {
       ...ticketUpdate(9025),
       description: "Active A",
       phase: "commit_unknown",
@@ -897,7 +895,7 @@ suite("offlineSyncStore — workspaceState 永続化", () => {
 
   test("semantic transition は operation identity・scope・source phase の不一致を拒否する", async () => {
     const scope = "scope-b";
-    addOfflineTicketUpdate(9026, {
+    await addOfflineTicketUpdateAsync(9026, {
       ...ticketUpdate(9026),
       operationId: "operation-9026",
       connectionScope: "scope-a",
@@ -938,14 +936,14 @@ suite("offlineSyncStore — workspaceState 永続化", () => {
       keys: (): readonly string[] => [],
       update: async (): Promise<void> => {
         writes++;
-        if (writes === 1) {
+        if (writes === 3) {
           await new Promise<void>((resolve) => { release = resolve; });
         }
       },
     };
     initializeOfflineSyncStore(memento as import("vscode").Memento, "stable-handle");
-    addOfflineNewTicket({ content: "X", documentUri: "file:///tmp/x.md" }, "stable-handle");
-    addOfflineNewTicket({ content: "B", documentUri: "file:///tmp/b.md" }, "stable-handle");
+    await addOfflineNewTicketAsync({ content: "X", documentUri: "file:///tmp/x.md" }, "stable-handle");
+    await addOfflineNewTicketAsync({ content: "B", documentUri: "file:///tmp/b.md" }, "stable-handle");
     const b = getOfflineSyncQueue("stable-handle").newTickets.find((item) => item.content === "B")!;
     const pending = updateOfflineNewTicketAsync(
       { queueId: b.queueId },
@@ -954,9 +952,13 @@ suite("offlineSyncStore — workspaceState 永続化", () => {
       b.revision,
     );
     await Promise.resolve();
-    addOfflineNewTicket({ content: "X2", documentUri: "file:///tmp/x.md" }, "stable-handle");
+    const laterSave = addOfflineNewTicketAsync(
+      { content: "X2", documentUri: "file:///tmp/x.md" },
+      "stable-handle",
+    );
     release?.();
     const updated = await pending;
+    await laterSave;
 
     assert.strictEqual(updated?.operationId, b.operationId);
     assert.strictEqual(updated?.createdIssueId, 77);
@@ -965,8 +967,8 @@ suite("offlineSyncStore — workspaceState 永続化", () => {
     )?.createdIssueId, undefined);
   });
 
-  test("remote created new ticket の active content を後続 save が上書きしない", () => {
-    addOfflineNewTicket({
+  test("remote created new ticket の active content を後続 save が上書きしない", async () => {
+    await addOfflineNewTicketAsync({
       content: "# Already sent",
       documentUri: "file:///tmp/pending-new.md",
       createdIssueId: 903,
@@ -974,7 +976,7 @@ suite("offlineSyncStore — workspaceState 永続化", () => {
     });
     const active = getOfflineSyncQueue().newTickets[0];
 
-    addOfflineNewTicket({
+    await addOfflineNewTicketAsync({
       content: "# Edited while finalization is pending",
       documentUri: "file:///tmp/pending-new.md",
     });
@@ -1002,8 +1004,8 @@ suite("offlineSyncStore — workspaceState 永続化", () => {
     };
     initializeOfflineSyncStore(memento as import("vscode").Memento, "scope-serial");
 
-    addOfflineTicketUpdate(1, ticketUpdate(1), "scope-serial");
-    addOfflineTicketUpdate(2, ticketUpdate(2), "scope-serial");
+    const first = addOfflineTicketUpdateAsync(1, ticketUpdate(1), "scope-serial");
+    const second = addOfflineTicketUpdateAsync(2, ticketUpdate(2), "scope-serial");
     await Promise.resolve();
 
     assert.strictEqual(updateCalls, 1);
@@ -1011,10 +1013,11 @@ suite("offlineSyncStore — workspaceState 永続化", () => {
     await new Promise<void>((resolve) => setImmediate(resolve));
     assert.strictEqual(updateCalls, 2);
     releases.shift()?.();
+    await Promise.all([first, second]);
   });
 
   test("I-13 remote-created new ticket の durable checkpoint は通常 discard で削除しない", async () => {
-    addOfflineNewTicket({
+    await addOfflineNewTicketAsync({
       content: "# Created",
       documentUri: "file:///tmp/created-pending.md",
       createdIssueId: 910,
@@ -1031,11 +1034,11 @@ suite("offlineSyncStore — workspaceState 永続化", () => {
   });
 
   test("remote checkpoint を持つticketも確認済みの破棄でキューから削除する", async () => {
-    addOfflineTicketUpdate(911, {
+    await addOfflineTicketUpdateAsync(911, {
       ...ticketUpdate(911),
       phase: "reconciliation_pending",
     });
-    addOfflineTicketUpdate(911, {
+    await addOfflineTicketUpdateAsync(911, {
       ...ticketUpdate(911),
       description: "Later edit",
     });
@@ -1046,7 +1049,7 @@ suite("offlineSyncStore — workspaceState 永続化", () => {
     assert.strictEqual(getOfflineSyncQueue().tickets.has(911), false);
   });
 
-  test("I-15 10,000回の後続saveをidentityあたりactive+nextの2 snapshotへcoalesceする", () => {
+  test("I-15 10,000回の後続saveをidentityあたりactive+nextの2 snapshotへcoalesceする", async () => {
     let operation = mergeOfflineTicketUpdate(
       912,
       undefined,
@@ -1068,8 +1071,8 @@ suite("offlineSyncStore — workspaceState 永続化", () => {
     assert.strictEqual("nextIntent" in (operation.nextIntent ?? {}), false);
   });
 
-  test("I-15 comment も10,000回の後続saveをactive+nextの2 snapshotへcoalesceする", () => {
-    addOfflineCommentUpdate({
+  test("I-15 comment も10,000回の後続saveをactive+nextの2 snapshotへcoalesceする", async () => {
+    await addOfflineCommentUpdateAsync({
       ticketId: 913,
       commentId: 19,
       body: "Active body",
@@ -1077,7 +1080,7 @@ suite("offlineSyncStore — workspaceState 永続化", () => {
     });
 
     for (let revision = 1; revision <= 10_000; revision++) {
-      addOfflineCommentUpdate({
+      await addOfflineCommentUpdateAsync({
         ticketId: 913,
         commentId: 19,
         body: `Later body ${revision}`,

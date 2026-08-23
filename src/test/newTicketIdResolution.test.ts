@@ -3,7 +3,7 @@ import * as vscode from "vscode";
 import {
   initializeOfflineSyncStore,
   getOfflineSyncQueue,
-  clearOfflineSyncQueue,
+  clearOfflineSyncQueueAsync,
 } from "../views/offlineSyncStore";
 import { queueNewTicketDraft, queueNewTicketDraftContent } from "../views/ticketSaveSync";
 import { createTestMemento } from "./helpers/vscodeMemento";
@@ -19,12 +19,12 @@ const newTicketContent = () =>
   });
 
 suite("新規チケット ID 反映", () => {
-  setup(() => {
+  setup(async () => {
     initializeOfflineSyncStore(createTestMemento());
   });
 
-  teardown(() => {
-    clearOfflineSyncQueue();
+  teardown(async () => {
+    await clearOfflineSyncQueueAsync();
   });
 
   test("queueNewTicketDraft: キューに追加され queued を返す", async () => {

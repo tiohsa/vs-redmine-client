@@ -3,7 +3,7 @@ import * as fs from "fs";
 import * as os from "os";
 import * as path from "path";
 import * as vscode from "vscode";
-import { initializeOfflineSyncStore, addOfflineTicketUpdate, addOfflineNewTicketAsync, addOfflineCommentUpdate, getOfflineSyncQueue } from "../views/offlineSyncStore";
+import { initializeOfflineSyncStore, addOfflineTicketUpdateAsync, addOfflineNewTicketAsync, addOfflineCommentUpdateAsync, getOfflineSyncQueue } from "../views/offlineSyncStore";
 import { createSyncEngine } from "../app/syncEngine";
 import { createTestMemento } from "./helpers/vscodeMemento";
 import { createSyncOperationRepository, DefaultSyncOperationRepository } from "../app/ticketSync/syncRepository";
@@ -24,7 +24,7 @@ suite("RT-A 〜 RT-J: Remote Certainty & Secondary Effect Invariant Tests", () =
   // RT-A: TicketUpdate commit_unknown verification (INV-04, INV-09, INV-27)
   test("RT-A: TicketUpdate commit_unknown 時、remote が古い（未反映）なら reconcile しても completed にならず、remote が反映された場合のみ completed になる", async () => {
     const ticketId = 100;
-    addOfflineTicketUpdate(ticketId, {
+    await addOfflineTicketUpdateAsync(ticketId, {
       ticketId,
       baseSubject: "Old Subject",
       baseDescription: "Old Description",
@@ -145,7 +145,7 @@ suite("RT-A 〜 RT-J: Remote Certainty & Secondary Effect Invariant Tests", () =
   test("RT-C: TicketUpdate の child ticket 作成時、親チケットの projectId が確実に渡り projectId=0 フォールバックが発生しない", async () => {
     const ticketId = 200;
     const parentProjectId = 123;
-    addOfflineTicketUpdate(ticketId, {
+    await addOfflineTicketUpdateAsync(ticketId, {
       ticketId,
       baseSubject: "Parent Ticket",
       baseDescription: "Desc",
@@ -504,7 +504,7 @@ suite("RT-A 〜 RT-J: Remote Certainty & Secondary Effect Invariant Tests", () =
   // RT-J: Legacy Queue Migration (INV-20)
   test("RT-J: Legacy queue の各エントリ（Ticket, NewTicket, Comment）が無損失で UnifiedSyncOperation へ正規化される", async () => {
     // Setup legacy items directly in store
-    addOfflineTicketUpdate(400, {
+    await addOfflineTicketUpdateAsync(400, {
       ticketId: 400,
       baseSubject: "Legacy Subject",
       baseDescription: "Legacy Desc",

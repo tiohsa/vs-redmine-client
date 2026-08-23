@@ -161,7 +161,7 @@ const syncEditorToRedmineAtScope = async (
   }
 
   if (contentType === "commentDraft") {
-    const queued = saveCommentDraftLocally(editor, operationScope);
+    const queued = await saveCommentDraftLocally(editor, operationScope);
     if (!queued || getOfflineSyncMode() === "manual") {
       return queued ? { kind: "comment", result: queued, ticketId } : undefined;
     }
@@ -185,7 +185,7 @@ const syncEditorToRedmineAtScope = async (
     if (!commentId) {
       return undefined;
     }
-    const queued = saveCommentDraftLocally(editor, operationScope);
+    const queued = await saveCommentDraftLocally(editor, operationScope);
     if (!queued || getOfflineSyncMode() === "manual") {
       return queued ? { kind: "comment", result: queued, ticketId } : undefined;
     }

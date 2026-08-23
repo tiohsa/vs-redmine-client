@@ -4,10 +4,10 @@ import { DashboardController } from "../dashboard/DashboardController";
 import { DashboardStateStore } from "../dashboard/DashboardStateStore";
 import type { DashboardWorkPanel } from "../dashboard/dashboardProtocol";
 import {
-  clearOfflineSyncQueue,
-  addOfflineNewTicket,
+  clearOfflineSyncQueueAsync,
+  addOfflineNewTicketAsync,
   getOfflineSyncQueue,
-  removeOfflineNewTicket,
+  removeOfflineNewTicketAsync,
 } from "../views/offlineSyncStore";
 import { clearTicketDrafts, updateDraftAfterSave } from "../views/ticketDraftStore";
 import { clearRegistry, registerNewTicketDraft, setEditorProjectId, getTicketIdForEditor } from "../views/ticketEditorRegistry";
@@ -73,14 +73,14 @@ const defaultSyncDeps = {
 // ── suite 1: draftUri ルーティング ─────────────────────────────────────────
 
 suite("composerSync – draftUri ルーティング", () => {
-  setup(() => {
-    clearOfflineSyncQueue();
+  setup(async () => {
+    await clearOfflineSyncQueueAsync();
     clearTicketDrafts();
     clearRegistry();
     clearNewTicketDrafts();
   });
-  teardown(() => {
-    clearOfflineSyncQueue();
+  teardown(async () => {
+    await clearOfflineSyncQueueAsync();
     clearTicketDrafts();
     clearRegistry();
     clearNewTicketDrafts();
@@ -107,7 +107,7 @@ suite("composerSync – draftUri ルーティング", () => {
           return editorStub;
         },
         syncFn: async (_editor): Promise<TicketSaveResult> => {
-          removeOfflineNewTicket({ documentUri: DRAFT_URI });
+          await removeOfflineNewTicketAsync({ documentUri: DRAFT_URI });
           return { status: "created", message: "Ticket created." };
         },
         getTicketIdFn: (_editor) => 42,
@@ -127,7 +127,7 @@ suite("composerSync – draftUri ルーティング", () => {
     store.update({ workPanel: makeComposerWorkPanel(undefined) });
 
     // キューに別のエントリを追加
-    addOfflineNewTicket({ content: makeNewTicketContent("キューのチケット"), projectId: 1, documentUri: "untitled:other.md" });
+    await addOfflineNewTicketAsync({ content: makeNewTicketContent("キューのチケット"), projectId: 1, documentUri: "untitled:other.md" });
 
     let syncCalled = false;
     const errors: string[] = [];
@@ -167,8 +167,8 @@ suite("composerSync – draftUri ルーティング", () => {
     store.update({ workPanel: makeComposerWorkPanel(DRAFT_URI) });
 
     // DRAFT_URI のエントリと、別URIのエントリをキューに追加
-    addOfflineNewTicket({ content: makeNewTicketContent("作成予定チケット"), projectId: 1, documentUri: DRAFT_URI });
-    addOfflineNewTicket({ content: makeNewTicketContent("別のチケット"), projectId: 1, documentUri: "untitled:other.md" });
+    await addOfflineNewTicketAsync({ content: makeNewTicketContent("作成予定チケット"), projectId: 1, documentUri: DRAFT_URI });
+    await addOfflineNewTicketAsync({ content: makeNewTicketContent("別のチケット"), projectId: 1, documentUri: "untitled:other.md" });
 
     const editorStub = makeEditorStub(makeNewTicketContent("作成予定チケット"));
 
@@ -182,7 +182,7 @@ suite("composerSync – draftUri ルーティング", () => {
       _composerSyncTestHooks: {
         findEditorFn: (_uri) => editorStub,
         syncFn: async (_editor): Promise<TicketSaveResult> => {
-          removeOfflineNewTicket({ documentUri: DRAFT_URI });
+          await removeOfflineNewTicketAsync({ documentUri: DRAFT_URI });
           return { status: "created", message: "Ticket created." };
         },
         getTicketIdFn: (_editor) => 77,
@@ -281,10 +281,10 @@ suite("composerSync – draftUri ルーティング", () => {
     const store = new DashboardStateStore();
     store.update({ workPanel: makeComposerWorkPanel(staleUntitled) });
 
-    addOfflineNewTicket({ content: makeNewTicketContent("旧URI"), projectId: 1, documentUri: staleUntitled });
-    addOfflineNewTicket({ content: makeNewTicketContent("新URI"), projectId: 1, documentUri: currentFile });
-    addOfflineNewTicket({ content: makeNewTicketContent("正規化URI"), projectId: 1, documentUri: normalizedCurrentFile });
-    addOfflineNewTicket({ content: makeNewTicketContent("残存"), projectId: 1, documentUri: "untitled:other.md" });
+    await addOfflineNewTicketAsync({ content: makeNewTicketContent("旧URI"), projectId: 1, documentUri: staleUntitled });
+    await addOfflineNewTicketAsync({ content: makeNewTicketContent("新URI"), projectId: 1, documentUri: currentFile });
+    await addOfflineNewTicketAsync({ content: makeNewTicketContent("正規化URI"), projectId: 1, documentUri: normalizedCurrentFile });
+    await addOfflineNewTicketAsync({ content: makeNewTicketContent("残存"), projectId: 1, documentUri: "untitled:other.md" });
 
     const editorStub = makeEditorStub(makeNewTicketContent("同期待ち"), normalizedCurrentFile);
     const ctrl = new DashboardController({
@@ -297,7 +297,7 @@ suite("composerSync – draftUri ルーティング", () => {
       _composerSyncTestHooks: {
         findEditorFn: (_uri) => editorStub,
         syncFn: async (_editor): Promise<TicketSaveResult> => {
-          removeOfflineNewTicket({ documentUri: normalizedCurrentFile });
+          await removeOfflineNewTicketAsync({ documentUri: normalizedCurrentFile });
           return { status: "created", message: "Ticket created." };
         },
         getTicketIdFn: (_editor) => 92,
@@ -318,12 +318,12 @@ suite("composerSync – draftUri ルーティング", () => {
 // ── suite 2: 空件名エラー ──────────────────────────────────────────────────
 
 suite("composerSync – 空の件名エラー", () => {
-  setup(() => {
+  setup(async () => {
     clearTicketDrafts();
     clearRegistry();
     clearNewTicketDrafts();
   });
-  teardown(() => {
+  teardown(async () => {
     clearTicketDrafts();
     clearRegistry();
     clearNewTicketDrafts();
@@ -367,12 +367,12 @@ suite("composerSync – 空の件名エラー", () => {
 // ── suite 3: 作成後フロントマター書き換え ─────────────────────────────────
 
 suite("composerSync – 作成成功後のフロントマター書き換え", () => {
-  setup(() => {
+  setup(async () => {
     clearTicketDrafts();
     clearRegistry();
     clearNewTicketDrafts();
   });
-  teardown(() => {
+  teardown(async () => {
     clearTicketDrafts();
     clearRegistry();
     clearNewTicketDrafts();

@@ -17,9 +17,9 @@ import {
   getTicketIdForUri,
 } from "../views/ticketEditorRegistry";
 import {
-  addOfflineCommentUpdate,
+  addOfflineCommentUpdateAsync,
   getActiveScope,
-  removeOfflineCommentEntry,
+  removeOfflineCommentEntryAsync,
 } from "../views/offlineSyncStore";
 import { computeNotesHash } from "../utils/notesHash";
 import type { NotificationController } from "./notificationController";
@@ -155,14 +155,14 @@ export const performSyncOnSave = async (
     case "commentUpdateFile": {
       const currentHash = computeNotesHash(classification.parsed.body);
       if (currentHash === classification.parsed.fields.sourceNotesHash) {
-        removeOfflineCommentEntry({
+        await removeOfflineCommentEntryAsync({
           commentId: classification.parsed.fields.journalId,
           documentUri: document.uri.toString(),
         }, operationScope);
         unsyncedPresentation.refresh();
         commentsPresentation.refreshForTicket(classification.parsed.fields.issueId);
       } else {
-        addOfflineCommentUpdate({
+        await addOfflineCommentUpdateAsync({
           ticketId: classification.parsed.fields.issueId,
           commentId: classification.parsed.fields.journalId,
           body: classification.parsed.body,
@@ -181,7 +181,7 @@ export const performSyncOnSave = async (
     }
 
     case "localComment": {
-      const commentResult = saveCommentDocumentLocally({
+      const commentResult = await saveCommentDocumentLocally({
         ticketId: classification.ticketId,
         commentId: classification.commentId,
         content: document.getText(),
@@ -255,7 +255,7 @@ export const performSyncOnSave = async (
     }
 
     case "draftCommentExisting": {
-      const commentResult = saveCommentDocumentLocally({
+      const commentResult = await saveCommentDocumentLocally({
         ticketId: classification.ticketId,
         commentId: classification.commentId,
         content: document.getText(),
@@ -278,7 +278,7 @@ export const performSyncOnSave = async (
     }
 
     case "draftCommentNew": {
-      const commentResult = saveCommentDocumentLocally({
+      const commentResult = await saveCommentDocumentLocally({
         ticketId: classification.ticketId,
         content: document.getText(),
         documentUri: document.uri,
@@ -299,7 +299,7 @@ export const performSyncOnSave = async (
     }
 
     case "parsedComment": {
-      const commentResult = saveCommentDocumentLocally({
+      const commentResult = await saveCommentDocumentLocally({
         ticketId: classification.ticketId,
         commentId: classification.commentId,
         content: document.getText(),

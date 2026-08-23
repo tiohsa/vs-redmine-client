@@ -49,6 +49,7 @@ Last updated: 2026-08-23
 ## 5. Synchronization and Persistence Invariants
 
 * Data in `src/views/offlineSyncStore.ts` is persistent state that survives VS Code restarts. When changing its shape, key, scope, revision, or phase, verify restoration of existing data and legacy compatibility.
+* All live offline queue mutations for the same `connectionScope` must use the store's scope transaction boundary. Acquire the queue snapshot after entering that boundary, persist the candidate before publishing it to memory, and keep production mutation APIs asynchronous; do not reintroduce direct live-memory writers or stale whole-queue replacement paths.
 * Synchronization must go through the lifecycle defined by `src/app/syncEngine.ts` and `src/app/ticketSync/`, preserving the ordering and checkpoints of remote write, read-back, and local finalize.
 * Primary Operation phase and Primary Effect state must transition atomically via `SyncOperationRepository.transitionPrimaryRemoteWrite` in a single persistence call to prevent state ledger divergence.
 * Planned effects are monotonic and idempotent; non-planned effects (committed/started/failed/commit_unknown) must never be rolled back to `planned` on re-planning unless explicitly compensated.

@@ -6,7 +6,7 @@ import {
   markDraftStatus,
   setTicketDraftContent,
 } from "../views/ticketDraftStore";
-import { addOfflineTicketUpdate, getOfflineSyncQueue } from "../views/offlineSyncStore";
+import { addOfflineTicketUpdateAsync, getOfflineSyncQueue } from "../views/offlineSyncStore";
 import { buildTicketEditorContent } from "../views/ticketEditorContent";
 import { applyQueuedTicketUpdate } from "../views/ticketSync/ticketQueueSync";
 import { reloadTicketEditor, syncTicketDraft } from "../views/ticketSync/ticketUpdateSync";
@@ -183,7 +183,7 @@ suite("Ticket save sync", () => {
       metadata: baseMetadata,
     });
     initializeTicketDraft(102, "Title", "Body", baseMetadata, "t1");
-    addOfflineTicketUpdate(102, {
+    await addOfflineTicketUpdateAsync(102, {
       ticketId: 102,
       baseSubject: "Title",
       baseDescription: "Body",

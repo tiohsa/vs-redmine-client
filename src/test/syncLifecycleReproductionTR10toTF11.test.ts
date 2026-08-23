@@ -3,7 +3,7 @@ import * as vscode from "vscode";
 import {
   initializeOfflineSyncStore,
   addOfflineNewTicketAsync,
-  addOfflineTicketUpdate,
+  addOfflineTicketUpdateAsync,
   getOfflineSyncQueue,
   replaceOfflineSyncQueueAsync,
   OfflineNewTicket,

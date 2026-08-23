@@ -3,7 +3,7 @@ import * as vscode from "vscode";
 import { performSyncOnSave } from "../app/saveSyncExecutor";
 import { clearTicketDrafts, initializeTicketDraft } from "../views/ticketDraftStore";
 import { clearNewTicketDrafts } from "../views/newTicketDraftStore";
-import { clearOfflineSyncQueue, getOfflineSyncQueue, initializeOfflineSyncStore } from "../views/offlineSyncStore";
+import { clearOfflineSyncQueueAsync, getOfflineSyncQueue, initializeOfflineSyncStore } from "../views/offlineSyncStore";
 import { clearRegistry, registerTicketEditor, registerNewTicketDraft } from "../views/ticketEditorRegistry";
 import { createMutableEditorStub, createTicketContentFixture } from "./helpers/editorStubs";
 import { createTestMemento } from "./helpers/vscodeMemento";
@@ -28,18 +28,18 @@ const makeNoopProvider = (): {
 });
 
 suite("saveSyncExecutor auto/manual mode policy (RT-01, RT-02)", () => {
-  setup(() => {
+  setup(async () => {
     initializeOfflineSyncStore(createTestMemento(), scope);
     clearTicketDrafts(scope);
     clearNewTicketDrafts();
-    clearOfflineSyncQueue(scope);
+    await clearOfflineSyncQueueAsync(scope);
     clearRegistry();
   });
 
-  teardown(() => {
+  teardown(async () => {
     clearTicketDrafts(scope);
     clearNewTicketDrafts();
-    clearOfflineSyncQueue(scope);
+    await clearOfflineSyncQueueAsync(scope);
     clearRegistry();
   });
 

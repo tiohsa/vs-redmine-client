@@ -287,7 +287,162 @@ suite("Attempt Closure P1 reproduction", () => {
     assert.strictEqual(blocker?.reason, "RECOVERY_REQUIRED");
   });
 
-  test("T04: Primary compensated + Child committed は blocker かつ reconcile_compensation のみ", () => {
+  test("R01/R04: coverage missing は理由付き manual_repair_required として公開する", () => {
+    const items = getRecoveryItemsForOperation({
+      operationId: `${SCOPE}:newTicket:manual-repair-attachment`,
+      kind: "ticket_create",
+      phase: "remote_created",
+      revision: 1,
+      attemptGeneration: 1,
+      effects: [
+        {
+          effectId: "ticket-create",
+          kind: "ticket_create",
+          operationRevision: 1,
+          attemptGeneration: 1,
+          state: "compensated",
+          remoteId: 500,
+          target: {},
+          requestSnapshot: {
+            kind: "ticket_create",
+            request: {
+              projectId: 1,
+              subject: "Parent",
+              description: "Description",
+              uploads: [],
+            },
+          },
+        },
+        {
+          effectId: "attachment:file:missing-coverage",
+          kind: "attachment_upload",
+          operationRevision: 1,
+          attemptGeneration: 1,
+          state: "committed",
+          token: "uncovered-token",
+          target: { filename: "diagram.png", token: "uncovered-token" },
+        },
+      ],
+    });
+
+    const item = items.find((candidate) =>
+      candidate.effectId === "attachment:file:missing-coverage");
+    assert.ok(item);
+    assert.deepStrictEqual(item?.allowedActions, []);
+    assert.strictEqual(item?.disposition, "manual_repair_required");
+    assert.strictEqual(item?.manualRepairReason, "COVERAGE_MISSING");
+    assert.match(item?.message ?? "", /Manual repair required/);
+  });
+
+  test("R02: coverage missing の通常 sync は forward mutation を実行しない", async () => {
+    const queueId = "manual-repair-forward-blocked";
+    const operationId = `${SCOPE}:newTicket:${queueId}`;
+    const queue = getOfflineSyncQueue(SCOPE);
+    queue.newTickets.push({
+      ...makeOperation(),
+      queueId,
+      operationId,
+      phase: "remote_created",
+      effects: [
+        {
+          effectId: "ticket-create",
+          kind: "ticket_create",
+          operationRevision: 1,
+          attemptGeneration: 1,
+          state: "compensated",
+          remoteId: 500,
+          target: {},
+          requestSnapshot: {
+            kind: "ticket_create",
+            request: {
+              projectId: 1,
+              subject: "Parent",
+              description: "Description",
+              uploads: [],
+            },
+          },
+        },
+        {
+          effectId: "attachment:file:missing-coverage",
+          kind: "attachment_upload",
+          operationRevision: 1,
+          attemptGeneration: 1,
+          state: "committed",
+          token: "uncovered-token",
+          target: { filename: "diagram.png", token: "uncovered-token" },
+        },
+      ],
+    });
+    await replaceOfflineSyncQueueAsync(queue, SCOPE);
+
+    let handlerCalls = 0;
+    const coordinator = new SyncCoordinator({
+      repository: createSyncOperationRepository(),
+      handlers: {
+        ticketCreate: {
+          prepare: async () => {
+            handlerCalls++;
+            throw new Error("manual repair 中は forward handler を実行しないこと");
+          },
+        } as any,
+      },
+    });
+
+    const outcome = await coordinator.sync(
+      { kind: "newTicket", queueId },
+      { connectionScope: SCOPE },
+    );
+
+    assert.strictEqual(outcome.kind, "remote_committed");
+    assert.strictEqual(handlerCalls, 0);
+    const retained = createSyncOperationRepository().getOperation(
+      { kind: "newTicket", queueId },
+      SCOPE,
+    );
+    assert.strictEqual(retained?.attemptGeneration, 1);
+    assert.strictEqual(
+      retained?.effects?.find((effect) => effect.effectId === "attachment:file:missing-coverage")?.state,
+      "committed",
+    );
+  });
+
+  test("R04: synthetic invariant blocker も空 action だけでなく理由を公開する", () => {
+    const items = getRecoveryItemsForOperation({
+      operationId: `${SCOPE}:newTicket:manual-repair-invariant`,
+      kind: "ticket_create",
+      phase: "remote_created",
+      revision: 1,
+      attemptGeneration: 1,
+      effects: [
+        {
+          effectId: "ticket-create-a",
+          kind: "ticket_create",
+          operationRevision: 1,
+          attemptGeneration: 1,
+          state: "compensated",
+          remoteId: 500,
+          target: {},
+        },
+        {
+          effectId: "ticket-create-b",
+          kind: "ticket_create",
+          operationRevision: 1,
+          attemptGeneration: 1,
+          state: "compensated",
+          remoteId: 501,
+          target: {},
+        },
+      ],
+    });
+
+    const invariant = items.find((candidate) => candidate.effectId === "__primary__");
+    assert.strictEqual(invariant?.disposition, "manual_repair_required");
+    assert.strictEqual(invariant?.manualRepairReason, "INVARIANT_VIOLATION");
+    assert.deepStrictEqual(invariant?.allowedActions, []);
+    assert.match(invariant?.message ?? "", /Multiple Primary effects/);
+  });
+
+  test("R03/T04: Primary compensated + Child committed は blocker かつ reconcile_compensation のみ", () => {
     const operation = {
       operationId: `${SCOPE}:newTicket:committed-child-recovery`,
       kind: "ticket_create",
@@ -326,6 +481,7 @@ suite("Attempt Closure P1 reproduction", () => {
     );
     assert.ok(childRecovery);
     assert.deepStrictEqual(childRecovery?.allowedActions, ["reconcile_compensation"]);
+    assert.strictEqual(childRecovery?.disposition, "actionable");
   });
 
   test("T05: restart 後も coverage decision、blocker、generation が一致する", async () => {

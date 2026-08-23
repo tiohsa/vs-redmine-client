@@ -5,7 +5,7 @@ import { createSyncController } from "../app/syncController";
 import { clearTicketDrafts } from "../views/ticketDraftStore";
 import { clearNewTicketDrafts } from "../views/newTicketDraftStore";
 import { suppressSaveSync, releaseSaveSync } from "../views/saveSyncSuppression";
-import { clearOfflineSyncQueue, getOfflineSyncQueue } from "../views/offlineSyncStore";
+import { clearOfflineSyncQueueAsync, getOfflineSyncQueue } from "../views/offlineSyncStore";
 import { buildCommentUpdateFileContent } from "../views/commentUpdateFile";
 import { clearRegistry, registerNewCommentDraft } from "../views/ticketEditorRegistry";
 import { createEditorStub } from "./helpers/editorStubs";
@@ -25,7 +25,7 @@ const makeNoopProvider = (): {
 });
 
 // コメント更新ファイルのコンテンツを生成するヘルパー
-// source_notes_hash に意図的に一致しないハッシュを使い、addOfflineCommentUpdate が呼ばれるようにする
+// source_notes_hash に意図的に一致しないハッシュを使い、addOfflineCommentUpdateAsync が呼ばれるようにする
 const buildCommentUpdateContent = (body: string): string =>
   buildCommentUpdateFileContent(
     { issueId: 50, journalId: 888, sourceNotesHash: "sha256:fakehash_notmatching" },
@@ -33,10 +33,10 @@ const buildCommentUpdateContent = (body: string): string =>
   );
 
 suite("0.1.3 安定化: 保存トリガー同期のシリアライゼーション", () => {
-  teardown(() => {
+  teardown(async () => {
     clearTicketDrafts();
     clearNewTicketDrafts();
-    clearOfflineSyncQueue();
+    await clearOfflineSyncQueueAsync();
     clearRegistry();
   });
 
