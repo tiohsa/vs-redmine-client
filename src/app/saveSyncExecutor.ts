@@ -35,8 +35,10 @@ import {
 } from "../config/connectionScope";
 import { showError } from "../utils/notifications";
 import { getOfflineSyncMode, type OfflineSyncMode } from "../config/settings";
-import type { SyncEngine } from "./syncEngine";
+import type { SyncEngine, SyncEngineKey, SyncEngineOutcome } from "./syncEngine";
 import { createOutcomePresenter } from "./outcomePresenter";
+import type { TicketSaveResult } from "../views/ticketSaveTypes";
+import type { CommentSaveResult } from "../views/commentSaveTypes";
 
 export interface SaveSyncExecutorDeps {
   ticketsPresentation: TicketPresentationPort;
@@ -45,7 +47,9 @@ export interface SaveSyncExecutorDeps {
   notifications: NotificationController;
   updateTicketListSubject: (ticketId: number, subject: string) => void;
   offlineSyncMode?: OfflineSyncMode;
-  syncEngine?: SyncEngine;
+  syncEngine?: Pick<SyncEngine, "syncOne">;
+  resolveTicketConflict?: typeof handleConflict;
+  resolveCommentConflict?: typeof handleCommentConflict;
 }
 
 export const performSyncOnSave = async (
@@ -63,7 +67,9 @@ export const performSyncOnSave = async (
     return;
   }
   const { ticketsPresentation, commentsPresentation, unsyncedPresentation, notifications } = deps;
-  const syncMode = deps.offlineSyncMode ?? (deps.syncEngine ? "auto" : getOfflineSyncMode());
+  const resolveTicketConflict = deps.resolveTicketConflict ?? handleConflict;
+  const resolveCommentConflict = deps.resolveCommentConflict ?? handleCommentConflict;
+  const syncMode = deps.offlineSyncMode ?? getOfflineSyncMode();
   const presenter = createOutcomePresenter({
     ticketsPresentation,
     commentsPresentation,
@@ -75,15 +81,91 @@ export const performSyncOnSave = async (
     commentsPresentation.refreshForTicket(ticketId);
   };
 
-  const syncIfAuto = async (key: import("./syncEngine").SyncEngineKey): Promise<void> => {
+  const resolveAutoConflict = async (
+    key: SyncEngineKey,
+    outcome: SyncEngineOutcome,
+  ): Promise<boolean> => {
+    if (outcome.kind !== "conflict") {
+      return false;
+    }
+
+    if (
+      editor &&
+      key.kind === "ticket" &&
+      "conflictContext" in outcome &&
+      outcome.conflictContext
+    ) {
+      const result: TicketSaveResult = await resolveTicketConflict(
+        {
+          status: "conflict",
+          message: outcome.message ?? vscode.l10n.t("Remote changes detected. Review diff before syncing."),
+          conflictContext: outcome.conflictContext,
+        },
+        editor,
+        undefined,
+        operationScope,
+        deps.syncEngine,
+      );
+      notifications.notifyTicketSaveResult(result);
+      if (result.status === "created") {
+        ticketsPresentation.refresh();
+      } else {
+        ticketsPresentation.notifyChange();
+      }
+      unsyncedPresentation.refresh();
+      return true;
+    }
+
+    if (
+      editor &&
+      key.kind === "comment" &&
+      "commentConflictContext" in outcome &&
+      outcome.commentConflictContext
+    ) {
+      const result: CommentSaveResult = await resolveCommentConflict(
+        {
+          status: "conflict",
+          message: outcome.message ?? vscode.l10n.t("Comment was updated in Redmine. Review diff before syncing."),
+          commentId: outcome.commentConflictContext.commentId,
+          conflictContext: outcome.commentConflictContext,
+        },
+        editor,
+        operationScope,
+        deps.syncEngine,
+      );
+      notifications.notifyCommentSaveResult(result);
+      if (shouldRefreshComments(result.status)) {
+        commentsPresentation.refreshForTicket(key.ticketId);
+      }
+      unsyncedPresentation.refresh();
+      return true;
+    }
+
+    if (key.kind === "comment") {
+      notifications.notifyCommentSaveResult({
+        status: "conflict",
+        message: outcome.message ?? vscode.l10n.t("A conflict was detected while synchronizing."),
+        commentId: key.commentId,
+      });
+      commentsPresentation.refreshForTicket(key.ticketId);
+      unsyncedPresentation.refresh();
+      return true;
+    }
+
+    return false;
+  };
+
+  const syncIfAuto = async (key: SyncEngineKey): Promise<void> => {
     if (syncMode === "auto" && deps.syncEngine && key.kind !== "newTicket") {
       try {
         const outcome = await deps.syncEngine.syncOne(key, { connectionScope: operationScope });
-        presenter.present(outcome as any, {
-          ticketId: key.kind === "ticket" ? key.ticketId : (key.kind === "comment" ? key.ticketId : undefined),
-          commentId: key.kind === "comment" ? key.commentId : undefined,
-          isAuto: true,
-        });
+        if (!(await resolveAutoConflict(key, outcome))) {
+          presenter.present(outcome, {
+            ticketId: key.kind === "ticket" ? key.ticketId : (key.kind === "comment" ? key.ticketId : undefined),
+            commentId: key.kind === "comment" ? key.commentId : undefined,
+            isAuto: true,
+          });
+        }
       } catch (error) {
         presenter.present(
           { kind: "failed_before_commit", error: error as Error },
@@ -106,7 +188,13 @@ export const performSyncOnSave = async (
     });
     if (ticketResult) {
       if (ticketResult.status === "conflict" && ticketResult.conflictContext) {
-        ticketResult = await handleConflict(ticketResult, editor, undefined, operationScope);
+        ticketResult = await resolveTicketConflict(
+          ticketResult,
+          editor,
+          undefined,
+          operationScope,
+          deps.syncEngine,
+        );
       }
       notifications.notifyTicketSaveResult(ticketResult);
       if (ticketResult.status === "created") {
@@ -126,7 +214,12 @@ export const performSyncOnSave = async (
     let commentResult = await handleCommentEditorSave(editor, undefined, operationScope);
     if (commentResult) {
       if (commentResult.status === "conflict" && commentResult.conflictContext) {
-        commentResult = await handleCommentConflict(commentResult, editor, operationScope);
+        commentResult = await resolveCommentConflict(
+          commentResult,
+          editor,
+          operationScope,
+          deps.syncEngine,
+        );
       }
       notifications.notifyCommentSaveResult(commentResult);
       const ticketId =

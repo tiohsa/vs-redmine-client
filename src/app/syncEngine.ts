@@ -11,6 +11,7 @@ import {
 import type { SyncContext } from "./ticketSync/ports";
 import type { TicketSyncOutcome, TicketSyncQueueKey } from "./ticketSync/ticketSyncOutcome";
 import type { CommentSaveDependencies } from "../views/commentSaveSync";
+import type { CommentConflictContext } from "../views/commentSaveTypes";
 import type { SyncOutcome } from "./ticketSync/syncOperationTypes";
 import { EffectResolution, TicketCreateHandler, TicketUpdateHandler } from "./ticketSync/operationHandlers";
 import { getAttemptGeneration, type DurableSyncEffectState, type RecoveryItem } from "./syncEffects";
@@ -22,7 +23,13 @@ export type SyncEngineKey =
 export type CommentSyncOutcome =
   | { kind: "completed"; ticketId: number; commentId?: number }
   | { kind: "no_change"; ticketId: number; commentId?: number }
-  | { kind: "conflict"; ticketId: number; message: string }
+  | {
+      kind: "conflict";
+      ticketId: number;
+      commentId?: number;
+      message: string;
+      commentConflictContext?: CommentConflictContext;
+    }
   | { kind: "failed_before_commit"; ticketId: number; error: Error };
 
 export type SyncEngineOutcome = TicketSyncOutcome | CommentSyncOutcome | SyncOutcome;
@@ -57,6 +64,7 @@ export interface SyncEngineDependencies {
 export class SyncEngine {
   private readonly coordinator: SyncCoordinator;
   private readonly tickets: Pick<TicketSyncService, "syncQueueItem" | "syncAll" | "resolveCommitUnknown">;
+  private readonly ticketEditorService: Pick<TicketSyncService, "syncEditor">;
   private readonly explicitTickets?: Pick<TicketSyncService, "syncQueueItem" | "syncAll" | "resolveCommitUnknown">;
   private readonly comments: Partial<CommentSaveDependencies>;
   private readonly rawTicketDeps?: any;
@@ -75,20 +83,31 @@ export class SyncEngine {
           ticketUpdate: new TicketUpdateHandler(),
         },
       });
-      this.tickets = createTicketSyncService({
+      const ticketService = createTicketSyncService({
         create: rawTickets,
         update: rawTickets,
+        coordinator: this.coordinator,
       });
+      this.tickets = ticketService;
+      this.ticketEditorService = ticketService;
     } else {
       this.coordinator = deps.coordinator ?? createSyncCoordinator();
       this.explicitTickets = isServiceLike ? rawTickets : undefined;
-      this.tickets = (isServiceLike ? rawTickets : undefined) ?? createTicketSyncService();
+      const ticketService = createTicketSyncService({ coordinator: this.coordinator });
+      this.tickets = (isServiceLike ? rawTickets : undefined) ?? ticketService;
+      this.ticketEditorService = ticketService;
     }
     this.comments = deps.comments ?? {};
   }
 
   public ticketService(): Pick<TicketSyncService, "syncQueueItem" | "syncAll" | "resolveCommitUnknown"> {
     return this.tickets;
+  }
+
+  public syncTicketEditor(
+    input: Parameters<TicketSyncService["syncEditor"]>[0],
+  ): ReturnType<TicketSyncService["syncEditor"]> {
+    return this.ticketEditorService.syncEditor(input);
   }
 
   public getRepository(): SyncOperationRepository {

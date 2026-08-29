@@ -17,6 +17,7 @@ import {
   getCurrentConnectionScope,
 } from "../../config/connectionScope";
 import { buildResult } from "../../views/ticketSync/ticketSyncResult";
+import type { SyncEngine } from "../../app/syncEngine";
 
 export class DashboardComposerService {
   private composerLoadGeneration = 0;
@@ -30,6 +31,7 @@ export class DashboardComposerService {
     selectTicket: (ticketId: number) => Promise<void>;
     getProjectTrackers?: typeof getProjectTrackers;
     listProjectMembers?: typeof listProjectMembers;
+    syncEngine?: Pick<SyncEngine, "syncOne"> & Partial<Pick<SyncEngine, "syncTicketEditor">>;
   }) {}
 
   async openNewTicketComposer(): Promise<void> {
@@ -183,7 +185,9 @@ export class DashboardComposerService {
         return vscode.window.showTextDocument(doc, { preview: false });
       });
     const syncFn = hooks?.syncFn ?? (async (editor: vscode.TextEditor) => {
-      const synced = await syncEditorToRedmine(editor);
+      const synced = await syncEditorToRedmine(editor, {
+        syncEngine: this.deps.syncEngine,
+      });
       return synced?.kind === "ticket"
         ? synced.result
         : buildResult("failed", "Ticket sync did not produce a result.");

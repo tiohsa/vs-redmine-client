@@ -6,6 +6,7 @@ import type {
   TicketEditorMetadataBlock,
 } from "../../views/ticketEditorContent";
 import type { ConflictContext, TicketSaveResult } from "../../views/ticketSaveTypes";
+import type { CommentConflictContext } from "../../views/commentSaveTypes";
 import type { DurableSyncEffect } from "../syncEffects";
 
 export type SyncOperationKind =
@@ -161,6 +162,7 @@ export type SyncOutcome =
       commentId?: number;
       message?: string;
       conflictContext?: ConflictContext;
+      commentConflictContext?: CommentConflictContext;
     }
   | {
       kind: "failed_before_commit";

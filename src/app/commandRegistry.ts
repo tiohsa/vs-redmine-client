@@ -45,6 +45,7 @@ import type {
   UnsyncedPresentationPort,
 } from "./presentationPorts";
 import type { SyncController, SyncStatus } from "./syncController";
+import type { SyncEngine } from "./syncEngine";
 import type { DashboardWebviewProvider } from "../dashboard/DashboardWebviewProvider";
 import type { DashboardCommentItem, DashboardState, DashboardUnsyncedKey } from "../dashboard/dashboardProtocol";
 
@@ -55,6 +56,7 @@ export interface CommandDeps {
   settingsPresentation: SettingsPresentationPort;
   dashboardProvider: DashboardWebviewProvider;
   sync: Pick<SyncController, "syncEditorAndNotify">;
+  syncEngine?: SyncEngine;
 }
 
 const toSelectedTicket = (state: DashboardState): Ticket | undefined => {
@@ -228,7 +230,9 @@ export const registerCommands = (
 
   context.subscriptions.push(
     vscode.commands.registerCommand("redmine-client.runOfflineSync", async () => {
-      await runOfflineSync();
+      await runOfflineSync(deps.syncEngine
+        ? { createSyncEngine: () => deps.syncEngine! }
+        : undefined);
       ticketsPresentation.refresh();
       commentsPresentation.refresh();
       unsyncedPresentation.refresh();
@@ -241,7 +245,10 @@ export const registerCommands = (
       }
       await syncUnsyncedFile(
         { syncKey: withKey.syncKey },
-        { onTicketCreated: () => ticketsPresentation.refresh() },
+        {
+          onTicketCreated: () => ticketsPresentation.refresh(),
+          createSyncEngine: deps.syncEngine ? () => deps.syncEngine! : undefined,
+        },
       );
       unsyncedPresentation.refresh();
     }),

@@ -14,6 +14,7 @@ import { registerConflictDiffProvider } from "./views/conflictDiffProvider";
 import { registerViews } from "./app/viewRegistry";
 import { createNotificationController } from "./app/notificationController";
 import { createSyncController } from "./app/syncController";
+import { createSyncEngine } from "./app/syncEngine";
 import {
   buildRegisterEditorDocument,
   buildUpdateTicketStatus,
@@ -40,8 +41,9 @@ export async function activate(context: vscode.ExtensionContext) {
     showWarning(vscode.l10n.t("ignoreSSLErrors is enabled. Do not use in production."));
   }
 
-  // ── ビュー登録 ───────────────────────────────────────────────────────────
-  const views = registerViews(context);
+  // ── 同期エンジン / ビュー登録 ────────────────────────────────────────────
+  const syncEngine = createSyncEngine();
+  const views = registerViews(context, { syncEngine });
 
   // ── 通知コントローラー ───────────────────────────────────────────────────
   const notifications = createNotificationController({
@@ -58,6 +60,7 @@ export async function activate(context: vscode.ExtensionContext) {
     unsyncedPresentation: views.unsyncedPresentation,
     notifications,
     registerEditorDocument,
+    syncEngine,
   });
 
   // ── ステータスバー ───────────────────────────────────────────────────────
@@ -80,6 +83,7 @@ export async function activate(context: vscode.ExtensionContext) {
     settingsPresentation: views.settingsPresentation,
     dashboardProvider: views.dashboardProvider,
     sync,
+    syncEngine,
   });
 
   // ── オフライン同期モード ─────────────────────────────────────────────────

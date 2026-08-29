@@ -21,6 +21,7 @@ import type {
 import type { TicketSaveResult } from "../views/ticketSaveTypes";
 import type { DashboardServiceContext } from "./services/DashboardServiceContext";
 import { clearTicketSummaries } from "../views/ticketSummaryStore";
+import type { SyncEngine } from "../app/syncEngine";
 
 export interface ComposerSyncTestHooks {
   syncFn?: (editor: vscode.TextEditor) => Promise<TicketSaveResult>;
@@ -39,6 +40,7 @@ export interface DashboardControllerOptions {
   notifyError: (requestId: string, msg: string) => void;
   notifyToast: (level: "info" | "warning" | "error" | "success", msg: string) => void;
   onTicketsRefreshed: () => void;
+  syncEngine?: SyncEngine;
   _composerSyncTestHooks?: ComposerSyncTestHooks;
 }
 
@@ -122,6 +124,7 @@ export class DashboardController {
       context,
       refreshTicketPresentation: () => this.refreshTicketPresentation(),
       loadComments: (ticketId) => this.loadComments(ticketId),
+      syncEngine: opts.syncEngine,
     });
     this.metadataService = new DashboardMetadataService({
       context,
@@ -138,6 +141,7 @@ export class DashboardController {
       refreshUnsynced: () => this.refreshUnsynced(),
       loadTickets: () => this.loadTickets(),
       selectTicket: (ticketId) => this.selectTicket(ticketId),
+      syncEngine: opts.syncEngine,
     });
     this.disposables.push(
       { dispose: onOfflineSyncQueueChanged(() => this.refreshUnsynced()) },

@@ -9,6 +9,7 @@ import type {
   TicketPresentationPort,
   UnsyncedPresentationPort,
 } from "./presentationPorts";
+import type { SyncEngine } from "./syncEngine";
 
 export interface ViewRegistry {
   ticketsPresentation: TicketPresentationPort;
@@ -18,8 +19,11 @@ export interface ViewRegistry {
   dashboardProvider: DashboardWebviewProvider;
 }
 
-export const registerViews = (context: vscode.ExtensionContext): ViewRegistry => {
-  const dashboardProvider = new DashboardWebviewProvider(context.extensionUri);
+export const registerViews = (
+  context: vscode.ExtensionContext,
+  deps: { syncEngine?: SyncEngine } = {},
+): ViewRegistry => {
+  const dashboardProvider = new DashboardWebviewProvider(context.extensionUri, deps);
   context.subscriptions.push(
     dashboardProvider,
     vscode.window.registerWebviewViewProvider(VIEW_ID_DASHBOARD, dashboardProvider, {

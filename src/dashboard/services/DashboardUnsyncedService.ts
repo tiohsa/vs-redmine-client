@@ -16,12 +16,14 @@ import type { UnsyncedFileSyncKey } from "../../app/unsyncedTypes";
 import { getTicketEditors } from "../../views/ticketEditorRegistry";
 import type { SyncStatus } from "../../app/syncController";
 import { getCurrentConnectionScope } from "../../config/connectionScope";
+import type { SyncEngine } from "../../app/syncEngine";
 
 export class DashboardUnsyncedService {
   constructor(private readonly deps: {
     context: DashboardServiceContext;
     refreshTicketPresentation: () => void;
     loadComments: (ticketId: number) => Promise<void>;
+    syncEngine?: SyncEngine;
   }) {}
 
   refreshUnsynced(): void {
@@ -165,7 +167,9 @@ export class DashboardUnsyncedService {
 
   async handleSyncAll(requestId: string): Promise<void> {
     this.deps.context.notifyOperationStarted(requestId, vscode.l10n.t("Syncing all…"));
-    const result = await runOfflineSync();
+    const result = await runOfflineSync(this.deps.syncEngine
+      ? { createSyncEngine: () => this.deps.syncEngine! }
+      : undefined);
     this.deps.context.onTicketsRefreshed();
     this.refreshUnsynced();
     this.deps.refreshTicketPresentation();
@@ -287,7 +291,12 @@ export class DashboardUnsyncedService {
 
     const result = await syncUnsyncedFile(
       { syncKey },
-      { onTicketCreated: () => this.deps.context.onTicketsRefreshed() },
+      {
+        onTicketCreated: () => this.deps.context.onTicketsRefreshed(),
+        createSyncEngine: this.deps.syncEngine
+          ? () => this.deps.syncEngine!
+          : undefined,
+      },
     );
     this.refreshUnsynced();
     this.deps.refreshTicketPresentation();

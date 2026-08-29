@@ -12,6 +12,8 @@ import type {
   TicketPresentationPort,
   UnsyncedPresentationPort,
 } from "./presentationPorts";
+import type { SyncEngine } from "./syncEngine";
+import type { OfflineSyncMode } from "../config/settings";
 
 export type SyncStatus = "uploaded" | "merged" | "noChange" | "conflict" | "failed";
 
@@ -32,6 +34,8 @@ export interface SyncControllerDeps {
   unsyncedPresentation: UnsyncedPresentationPort;
   notifications: NotificationController;
   registerEditorDocument: (document: vscode.TextDocument) => void;
+  syncEngine: Pick<SyncEngine, "syncOne"> & Partial<Pick<SyncEngine, "syncTicketEditor">>;
+  offlineSyncMode?: OfflineSyncMode;
 }
 
 export interface SyncController {
@@ -53,6 +57,7 @@ export const createSyncController = (deps: SyncControllerDeps): SyncController =
         onSubjectUpdated: updateTicketListSubject,
         onTicketCreated: () => ticketsPresentation.refresh(),
         onCommentsRefresh: (ticketId) => commentsPresentation.refreshForTicket(ticketId),
+        syncEngine: deps.syncEngine,
       });
       if (!syncResult) {
         return "failed";
@@ -65,6 +70,7 @@ export const createSyncController = (deps: SyncControllerDeps): SyncController =
             editor,
             undefined,
             getConnectionScopeForEditor(editor),
+            deps.syncEngine,
           );
         }
         notifications.notifyTicketSaveResult(result);
@@ -81,6 +87,7 @@ export const createSyncController = (deps: SyncControllerDeps): SyncController =
             result,
             editor,
             getConnectionScopeForEditor(editor),
+            deps.syncEngine,
           );
         }
         notifications.notifyCommentSaveResult(result);
@@ -106,6 +113,8 @@ export const createSyncController = (deps: SyncControllerDeps): SyncController =
       unsyncedPresentation,
       notifications,
       updateTicketListSubject,
+      syncEngine: deps.syncEngine,
+      offlineSyncMode: deps.offlineSyncMode,
     });
   };
 

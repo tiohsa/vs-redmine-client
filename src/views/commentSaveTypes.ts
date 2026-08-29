@@ -15,6 +15,8 @@ export interface CommentConflictContext {
   commentId: number;
   ticketId: number;
   baseBody: string;
+  /** False when the queue only has a source hash and cannot perform a valid three-way merge. */
+  baseBodyKnown?: boolean;
   localBody: string;
   remoteBody: string;
   remoteUpdatedAt?: string;

@@ -24,6 +24,13 @@ const makeNoopProvider = (): {
   setSelectedProjectId: async () => undefined,
 });
 
+const makeSyncEngineStub = () => ({
+  syncOne: async () => ({
+    kind: "failed_before_commit" as const,
+    error: new Error("sync is outside serialization test scope"),
+  }),
+});
+
 // コメント更新ファイルのコンテンツを生成するヘルパー
 // source_notes_hash に意図的に一致しないハッシュを使い、addOfflineCommentUpdateAsync が呼ばれるようにする
 const buildCommentUpdateContent = (body: string): string =>
@@ -52,7 +59,8 @@ suite("0.1.3 安定化: 保存トリガー同期のシリアライゼーショ�
         notifyTicketSaveResult: (r: { status: string }) => callLog.push(`ticket:${r.status}`),
         notifyCommentSaveResult: (r: { status: string }) => callLog.push(`comment:${r.status}`),
       } as unknown as import("../app/notificationController").NotificationController,
-      registerEditorDocument: () => undefined,
+    registerEditorDocument: () => undefined,
+    syncEngine: makeSyncEngineStub(),
     });
 
     suppressSaveSync(uri.toString());
@@ -92,7 +100,8 @@ suite("0.1.3 安定化: 保存トリガー同期のシリアライゼーショ�
         notifyTicketSaveResult: () => undefined,
         notifyCommentSaveResult: () => undefined,
       } as unknown as import("../app/notificationController").NotificationController,
-      registerEditorDocument: () => undefined,
+    registerEditorDocument: () => undefined,
+    syncEngine: makeSyncEngineStub(),
     });
 
     // 3 回の連続保存を 20ms 間隔で発火（最後のコンテンツが "Save 3"）
@@ -152,7 +161,8 @@ suite("0.1.3 安定化: 保存トリガー同期のシリアライゼーショ�
         notifyTicketSaveResult: () => undefined,
         notifyCommentSaveResult: () => undefined,
       } as unknown as import("../app/notificationController").NotificationController,
-      registerEditorDocument: () => undefined,
+    registerEditorDocument: () => undefined,
+    syncEngine: makeSyncEngineStub(),
     });
 
     const doc1 = { uri: uri1, getText: () => makeCommentContent(51, 901, "Doc1 body") } as vscode.TextDocument;
@@ -202,7 +212,8 @@ suite("0.1.3 安定化: 保存トリガー同期のシリアライゼーショ�
         notifyTicketSaveResult: () => undefined,
         notifyCommentSaveResult: () => undefined,
       } as unknown as import("../app/notificationController").NotificationController,
-      registerEditorDocument: () => undefined,
+    registerEditorDocument: () => undefined,
+    syncEngine: makeSyncEngineStub(),
     });
 
     const doc = {

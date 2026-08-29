@@ -79,6 +79,7 @@ export type OfflineTicketUpdate = {
   remoteUpdatedAt?: string;
   createdChildIds?: number[];
   revision?: number;
+  intentRevision?: number;
   nextIntent?: TicketUpdateIntentSnapshot;
   createdAt?: number;
   effects?: DurableSyncEffect[];
@@ -99,6 +100,7 @@ export type OfflineCommentUpdate = {
   phase?: TicketUpdateSyncPhase;
   attemptGeneration?: number;
   revision?: number;
+  intentRevision?: number;
   effects?: DurableSyncEffect[];
   remoteProjectId?: number;
   finalizeDraft?: boolean;
@@ -123,6 +125,7 @@ export type SyncOperation = {
   kind: SyncOperationKind;
   connectionScope: string;
   revision: number;
+  intentRevision?: number;
   attemptGeneration?: number;
   phase: NewTicketSyncPhase | TicketUpdateSyncPhase | "queued";
   documentUri?: string;
@@ -526,13 +529,14 @@ const operationFromTicketUpdate = (
   update: OfflineTicketUpdate,
   scope: string,
 ): SyncOperation => {
-  const revision = update.revision ?? 1;
+  const revision = Math.max(update.revision ?? 1, update.intentRevision ?? 0);
   const phase = update.phase ?? "queued";
   return ({
   operationId: update.operationId ?? `ticket:${update.ticketId}`,
   kind: "ticketUpdate",
-  connectionScope: update.connectionScope ?? scope,
-  revision,
+    connectionScope: update.connectionScope ?? scope,
+    revision,
+    intentRevision: revision,
   attemptGeneration: getAttemptGeneration(update),
   phase,
   documentUri: update.documentUri,
@@ -567,7 +571,7 @@ const operationFromComment = (
   scope: string,
   index: number,
 ): SyncOperation => {
-  const revision = comment.revision ?? 1;
+  const revision = Math.max(comment.revision ?? 1, comment.intentRevision ?? 0);
   const phase = (comment.phase ?? "queued") as SyncOperation["phase"];
   const durablePrimaryKind = comment.effects?.find((effect) =>
     effect.kind === "comment_create" || effect.kind === "comment_update"
@@ -580,9 +584,10 @@ const operationFromComment = (
   return ({
   operationId: comment.operationId ??
     `comment:${comment.ticketId}:${comment.commentId ?? comment.documentUri ?? index}`,
-  kind,
-  connectionScope: comment.connectionScope ?? scope,
-  revision,
+    kind,
+    connectionScope: comment.connectionScope ?? scope,
+    revision,
+    intentRevision: revision,
   attemptGeneration: getAttemptGeneration(comment),
   phase,
   documentUri: comment.documentUri,
@@ -619,7 +624,8 @@ const queueFromOperations = (operations: SyncOperation[]): OfflineSyncQueue => {
           ...(operation.payload as OfflineTicketUpdate),
           operationId: operation.operationId,
           connectionScope: operation.connectionScope,
-          revision: operation.revision,
+          revision: operation.intentRevision ?? operation.revision,
+          intentRevision: operation.intentRevision ?? operation.revision,
           attemptGeneration: operation.attemptGeneration,
           phase: operation.phase as TicketUpdateSyncPhase,
           createdAt: operation.createdAt,
@@ -630,11 +636,12 @@ const queueFromOperations = (operations: SyncOperation[]): OfflineSyncQueue => {
       }
       case "commentCreate":
       case "commentUpdate": {
-        const comment = normalizeComment({
-          ...(operation.payload as OfflineCommentUpdate),
-          operationId: operation.operationId,
-          connectionScope: operation.connectionScope,
-          revision: operation.revision,
+      const comment = normalizeComment({
+        ...(operation.payload as OfflineCommentUpdate),
+        operationId: operation.operationId,
+        connectionScope: operation.connectionScope,
+        revision: operation.intentRevision ?? operation.revision,
+        intentRevision: operation.intentRevision ?? operation.revision,
           attemptGeneration: operation.attemptGeneration,
           phase: (operation.phase === "remote_write_started" ? "commit_unknown" : operation.phase) as TicketUpdateSyncPhase,
           createdAt: operation.createdAt,
@@ -760,6 +767,7 @@ const promoteTicketIntent = (operation: OfflineTicketUpdate): OfflineTicketUpdat
     documentUri: next.documentUri ?? operation.documentUri,
     phase: "queued",
     revision: next.revision,
+    intentRevision: next.revision,
     nextIntent: undefined,
     effects: reusableEffects,
   };
@@ -791,7 +799,7 @@ const normalizeTicketUpdate = (
   ticketId: number,
   update: OfflineTicketUpdate,
 ): OfflineTicketUpdate => {
-  const revision = update.revision ?? 1;
+  const revision = Math.max(update.revision ?? 1, update.intentRevision ?? 0);
   const attemptGeneration = getAttemptGeneration(update);
   const phase = update.phase === "remote_write_started" ? "commit_unknown" : update.phase ?? "queued";
   const effects = normalizeOperationEffects({
@@ -811,6 +819,7 @@ const normalizeTicketUpdate = (
     operationId: update.operationId ?? `ticket:${ticketId}`,
     phase: restoredPhase,
     revision,
+    intentRevision: revision,
     attemptGeneration,
     effects,
   };
@@ -889,6 +898,7 @@ const promoteCommentIntent = (operation: OfflineCommentUpdate): OfflineCommentUp
     documentUri: next.documentUri ?? operation.documentUri,
     phase: "queued",
     revision: next.revision,
+    intentRevision: next.revision,
     nextIntent: undefined,
     effects: reusableEffects,
   };
@@ -908,7 +918,7 @@ const normalizeComment = (
     : durablePrimaryKind === "comment_update"
       ? "commentUpdate"
       : comment.commentId === undefined ? "commentCreate" : "commentUpdate";
-  const revision = comment.revision ?? 1;
+  const revision = Math.max(comment.revision ?? 1, comment.intentRevision ?? 0);
   const phase = comment.phase === "remote_write_started"
     ? "commit_unknown"
     : comment.phase ?? "queued";
@@ -930,6 +940,7 @@ const normalizeComment = (
       `comment:${comment.ticketId}:${comment.commentId ?? comment.documentUri ?? index}`,
     connectionScope: comment.connectionScope ?? scope,
     revision,
+    intentRevision: revision,
     attemptGeneration,
     phase: restoredPhase,
     effects,
@@ -1205,6 +1216,66 @@ export const addOfflineTicketUpdateAsync = (
   return commitQueueMutation(undefined);
 });
 
+export type OfflineTicketConflictExpectation = Pick<
+  OfflineTicketUpdate,
+  "operationId" | "revision" | "intentRevision" | "connectionScope" | "content"
+>;
+
+export type OfflineCommentConflictExpectation = Pick<
+  OfflineCommentUpdate,
+  "operationId" | "revision" | "intentRevision" | "connectionScope" | "body"
+>;
+
+const hasCurrentAttemptNonPlannedEffect = (
+  operation: Pick<OfflineTicketUpdate | OfflineCommentUpdate, "attemptGeneration" | "effects">,
+): boolean => {
+  const attemptGeneration = getAttemptGeneration(operation);
+  return (operation.effects ?? []).some((effect) =>
+    normalizeAttemptGeneration(effect.attemptGeneration) === attemptGeneration &&
+    effect.state !== "planned"
+  );
+};
+
+export const rebaseOfflineTicketUpdateAfterConflictAsync = (
+  ticketId: number,
+  remoteBase: Pick<
+    OfflineTicketUpdate,
+    "baseSubject" | "baseDescription" | "baseMetadata" | "lastKnownRemoteUpdatedAt"
+  >,
+  scope = activeScope,
+  expected?: OfflineTicketConflictExpectation,
+): Promise<OfflineTicketUpdate | undefined> => mutateQueueAsync(scope, (queue) => {
+  const existing = queue.tickets.get(ticketId);
+  if (
+    !existing ||
+    (existing.phase !== undefined && existing.phase !== "queued") ||
+    existing.nextIntent !== undefined ||
+    (existing.connectionScope !== undefined && existing.connectionScope !== scope) ||
+    hasCurrentAttemptNonPlannedEffect(existing) ||
+    (expected !== undefined && (
+      existing.operationId !== expected.operationId ||
+      existing.revision !== expected.revision ||
+      (expected.intentRevision !== undefined &&
+        (existing.intentRevision ?? existing.revision) !== expected.intentRevision) ||
+      (expected.connectionScope !== undefined &&
+        existing.connectionScope !== expected.connectionScope) ||
+      existing.content !== expected.content
+    ))
+  ) {
+    return skipQueueMutation(undefined);
+  }
+  const revision = Math.max(existing.revision ?? 1, existing.intentRevision ?? 0) + 1;
+  const rebased: OfflineTicketUpdate = {
+    ...existing,
+    ...remoteBase,
+    phase: "queued",
+    revision,
+    intentRevision: revision,
+  };
+  queue.tickets.set(ticketId, rebased);
+  return commitQueueMutation(rebased);
+});
+
 export const addOfflineCommentUpdateAsync = (
   update: OfflineCommentUpdate,
   scope = activeScope,
@@ -1247,6 +1318,47 @@ export const addOfflineCommentUpdateAsync = (
     createdAt: update.createdAt ?? Date.now(),
   }, scope, queue.comments.length));
   return commitQueueMutation(undefined);
+});
+
+export const rebaseOfflineCommentUpdateAfterConflictAsync = (
+  commentId: number,
+  remoteBase: Pick<
+    OfflineCommentUpdate,
+    "baseBody" | "lastKnownRemoteUpdatedAt" | "sourceNotesHash"
+  >,
+  scope = activeScope,
+  expected?: OfflineCommentConflictExpectation,
+): Promise<OfflineCommentUpdate | undefined> => mutateQueueAsync(scope, (queue) => {
+  const index = queue.comments.findIndex((entry) => entry.commentId === commentId);
+  const existing = index === -1 ? undefined : queue.comments[index];
+  if (
+    !existing ||
+    (existing.phase !== undefined && existing.phase !== "queued") ||
+    existing.nextIntent !== undefined ||
+    (existing.connectionScope !== undefined && existing.connectionScope !== scope) ||
+    hasCurrentAttemptNonPlannedEffect(existing) ||
+    (expected !== undefined && (
+      existing.operationId !== expected.operationId ||
+      existing.revision !== expected.revision ||
+      (expected.intentRevision !== undefined &&
+        (existing.intentRevision ?? existing.revision) !== expected.intentRevision) ||
+      (expected.connectionScope !== undefined &&
+        existing.connectionScope !== expected.connectionScope) ||
+      existing.body !== expected.body
+    ))
+  ) {
+    return skipQueueMutation(undefined);
+  }
+  const revision = Math.max(existing.revision ?? 1, existing.intentRevision ?? 0) + 1;
+  const rebased: OfflineCommentUpdate = {
+    ...existing,
+    ...remoteBase,
+    phase: "queued",
+    revision,
+    intentRevision: revision,
+  };
+  queue.comments[index] = rebased;
+  return commitQueueMutation(rebased);
 });
 
 const findNewTicketIndex = (
@@ -1872,6 +1984,34 @@ export const removeOfflineTicketUpdateAsync = async (
     : skipQueueMutation(undefined));
 };
 
+export const removeOfflineTicketUpdateIfMatchesAsync = (
+  ticketId: number,
+  expected: OfflineTicketConflictExpectation | undefined,
+  scope = activeScope,
+): Promise<boolean> => mutateQueueAsync(scope, (queue) => {
+  const current = queue.tickets.get(ticketId);
+  if (!current) {
+    return skipQueueMutation(expected === undefined);
+  }
+  if (
+    expected === undefined ||
+    (current.phase !== undefined && current.phase !== "queued") ||
+    current.nextIntent !== undefined ||
+    (current.connectionScope !== undefined && current.connectionScope !== scope) ||
+    current.operationId !== expected.operationId ||
+    current.revision !== expected.revision ||
+    (expected.intentRevision !== undefined &&
+      (current.intentRevision ?? current.revision) !== expected.intentRevision) ||
+    (expected.connectionScope !== undefined &&
+      current.connectionScope !== expected.connectionScope) ||
+    current.content !== expected.content
+  ) {
+        return skipQueueMutation(false);
+  }
+  queue.tickets.delete(ticketId);
+  return commitQueueMutation(true);
+});
+
 export const discardOfflineTicketUpdateAsync = async (
   ticketId: number,
   scope: string,
@@ -2137,6 +2277,35 @@ export const removeOfflineCommentEntryAsync = (
   return queue.comments.length === previousLength
     ? skipQueueMutation(undefined)
     : commitQueueMutation(undefined);
+});
+
+export const removeOfflineCommentEntryIfMatchesAsync = (
+  params: { ticketId: number; commentId?: number; documentUri?: string },
+  expected: OfflineCommentConflictExpectation | undefined,
+  scope = activeScope,
+): Promise<boolean> => mutateQueueAsync(scope, (queue) => {
+  const index = findCommentIndex(queue, params);
+  if (index === -1) {
+    return skipQueueMutation(expected === undefined);
+  }
+  const current = queue.comments[index];
+  if (
+    expected === undefined ||
+    (current.phase !== undefined && current.phase !== "queued") ||
+    current.nextIntent !== undefined ||
+    (current.connectionScope !== undefined && current.connectionScope !== scope) ||
+    current.operationId !== expected.operationId ||
+    current.revision !== expected.revision ||
+    (expected.intentRevision !== undefined &&
+      (current.intentRevision ?? current.revision) !== expected.intentRevision) ||
+    (expected.connectionScope !== undefined &&
+      current.connectionScope !== expected.connectionScope) ||
+    current.body !== expected.body
+  ) {
+    return skipQueueMutation(false);
+  }
+  queue.comments.splice(index, 1);
+  return commitQueueMutation(true);
 });
 
 /** Canonical write API for all pending synchronization operations. */

@@ -36,8 +36,10 @@ import {
 } from "../../views/commentSaveSync";
 import {
   finalizeNewCommentDraftFileAfterSync,
+  isCommentUpdateFilename,
   updateCommentUpdateFileAfterSync,
 } from "../../views/commentUpdateFile";
+import { updateCommentEdit } from "../../views/commentEditStore";
 import {
   buildMarkdownImageUploadFailureMessage,
   hasMarkdownImageUploadFailure,
@@ -3719,13 +3721,18 @@ export class CommentUpdateHandler implements OperationHandler<CommentUpdateInten
     }
 
     // コンフリクト検出
-    if (intent.sourceNotesHash) {
+    if (intent.sourceNotesHash || intent.lastKnownRemoteUpdatedAt) {
       try {
         const detail = await commentDeps.getIssueDetail(ticketId);
         const remoteComment = detail.comments.find((c) => c.id === commentId);
         if (remoteComment) {
           const remoteHash = computeNotesHash(remoteComment.body);
-          if (remoteHash !== intent.sourceNotesHash) {
+          const hashChanged = intent.sourceNotesHash !== undefined &&
+            remoteHash !== intent.sourceNotesHash;
+          const timestampChanged = intent.lastKnownRemoteUpdatedAt !== undefined &&
+            remoteComment.updatedAt !== intent.lastKnownRemoteUpdatedAt;
+          const remoteChanged = hashChanged || timestampChanged;
+          if (remoteChanged) {
             return {
               ok: false,
               outcome: {
@@ -3733,6 +3740,15 @@ export class CommentUpdateHandler implements OperationHandler<CommentUpdateInten
                 ticketId,
                 commentId,
                 message: vscode.l10n.t("Comment was updated in Redmine. Review the diff before syncing."),
+                commentConflictContext: {
+                  ticketId,
+                  commentId,
+                  baseBody: intent.baseBody ?? "",
+                  baseBodyKnown: intent.baseBody !== undefined,
+                  localBody: nextContent,
+                  remoteBody: remoteComment.body,
+                  remoteUpdatedAt: remoteComment.updatedAt,
+                },
               },
             };
           }
@@ -4094,13 +4110,13 @@ export class CommentUpdateHandler implements OperationHandler<CommentUpdateInten
       if (operation.phase === "commit_unknown" && normalizeCommentBody(remoteComment.body) !== normalizeCommentBody(expectedBody)) {
         return { ok: false, message: "Remote comment body does not match intended update" };
       }
-      return {
-        ok: true,
-        remoteId: commentId,
-        projectId: detail.ticket.projectId,
-        remoteUpdatedAt: detail.ticket.updatedAt,
-        canonical: detail,
-      };
+    return {
+      ok: true,
+      remoteId: commentId,
+      projectId: detail.ticket.projectId,
+      remoteUpdatedAt: remoteComment.updatedAt,
+      canonical: detail,
+    };
     } catch (err) {
       return { ok: false, message: (err as Error).message };
     }
@@ -4114,17 +4130,32 @@ export class CommentUpdateHandler implements OperationHandler<CommentUpdateInten
   ): Promise<{ ok: true } | { ok: false; message: string; pending: "local_finalize" }> {
     const documentUri = operation.documentUri ?? operation.intent?.documentUri;
     const body = operation.intent?.body ?? "";
-    if (documentUri) {
+    const commentId = operation.commentId ?? operation.intent?.commentId;
+    const remoteComment = commentId === undefined
+      ? undefined
+      : reconciled?.comments?.find((comment: { id?: number }) => comment.id === commentId);
+    const remoteBody = typeof remoteComment?.body === "string" ? remoteComment.body : body;
+    const remoteUpdatedAt = typeof remoteComment?.updatedAt === "string"
+      ? remoteComment.updatedAt
+      : operation.remoteUpdatedAt;
+
+    const requiresCommentUpdateFileFinalize = operation.intent?.sourceNotesHash !== undefined ||
+      (documentUri !== undefined && isCommentUpdateFilename(path.basename(vscode.Uri.parse(documentUri).path)));
+    if (documentUri && requiresCommentUpdateFileFinalize) {
       const res = await updateCommentUpdateFileAfterSync({
         documentUri,
-        syncedBody: body,
+        syncedBody: remoteBody,
         expectedBody: operation.intent?.body ?? "",
-        remoteUpdatedAt: reconciled?.ticket?.updatedAt,
+        remoteUpdatedAt,
         canonical: reconciled,
       });
       if (res !== "applied") {
         return { ok: false, message: `Local finalization pending: ${res}`, pending: "local_finalize" };
       }
+    } else if (commentId !== undefined) {
+      // A regular comment editor is not a comment-update frontmatter file.
+      // Its durable local finalize is the reconciled edit baseline, not a file rewrite.
+      updateCommentEdit(commentId, remoteBody, remoteUpdatedAt, context.connectionScope);
     }
     return { ok: true };
   }
