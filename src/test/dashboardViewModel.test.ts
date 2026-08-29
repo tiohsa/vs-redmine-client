@@ -7,8 +7,8 @@ import {
 } from "../dashboard/viewModels/ticketDashboardViewModel";
 import { buildUnsyncedDashboardItems } from "../dashboard/viewModels/unsyncedDashboardViewModel";
 import {
-  clearOfflineSyncQueue,
-  replaceOfflineSyncQueue,
+  clearOfflineSyncQueueAsync,
+  replaceOfflineSyncQueueAsync,
 } from "../views/offlineSyncStore";
 import {
   clearTicketDrafts,
@@ -37,23 +37,23 @@ const makeTicket = (overrides: Partial<Ticket> & { id: number }): Ticket => ({
 });
 
 suite("Dashboard ViewModel — チケット変換", () => {
-  setup(() => {
-    clearOfflineSyncQueue();
+  setup(async () => {
+    await clearOfflineSyncQueueAsync();
     clearTicketDrafts();
     initializeDraftStoreForTests();
   });
 
-  teardown(() => {
-    clearOfflineSyncQueue();
+  teardown(async () => {
+    await clearOfflineSyncQueueAsync();
     clearTicketDrafts();
   });
 
-  test("空リストは空配列を返す", () => {
+  test("空リストは空配列を返す", async () => {
     const result = buildTicketDashboardNodes([]);
     assert.deepStrictEqual(result, []);
   });
 
-  test("フラットなチケットをノードに変換する", () => {
+  test("フラットなチケットをノードに変換する", async () => {
     const tickets = [makeTicket({ id: 1 }), makeTicket({ id: 2 })];
     const nodes = buildTicketDashboardNodes(tickets);
     assert.strictEqual(nodes.length, 2);
@@ -64,7 +64,7 @@ suite("Dashboard ViewModel — チケット変換", () => {
     assert.deepStrictEqual(nodes[0].children, []);
   });
 
-  test("親子ツリー構造が保持される", () => {
+  test("親子ツリー構造が保持される", async () => {
     const tickets = [
       makeTicket({ id: 1, subject: "Parent" }),
       makeTicket({ id: 2, subject: "Child", parentId: 1 }),
@@ -80,7 +80,7 @@ suite("Dashboard ViewModel — チケット変換", () => {
     assert.strictEqual(nodes[0].children[0].children[0].level, 2);
   });
 
-  test("親が読み込まれていない子はルートに昇格する", () => {
+  test("親が読み込まれていない子はルートに昇格する", async () => {
     const tickets = [
       makeTicket({ id: 2, subject: "Child", parentId: 99 }),
     ];
@@ -90,7 +90,7 @@ suite("Dashboard ViewModel — チケット変換", () => {
     assert.strictEqual(nodes[0].level, 0);
   });
 
-  test("各フィールドが正しくマッピングされる", () => {
+  test("各フィールドが正しくマッピングされる", async () => {
     const tickets = [
       makeTicket({
         id: 10,
@@ -120,7 +120,7 @@ suite("Dashboard ViewModel — チケット変換", () => {
     assert.strictEqual(node.startDate, "2026-04-01");
   });
 
-  test("buildTicketDetail でチケット詳細を変換する", () => {
+  test("buildTicketDetail でチケット詳細を変換する", async () => {
     const ticket = makeTicket({
       id: 5,
       subject: "Detail test",
@@ -145,43 +145,43 @@ suite("Dashboard ViewModel — チケット変換", () => {
 });
 
 suite("Dashboard ViewModel — 同期状態解決", () => {
-  setup(() => {
-    clearOfflineSyncQueue();
+  setup(async () => {
+    await clearOfflineSyncQueueAsync();
     clearTicketDrafts();
     initializeDraftStoreForTests();
   });
 
-  teardown(() => {
-    clearOfflineSyncQueue();
+  teardown(async () => {
+    await clearOfflineSyncQueueAsync();
     clearTicketDrafts();
   });
 
-  test("ドラフトなし・キューなしは Synced を返す", () => {
+  test("ドラフトなし・キューなしは Synced を返す", async () => {
     assert.strictEqual(resolveTicketSyncState(1), "Synced");
   });
 
-  test("ドラフトが Dirty のとき Dirty を返す", () => {
+  test("ドラフトが Dirty のとき Dirty を返す", async () => {
     setupDraft(10, "Dirty");
     assert.strictEqual(resolveTicketSyncState(10), "Dirty");
   });
 
-  test("ドラフトが Failed のとき Failed を返す", () => {
+  test("ドラフトが Failed のとき Failed を返す", async () => {
     setupDraft(11, "Failed");
     assert.strictEqual(resolveTicketSyncState(11), "Failed");
   });
 
-  test("ドラフトが Conflict のとき Conflict を返す", () => {
+  test("ドラフトが Conflict のとき Conflict を返す", async () => {
     setupDraft(12, "Conflict");
     assert.strictEqual(resolveTicketSyncState(12), "Conflict");
   });
 
-  test("ドラフトが Syncing のとき Syncing を返す", () => {
+  test("ドラフトが Syncing のとき Syncing を返す", async () => {
     setupDraft(13, "Syncing");
     assert.strictEqual(resolveTicketSyncState(13), "Syncing");
   });
 
-  test("オフラインキューに積まれているとき Queued を返す", () => {
-    replaceOfflineSyncQueue({
+  test("オフラインキューに積まれているとき Queued を返す", async () => {
+    await replaceOfflineSyncQueueAsync({
       tickets: new Map([[20, { ticketId: 20 } as never]]),
       comments: [],
       newTickets: [],
@@ -189,9 +189,9 @@ suite("Dashboard ViewModel — 同期状態解決", () => {
     assert.strictEqual(resolveTicketSyncState(20), "Queued");
   });
 
-  test("ドラフトが存在するときはキューより優先される", () => {
+  test("ドラフトが存在するときはキューより優先される", async () => {
     setupDraft(21, "Failed");
-    replaceOfflineSyncQueue({
+    await replaceOfflineSyncQueueAsync({
       tickets: new Map([[21, { ticketId: 21 } as never]]),
       comments: [],
       newTickets: [],
@@ -199,7 +199,7 @@ suite("Dashboard ViewModel — 同期状態解決", () => {
     assert.strictEqual(resolveTicketSyncState(21), "Failed");
   });
 
-  test("buildTicketDashboardNodes で syncState がノードに反映される", () => {
+  test("buildTicketDashboardNodes で syncState がノードに反映される", async () => {
     setupDraft(100, "Dirty");
     const tickets = [makeTicket({ id: 100 })];
     const nodes = buildTicketDashboardNodes(tickets);
@@ -208,21 +208,21 @@ suite("Dashboard ViewModel — 同期状態解決", () => {
 });
 
 suite("Dashboard ViewModel — 未同期アイテム変換", () => {
-  setup(() => {
-    clearOfflineSyncQueue();
+  setup(async () => {
+    await clearOfflineSyncQueueAsync();
   });
 
-  teardown(() => {
-    clearOfflineSyncQueue();
+  teardown(async () => {
+    await clearOfflineSyncQueueAsync();
   });
 
-  test("キューが空のとき空配列を返す", () => {
+  test("キューが空のとき空配列を返す", async () => {
     const items = buildUnsyncedDashboardItems();
     assert.deepStrictEqual(items, []);
   });
 
-  test("チケット更新が変換される", () => {
-    replaceOfflineSyncQueue({
+  test("チケット更新が変換される", async () => {
+    await replaceOfflineSyncQueueAsync({
       tickets: new Map([[5, { ticketId: 5 } as never]]),
       comments: [],
       newTickets: [],
@@ -233,8 +233,8 @@ suite("Dashboard ViewModel — 未同期アイテム変換", () => {
     assert.strictEqual(items[0].key.ticketId, 5);
   });
 
-  test("新規チケットが変換される", () => {
-    replaceOfflineSyncQueue({
+  test("新規チケットが変換される", async () => {
+    await replaceOfflineSyncQueueAsync({
       tickets: new Map(),
       comments: [],
       newTickets: [{ queueId: "test-q1", documentUri: "file:///new.md", projectId: 1, content: "" }],
@@ -245,8 +245,8 @@ suite("Dashboard ViewModel — 未同期アイテム変換", () => {
     assert.strictEqual(items[0].key.documentUri, "file:///new.md");
   });
 
-  test("remote checkpoint を持つitemも確認済みの破棄を許可する", () => {
-    replaceOfflineSyncQueue({
+  test("remote checkpoint を持つitemも確認済みの破棄を許可する", async () => {
+    await replaceOfflineSyncQueueAsync({
       tickets: new Map([[6, {
         ticketId: 6,
         phase: "reconciliation_pending",
@@ -262,8 +262,8 @@ suite("Dashboard ViewModel — 未同期アイテム変換", () => {
     assert.strictEqual(item.canSync, true);
   });
 
-  test("コメント更新が変換される", () => {
-    replaceOfflineSyncQueue({
+  test("コメント更新が変換される", async () => {
+    await replaceOfflineSyncQueueAsync({
       tickets: new Map(),
       comments: [
         {
@@ -282,8 +282,8 @@ suite("Dashboard ViewModel — 未同期アイテム変換", () => {
     assert.strictEqual(items[0].key.commentId, 42);
   });
 
-  test("複数種類の未同期アイテムを合算する", () => {
-    replaceOfflineSyncQueue({
+  test("複数種類の未同期アイテムを合算する", async () => {
+    await replaceOfflineSyncQueueAsync({
       tickets: new Map([[1, { ticketId: 1 } as never], [2, { ticketId: 2 } as never]]),
       comments: [{ ticketId: 3, commentId: 10, documentUri: "file:///c.md", body: "" }],
       newTickets: [{ queueId: "test-q2", documentUri: "file:///n.md", projectId: 2, content: "" }],

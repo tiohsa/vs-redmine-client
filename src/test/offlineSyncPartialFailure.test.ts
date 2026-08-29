@@ -1,12 +1,12 @@
 import * as assert from "assert";
 import {
   initializeOfflineSyncStore,
-  addOfflineTicketUpdate,
-  addOfflineCommentUpdate,
-  addOfflineNewTicket,
+  addOfflineTicketUpdateAsync,
+  addOfflineCommentUpdateAsync,
+  addOfflineNewTicketAsync,
   getOfflineSyncQueue,
-  replaceOfflineSyncQueue,
-  clearOfflineSyncQueue,
+  replaceOfflineSyncQueueAsync,
+  clearOfflineSyncQueueAsync,
 } from "../views/offlineSyncStore";
 import { applyQueuedTicketUpdate } from "../views/ticketSync/ticketQueueSync";
 import { applyQueuedCommentUpdate } from "../views/commentSaveSync";
@@ -24,12 +24,12 @@ const makeTicketUpdate = (ticketId: number) => ({
 });
 
 suite("Offline Sync partial failure", () => {
-  setup(() => {
+  setup(async () => {
     initializeOfflineSyncStore(createTestMemento());
   });
 
-  teardown(() => {
-    clearOfflineSyncQueue();
+  teardown(async () => {
+    await clearOfflineSyncQueueAsync();
   });
 
   // ── applyQueuedTicketUpdate ────────────────────────────────────────────────
@@ -180,18 +180,18 @@ suite("Offline Sync partial failure", () => {
 
   // ── キュー状態管理 ────────────────────────────────────────────────────────
 
-  test("成功分は replaceOfflineSyncQueue で除去される", () => {
+  test("成功分は replaceOfflineSyncQueueAsync で除去される", async () => {
     const memento = createTestMemento();
     initializeOfflineSyncStore(memento);
 
-    addOfflineTicketUpdate(1, makeTicketUpdate(1));
-    addOfflineTicketUpdate(2, makeTicketUpdate(2));
-    addOfflineCommentUpdate({ ticketId: 10, commentId: 99, body: "comment" });
+    await addOfflineTicketUpdateAsync(1, makeTicketUpdate(1));
+    await addOfflineTicketUpdateAsync(2, makeTicketUpdate(2));
+    await addOfflineCommentUpdateAsync({ ticketId: 10, commentId: 99, body: "comment" });
 
     // チケット1は成功（除去）、チケット2は失敗（残す）
     const failedTickets = [makeTicketUpdate(2)];
     const failedComments = [{ ticketId: 10, commentId: 99, body: "comment" }];
-    replaceOfflineSyncQueue({
+    await replaceOfflineSyncQueueAsync({
       tickets: new Map(failedTickets.map((t) => [t.ticketId, t])),
       comments: failedComments,
       newTickets: [],
@@ -204,15 +204,15 @@ suite("Offline Sync partial failure", () => {
     assert.strictEqual(q.comments.length, 1);
   });
 
-  test("全件成功時は clearOfflineSyncQueue でキューが空になる", () => {
+  test("全件成功時は clearOfflineSyncQueueAsync でキューが空になる", async () => {
     const memento = createTestMemento();
     initializeOfflineSyncStore(memento);
 
-    addOfflineTicketUpdate(1, makeTicketUpdate(1));
-    addOfflineCommentUpdate({ ticketId: 10, commentId: 99, body: "comment" });
-    addOfflineNewTicket({ content: "# New Ticket\n\nBody" });
+    await addOfflineTicketUpdateAsync(1, makeTicketUpdate(1));
+    await addOfflineCommentUpdateAsync({ ticketId: 10, commentId: 99, body: "comment" });
+    await addOfflineNewTicketAsync({ content: "# New Ticket\n\nBody" });
 
-    clearOfflineSyncQueue();
+    await clearOfflineSyncQueueAsync();
 
     const q = getOfflineSyncQueue();
     assert.strictEqual(q.tickets.size, 0);
@@ -220,25 +220,25 @@ suite("Offline Sync partial failure", () => {
     assert.strictEqual(q.newTickets.length, 0);
   });
 
-  test("同じ ticketId を二度 queue に追加しても重複しない", () => {
+  test("同じ ticketId を二度 queue に追加しても重複しない", async () => {
     const memento = createTestMemento();
     initializeOfflineSyncStore(memento);
 
-    addOfflineTicketUpdate(5, makeTicketUpdate(5));
-    addOfflineTicketUpdate(5, { ...makeTicketUpdate(5), subject: "Updated again" });
+    await addOfflineTicketUpdateAsync(5, makeTicketUpdate(5));
+    await addOfflineTicketUpdateAsync(5, { ...makeTicketUpdate(5), subject: "Updated again" });
 
     const q = getOfflineSyncQueue();
     assert.strictEqual(q.tickets.size, 1);
     assert.strictEqual(q.tickets.get(5)?.subject, "Updated again");
   });
 
-  test("同じ documentUri のコメントを二度 queue に追加しても重複しない", () => {
+  test("同じ documentUri のコメントを二度 queue に追加しても重複しない", async () => {
     const memento = createTestMemento();
     initializeOfflineSyncStore(memento);
 
     const docUri = "file:///tmp/comment_draft.md";
-    addOfflineCommentUpdate({ ticketId: 10, body: "first", documentUri: docUri });
-    addOfflineCommentUpdate({ ticketId: 10, body: "second", documentUri: docUri });
+    await addOfflineCommentUpdateAsync({ ticketId: 10, body: "first", documentUri: docUri });
+    await addOfflineCommentUpdateAsync({ ticketId: 10, body: "second", documentUri: docUri });
 
     const q = getOfflineSyncQueue();
     assert.strictEqual(q.comments.length, 1);

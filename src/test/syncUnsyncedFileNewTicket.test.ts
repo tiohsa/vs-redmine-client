@@ -1,6 +1,6 @@
 import * as assert from "assert";
 import * as vscode from "vscode";
-import { clearOfflineSyncQueue, addOfflineNewTicket, getOfflineSyncQueue, updateOfflineNewTicket } from "../views/offlineSyncStore";
+import { clearOfflineSyncQueueAsync, addOfflineNewTicketAsync, getOfflineSyncQueue, updateOfflineNewTicketAsync } from "../views/offlineSyncStore";
 import { clearTicketDrafts } from "../views/ticketDraftStore";
 import { buildTicketEditorContent, parseTicketEditorContent } from "../views/ticketEditorContent";
 import { buildIssueMetadataFixture } from "./helpers/ticketMetadataFixtures";
@@ -23,7 +23,7 @@ const buildNewTicketText = (): string =>
   });
 
 suite("syncUnsyncedFileNewTicket – buildRegisteredDocumentContent", () => {
-  test("rewrites content with ticket-update mode and issue_id", () => {
+  test("rewrites content with ticket-update mode and issue_id", async () => {
     const text = buildNewTicketText();
     const result = buildRegisteredDocumentContent(text, 9001);
 
@@ -35,7 +35,7 @@ suite("syncUnsyncedFileNewTicket – buildRegisteredDocumentContent", () => {
     assert.strictEqual(parsed.controlFields?.project_id, 5);
   });
 
-  test("preserves subject and description", () => {
+  test("preserves subject and description", async () => {
     const text = buildNewTicketText();
     const result = buildRegisteredDocumentContent(text, 123);
 
@@ -44,7 +44,7 @@ suite("syncUnsyncedFileNewTicket – buildRegisteredDocumentContent", () => {
     assert.strictEqual(parsed.description, "Body");
   });
 
-  test("removes draft_id when present", () => {
+  test("removes draft_id when present", async () => {
     const text = buildTicketEditorContent({
       subject: "T",
       description: "D",
@@ -200,19 +200,19 @@ suite("syncUnsyncedFileNewTicket – rewriteDocumentWithRegisteredFields closed 
 suite("syncUnsyncedFileNewTicket – queue management", () => {
   const DOC_URI = "untitled:redmine-client-new-ticket-queue.md";
 
-  setup(() => {
-    clearOfflineSyncQueue();
+  setup(async () => {
+    await clearOfflineSyncQueueAsync();
     clearTicketDrafts();
   });
 
-  teardown(() => {
-    clearOfflineSyncQueue();
+  teardown(async () => {
+    await clearOfflineSyncQueueAsync();
     clearTicketDrafts();
   });
 
   test("queue entry remains when rewrite fails", async () => {
     const text = buildNewTicketText();
-    addOfflineNewTicket({ content: text, projectId: 5, documentUri: DOC_URI });
+    await addOfflineNewTicketAsync({ content: text, projectId: 5, documentUri: DOC_URI });
 
     const openDocument = {
       uri: vscode.Uri.parse(DOC_URI),
@@ -233,7 +233,7 @@ suite("syncUnsyncedFileNewTicket – queue management", () => {
 });
 
 suite("syncUnsyncedFileNewTicket – project_id preserved in rewrite", () => {
-  test("buildRegisteredDocumentContent injects projectId into frontmatter", () => {
+  test("buildRegisteredDocumentContent injects projectId into frontmatter", async () => {
     const text = buildTicketEditorContent({
       subject: "T",
       description: "D",
@@ -247,7 +247,7 @@ suite("syncUnsyncedFileNewTicket – project_id preserved in rewrite", () => {
     assert.strictEqual(parsed.controlFields?.mode, "ticket-update");
   });
 
-  test("buildRegisteredDocumentContent overrides stale project_id with resolved value", () => {
+  test("buildRegisteredDocumentContent overrides stale project_id with resolved value", async () => {
     const text = buildTicketEditorContent({
       subject: "T",
       description: "D",
@@ -293,20 +293,20 @@ suite("syncUnsyncedFileNewTicket – project_id preserved in rewrite", () => {
   });
 });
 
-suite("syncUnsyncedFileNewTicket – updateOfflineNewTicket", () => {
+suite("syncUnsyncedFileNewTicket – updateOfflineNewTicketAsync", () => {
   const DOC_URI_UPD = "file:///tmp/update-test.md";
 
-  setup(() => {
-    clearOfflineSyncQueue();
+  setup(async () => {
+    await clearOfflineSyncQueueAsync();
   });
 
-  teardown(() => {
-    clearOfflineSyncQueue();
+  teardown(async () => {
+    await clearOfflineSyncQueueAsync();
   });
 
-  test("updateOfflineNewTicket sets createdIssueId and status", () => {
-    addOfflineNewTicket({ content: "# T", documentUri: DOC_URI_UPD, projectId: 5 });
-    updateOfflineNewTicket({ documentUri: DOC_URI_UPD }, { createdIssueId: 123, status: "created_rewrite_failed" });
+  test("updateOfflineNewTicketAsync sets createdIssueId and status", async () => {
+    await addOfflineNewTicketAsync({ content: "# T", documentUri: DOC_URI_UPD, projectId: 5 });
+    await updateOfflineNewTicketAsync({ documentUri: DOC_URI_UPD }, { createdIssueId: 123, status: "created_rewrite_failed" });
 
     const q = getOfflineSyncQueue();
     const entry = q.newTickets.find((t) => t.documentUri === DOC_URI_UPD);
@@ -316,18 +316,18 @@ suite("syncUnsyncedFileNewTicket – updateOfflineNewTicket", () => {
     assert.strictEqual(entry?.projectId, 5, "other fields preserved");
   });
 
-  test("updateOfflineNewTicket is no-op when documentUri not found", () => {
-    addOfflineNewTicket({ content: "# T", documentUri: DOC_URI_UPD });
-    updateOfflineNewTicket({ documentUri: "file:///tmp/nonexistent.md" }, { createdIssueId: 999 });
+  test("updateOfflineNewTicketAsync is no-op when documentUri not found", async () => {
+    await addOfflineNewTicketAsync({ content: "# T", documentUri: DOC_URI_UPD });
+    await updateOfflineNewTicketAsync({ documentUri: "file:///tmp/nonexistent.md" }, { createdIssueId: 999 });
 
     const q = getOfflineSyncQueue();
     const entry = q.newTickets.find((t) => t.documentUri === DOC_URI_UPD);
     assert.strictEqual(entry?.createdIssueId, undefined);
   });
 
-  test("queue entry with createdIssueId still exists after failed rewrite (regression)", () => {
-    addOfflineNewTicket({ content: "# T", documentUri: DOC_URI_UPD });
-    updateOfflineNewTicket({ documentUri: DOC_URI_UPD }, { createdIssueId: 77 });
+  test("queue entry with createdIssueId still exists after failed rewrite (regression)", async () => {
+    await addOfflineNewTicketAsync({ content: "# T", documentUri: DOC_URI_UPD });
+    await updateOfflineNewTicketAsync({ documentUri: DOC_URI_UPD }, { createdIssueId: 77 });
 
     const q = getOfflineSyncQueue();
     assert.strictEqual(q.newTickets.length, 1, "entry must remain in queue");

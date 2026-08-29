@@ -26,6 +26,7 @@ import {
   createSyncEngine,
   createTicketSyncService,
   ticketSyncOutcomeToSaveResult,
+  type SyncEngine,
   type SyncEngineOutcome,
 } from "../app/ticketSync";
 import type { RewriteDocumentDeps } from "../views/editorDocumentRewrite";
@@ -43,6 +44,7 @@ export interface SyncToRedmineOptions {
   onCommentsRefresh?: (ticketId: number) => void;
   deps?: Partial<TicketSaveDependencies & CommentSaveDependencies>;
   rewrite?: RewriteDocumentDeps;
+  syncEngine?: Pick<SyncEngine, "syncOne"> & Partial<Pick<SyncEngine, "syncTicketEditor">>;
 }
 
 const commentSyncOutcomeToSaveResult = (
@@ -59,7 +61,14 @@ const commentSyncOutcomeToSaveResult = (
     case "no_change":
       return { status: "no_change", message: "No changes to save." };
     case "conflict":
-      return { status: "conflict", message: outcome.message ?? "Remote changes detected." };
+      return {
+        status: "conflict",
+        message: outcome.message ?? "Remote changes detected.",
+        commentId: "commentId" in outcome ? outcome.commentId : undefined,
+        conflictContext: "commentConflictContext" in outcome
+          ? outcome.commentConflictContext
+          : undefined,
+      };
     case "commit_unknown":
       return { status: "failed", message: outcome.message };
     case "remote_committed":
@@ -108,17 +117,20 @@ const syncEditorToRedmineAtScope = async (
   }
 
   if (ticketId === NEW_TICKET_DRAFT_ID) {
-    const outcome = await createTicketSyncService({
-      create: options.deps,
-      update: options.deps,
-      rewrite: options.rewrite,
-    }).syncEditor({
+    const input = {
       context: { connectionScope: operationScope },
       editor,
       ticketId,
       newTicket: true,
       manual: getOfflineSyncMode() === "manual",
-    });
+    };
+    const outcome = options.syncEngine?.syncTicketEditor
+      ? await options.syncEngine.syncTicketEditor(input)
+      : await createTicketSyncService({
+          create: options.deps,
+          update: options.deps,
+          rewrite: options.rewrite,
+        }).syncEditor(input);
     const result = ticketSyncOutcomeToSaveResult(outcome, true);
     if (outcome.kind === "completed") {
       options.onTicketCreated?.();
@@ -130,17 +142,20 @@ const syncEditorToRedmineAtScope = async (
     markDraftStatus(ticketId, "Syncing", operationScope);
     let result: TicketSaveResult;
     try {
-      const outcome = await createTicketSyncService({
-        create: options.deps,
-        update: options.deps,
-        rewrite: options.rewrite,
-      }).syncEditor({
+      const input = {
         context: { connectionScope: operationScope },
         editor,
         ticketId,
         newTicket: false,
         manual: getOfflineSyncMode() === "manual",
-      });
+      };
+      const outcome = options.syncEngine?.syncTicketEditor
+        ? await options.syncEngine.syncTicketEditor(input)
+        : await createTicketSyncService({
+            create: options.deps,
+            update: options.deps,
+            rewrite: options.rewrite,
+          }).syncEditor(input);
       result = ticketSyncOutcomeToSaveResult(outcome, false);
       if (outcome.kind === "completed") {
         const canonicalSubject = getTicketDraft(ticketId, operationScope)?.baseSubject;
@@ -161,11 +176,11 @@ const syncEditorToRedmineAtScope = async (
   }
 
   if (contentType === "commentDraft") {
-    const queued = saveCommentDraftLocally(editor, operationScope);
+    const queued = await saveCommentDraftLocally(editor, operationScope);
     if (!queued || getOfflineSyncMode() === "manual") {
       return queued ? { kind: "comment", result: queued, ticketId } : undefined;
     }
-    const outcome = await createSyncEngine({ comments: options.deps }).syncOne(
+    const outcome = await (options.syncEngine ?? createSyncEngine({ comments: options.deps })).syncOne(
       {
         kind: "comment",
         ticketId,
@@ -185,11 +200,11 @@ const syncEditorToRedmineAtScope = async (
     if (!commentId) {
       return undefined;
     }
-    const queued = saveCommentDraftLocally(editor, operationScope);
+    const queued = await saveCommentDraftLocally(editor, operationScope);
     if (!queued || getOfflineSyncMode() === "manual") {
       return queued ? { kind: "comment", result: queued, ticketId } : undefined;
     }
-    const outcome = await createSyncEngine({ comments: options.deps }).syncOne(
+    const outcome = await (options.syncEngine ?? createSyncEngine({ comments: options.deps })).syncOne(
       {
         kind: "comment",
         ticketId,

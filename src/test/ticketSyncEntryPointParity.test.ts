@@ -3,7 +3,7 @@ import * as vscode from "vscode";
 import { TicketSyncService } from "../app/ticketSync";
 import {
   addOfflineNewTicketAsync,
-  addOfflineTicketUpdate,
+  addOfflineTicketUpdateAsync,
   getOfflineSyncQueue,
   initializeOfflineSyncStore,
 } from "../views/offlineSyncStore";
@@ -149,7 +149,7 @@ suite("TicketSyncService entry-point parity", () => {
       clearRegistry();
       const localMetadata = buildIssueMetadataFixture({ status: "In Progress" });
       initializeTicketDraft(800, "Local", "Old", localMetadata, undefined, scope);
-      addOfflineTicketUpdate(800, {
+      await addOfflineTicketUpdateAsync(800, {
         ticketId: 800,
         baseSubject: "Local",
         baseDescription: "Old",

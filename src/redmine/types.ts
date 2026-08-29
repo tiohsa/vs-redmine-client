@@ -37,6 +37,7 @@ export interface TicketUpdateFields {
   description?: string;
   statusId?: number;
   assigneeId?: number;
+  assignedToId?: number | "";
   trackerId?: number;
   priorityId?: number;
   dueDate?: string | null;

@@ -1,7 +1,9 @@
 import { randomUUID } from "crypto";
+import { AsyncLocalStorage } from "async_hooks";
 import type { Memento } from "vscode";
 import { IssueMetadata } from "./ticketMetadataTypes";
 import {
+  buildTicketEditorContent,
   TicketEditorContent,
   TicketEditorLayout,
   TicketEditorMetadataBlock,
@@ -9,7 +11,11 @@ import {
 import type { FrontmatterControlFields } from "./ticketMetadataControlFields";
 import { computeNotesHash } from "../utils/notesHash";
 import {
+  getAttemptGeneration,
+  evaluateAttemptClosure,
   hasUncertainDurableSyncEffect,
+  hasUncertainPrimaryDurableSyncEffect,
+  normalizeAttemptGeneration,
   restoreDurableSyncEffect,
   transitionDurableSyncEffect,
   type DurableSyncEffect,
@@ -43,6 +49,7 @@ export type TicketUpdateIntentSnapshot = {
   subject: string;
   description: string;
   metadata: IssueMetadata;
+  content?: string;
   layout?: TicketEditorLayout;
   metadataBlock?: TicketEditorMetadataBlock;
   controlFields?: FrontmatterControlFields;
@@ -59,6 +66,7 @@ export type OfflineTicketUpdate = {
   subject: string;
   description: string;
   metadata: IssueMetadata;
+  content?: string;
   layout?: TicketEditorLayout;
   metadataBlock?: TicketEditorMetadataBlock;
   controlFields?: FrontmatterControlFields;
@@ -67,9 +75,11 @@ export type OfflineTicketUpdate = {
   operationId?: string;
   connectionScope?: string;
   phase?: TicketUpdateSyncPhase;
+  attemptGeneration?: number;
   remoteUpdatedAt?: string;
   createdChildIds?: number[];
   revision?: number;
+  intentRevision?: number;
   nextIntent?: TicketUpdateIntentSnapshot;
   createdAt?: number;
   effects?: DurableSyncEffect[];
@@ -88,7 +98,9 @@ export type OfflineCommentUpdate = {
   operationId?: string;
   connectionScope?: string;
   phase?: TicketUpdateSyncPhase;
+  attemptGeneration?: number;
   revision?: number;
+  intentRevision?: number;
   effects?: DurableSyncEffect[];
   remoteProjectId?: number;
   finalizeDraft?: boolean;
@@ -113,6 +125,8 @@ export type SyncOperation = {
   kind: SyncOperationKind;
   connectionScope: string;
   revision: number;
+  intentRevision?: number;
+  attemptGeneration?: number;
   phase: NewTicketSyncPhase | TicketUpdateSyncPhase | "queued";
   documentUri?: string;
   createdAt: number;
@@ -139,6 +153,7 @@ export type OfflineNewTicket = {
   status?: "queued" | "created_rewrite_failed";
   phase?: NewTicketSyncPhase;
   connectionScope?: string;
+  attemptGeneration?: number;
   remoteUpdatedAt?: string;
   createdChildIds?: number[];
   revision?: number;
@@ -201,6 +216,7 @@ export type CommentLifecycleAction =
 export type LifecycleTransitionExpectation<Phase extends string> = {
   operationId: string;
   revision: number;
+  attemptGeneration?: number;
   sourcePhase: Phase;
 };
 
@@ -250,14 +266,88 @@ type SerializedQueue = {
 
 let memento: Memento | undefined;
 let activeScope = "";
+export const getActiveScope = (): string => activeScope;
 const queuesByScope = new Map<string, OfflineSyncQueue>();
 const persistenceByScope = new Map<string, Promise<void>>();
-const pendingSnapshotByScope = new Map<string, SerializedQueue>();
+
+/**
+ * Scope単位の永続 mutation mutex。
+ *
+ * Lifecycle の CAS は「現在値の読込」から「Memento成功後のmemory commit」までを
+ * 一つの臨界区間として扱う必要がある。Repository からこのstoreへ再入する経路も
+ * あるため、AsyncLocalStorageで同一scopeの再入だけを許可する。
+ */
+const mutationContext = new AsyncLocalStorage<Set<string>>();
+const mutationByScope = new Map<string, Promise<unknown>>();
+
+const runScopeMutation = <T>(scope: string, mutation: () => Promise<T>): Promise<T> => {
+  const activeScopes = mutationContext.getStore();
+  if (activeScopes?.has(scope)) {
+    return mutation();
+  }
+
+  const previous = mutationByScope.get(scope);
+  if (!previous) {
+    const nextScopes = new Set(activeScopes ?? []);
+    nextScopes.add(scope);
+    const current = mutationContext.run(nextScopes, mutation);
+    const pending = current.catch(() => undefined);
+    mutationByScope.set(scope, pending);
+    void pending.then(() => {
+      if (mutationByScope.get(scope) === pending) {
+        mutationByScope.delete(scope);
+      }
+    });
+    return current;
+  }
+
+  // mutationByScope stores a rejection-swallowing promise, so attaching a
+  // single continuation keeps the first mutation observable in the next
+  // microtask (and preserves the existing async mutation contract).
+  const current = previous.then(() => {
+    const nextScopes = new Set(activeScopes ?? []);
+    nextScopes.add(scope);
+    return mutationContext.run(nextScopes, mutation);
+  });
+  const pending = current.catch(() => undefined);
+  mutationByScope.set(scope, pending);
+  void pending.then(
+    () => {
+      if (mutationByScope.get(scope) === pending) {
+        mutationByScope.delete(scope);
+      }
+    },
+    () => {
+      if (mutationByScope.get(scope) === pending) {
+        mutationByScope.delete(scope);
+      }
+    },
+  );
+  return current;
+};
 
 const emptyQueue = (): OfflineSyncQueue => ({
   tickets: new Map<number, OfflineTicketUpdate>(),
   comments: [],
   newTickets: [],
+});
+
+/** Queue transaction candidate を live state と参照共有しない形で複製する。 */
+const cloneQueueForMutation = (queue: OfflineSyncQueue): OfflineSyncQueue =>
+  structuredClone(queue);
+
+type QueueMutationResult<T> =
+  | { commit: true; result: T }
+  | { commit: false; result: T };
+
+const commitQueueMutation = <T>(result: T): QueueMutationResult<T> => ({
+  commit: true,
+  result,
+});
+
+const skipQueueMutation = <T>(result: T): QueueMutationResult<T> => ({
+  commit: false,
+  result,
 });
 
 const primaryEffectKind = (kind: SyncOperationKind): DurableSyncEffectKind => {
@@ -280,11 +370,16 @@ const primaryEffectId = (kind: SyncOperationKind): string => {
 
 const withPlannedPrimaryEffect = <T extends {
   revision?: number;
+  attemptGeneration?: number;
   effects?: DurableSyncEffect[];
 }>(operation: T, kind: SyncOperationKind, target: DurableSyncEffect["target"]): T => {
   const revision = operation.revision ?? 1;
+  const attemptGeneration = getAttemptGeneration(operation);
   const effectId = primaryEffectId(kind);
-  if (operation.effects?.some((effect) => effect.effectId === effectId)) {
+  if (operation.effects?.some((effect) =>
+    effect.effectId === effectId &&
+    normalizeAttemptGeneration(effect.attemptGeneration) === attemptGeneration
+  )) {
     return operation;
   }
   return {
@@ -293,6 +388,7 @@ const withPlannedPrimaryEffect = <T extends {
       effectId,
       kind: primaryEffectKind(kind),
       operationRevision: revision,
+      attemptGeneration,
       state: "planned",
       target,
     }],
@@ -301,6 +397,7 @@ const withPlannedPrimaryEffect = <T extends {
 
 const withPrimaryEffectTransition = <T extends {
   revision?: number;
+  attemptGeneration?: number;
   effects?: DurableSyncEffect[];
 }>(
   operation: T,
@@ -309,21 +406,33 @@ const withPrimaryEffectTransition = <T extends {
   sourceState: DurableSyncEffectState,
 ): T | undefined => {
   const effectId = primaryEffectId(kind);
+  const attemptGeneration = getAttemptGeneration(operation);
   let effects = operation.effects ?? [];
-  let index = effects.findIndex((effect) => effect.effectId === effectId);
+  let index = effects.findIndex((effect) =>
+    effect.effectId === effectId &&
+    normalizeAttemptGeneration(effect.attemptGeneration) === attemptGeneration
+  );
   if (index === -1 && sourceState !== "planned") {
     effects = [...effects, {
       effectId,
       kind: primaryEffectKind(kind),
       operationRevision: operation.revision ?? 1,
+      attemptGeneration,
       state: sourceState,
       target: {},
     }];
     index = effects.length - 1;
   }
   if (index === -1) { return undefined; }
+  if (
+    (action.kind === "commit" && effects[index].state === "committed" && (action.remoteId === undefined || effects[index].remoteId === action.remoteId)) ||
+    (action.kind === "mark_commit_unknown" && effects[index].state === "commit_unknown")
+  ) {
+    return { ...operation, effects };
+  }
   const transitioned = transitionDurableSyncEffect(effects[index], action, {
     operationRevision: operation.revision ?? 1,
+    attemptGeneration,
     sourceState,
   });
   if (!transitioned) {
@@ -337,16 +446,24 @@ const withPrimaryEffectTransition = <T extends {
 const normalizeOperationEffects = (input: {
   kind: SyncOperationKind;
   revision: number;
+  attemptGeneration?: number;
   phase: SyncOperation["phase"];
   payload: OfflineNewTicket | OfflineTicketUpdate | OfflineCommentUpdate;
   effects?: DurableSyncEffect[];
 }): DurableSyncEffect[] => {
+  const attemptGeneration = normalizeAttemptGeneration(input.attemptGeneration);
   if (Array.isArray(input.effects)) {
-    return input.effects.map(restoreDurableSyncEffect);
+    return input.effects.map((effect) => ({
+      ...restoreDurableSyncEffect(effect),
+      attemptGeneration: normalizeAttemptGeneration(effect.attemptGeneration ?? attemptGeneration),
+    }));
   }
   const payloadEffects = input.payload.effects;
   if (Array.isArray(payloadEffects)) {
-    return payloadEffects.map(restoreDurableSyncEffect);
+    return payloadEffects.map((effect) => ({
+      ...restoreDurableSyncEffect(effect),
+      attemptGeneration: normalizeAttemptGeneration(effect.attemptGeneration ?? attemptGeneration),
+    }));
   }
   const remoteId = input.kind === "ticketCreate"
     ? (input.payload as OfflineNewTicket).createdIssueId
@@ -366,6 +483,7 @@ const normalizeOperationEffects = (input: {
       effectId: primaryEffectId(input.kind),
       kind: primaryEffectKind(input.kind),
       operationRevision: input.revision,
+      attemptGeneration,
       state: uncertain ? "commit_unknown" : "committed",
       target: input.kind === "ticketUpdate" || input.kind === "commentCreate" ||
         input.kind === "commentUpdate"
@@ -383,6 +501,7 @@ const normalizeOperationEffects = (input: {
         effectId: `legacy-child:${childId}`,
         kind: "child_create",
         operationRevision: input.revision,
+        attemptGeneration,
         state: "committed",
         target: { ordinal },
         remoteId: childId,
@@ -399,6 +518,7 @@ const businessPayload = <T extends OfflineNewTicket | OfflineTicketUpdate | Offl
   delete copy.operationId;
   delete copy.connectionScope;
   delete copy.phase;
+  delete copy.attemptGeneration;
   delete copy.revision;
   delete copy.createdAt;
   delete copy.effects;
@@ -409,17 +529,19 @@ const operationFromTicketUpdate = (
   update: OfflineTicketUpdate,
   scope: string,
 ): SyncOperation => {
-  const revision = update.revision ?? 1;
+  const revision = Math.max(update.revision ?? 1, update.intentRevision ?? 0);
   const phase = update.phase ?? "queued";
   return ({
   operationId: update.operationId ?? `ticket:${update.ticketId}`,
   kind: "ticketUpdate",
-  connectionScope: update.connectionScope ?? scope,
-  revision,
+    connectionScope: update.connectionScope ?? scope,
+    revision,
+    intentRevision: revision,
+  attemptGeneration: getAttemptGeneration(update),
   phase,
   documentUri: update.documentUri,
   createdAt: update.createdAt ?? 0,
-  effects: normalizeOperationEffects({ kind: "ticketUpdate", revision, phase, payload: update }),
+  effects: normalizeOperationEffects({ kind: "ticketUpdate", revision, attemptGeneration: getAttemptGeneration(update), phase, payload: update, effects: update.effects }),
   payload: businessPayload(update),
   });
 };
@@ -435,10 +557,11 @@ const operationFromNewTicket = (
   kind: "ticketCreate",
   connectionScope: ticket.connectionScope ?? scope,
   revision,
+  attemptGeneration: getAttemptGeneration(ticket),
   phase,
   documentUri: ticket.documentUri,
   createdAt: ticket.createdAt ?? 0,
-  effects: normalizeOperationEffects({ kind: "ticketCreate", revision, phase, payload: ticket }),
+  effects: normalizeOperationEffects({ kind: "ticketCreate", revision, attemptGeneration: getAttemptGeneration(ticket), phase, payload: ticket, effects: ticket.effects }),
   payload: businessPayload(ticket),
   });
 };
@@ -448,8 +571,8 @@ const operationFromComment = (
   scope: string,
   index: number,
 ): SyncOperation => {
-  const revision = comment.revision ?? 1;
-  const phase = comment.phase ?? "queued";
+  const revision = Math.max(comment.revision ?? 1, comment.intentRevision ?? 0);
+  const phase = (comment.phase ?? "queued") as SyncOperation["phase"];
   const durablePrimaryKind = comment.effects?.find((effect) =>
     effect.kind === "comment_create" || effect.kind === "comment_update"
   )?.kind;
@@ -461,13 +584,15 @@ const operationFromComment = (
   return ({
   operationId: comment.operationId ??
     `comment:${comment.ticketId}:${comment.commentId ?? comment.documentUri ?? index}`,
-  kind,
-  connectionScope: comment.connectionScope ?? scope,
-  revision,
+    kind,
+    connectionScope: comment.connectionScope ?? scope,
+    revision,
+    intentRevision: revision,
+  attemptGeneration: getAttemptGeneration(comment),
   phase,
   documentUri: comment.documentUri,
   createdAt: comment.createdAt ?? 0,
-  effects: normalizeOperationEffects({ kind, revision, phase, payload: comment }),
+  effects: normalizeOperationEffects({ kind, revision, attemptGeneration: getAttemptGeneration(comment), phase, payload: comment, effects: comment.effects }),
   payload: businessPayload(comment),
   });
 };
@@ -488,9 +613,10 @@ const queueFromOperations = (operations: SyncOperation[]): OfflineSyncQueue => {
           operationId: operation.operationId,
           connectionScope: operation.connectionScope,
           revision: operation.revision,
+          attemptGeneration: operation.attemptGeneration,
           phase: operation.phase as NewTicketSyncPhase,
           createdAt: operation.createdAt,
-          effects: normalizeOperationEffects({ ...operation, effects: operation.effects }),
+          effects: normalizeOperationEffects({ ...operation, attemptGeneration: operation.attemptGeneration, effects: operation.effects }),
         }));
         break;
       case "ticketUpdate": {
@@ -498,24 +624,28 @@ const queueFromOperations = (operations: SyncOperation[]): OfflineSyncQueue => {
           ...(operation.payload as OfflineTicketUpdate),
           operationId: operation.operationId,
           connectionScope: operation.connectionScope,
-          revision: operation.revision,
+          revision: operation.intentRevision ?? operation.revision,
+          intentRevision: operation.intentRevision ?? operation.revision,
+          attemptGeneration: operation.attemptGeneration,
           phase: operation.phase as TicketUpdateSyncPhase,
           createdAt: operation.createdAt,
-          effects: normalizeOperationEffects({ ...operation, effects: operation.effects }),
+          effects: normalizeOperationEffects({ ...operation, attemptGeneration: operation.attemptGeneration, effects: operation.effects }),
         };
         queue.tickets.set(update.ticketId, normalizeTicketUpdate(update.ticketId, update));
         break;
       }
       case "commentCreate":
       case "commentUpdate": {
-        const comment = normalizeComment({
-          ...(operation.payload as OfflineCommentUpdate),
-          operationId: operation.operationId,
-          connectionScope: operation.connectionScope,
-          revision: operation.revision,
+      const comment = normalizeComment({
+        ...(operation.payload as OfflineCommentUpdate),
+        operationId: operation.operationId,
+        connectionScope: operation.connectionScope,
+        revision: operation.intentRevision ?? operation.revision,
+        intentRevision: operation.intentRevision ?? operation.revision,
+          attemptGeneration: operation.attemptGeneration,
           phase: (operation.phase === "remote_write_started" ? "commit_unknown" : operation.phase) as TicketUpdateSyncPhase,
           createdAt: operation.createdAt,
-          effects: normalizeOperationEffects({ ...operation, effects: operation.effects }),
+          effects: normalizeOperationEffects({ ...operation, attemptGeneration: operation.attemptGeneration, effects: operation.effects }),
         }, operation.connectionScope, queue.comments.length);
         queue.comments.push(comment);
         break;
@@ -534,20 +664,22 @@ const getQueue = (scope = activeScope): OfflineSyncQueue => {
   return queue;
 };
 
-const serializeQueue = (scope: string): SerializedQueue => {
-  const queue = getQueue(scope);
-  return {
-    version: 3,
-    operations: operationsFromQueue(queue, scope),
-  };
-};
+const serializeQueueFrom = (
+  queue: OfflineSyncQueue,
+  scope: string,
+): SerializedQueue => ({
+  version: 3,
+  operations: operationsFromQueue(queue, scope),
+});
+
+const serializeQueue = (scope: string): SerializedQueue =>
+  serializeQueueFrom(getQueue(scope), scope);
 
 const schedulePersist = (
   scope: string,
   serialized: SerializedQueue,
   clearLegacy = false,
 ): Promise<void> => {
-  pendingSnapshotByScope.set(scope, serialized);
   const targetMemento = memento;
   const previous = persistenceByScope.get(scope);
   const perform = async (): Promise<void> => {
@@ -565,36 +697,68 @@ const schedulePersist = (
   void current.finally(() => {
     if (persistenceByScope.get(scope) === current) {
       persistenceByScope.delete(scope);
-      pendingSnapshotByScope.delete(scope);
     }
   }).catch(() => undefined);
   return current;
 };
 
-const persistAsync = async (scope = activeScope): Promise<void> => {
-  const serialized = serializeQueue(scope);
-  await schedulePersist(scope, serialized);
-  notifyQueueChanged();
-};
+/**
+ * 同一 scope の Queue mutation に対する唯一の transaction primitive。
+ * latest read から persist、memory publish、通知までを同じ critical section
+ * で行い、永続化に失敗した candidate は live memory へ公開しない。
+ */
+const mutateQueueAsync = <T>(
+  scope: string,
+  mutation: (
+    candidate: OfflineSyncQueue,
+  ) => QueueMutationResult<T> | Promise<QueueMutationResult<T>>,
+): Promise<T> => runScopeMutation(scope, async () => {
+  const candidate = cloneQueueForMutation(getQueue(scope));
+  const outcome = await mutation(candidate);
+  if (!outcome.commit) {
+    return outcome.result;
+  }
 
-const persist = (scope = activeScope): void => {
-  const serialized = serializeQueue(scope);
-  const current = schedulePersist(scope, serialized);
+  await schedulePersist(scope, serializeQueueFrom(candidate, scope));
+  queuesByScope.set(scope, candidate);
   notifyQueueChanged();
-  void current.catch((err: unknown) => {
-    console.error("[vs-redmine-client] offlineSyncStore: persist failed", err);
+  return outcome.result;
+});
+
+/**
+ * Repository が operation 単位の read/CAS/modify を Store transaction 内で
+ * 実行するための境界。`undefined` は検証不一致として永続化しない。
+ */
+export const mutateOfflineSyncQueueAsync = <T>(
+  scope: string,
+  mutation: (candidate: OfflineSyncQueue) => T | undefined | Promise<T | undefined>,
+): Promise<T | undefined> => mutateQueueAsync(scope, async (candidate) => {
+  const result = await mutation(candidate);
+  return result === undefined
+    ? skipQueueMutation(undefined)
+    : commitQueueMutation(result);
+});
+
+export const persistAsync = (scope = activeScope): Promise<void> =>
+  runScopeMutation(scope, async () => {
+    await schedulePersist(scope, serializeQueue(scope));
+    notifyQueueChanged();
   });
-};
 
 const promoteTicketIntent = (operation: OfflineTicketUpdate): OfflineTicketUpdate => {
   const next = operation.nextIntent;
+  const effects = operation.effects ?? [];
   if (!next) {
-    return { ...operation, phase: "queued", nextIntent: undefined, effects: [] };
+    return { ...operation, phase: "queued", nextIntent: undefined, effects };
   }
+  const reusableEffects = effects.filter((e) =>
+    e.state === "committed" || e.state === "commit_unknown" || e.state === "compensation_unknown" || e.state === "compensation_started"
+  );
   return {
     ...operation,
     subject: next.subject,
     description: next.description,
+    content: next.content ?? operation.content,
     metadata: next.metadata,
     layout: next.layout,
     metadataBlock: next.metadataBlock,
@@ -603,16 +767,21 @@ const promoteTicketIntent = (operation: OfflineTicketUpdate): OfflineTicketUpdat
     documentUri: next.documentUri ?? operation.documentUri,
     phase: "queued",
     revision: next.revision,
+    intentRevision: next.revision,
     nextIntent: undefined,
-    effects: [],
+    effects: reusableEffects,
   };
 };
 
 const promoteNewTicketIntent = (operation: OfflineNewTicket): OfflineNewTicket => {
   const next = operation.nextIntent;
+  const effects = operation.effects ?? [];
   if (!next) {
-    return { ...operation, phase: "queued", nextIntent: undefined, effects: [] };
+    return { ...operation, phase: "queued", nextIntent: undefined, effects };
   }
+  const reusableEffects = effects.filter((e) =>
+    e.state === "committed" || e.state === "commit_unknown" || e.state === "compensation_unknown" || e.state === "compensation_started"
+  );
   return {
     ...operation,
     content: next.content,
@@ -622,7 +791,7 @@ const promoteNewTicketIntent = (operation: OfflineNewTicket): OfflineNewTicket =
     phase: "queued",
     revision: next.revision,
     nextIntent: undefined,
-    effects: [],
+    effects: reusableEffects,
   };
 };
 
@@ -630,26 +799,47 @@ const normalizeTicketUpdate = (
   ticketId: number,
   update: OfflineTicketUpdate,
 ): OfflineTicketUpdate => {
+  const revision = Math.max(update.revision ?? 1, update.intentRevision ?? 0);
+  const attemptGeneration = getAttemptGeneration(update);
+  const phase = update.phase === "remote_write_started" ? "commit_unknown" : update.phase ?? "queued";
+  const effects = normalizeOperationEffects({
+    kind: "ticketUpdate",
+    revision,
+    attemptGeneration,
+    phase,
+    payload: update,
+    effects: update.effects,
+  });
+  const restoredPhase = hasUncertainPrimaryDurableSyncEffect(effects) &&
+    (phase === "preparing" || phase === "queued")
+    ? "commit_unknown"
+    : phase;
   const restored: OfflineTicketUpdate = {
     ...update,
     operationId: update.operationId ?? `ticket:${ticketId}`,
-    phase: update.phase === "remote_write_started" ? "commit_unknown" : update.phase ?? "queued",
-    revision: update.revision ?? 1,
+    phase: restoredPhase,
+    revision,
+    intentRevision: revision,
+    attemptGeneration,
+    effects,
   };
-  const preparingHasRemoteChild = restored.phase === "preparing" &&
-    restored.effects?.some((effect) => effect.kind === "child_create" && [
-      "committed",
-      "commit_unknown",
-      "compensation_started",
-      "compensation_unknown",
-    ].includes(effect.state));
-  return !preparingHasRemoteChild && (restored.phase === "preparing" || restored.phase === "queued")
+  const hasRemoteChild = restored.effects?.some((effect) => effect.kind === "child_create" && [
+    "committed",
+    "commit_unknown",
+    "compensation_started",
+    "compensation_unknown",
+  ].includes(effect.state));
+  if (hasRemoteChild) {
+    return restored;
+  }
+  return restored.phase === "preparing" || restored.phase === "queued"
     ? promoteTicketIntent(restored)
     : restored;
 };
 
 const normalizeNewTicket = (ticket: OfflineNewTicket): OfflineNewTicket => {
   const revision = ticket.revision ?? 1;
+  const attemptGeneration = getAttemptGeneration(ticket);
   const phase = ticket.phase === "remote_write_started" ? "commit_unknown" : ticket.phase ?? (
     ticket.createdIssueId !== undefined || ticket.status === "created_rewrite_failed"
       ? "local_finalize_pending"
@@ -658,10 +848,12 @@ const normalizeNewTicket = (ticket: OfflineNewTicket): OfflineNewTicket => {
   const effects = normalizeOperationEffects({
     kind: "ticketCreate",
     revision,
+    attemptGeneration,
     phase,
     payload: ticket,
+    effects: ticket.effects,
   });
-  const restoredPhase = hasUncertainDurableSyncEffect(effects) &&
+  const restoredPhase = hasUncertainPrimaryDurableSyncEffect(effects) &&
     (phase === "preparing" || phase === "queued")
     ? "commit_unknown"
     : phase;
@@ -669,6 +861,7 @@ const normalizeNewTicket = (ticket: OfflineNewTicket): OfflineNewTicket => {
     ...ticket,
     operationId: ticket.operationId ?? ticket.queueId,
     revision,
+    attemptGeneration,
     phase: restoredPhase,
     effects,
   };
@@ -679,27 +872,35 @@ const normalizeNewTicket = (ticket: OfflineNewTicket): OfflineNewTicket => {
 
 const promoteCommentIntent = (operation: OfflineCommentUpdate): OfflineCommentUpdate => {
   const next = operation.nextIntent;
+  const effects = operation.effects ?? [];
   if (!next) {
-    return { ...operation, phase: "queued", nextIntent: undefined, effects: [] };
+    return { ...operation, phase: "queued", nextIntent: undefined, effects };
   }
+  const commentId = operation.commentId ?? (operation as any).createdRemoteId;
+  const hasCommentId = commentId !== undefined;
+  const reusableEffects = effects.filter((e) =>
+    e.state === "committed" || e.state === "commit_unknown" || e.state === "compensation_unknown" || e.state === "compensation_started"
+  );
   return {
     ...operation,
+    commentId,
     body: next.body,
-    baseBody: operation.finalizeDraft && operation.commentId !== undefined
+    baseBody: operation.finalizeDraft && hasCommentId
       ? operation.body
       : operation.baseBody,
-    sourceNotesHash: operation.finalizeDraft && operation.commentId !== undefined
+    sourceNotesHash: operation.finalizeDraft && hasCommentId
       ? computeNotesHash(operation.body)
       : operation.sourceNotesHash,
-    finalizeDraft: operation.finalizeDraft && operation.commentId !== undefined
+    finalizeDraft: operation.finalizeDraft && hasCommentId
       ? false
       : operation.finalizeDraft,
     baseDir: next.baseDir ?? operation.baseDir,
     documentUri: next.documentUri ?? operation.documentUri,
     phase: "queued",
     revision: next.revision,
+    intentRevision: next.revision,
     nextIntent: undefined,
-    effects: [],
+    effects: reusableEffects,
   };
 };
 
@@ -708,6 +909,7 @@ const normalizeComment = (
   scope: string,
   index: number,
 ): OfflineCommentUpdate => {
+  const attemptGeneration = getAttemptGeneration(comment);
   const durablePrimaryKind = comment.effects?.find((effect) =>
     effect.kind === "comment_create" || effect.kind === "comment_update"
   )?.kind;
@@ -716,17 +918,19 @@ const normalizeComment = (
     : durablePrimaryKind === "comment_update"
       ? "commentUpdate"
       : comment.commentId === undefined ? "commentCreate" : "commentUpdate";
-  const revision = comment.revision ?? 1;
+  const revision = Math.max(comment.revision ?? 1, comment.intentRevision ?? 0);
   const phase = comment.phase === "remote_write_started"
     ? "commit_unknown"
     : comment.phase ?? "queued";
   const effects = normalizeOperationEffects({
     kind,
     revision,
+    attemptGeneration,
     phase,
     payload: comment,
+    effects: comment.effects,
   });
-  const restoredPhase = hasUncertainDurableSyncEffect(effects) &&
+  const restoredPhase = hasUncertainPrimaryDurableSyncEffect(effects) &&
     (phase === "preparing" || phase === "queued")
     ? "commit_unknown"
     : phase;
@@ -736,6 +940,8 @@ const normalizeComment = (
       `comment:${comment.ticketId}:${comment.commentId ?? comment.documentUri ?? index}`,
     connectionScope: comment.connectionScope ?? scope,
     revision,
+    intentRevision: revision,
+    attemptGeneration,
     phase: restoredPhase,
     effects,
   };
@@ -759,15 +965,17 @@ const deserializeQueue = (raw: SerializedQueue | undefined): OfflineSyncQueue =>
   return {
     tickets: new Map(
       raw && Array.isArray(raw.tickets)
-        ? raw.tickets.filter(
-          (e): e is [number, OfflineTicketUpdate] =>
-            Array.isArray(e) &&
-            typeof e[0] === "number" &&
-            e[1] !== null &&
-            typeof e[1] === "object",
-        ).map(([ticketId, update]) => (
-          [ticketId, normalizeTicketUpdate(ticketId, update)] as [number, OfflineTicketUpdate]
-        ))
+        ? raw.tickets
+          .map((e: any): [number, OfflineTicketUpdate] | undefined => {
+            if (Array.isArray(e) && typeof e[0] === "number" && e[1] && typeof e[1] === "object") {
+              return [e[0], normalizeTicketUpdate(e[0], e[1])];
+            }
+            if (e && typeof e === "object" && typeof e.ticketId === "number") {
+              return [e.ticketId, normalizeTicketUpdate(e.ticketId, e)];
+            }
+            return undefined;
+          })
+          .filter((e): e is [number, OfflineTicketUpdate] => e !== undefined)
         : [],
     ),
     comments:
@@ -787,10 +995,7 @@ const deserializeQueue = (raw: SerializedQueue | undefined): OfflineSyncQueue =>
 
 /** Returns the canonical, persisted representation of pending work. */
 export const listSyncOperations = (scope = activeScope): SyncOperation[] =>
-  operationsFromQueue(getQueue(scope), scope).map((operation) => ({
-    ...operation,
-    payload: { ...operation.payload },
-  }));
+  structuredClone(operationsFromQueue(getQueue(scope), scope));
 
 export const getSyncOperation = (
   operationId: string,
@@ -802,10 +1007,30 @@ export const getSyncOperation = (
 const findStoredOperation = (
   queue: OfflineSyncQueue,
   operationId: string,
-): OfflineNewTicket | OfflineTicketUpdate | OfflineCommentUpdate | undefined =>
-  queue.newTickets.find((operation) => operation.operationId === operationId) ??
-  Array.from(queue.tickets.values()).find((operation) => operation.operationId === operationId) ??
-  queue.comments.find((operation) => operation.operationId === operationId);
+): OfflineNewTicket | OfflineTicketUpdate | OfflineCommentUpdate | undefined => {
+  const newTicket = queue.newTickets.find((op) =>
+    op.operationId === operationId ||
+    (op.queueId !== undefined && op.queueId === operationId) ||
+    (op.documentUri !== undefined && (operationId.endsWith(`:${op.documentUri}`) || operationId === op.documentUri))
+  );
+  if (newTicket) { return newTicket; }
+
+  const ticket = Array.from(queue.tickets.values()).find((op) =>
+    op.operationId === operationId ||
+    `ticket:${op.ticketId}` === operationId ||
+    operationId.endsWith(`:${op.ticketId}`)
+  );
+  if (ticket) { return ticket; }
+
+  return queue.comments.find((op) =>
+    op.operationId === operationId ||
+    (op.operationId !== undefined && (operationId.endsWith(`:${op.operationId}`) || op.operationId.endsWith(`:${operationId}`))) ||
+    (op.commentId !== undefined && `comment:${op.ticketId}:${op.commentId}` === operationId) ||
+    (op.commentId !== undefined && operationId.includes(`:${op.ticketId}:${op.commentId}`)) ||
+    (op.documentUri !== undefined && (operationId.endsWith(`:${op.documentUri}`) || operationId === op.documentUri)) ||
+    (op.ticketId !== undefined && operationId.includes(`:${op.ticketId}:`))
+  );
+};
 
 export const planOfflineSyncEffectAsync = async (
   operationId: string,
@@ -813,22 +1038,39 @@ export const planOfflineSyncEffectAsync = async (
   scope: string,
   expectedRevision: number,
 ): Promise<DurableSyncEffect | undefined> => {
-  const operation = findStoredOperation(getQueue(scope), operationId);
+  return mutateQueueAsync(scope, (queue) => {
+  const operation = findStoredOperation(queue, operationId);
   if (
     !operation ||
     operation.revision !== expectedRevision ||
     effect.operationRevision !== expectedRevision ||
+    (effect.attemptGeneration !== undefined &&
+      normalizeAttemptGeneration(effect.attemptGeneration) !== getAttemptGeneration(operation)) ||
     (operation.connectionScope !== undefined && operation.connectionScope !== scope)
   ) {
-    return undefined;
+    return skipQueueMutation(undefined);
   }
-  const existing = operation.effects?.find((candidate) => candidate.effectId === effect.effectId);
+  const existing = operation.effects?.find((candidate) =>
+    candidate.effectId === effect.effectId &&
+    normalizeAttemptGeneration(candidate.attemptGeneration) === getAttemptGeneration(operation)
+  );
   if (existing) {
-    return existing.operationRevision === expectedRevision ? { ...existing } : undefined;
+    return skipQueueMutation(
+      existing.operationRevision === expectedRevision ? { ...existing } : undefined,
+    );
   }
-  operation.effects = [...(operation.effects ?? []), { ...effect, target: { ...effect.target } }];
-  await persistAsync(scope);
-  return { ...effect, target: { ...effect.target } };
+  const planned = {
+    ...effect,
+    attemptGeneration: getAttemptGeneration(operation),
+    target: { ...effect.target },
+  };
+  const nextOperation = {
+    ...operation,
+    effects: [...(operation.effects ?? []), planned],
+  } as StoredOfflineOperation;
+  replaceStoredOperationInQueue(queue, operation, nextOperation);
+  return commitQueueMutation({ ...planned, target: { ...planned.target } });
+  });
 };
 
 export const transitionOfflineSyncEffectAsync = async (
@@ -838,27 +1080,41 @@ export const transitionOfflineSyncEffectAsync = async (
   scope: string,
   expected: {
     operationRevision: number;
+    attemptGeneration?: number;
     sourceState: DurableSyncEffectState;
   },
 ): Promise<DurableSyncEffect | undefined> => {
-  const operation = findStoredOperation(getQueue(scope), operationId);
+  return mutateQueueAsync(scope, (queue) => {
+  const operation = findStoredOperation(queue, operationId);
   if (
     !operation ||
     operation.revision !== expected.operationRevision ||
+    (expected.attemptGeneration !== undefined &&
+      getAttemptGeneration(operation) !== normalizeAttemptGeneration(expected.attemptGeneration)) ||
     (operation.connectionScope !== undefined && operation.connectionScope !== scope)
   ) {
-    return undefined;
+    return skipQueueMutation(undefined);
   }
   const effects = operation.effects ?? [];
-  const index = effects.findIndex((effect) => effect.effectId === effectId);
-  if (index === -1) { return undefined; }
-  const transitioned = transitionDurableSyncEffect(effects[index], action, expected);
-  if (!transitioned) { return undefined; }
+  const index = effects.findIndex((effect) =>
+    effect.effectId === effectId &&
+    normalizeAttemptGeneration(effect.attemptGeneration) === getAttemptGeneration(operation)
+  );
+  if (index === -1) { return skipQueueMutation(undefined); }
+  const transitioned = transitionDurableSyncEffect(effects[index], action, {
+    ...expected,
+    attemptGeneration: expected.attemptGeneration ?? getAttemptGeneration(operation),
+  });
+  if (!transitioned) { return skipQueueMutation(undefined); }
   const nextEffects = [...effects];
   nextEffects[index] = transitioned;
-  operation.effects = nextEffects;
-  await persistAsync(scope);
-  return { ...transitioned, target: { ...transitioned.target } };
+  const nextOperation = {
+    ...operation,
+    effects: nextEffects,
+  } as StoredOfflineOperation;
+  replaceStoredOperationInQueue(queue, operation, nextOperation);
+  return commitQueueMutation({ ...transitioned, target: { ...transitioned.target } });
+  });
 };
 
 function loadQueue(storage: Memento, storageKey: string): OfflineSyncQueue {
@@ -868,27 +1124,24 @@ function loadQueue(storage: Memento, storageKey: string): OfflineSyncQueue {
 export const initializeOfflineSyncStore = (storage: Memento, scope?: string): void => {
   const sameStorage = memento === storage;
   const requestedScope = scope ?? "";
-  const pendingSnapshot = sameStorage
-    ? pendingSnapshotByScope.get(requestedScope)
-    : undefined;
   memento = storage;
   activeScope = requestedScope;
   queuesByScope.clear();
   if (!sameStorage) {
     persistenceByScope.clear();
-    pendingSnapshotByScope.clear();
   }
   const activeStorageKey = storageKeyForScope(activeScope);
   const scoped = storage.get<SerializedQueue>(activeStorageKey);
   const legacy = scope ? storage.get<SerializedQueue>(STORAGE_KEY) : undefined;
-  const queue = deserializeQueue(pendingSnapshot ?? scoped ?? legacy);
+  const queue = deserializeQueue(scoped ?? legacy);
   queuesByScope.set(activeScope, queue);
   if ((!scoped?.operations && (scoped || legacy))) {
-    const current = schedulePersist(
-      activeScope,
-      serializeQueue(activeScope),
+    const migrationScope = activeScope;
+    const current = runScopeMutation(migrationScope, () => schedulePersist(
+      migrationScope,
+      serializeQueue(migrationScope),
       Boolean(scope && !scoped && legacy),
-    );
+    ));
     void current.catch((err: unknown) => {
       console.error("[vs-redmine-client] offlineSyncStore: migration failed", err);
     });
@@ -915,6 +1168,7 @@ export const mergeOfflineTicketUpdate = (
       existing.revision ?? 1,
       existing.nextIntent?.revision ?? 0,
     ) + 1;
+    const fallbackNextContent = update.content ?? (update.subject ? buildTicketEditorContent(update) : update.description);
     return {
       ...existing,
       documentUri: existing.documentUri ?? update.documentUri,
@@ -922,6 +1176,7 @@ export const mergeOfflineTicketUpdate = (
         revision,
         subject: update.subject,
         description: update.description,
+        content: fallbackNextContent,
         metadata: update.metadata,
         layout: update.layout,
         metadataBlock: update.metadataBlock,
@@ -931,9 +1186,11 @@ export const mergeOfflineTicketUpdate = (
       },
     };
   }
+  const fallbackContent = update.content ?? existing?.content ?? (update.subject ? buildTicketEditorContent(update) : update.description);
   return {
     ...(existing ?? update),
     ...update,
+    content: fallbackContent,
     baseSubject: existing?.baseSubject ?? update.baseSubject,
     baseDescription: existing?.baseDescription ?? update.baseDescription,
     baseMetadata: existing?.baseMetadata ?? update.baseMetadata,
@@ -949,22 +1206,80 @@ export const mergeOfflineTicketUpdate = (
   };
 };
 
-export const addOfflineTicketUpdate = (
+export const addOfflineTicketUpdateAsync = (
   ticketId: number,
   update: OfflineTicketUpdate,
   scope = activeScope,
-): void => {
-  const queue = getQueue(scope);
+): Promise<void> => mutateQueueAsync(scope, (queue) => {
   const existing = queue.tickets.get(ticketId);
   queue.tickets.set(ticketId, mergeOfflineTicketUpdate(ticketId, existing, update));
-  persist(scope);
+  return commitQueueMutation(undefined);
+});
+
+export type OfflineTicketConflictExpectation = Pick<
+  OfflineTicketUpdate,
+  "operationId" | "revision" | "intentRevision" | "connectionScope" | "content"
+>;
+
+export type OfflineCommentConflictExpectation = Pick<
+  OfflineCommentUpdate,
+  "operationId" | "revision" | "intentRevision" | "connectionScope" | "body"
+>;
+
+const hasCurrentAttemptNonPlannedEffect = (
+  operation: Pick<OfflineTicketUpdate | OfflineCommentUpdate, "attemptGeneration" | "effects">,
+): boolean => {
+  const attemptGeneration = getAttemptGeneration(operation);
+  return (operation.effects ?? []).some((effect) =>
+    normalizeAttemptGeneration(effect.attemptGeneration) === attemptGeneration &&
+    effect.state !== "planned"
+  );
 };
 
-export const addOfflineCommentUpdate = (
+export const rebaseOfflineTicketUpdateAfterConflictAsync = (
+  ticketId: number,
+  remoteBase: Pick<
+    OfflineTicketUpdate,
+    "baseSubject" | "baseDescription" | "baseMetadata" | "lastKnownRemoteUpdatedAt"
+  >,
+  scope = activeScope,
+  expected?: OfflineTicketConflictExpectation,
+): Promise<OfflineTicketUpdate | undefined> => mutateQueueAsync(scope, (queue) => {
+  const existing = queue.tickets.get(ticketId);
+  if (
+    !existing ||
+    (existing.phase !== undefined && existing.phase !== "queued") ||
+    existing.nextIntent !== undefined ||
+    (existing.connectionScope !== undefined && existing.connectionScope !== scope) ||
+    hasCurrentAttemptNonPlannedEffect(existing) ||
+    (expected !== undefined && (
+      existing.operationId !== expected.operationId ||
+      existing.revision !== expected.revision ||
+      (expected.intentRevision !== undefined &&
+        (existing.intentRevision ?? existing.revision) !== expected.intentRevision) ||
+      (expected.connectionScope !== undefined &&
+        existing.connectionScope !== expected.connectionScope) ||
+      existing.content !== expected.content
+    ))
+  ) {
+    return skipQueueMutation(undefined);
+  }
+  const revision = Math.max(existing.revision ?? 1, existing.intentRevision ?? 0) + 1;
+  const rebased: OfflineTicketUpdate = {
+    ...existing,
+    ...remoteBase,
+    phase: "queued",
+    revision,
+    intentRevision: revision,
+  };
+  queue.tickets.set(ticketId, rebased);
+  return commitQueueMutation(rebased);
+});
+
+export const addOfflineCommentUpdateAsync = (
   update: OfflineCommentUpdate,
   scope = activeScope,
-): void => {
-  const queue = getQueue(scope);
+): Promise<void> => mutateQueueAsync(scope, (queue) => {
   const index = queue.comments.findIndex((item) =>
     (update.commentId !== undefined && item.commentId === update.commentId) ||
     (update.documentUri !== undefined && item.documentUri === update.documentUri),
@@ -992,8 +1307,7 @@ export const addOfflineCommentUpdate = (
         createdAt: existing.createdAt ?? update.createdAt ?? Date.now(),
       }, scope, index);
     }
-    persist(scope);
-    return;
+    return commitQueueMutation(undefined);
   }
   queue.comments.push(normalizeComment({
     ...update,
@@ -1003,8 +1317,49 @@ export const addOfflineCommentUpdate = (
     revision: update.revision ?? 1,
     createdAt: update.createdAt ?? Date.now(),
   }, scope, queue.comments.length));
-  persist(scope);
-};
+  return commitQueueMutation(undefined);
+});
+
+export const rebaseOfflineCommentUpdateAfterConflictAsync = (
+  commentId: number,
+  remoteBase: Pick<
+    OfflineCommentUpdate,
+    "baseBody" | "lastKnownRemoteUpdatedAt" | "sourceNotesHash"
+  >,
+  scope = activeScope,
+  expected?: OfflineCommentConflictExpectation,
+): Promise<OfflineCommentUpdate | undefined> => mutateQueueAsync(scope, (queue) => {
+  const index = queue.comments.findIndex((entry) => entry.commentId === commentId);
+  const existing = index === -1 ? undefined : queue.comments[index];
+  if (
+    !existing ||
+    (existing.phase !== undefined && existing.phase !== "queued") ||
+    existing.nextIntent !== undefined ||
+    (existing.connectionScope !== undefined && existing.connectionScope !== scope) ||
+    hasCurrentAttemptNonPlannedEffect(existing) ||
+    (expected !== undefined && (
+      existing.operationId !== expected.operationId ||
+      existing.revision !== expected.revision ||
+      (expected.intentRevision !== undefined &&
+        (existing.intentRevision ?? existing.revision) !== expected.intentRevision) ||
+      (expected.connectionScope !== undefined &&
+        existing.connectionScope !== expected.connectionScope) ||
+      existing.body !== expected.body
+    ))
+  ) {
+    return skipQueueMutation(undefined);
+  }
+  const revision = Math.max(existing.revision ?? 1, existing.intentRevision ?? 0) + 1;
+  const rebased: OfflineCommentUpdate = {
+    ...existing,
+    ...remoteBase,
+    phase: "queued",
+    revision,
+    intentRevision: revision,
+  };
+  queue.comments[index] = rebased;
+  return commitQueueMutation(rebased);
+});
 
 const findNewTicketIndex = (
   queue: OfflineSyncQueue,
@@ -1038,68 +1393,16 @@ const documentIdentity = (uri: string | undefined): string | undefined => {
   return uri;
 };
 
-const sameDocumentIdentity = (
+export const sameDocumentIdentity = (
   left: string | undefined,
   right: string | undefined,
 ): boolean => left !== undefined && right !== undefined &&
   documentIdentity(left) === documentIdentity(right);
 
-export const addOfflineNewTicket = (
-  update: Omit<OfflineNewTicket, "queueId">,
-  scope = activeScope,
-): void => {
-  const queue = getQueue(scope);
-  const index = update.documentUri
-    ? queue.newTickets.findIndex(
-      (item) => sameDocumentIdentity(item.documentUri, update.documentUri),
-    )
-    : -1;
-  if (index !== -1) {
-    const existing = queue.newTickets[index];
-    queue.newTickets.splice(index, 1);
-    if (existing.phase && existing.phase !== "queued" && existing.phase !== "completed") {
-      const revision = Math.max(
-        existing.revision ?? 1,
-        existing.nextIntent?.revision ?? 0,
-      ) + 1;
-      queue.newTickets.unshift({
-        ...existing,
-        documentUri: existing.documentUri ?? update.documentUri,
-        nextIntent: {
-          revision,
-          content: update.content,
-          projectId: update.projectId ?? existing.projectId,
-          documentUri: update.documentUri ?? existing.documentUri,
-          baseDir: update.baseDir ?? existing.baseDir,
-        },
-      });
-    } else {
-      queue.newTickets.unshift({
-        ...existing,
-        ...update,
-        revision: existing.revision ?? update.revision ?? 1,
-      });
-    }
-  } else {
-    const queueId = randomUUID();
-    queue.newTickets.unshift({
-      ...update,
-      queueId,
-      operationId: queueId,
-      phase: update.phase ?? "queued",
-      connectionScope: update.connectionScope ?? scope,
-      revision: update.revision ?? 1,
-      createdAt: update.createdAt ?? Date.now(),
-    });
-  }
-  persist(scope);
-};
-
 export const addOfflineNewTicketAsync = async (
   update: Omit<OfflineNewTicket, "queueId"> & { queueId?: string },
-  scope: string,
-): Promise<OfflineNewTicket> => {
-  const queue = getQueue(scope);
+  scope = activeScope,
+): Promise<OfflineNewTicket> => mutateQueueAsync(scope, (queue) => {
   const index = update.documentUri
     ? queue.newTickets.findIndex(
       (item) => sameDocumentIdentity(item.documentUri, update.documentUri),
@@ -1145,17 +1448,34 @@ export const addOfflineNewTicketAsync = async (
   } else {
     queue.newTickets[index] = entry;
   }
-  await persistAsync(scope);
-  return entry;
-};
+  return commitQueueMutation(entry);
+});
 
 export const getOfflineSyncQueue = (scope = activeScope): OfflineSyncQueue => {
-  const queue = getQueue(scope);
-  return {
-    tickets: new Map(queue.tickets),
-    comments: [...queue.comments],
-    newTickets: [...queue.newTickets],
-  };
+  return structuredClone(getQueue(scope));
+};
+
+type StoredOfflineOperation = OfflineNewTicket | OfflineTicketUpdate | OfflineCommentUpdate;
+
+const replaceStoredOperationInQueue = (
+  queue: OfflineSyncQueue,
+  current: StoredOfflineOperation,
+  next: StoredOfflineOperation,
+): void => {
+  const newTicketIndex = queue.newTickets.findIndex((entry) => entry === current);
+  if (newTicketIndex !== -1) {
+    queue.newTickets[newTicketIndex] = next as OfflineNewTicket;
+    return;
+  }
+  const ticketEntry = Array.from(queue.tickets.entries()).find(([, entry]) => entry === current);
+  if (ticketEntry) {
+    queue.tickets.set(ticketEntry[0], next as OfflineTicketUpdate);
+    return;
+  }
+  const commentIndex = queue.comments.findIndex((entry) => entry === current);
+  if (commentIndex !== -1) {
+    queue.comments[commentIndex] = next as OfflineCommentUpdate;
+  }
 };
 
 export const getOfflineNewTicket = (
@@ -1164,67 +1484,57 @@ export const getOfflineNewTicket = (
 ): OfflineNewTicket | undefined => {
   const queue = getQueue(scope);
   const index = findNewTicketIndex(queue, key);
-  return index === -1 ? undefined : { ...queue.newTickets[index] };
+  return index === -1 ? undefined : structuredClone(queue.newTickets[index]);
 };
 
-export const clearOfflineSyncQueue = (scope = activeScope): void => {
-  const queue = getQueue(scope);
+export const clearOfflineSyncQueueAsync = (scope = activeScope): Promise<void> =>
+  mutateQueueAsync(scope, (queue) => {
   queue.tickets.clear();
   queue.comments = [];
   queue.newTickets = [];
-  persist(scope);
-};
+  return commitQueueMutation(undefined);
+  });
 
-export const replaceOfflineSyncQueue = (
+const replaceOfflineSyncQueueAsyncInternal = async (
   next: OfflineSyncQueue,
   scope = activeScope,
-): void => {
-  const queue = getQueue(scope);
-  queue.tickets = new Map(next.tickets);
-  queue.comments = [...next.comments];
-  queue.newTickets = [...next.newTickets];
-  persist(scope);
-};
+): Promise<void> => mutateQueueAsync(scope, (candidate) => {
+  const isolated = cloneQueueForMutation(next);
+  candidate.tickets = isolated.tickets;
+  candidate.comments = isolated.comments;
+  candidate.newTickets = isolated.newTickets;
+  return commitQueueMutation(undefined);
+});
 
-export const removeOfflineTicketUpdate = (ticketId: number, scope = activeScope): void => {
-  const queue = getQueue(scope);
-  queue.tickets.delete(ticketId);
-  persist(scope);
-};
-
-export const updateOfflineNewTicket = (
-  key: { queueId?: string; documentUri?: string },
-  updates: Partial<Pick<OfflineNewTicket, "createdIssueId" | "status" | "phase" | "remoteUpdatedAt" | "createdChildIds">>,
+export const replaceOfflineSyncQueueAsync = (
+  next: OfflineSyncQueue,
   scope = activeScope,
-): void => {
-  const queue = getQueue(scope);
-  const index = findNewTicketIndex(queue, key);
-  if (index !== -1) {
-    queue.newTickets[index] = { ...queue.newTickets[index], ...updates };
-    persist(scope);
-  }
-};
+): Promise<void> => replaceOfflineSyncQueueAsyncInternal(next, scope);
 
 export const updateOfflineNewTicketAsync = async (
   key: { queueId?: string; documentUri?: string },
   updates: Partial<Pick<OfflineNewTicket, "createdIssueId" | "status" | "phase" | "remoteUpdatedAt" | "createdChildIds">>,
-  scope: string,
+  scope = activeScope,
   expectedRevision?: number,
 ): Promise<OfflineNewTicket | undefined> => {
-  const queue = getQueue(scope);
-  const index = findNewTicketIndex(queue, key);
-  if (index === -1 || (
-    expectedRevision !== undefined && queue.newTickets[index].revision !== expectedRevision
-  )) {
+  try {
+    return await mutateQueueAsync(scope, (queue) => {
+      const index = findNewTicketIndex(queue, key);
+      if (index === -1 || (
+        expectedRevision !== undefined && queue.newTickets[index].revision !== expectedRevision
+      )) {
+        return skipQueueMutation(undefined);
+      }
+      if (updates.phase === "queued" && queue.newTickets[index].nextIntent) {
+        return skipQueueMutation(undefined);
+      }
+      const next = { ...queue.newTickets[index], ...updates };
+      queue.newTickets[index] = next;
+      return commitQueueMutation(next);
+    });
+  } catch {
     return undefined;
   }
-  if (updates.phase === "queued" && queue.newTickets[index].nextIntent) {
-    return undefined;
-  }
-  const next = { ...queue.newTickets[index], ...updates };
-  queue.newTickets[index] = next;
-  await persistAsync(scope);
-  return next;
 };
 
 const newTicketActionAllowsSource = (
@@ -1235,10 +1545,10 @@ const newTicketActionAllowsSource = (
     case "begin_preparation": return source === "queued";
     case "abort_before_remote_write": return source === "preparing";
     case "start_normal_remote_write": return source === "preparing";
-    case "start_explicit_retry_remote_write": return source === "commit_unknown";
+    case "start_explicit_retry_remote_write": return source === "commit_unknown" || source === "remote_write_started";
     case "mark_commit_unknown": return source === "remote_write_started";
     case "record_remote_created": return source === "remote_write_started";
-    case "link_created_ticket": return source === "commit_unknown";
+    case "link_created_ticket": return source === "commit_unknown" || source === "remote_write_started";
     case "mark_reconciliation_pending":
       return source === "remote_created" || source === "reconciliation_pending" ||
         source === "local_finalize_pending";
@@ -1258,21 +1568,24 @@ export const transitionOfflineNewTicketLifecycleAsync = async (
   scope: string,
   expected: LifecycleTransitionExpectation<NewTicketSyncPhase>,
 ): Promise<OfflineNewTicket | undefined> => {
-  const queue = getQueue(scope);
-  const index = findNewTicketIndex(queue, key);
-  const current = index === -1 ? undefined : queue.newTickets[index];
-  if (
-    !current ||
-    current.operationId !== expected.operationId ||
-    current.revision !== expected.revision ||
-    current.phase !== expected.sourcePhase ||
-    (current.connectionScope !== undefined && current.connectionScope !== scope) ||
-    !newTicketActionAllowsSource(action, expected.sourcePhase)
-  ) {
-    return undefined;
-  }
-  let next: OfflineNewTicket;
-  switch (action.kind) {
+  try {
+    return await mutateQueueAsync(scope, (queue) => {
+      const index = findNewTicketIndex(queue, key);
+      const current = index === -1 ? undefined : queue.newTickets[index];
+      if (
+        !current ||
+        (current.operationId !== undefined && expected.operationId !== undefined && current.operationId !== expected.operationId) ||
+        current.revision !== expected.revision ||
+        (expected.attemptGeneration !== undefined &&
+          getAttemptGeneration(current) !== normalizeAttemptGeneration(expected.attemptGeneration)) ||
+        current.phase !== expected.sourcePhase ||
+        (current.connectionScope !== undefined && current.connectionScope !== scope) ||
+        !newTicketActionAllowsSource(action, expected.sourcePhase)
+      ) {
+        return skipQueueMutation(undefined);
+      }
+      let next: OfflineNewTicket;
+      switch (action.kind) {
     case "begin_preparation":
       next = {
         ...withPlannedPrimaryEffect(current, "ticketCreate", {}),
@@ -1292,7 +1605,7 @@ export const transitionOfflineNewTicketLifecycleAsync = async (
           : { kind: "start_explicit_retry" },
         action.kind === "start_normal_remote_write" ? "planned" : "commit_unknown",
       );
-      if (!transitioned) { return undefined; }
+      if (!transitioned) { return skipQueueMutation(undefined); }
       next = { ...transitioned, phase: "remote_write_started" };
       break;
     }
@@ -1303,7 +1616,7 @@ export const transitionOfflineNewTicketLifecycleAsync = async (
         { kind: "mark_commit_unknown" },
         "started",
       );
-      if (!transitioned) { return undefined; }
+      if (!transitioned) { return skipQueueMutation(undefined); }
       next = { ...transitioned, phase: "commit_unknown" };
       break;
     }
@@ -1317,7 +1630,7 @@ export const transitionOfflineNewTicketLifecycleAsync = async (
           : { kind: "assume_committed", remoteId: action.ticketId },
         action.kind === "record_remote_created" ? "started" : "commit_unknown",
       );
-      if (!transitioned) { return undefined; }
+      if (!transitioned) { return skipQueueMutation(undefined); }
       next = { ...transitioned, createdIssueId: action.ticketId, phase: "remote_created" };
       break;
     }
@@ -1339,29 +1652,49 @@ export const transitionOfflineNewTicketLifecycleAsync = async (
       next = { ...current, phase: "reconciliation_pending" };
       break;
     case "complete_compensation":
-      if (
-        current.effects?.find((effect) => effect.effectId === "ticket-create")?.state !==
-          "compensated" ||
-        current.effects?.some((effect) =>
-          effect.kind === "child_create" &&
-          effect.state !== "compensated" &&
-          effect.state !== "failed"
-        )
-      ) {
-        return undefined;
+      {
+        const currentAttemptGeneration = getAttemptGeneration(current);
+        const closureDecision = evaluateAttemptClosure(
+          current,
+          current.revision,
+          currentAttemptGeneration,
+        );
+        if (!closureDecision.closable) {
+          return skipQueueMutation(undefined);
+        }
+        const futureEffects = (current.effects ?? []).filter(
+          (effect) => normalizeAttemptGeneration(effect.attemptGeneration) > currentAttemptGeneration,
+        );
+        const promoted = current.nextIntent
+          ? {
+            ...current,
+            content: current.nextIntent.content,
+            projectId: current.nextIntent.projectId ?? current.projectId,
+            documentUri: current.nextIntent.documentUri ?? current.documentUri,
+            baseDir: current.nextIntent.baseDir ?? current.baseDir,
+            revision: current.nextIntent.revision,
+            nextIntent: undefined,
+          }
+          : { ...current, nextIntent: undefined };
+        next = {
+          ...promoted,
+          createdIssueId: undefined,
+          createdChildIds: undefined,
+          status: undefined,
+          remoteUpdatedAt: undefined,
+          attemptGeneration: currentAttemptGeneration + 1,
+          phase: "queued",
+          effects: futureEffects,
+        };
       }
-      next = {
-        ...current,
-        createdIssueId: undefined,
-        createdChildIds: undefined,
-        phase: "queued",
-        effects: [],
-      };
       break;
+      }
+      queue.newTickets[index] = next;
+      return commitQueueMutation(next);
+    });
+  } catch {
+    return undefined;
   }
-  queue.newTickets[index] = next;
-  await persistAsync(scope);
-  return next;
 };
 
 export const abortOfflineNewTicketBeforeRemoteWriteAsync = async (
@@ -1369,73 +1702,64 @@ export const abortOfflineNewTicketBeforeRemoteWriteAsync = async (
   scope: string,
   expectedRevision: number,
 ): Promise<OfflineNewTicket | undefined> => {
-  const queue = getQueue(scope);
-  const index = findNewTicketIndex(queue, key);
-  const current = index === -1 ? undefined : queue.newTickets[index];
-  if (!current || current.revision !== expectedRevision || current.phase !== "preparing") {
+  try {
+    return await mutateQueueAsync(scope, (queue) => {
+      const index = findNewTicketIndex(queue, key);
+      const current = index === -1 ? undefined : queue.newTickets[index];
+      if (!current || current.revision !== expectedRevision || current.phase !== "preparing") {
+        return skipQueueMutation(undefined);
+      }
+      const next = promoteNewTicketIntent(current);
+      queue.newTickets[index] = next;
+      return commitQueueMutation(next);
+    });
+  } catch {
     return undefined;
-  }
-  const next = promoteNewTicketIntent(current);
-  queue.newTickets[index] = next;
-  await persistAsync(scope);
-  return next;
-};
-
-export const removeOfflineNewTicket = (
-  key: { queueId?: string; documentUri?: string },
-  scope = activeScope,
-): void => {
-  const queue = getQueue(scope);
-  const previousLength = queue.newTickets.length;
-  queue.newTickets = queue.newTickets.filter((ticket) => {
-    if (key.queueId && ticket.queueId === key.queueId) {
-      return false;
-    }
-    return !sameDocumentIdentity(ticket.documentUri, key.documentUri);
-  });
-  if (queue.newTickets.length !== previousLength) {
-    persist(scope);
   }
 };
 
 export const removeOfflineNewTicketAsync = async (
   key: { queueId?: string; documentUri?: string },
-  scope: string,
+  scope = activeScope,
 ): Promise<void> => {
-  const queue = getQueue(scope);
-  const previousLength = queue.newTickets.length;
-  queue.newTickets = queue.newTickets.filter((ticket) => {
-    if (key.queueId && ticket.queueId === key.queueId) {
-      return false;
-    }
-    return !sameDocumentIdentity(ticket.documentUri, key.documentUri);
+  return mutateQueueAsync(scope, (queue) => {
+    const previousLength = queue.newTickets.length;
+    queue.newTickets = queue.newTickets.filter((ticket) => {
+      if (key.queueId && ticket.queueId === key.queueId) {
+        return false;
+      }
+      return !sameDocumentIdentity(ticket.documentUri, key.documentUri);
+    });
+    return queue.newTickets.length === previousLength
+      ? skipQueueMutation(undefined)
+      : commitQueueMutation(undefined);
   });
-  if (queue.newTickets.length !== previousLength) {
-    await persistAsync(scope);
-  }
 };
 
 export const discardOfflineNewTicketAsync = async (
   key: { queueId?: string; documentUri?: string },
   scope: string,
 ): Promise<OfflineDiscardResult> => {
-  const queue = getQueue(scope);
-  const index = findNewTicketIndex(queue, key);
-  if (index === -1) {
-    return "not_found";
+  try {
+    return await mutateQueueAsync(scope, (queue) => {
+      const index = findNewTicketIndex(queue, key);
+      if (index === -1) {
+        return skipQueueMutation("not_found");
+      }
+      const operation = queue.newTickets[index];
+      if (operation.phase && operation.phase !== "queued" && operation.phase !== "completed") {
+        if (!operation.nextIntent) {
+          return skipQueueMutation("recovery_required");
+        }
+        queue.newTickets[index] = { ...operation, nextIntent: undefined };
+        return commitQueueMutation("discarded_next");
+      }
+      queue.newTickets.splice(index, 1);
+      return commitQueueMutation("discarded");
+    });
+  } catch {
+    return "recovery_required";
   }
-  const operation = queue.newTickets[index];
-  if (operation.phase && operation.phase !== "queued" && operation.phase !== "completed") {
-    if (!operation.nextIntent) {
-      return "recovery_required";
-    }
-    queue.newTickets[index] = { ...operation, nextIntent: undefined };
-    await persistAsync(scope);
-    return "discarded_next";
-  }
-  queue.newTickets.splice(index, 1);
-  await persistAsync(scope);
-  return "discarded";
 };
 
 export const completeOfflineNewTicketAsync = async (
@@ -1444,27 +1768,32 @@ export const completeOfflineNewTicketAsync = async (
   promotion?: OfflineTicketUpdate & { sourceRevision?: number },
   expectedRevision?: number,
 ): Promise<boolean> => {
-  const queue = getQueue(scope);
-  const index = findNewTicketIndex(queue, key);
-  if (index === -1) {
-    return true;
-  }
-  const current = queue.newTickets[index];
-  if (expectedRevision !== undefined && current.revision !== expectedRevision) {
+  try {
+    return await mutateQueueAsync(scope, (queue) => {
+      const index = findNewTicketIndex(queue, key);
+      if (index === -1) {
+        return skipQueueMutation(true);
+      }
+      const current = queue.newTickets[index];
+      if (expectedRevision !== undefined && current.revision !== expectedRevision) {
+        return skipQueueMutation(false);
+      }
+      if (current.nextIntent && (
+        !promotion ||
+        (current.nextIntent.revision !== undefined && promotion.sourceRevision !== current.nextIntent.revision)
+      )) {
+        return skipQueueMutation(false);
+      }
+      queue.newTickets.splice(index, 1);
+      if (promotion) {
+        const { sourceRevision: _sourceRevision, ...ticketUpdate } = promotion;
+        queue.tickets.set(promotion.ticketId, ticketUpdate);
+      }
+      return commitQueueMutation(true);
+    });
+  } catch {
     return false;
   }
-  if (current.nextIntent) {
-    if (!promotion || promotion.sourceRevision !== current.nextIntent.revision) {
-      return false;
-    }
-  }
-  queue.newTickets.splice(index, 1);
-  if (promotion) {
-    const { sourceRevision: _sourceRevision, ...ticketUpdate } = promotion;
-    queue.tickets.set(promotion.ticketId, ticketUpdate);
-  }
-  await persistAsync(scope);
-  return true;
 };
 
 export const updateOfflineTicketUpdateAsync = async (
@@ -1473,18 +1802,22 @@ export const updateOfflineTicketUpdateAsync = async (
   scope: string,
   expectedRevision?: number,
 ): Promise<OfflineTicketUpdate | undefined> => {
-  const queue = getQueue(scope);
-  const current = queue.tickets.get(ticketId);
-  if (!current || (expectedRevision !== undefined && current.revision !== expectedRevision)) {
+  try {
+    return await mutateQueueAsync(scope, (queue) => {
+      const current = queue.tickets.get(ticketId);
+      if (!current || (expectedRevision !== undefined && current.revision !== expectedRevision)) {
+        return skipQueueMutation(undefined);
+      }
+      if (updates.phase === "queued" && current.nextIntent) {
+        return skipQueueMutation(undefined);
+      }
+      const next = { ...current, ...updates };
+      queue.tickets.set(ticketId, next);
+      return commitQueueMutation(next);
+    });
+  } catch {
     return undefined;
   }
-  if (updates.phase === "queued" && current.nextIntent) {
-    return undefined;
-  }
-  const next = { ...current, ...updates };
-  queue.tickets.set(ticketId, next);
-  await persistAsync(scope);
-  return next;
 };
 
 const ticketUpdateActionAllowsSource = (
@@ -1495,10 +1828,10 @@ const ticketUpdateActionAllowsSource = (
     case "begin_preparation": return source === "queued";
     case "abort_before_remote_write": return source === "preparing";
     case "start_normal_remote_write": return source === "preparing";
-    case "start_explicit_retry_remote_write": return source === "commit_unknown";
+    case "start_explicit_retry_remote_write": return source === "commit_unknown" || source === "remote_write_started";
     case "mark_commit_unknown": return source === "remote_write_started";
     case "record_remote_commit": return source === "remote_write_started";
-    case "assume_update_committed": return source === "commit_unknown";
+    case "assume_update_committed": return source === "commit_unknown" || source === "remote_write_started";
     case "mark_reconciliation_pending":
       return source === "remote_committed" || source === "reconciliation_pending" ||
         source === "local_finalize_pending";
@@ -1517,20 +1850,23 @@ export const transitionOfflineTicketUpdateLifecycleAsync = async (
   scope: string,
   expected: LifecycleTransitionExpectation<TicketUpdateSyncPhase>,
 ): Promise<OfflineTicketUpdate | undefined> => {
-  const queue = getQueue(scope);
-  const current = queue.tickets.get(ticketId);
-  if (
-    !current ||
-    current.operationId !== expected.operationId ||
-    current.revision !== expected.revision ||
-    current.phase !== expected.sourcePhase ||
-    (current.connectionScope !== undefined && current.connectionScope !== scope) ||
-    !ticketUpdateActionAllowsSource(action, expected.sourcePhase)
-  ) {
-    return undefined;
-  }
-  let next: OfflineTicketUpdate;
-  switch (action.kind) {
+  try {
+    return await mutateQueueAsync(scope, (queue) => {
+      const current = queue.tickets.get(ticketId);
+      if (
+        !current ||
+        current.operationId !== expected.operationId ||
+        current.revision !== expected.revision ||
+        (expected.attemptGeneration !== undefined &&
+          getAttemptGeneration(current) !== normalizeAttemptGeneration(expected.attemptGeneration)) ||
+        current.phase !== expected.sourcePhase ||
+        (current.connectionScope !== undefined && current.connectionScope !== scope) ||
+        !ticketUpdateActionAllowsSource(action, expected.sourcePhase)
+      ) {
+        return skipQueueMutation(undefined);
+      }
+      let next: OfflineTicketUpdate;
+      switch (action.kind) {
     case "begin_preparation":
       next = {
         ...withPlannedPrimaryEffect(current, "ticketUpdate", { ticketId }),
@@ -1551,7 +1887,7 @@ export const transitionOfflineTicketUpdateLifecycleAsync = async (
           : { kind: "start_explicit_retry" },
         action.kind === "start_normal_remote_write" ? "planned" : "commit_unknown",
       );
-      if (!transitioned) { return undefined; }
+      if (!transitioned) { return skipQueueMutation(undefined); }
       next = { ...transitioned, phase: "remote_write_started", remoteUpdatedAt: undefined };
       break;
     }
@@ -1562,7 +1898,7 @@ export const transitionOfflineTicketUpdateLifecycleAsync = async (
         { kind: "mark_commit_unknown" },
         "started",
       );
-      if (!transitioned) { return undefined; }
+      if (!transitioned) { return skipQueueMutation(undefined); }
       next = { ...transitioned, phase: "commit_unknown", remoteUpdatedAt: undefined };
       break;
     }
@@ -1573,7 +1909,7 @@ export const transitionOfflineTicketUpdateLifecycleAsync = async (
         { kind: "commit" },
         "started",
       );
-      if (!transitioned) { return undefined; }
+      if (!transitioned) { return skipQueueMutation(undefined); }
       next = {
         ...transitioned,
         phase: "remote_committed",
@@ -1589,7 +1925,7 @@ export const transitionOfflineTicketUpdateLifecycleAsync = async (
         { kind: "assume_committed" },
         "commit_unknown",
       );
-      if (!transitioned) { return undefined; }
+      if (!transitioned) { return skipQueueMutation(undefined); }
       next = { ...transitioned, phase: "remote_committed", remoteUpdatedAt: undefined };
       break;
     }
@@ -1610,10 +1946,13 @@ export const transitionOfflineTicketUpdateLifecycleAsync = async (
     case "mark_compensation_pending":
       next = { ...current, phase: "reconciliation_pending" };
       break;
+      }
+      queue.tickets.set(ticketId, next);
+      return commitQueueMutation(next);
+    });
+  } catch {
+    return undefined;
   }
-  queue.tickets.set(ticketId, next);
-  await persistAsync(scope);
-  return next;
 };
 
 export const abortOfflineTicketUpdateBeforeRemoteWriteAsync = async (
@@ -1621,39 +1960,72 @@ export const abortOfflineTicketUpdateBeforeRemoteWriteAsync = async (
   scope: string,
   expectedRevision: number,
 ): Promise<OfflineTicketUpdate | undefined> => {
-  const queue = getQueue(scope);
-  const current = queue.tickets.get(ticketId);
-  if (!current || current.revision !== expectedRevision || current.phase !== "preparing") {
+  try {
+    return await mutateQueueAsync(scope, (queue) => {
+      const current = queue.tickets.get(ticketId);
+      if (!current || current.revision !== expectedRevision || current.phase !== "preparing") {
+        return skipQueueMutation(undefined);
+      }
+      const next = promoteTicketIntent(current);
+      queue.tickets.set(ticketId, next);
+      return commitQueueMutation(next);
+    });
+  } catch {
     return undefined;
   }
-  const next = promoteTicketIntent(current);
-  queue.tickets.set(ticketId, next);
-  await persistAsync(scope);
-  return next;
 };
 
 export const removeOfflineTicketUpdateAsync = async (
   ticketId: number,
-  scope: string,
+  scope = activeScope,
 ): Promise<void> => {
-  const queue = getQueue(scope);
-  if (queue.tickets.delete(ticketId)) {
-    await persistAsync(scope);
-  }
+  return mutateQueueAsync(scope, (queue) => queue.tickets.delete(ticketId)
+    ? commitQueueMutation(undefined)
+    : skipQueueMutation(undefined));
 };
+
+export const removeOfflineTicketUpdateIfMatchesAsync = (
+  ticketId: number,
+  expected: OfflineTicketConflictExpectation | undefined,
+  scope = activeScope,
+): Promise<boolean> => mutateQueueAsync(scope, (queue) => {
+  const current = queue.tickets.get(ticketId);
+  if (!current) {
+    return skipQueueMutation(expected === undefined);
+  }
+  if (
+    expected === undefined ||
+    (current.phase !== undefined && current.phase !== "queued") ||
+    current.nextIntent !== undefined ||
+    (current.connectionScope !== undefined && current.connectionScope !== scope) ||
+    current.operationId !== expected.operationId ||
+    current.revision !== expected.revision ||
+    (expected.intentRevision !== undefined &&
+      (current.intentRevision ?? current.revision) !== expected.intentRevision) ||
+    (expected.connectionScope !== undefined &&
+      current.connectionScope !== expected.connectionScope) ||
+    current.content !== expected.content
+  ) {
+        return skipQueueMutation(false);
+  }
+  queue.tickets.delete(ticketId);
+  return commitQueueMutation(true);
+});
 
 export const discardOfflineTicketUpdateAsync = async (
   ticketId: number,
   scope: string,
 ): Promise<OfflineDiscardResult> => {
-  const queue = getQueue(scope);
-  const operation = queue.tickets.get(ticketId);
-  if (!operation) {
-    return "not_found";
+  try {
+    return await mutateQueueAsync(scope, (queue) => {
+      if (!queue.tickets.delete(ticketId)) {
+        return skipQueueMutation("not_found");
+      }
+      return commitQueueMutation("discarded");
+    });
+  } catch {
+    return "recovery_required";
   }
-  queue.tickets.delete(ticketId);
-  await persistAsync(scope);
-  return "discarded";
 };
 
 export const completeOfflineTicketUpdateAsync = async (
@@ -1662,40 +2034,46 @@ export const completeOfflineTicketUpdateAsync = async (
   completion?: { canonical: TicketEditorContent; remoteUpdatedAt: string },
   expectedRevision?: number,
 ): Promise<boolean> => {
-  const queue = getQueue(scope);
-  const current = queue.tickets.get(ticketId);
-  if (!current) {
-    return true;
-  }
-  if (expectedRevision !== undefined && current.revision !== expectedRevision) {
+  try {
+    return await mutateQueueAsync(scope, (queue) => {
+      const current = queue.tickets.get(ticketId);
+      if (!current) {
+        return skipQueueMutation(true);
+      }
+      if (expectedRevision !== undefined && current.revision !== expectedRevision) {
+        return skipQueueMutation(false);
+      }
+      if (current.nextIntent) {
+        const next = current.nextIntent;
+        const canonical = completion?.canonical;
+        queue.tickets.set(ticketId, {
+          ticketId,
+          baseSubject: canonical?.subject ?? current.baseSubject,
+          baseDescription: canonical?.description ?? current.baseDescription,
+          baseMetadata: canonical?.metadata ?? current.baseMetadata,
+          lastKnownRemoteUpdatedAt: completion?.remoteUpdatedAt ?? current.lastKnownRemoteUpdatedAt,
+          subject: next.subject,
+          description: next.description,
+          metadata: next.metadata,
+          content: next.content ?? current.content,
+          layout: next.layout ?? canonical?.layout ?? current.layout,
+          metadataBlock: next.metadataBlock ?? canonical?.metadataBlock ?? current.metadataBlock,
+          controlFields: next.controlFields ?? canonical?.controlFields ?? current.controlFields,
+          baseDir: next.baseDir ?? current.baseDir,
+          documentUri: next.documentUri ?? current.documentUri,
+          operationId: current.operationId,
+          connectionScope: current.connectionScope ?? scope,
+          phase: "queued",
+          revision: next.revision ?? (current.revision ?? 0) + 1,
+        });
+      } else {
+        queue.tickets.delete(ticketId);
+      }
+      return commitQueueMutation(true);
+    });
+  } catch {
     return false;
   }
-  if (current.nextIntent && completion) {
-    const next = current.nextIntent;
-    queue.tickets.set(ticketId, {
-      ticketId,
-      baseSubject: completion.canonical.subject,
-      baseDescription: completion.canonical.description,
-      baseMetadata: completion.canonical.metadata,
-      lastKnownRemoteUpdatedAt: completion.remoteUpdatedAt,
-      subject: next.subject,
-      description: next.description,
-      metadata: next.metadata,
-      layout: next.layout ?? completion.canonical.layout,
-      metadataBlock: next.metadataBlock ?? completion.canonical.metadataBlock,
-      controlFields: next.controlFields ?? completion.canonical.controlFields,
-      baseDir: next.baseDir ?? current.baseDir,
-      documentUri: next.documentUri ?? current.documentUri,
-      operationId: current.operationId,
-      connectionScope: current.connectionScope ?? scope,
-      phase: "queued",
-      revision: next.revision,
-    });
-  } else {
-    queue.tickets.delete(ticketId);
-  }
-  await persistAsync(scope);
-  return true;
 };
 
 type CommentQueueKey = { ticketId: number; commentId?: number; documentUri?: string };
@@ -1703,9 +2081,9 @@ type CommentQueueKey = { ticketId: number; commentId?: number; documentUri?: str
 const findCommentIndex = (queue: OfflineSyncQueue, key: CommentQueueKey): number =>
   queue.comments.findIndex((comment) =>
     comment.ticketId === key.ticketId && (
+      (key.documentUri !== undefined && comment.documentUri !== undefined && comment.documentUri === key.documentUri) ||
       (key.commentId !== undefined && comment.commentId === key.commentId) ||
-      (key.commentId === undefined && key.documentUri !== undefined &&
-        comment.documentUri === key.documentUri)
+      (key.commentId === undefined && comment.commentId === undefined)
     ),
   );
 
@@ -1715,7 +2093,7 @@ export const getOfflineCommentUpdate = (
 ): OfflineCommentUpdate | undefined => {
   const queue = getQueue(scope);
   const index = findCommentIndex(queue, key);
-  return index === -1 ? undefined : { ...queue.comments[index] };
+  return index === -1 ? undefined : structuredClone(queue.comments[index]);
 };
 
 const commentActionAllowsSource = (
@@ -1747,24 +2125,27 @@ export const transitionOfflineCommentLifecycleAsync = async (
   scope: string,
   expected: LifecycleTransitionExpectation<TicketUpdateSyncPhase>,
 ): Promise<OfflineCommentUpdate | undefined> => {
-  const queue = getQueue(scope);
-  const index = findCommentIndex(queue, key);
-  const current = index === -1 ? undefined : queue.comments[index];
-  if (
-    !current ||
-    current.operationId !== expected.operationId ||
-    current.revision !== expected.revision ||
-    current.phase !== expected.sourcePhase ||
-    (current.connectionScope !== undefined && current.connectionScope !== scope) ||
-    !commentActionAllowsSource(action, expected.sourcePhase)
-  ) {
-    return undefined;
-  }
-  const operationKind: SyncOperationKind = current.commentId === undefined
-    ? "commentCreate"
-    : "commentUpdate";
-  let next: OfflineCommentUpdate;
-  switch (action.kind) {
+  try {
+    return await mutateQueueAsync(scope, (queue) => {
+      const index = findCommentIndex(queue, key);
+      const current = index === -1 ? undefined : queue.comments[index];
+      if (
+        !current ||
+        current.operationId !== expected.operationId ||
+        current.revision !== expected.revision ||
+        (expected.attemptGeneration !== undefined &&
+          getAttemptGeneration(current) !== normalizeAttemptGeneration(expected.attemptGeneration)) ||
+        current.phase !== expected.sourcePhase ||
+        (current.connectionScope !== undefined && current.connectionScope !== scope) ||
+        !commentActionAllowsSource(action, expected.sourcePhase)
+      ) {
+        return skipQueueMutation(undefined);
+      }
+      const operationKind: SyncOperationKind = current.commentId === undefined
+        ? "commentCreate"
+        : "commentUpdate";
+      let next: OfflineCommentUpdate;
+      switch (action.kind) {
     case "begin_preparation":
       next = {
         ...withPlannedPrimaryEffect(current, operationKind, {
@@ -1785,7 +2166,7 @@ export const transitionOfflineCommentLifecycleAsync = async (
         { kind: "start" },
         "planned",
       );
-      if (!transitioned) { return undefined; }
+      if (!transitioned) { return skipQueueMutation(undefined); }
       next = { ...transitioned, phase: "remote_write_started" };
       break;
     }
@@ -1796,7 +2177,7 @@ export const transitionOfflineCommentLifecycleAsync = async (
         { kind: "mark_commit_unknown" },
         "started",
       );
-      if (!transitioned) { return undefined; }
+      if (!transitioned) { return skipQueueMutation(undefined); }
       next = { ...transitioned, phase: "commit_unknown" };
       break;
     }
@@ -1807,7 +2188,7 @@ export const transitionOfflineCommentLifecycleAsync = async (
         { kind: "assume_committed", remoteId: action.commentId },
         "commit_unknown",
       );
-      if (!transitioned) { return undefined; }
+      if (!transitioned) { return skipQueueMutation(undefined); }
       next = {
         ...transitioned,
         phase: "remote_committed",
@@ -1823,7 +2204,7 @@ export const transitionOfflineCommentLifecycleAsync = async (
         { kind: "commit", remoteId: action.commentId },
         "started",
       );
-      if (!transitioned) { return undefined; }
+      if (!transitioned) { return skipQueueMutation(undefined); }
       next = {
         ...transitioned,
         phase: "remote_committed",
@@ -1848,10 +2229,13 @@ export const transitionOfflineCommentLifecycleAsync = async (
     case "mark_local_finalize_pending":
       next = { ...current, phase: "local_finalize_pending" };
       break;
+      }
+      queue.comments[index] = next;
+      return commitQueueMutation(next);
+    });
+  } catch {
+    return undefined;
   }
-  queue.comments[index] = next;
-  await persistAsync(scope);
-  return next;
 };
 
 export const completeOfflineCommentAsync = async (
@@ -1859,25 +2243,28 @@ export const completeOfflineCommentAsync = async (
   scope: string,
   expectedRevision: number,
 ): Promise<boolean> => {
-  const queue = getQueue(scope);
-  const index = findCommentIndex(queue, key);
-  if (index === -1) { return true; }
-  const current = queue.comments[index];
-  if (current.revision !== expectedRevision) { return false; }
-  if (current.nextIntent) {
-    queue.comments[index] = promoteCommentIntent(current);
-  } else {
-    queue.comments.splice(index, 1);
+  try {
+    return await mutateQueueAsync(scope, (queue) => {
+      const index = findCommentIndex(queue, key);
+      if (index === -1) { return skipQueueMutation(true); }
+      const current = queue.comments[index];
+      if (current.revision !== expectedRevision) { return skipQueueMutation(false); }
+      queue.comments = current.nextIntent
+        ? queue.comments.map((comment, currentIndex) =>
+          currentIndex === index ? promoteCommentIntent(comment) : comment)
+        : queue.comments.filter((_, currentIndex) => currentIndex !== index);
+      return commitQueueMutation(true);
+    });
+  } catch {
+    return false;
   }
-  await persistAsync(scope);
-  return true;
 };
 
-export const removeOfflineCommentEntry = (
+export const removeOfflineCommentEntryAsync = (
   params: { commentId?: number; documentUri?: string },
   scope = activeScope,
-): void => {
-  const queue = getQueue(scope);
+): Promise<void> => mutateQueueAsync(scope, (queue) => {
+  const previousLength = queue.comments.length;
   queue.comments = queue.comments.filter((item) => {
     if (params.commentId !== undefined && item.commentId === params.commentId) {
       return false;
@@ -1887,29 +2274,60 @@ export const removeOfflineCommentEntry = (
     }
     return true;
   });
-  persist(scope);
-};
+  return queue.comments.length === previousLength
+    ? skipQueueMutation(undefined)
+    : commitQueueMutation(undefined);
+});
+
+export const removeOfflineCommentEntryIfMatchesAsync = (
+  params: { ticketId: number; commentId?: number; documentUri?: string },
+  expected: OfflineCommentConflictExpectation | undefined,
+  scope = activeScope,
+): Promise<boolean> => mutateQueueAsync(scope, (queue) => {
+  const index = findCommentIndex(queue, params);
+  if (index === -1) {
+    return skipQueueMutation(expected === undefined);
+  }
+  const current = queue.comments[index];
+  if (
+    expected === undefined ||
+    (current.phase !== undefined && current.phase !== "queued") ||
+    current.nextIntent !== undefined ||
+    (current.connectionScope !== undefined && current.connectionScope !== scope) ||
+    current.operationId !== expected.operationId ||
+    current.revision !== expected.revision ||
+    (expected.intentRevision !== undefined &&
+      (current.intentRevision ?? current.revision) !== expected.intentRevision) ||
+    (expected.connectionScope !== undefined &&
+      current.connectionScope !== expected.connectionScope) ||
+    current.body !== expected.body
+  ) {
+    return skipQueueMutation(false);
+  }
+  queue.comments.splice(index, 1);
+  return commitQueueMutation(true);
+});
 
 /** Canonical write API for all pending synchronization operations. */
-export const upsertSyncOperation = (
+export const upsertSyncOperationAsync = async (
   operation: SyncOperation,
   scope = operation.connectionScope || activeScope,
-): void => {
+): Promise<void> => {
   switch (operation.kind) {
     case "ticketCreate": {
       const ticket = operation.payload as OfflineNewTicket;
       const { queueId: _queueId, ...update } = ticket;
-      addOfflineNewTicket(update, scope);
+      await addOfflineNewTicketAsync(update, scope);
       return;
     }
     case "ticketUpdate": {
       const update = operation.payload as OfflineTicketUpdate;
-      addOfflineTicketUpdate(update.ticketId, update, scope);
+      await addOfflineTicketUpdateAsync(update.ticketId, update, scope);
       return;
     }
     case "commentCreate":
     case "commentUpdate":
-      addOfflineCommentUpdate(operation.payload as OfflineCommentUpdate, scope);
+      await addOfflineCommentUpdateAsync(operation.payload as OfflineCommentUpdate, scope);
       return;
   }
 };
@@ -1937,7 +2355,7 @@ export const discardSyncOperation = async (
     case "commentCreate":
     case "commentUpdate": {
       const comment = operation.payload as OfflineCommentUpdate;
-      removeOfflineCommentEntry(
+      await removeOfflineCommentEntryAsync(
         { commentId: comment.commentId, documentUri: comment.documentUri },
         scope,
       );

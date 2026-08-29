@@ -7,6 +7,7 @@ import { DashboardMessageRouter } from "./DashboardMessageRouter";
 import { DashboardStateStore } from "./DashboardStateStore";
 import type { DashboardEvent, DashboardState } from "./dashboardProtocol";
 import { VIEW_ID_DASHBOARD } from "./dashboardProtocol";
+import type { SyncEngine } from "../app/syncEngine";
 
 export { VIEW_ID_DASHBOARD };
 
@@ -22,7 +23,10 @@ export class DashboardWebviewProvider
   private readonly router: DashboardMessageRouter;
   private readonly disposables: vscode.Disposable[] = [];
 
-  constructor(private readonly extensionUri: vscode.Uri) {
+  constructor(
+    private readonly extensionUri: vscode.Uri,
+    deps: { syncEngine?: SyncEngine } = {},
+  ) {
     this.store = new DashboardStateStore();
 
     this.controller = new DashboardController({
@@ -42,6 +46,7 @@ export class DashboardWebviewProvider
       onTicketsRefreshed: () => {
         void this.controller.initialize();
       },
+      syncEngine: deps.syncEngine,
     });
 
     this.router = new DashboardMessageRouter(this.controller);

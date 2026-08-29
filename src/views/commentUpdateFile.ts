@@ -85,11 +85,19 @@ export const parseCommentUpdateFile = (content: string): ParsedCommentUpdateFile
   return { fields, body };
 };
 
+export interface UpdateCommentUpdateFileInput {
+  documentUri: string;
+  syncedBody: string;
+  expectedBody?: string;
+  remoteUpdatedAt?: string;
+  canonical?: any;
+}
+
 export const updateCommentUpdateFileAfterSync = async (
-  documentUri: string,
-  syncedBody: string,
-  expectedBody = syncedBody,
+  input: UpdateCommentUpdateFileInput,
 ): Promise<CommentDocumentFinalizeResult> => {
+  const { documentUri, syncedBody } = input;
+  const expectedBody = input.expectedBody ?? syncedBody;
   const openDoc = vscode.workspace.textDocuments.find(
     (document) => document.uri.toString() === documentUri,
   );
@@ -159,14 +167,13 @@ export const finalizeNewCommentDraftFileAfterSync = async (input: {
       ? "applied"
       : "stale_source";
   }
-  if (raw !== input.expectedDocumentBody) { return "stale_source"; }
   const updated = buildCommentUpdateFileContent({
     issueId: input.ticketId,
     journalId: input.commentId,
     projectId: input.projectId,
     sourceNotesHash: computeNotesHash(input.syncedBody),
     lastSyncedAt: new Date().toISOString(),
-  }, input.expectedDocumentBody);
+  }, raw);
 
   suppressSaveSync(input.documentUri);
   try {

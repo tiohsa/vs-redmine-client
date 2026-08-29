@@ -5,7 +5,7 @@ import * as path from "path";
 import * as vscode from "vscode";
 import { syncNewCommentDraft, applyQueuedCommentUpdate } from "../views/commentSaveSync";
 import {
-  addOfflineCommentUpdate,
+  addOfflineCommentUpdateAsync,
   getOfflineSyncQueue,
   initializeOfflineSyncStore,
 } from "../views/offlineSyncStore";
@@ -151,7 +151,7 @@ suite("Comment created_unresolved", () => {
   test("I-11 POST成功後の created_unresolved は queue を保持し retry は reconciliation のみ行う", async () => {
     initializeOfflineSyncStore(createTestMemento(), SCOPE);
     const documentUri = "file:///tmp/comment-unresolved.md";
-    addOfflineCommentUpdate({ ticketId: 10, body: "Queued new comment", documentUri }, SCOPE);
+    await addOfflineCommentUpdateAsync({ ticketId: 10, body: "Queued new comment", documentUri }, SCOPE);
     let addCalls = 0;
     let getCalls = 0;
     const engine = createSyncEngine({
@@ -193,7 +193,7 @@ suite("Comment created_unresolved", () => {
   test("comment POST timeout は commit_unknown となり通常 retry で再POSTしない", async () => {
     initializeOfflineSyncStore(createTestMemento(), SCOPE);
     const documentUri = "file:///tmp/comment-timeout.md";
-    addOfflineCommentUpdate({ ticketId: 11, body: "Maybe committed", documentUri }, SCOPE);
+    await addOfflineCommentUpdateAsync({ ticketId: 11, body: "Maybe committed", documentUri }, SCOPE);
     let addCalls = 0;
     const engine = createSyncEngine({
       comments: {
@@ -221,7 +221,7 @@ suite("Comment created_unresolved", () => {
   test("comment POST timeout は明示的GET reconciliationで一意な自分のjournalだけをlinkする", async () => {
     initializeOfflineSyncStore(createTestMemento(), SCOPE);
     const documentUri = "file:///tmp/comment-timeout-reconcile.md";
-    addOfflineCommentUpdate({ ticketId: 13, body: "Maybe committed", documentUri }, SCOPE);
+    await addOfflineCommentUpdateAsync({ ticketId: 13, body: "Maybe committed", documentUri }, SCOPE);
     let addCalls = 0;
     const engine = createSyncEngine({
       comments: {
@@ -267,7 +267,7 @@ suite("Comment created_unresolved", () => {
   test("comment commit_unknown reconciliation は同一body候補が複数なら自動linkしない", async () => {
     initializeOfflineSyncStore(createTestMemento(), SCOPE);
     const documentUri = "file:///tmp/comment-timeout-ambiguous.md";
-    addOfflineCommentUpdate({ ticketId: 14, body: "Duplicate", documentUri }, SCOPE);
+    await addOfflineCommentUpdateAsync({ ticketId: 14, body: "Duplicate", documentUri }, SCOPE);
     const engine = createSyncEngine({
       comments: {
         addComment: async () => { throw new Error("transport timeout"); },
@@ -302,7 +302,7 @@ suite("Comment created_unresolved", () => {
   test("ambiguous comment commit_unknown は指定journal IDをbody/author照合してlinkできる", async () => {
     initializeOfflineSyncStore(createTestMemento(), SCOPE);
     const documentUri = "file:///tmp/comment-timeout-manual-link.md";
-    addOfflineCommentUpdate({ ticketId: 19, body: "Duplicate", documentUri }, SCOPE);
+    await addOfflineCommentUpdateAsync({ ticketId: 19, body: "Duplicate", documentUri }, SCOPE);
     const engine = createSyncEngine({
       comments: {
         addComment: async () => { throw new Error("transport timeout"); },
@@ -337,7 +337,7 @@ suite("Comment created_unresolved", () => {
 
   test("comment PUT timeout は明示的GET reconciliationでjournal IDとbodyを照合する", async () => {
     initializeOfflineSyncStore(createTestMemento(), SCOPE);
-    addOfflineCommentUpdate({
+    await addOfflineCommentUpdateAsync({
       ticketId: 15,
       commentId: 501,
       baseBody: "Before",
@@ -382,7 +382,7 @@ suite("Comment created_unresolved", () => {
   test("I-20 comment PUT後にrequired local finalize不可ならqueueをcompletedにしない", async () => {
     initializeOfflineSyncStore(createTestMemento(), SCOPE);
     const documentUri = "file:///tmp/closed-comment-update.md";
-    addOfflineCommentUpdate({
+    await addOfflineCommentUpdateAsync({
       ticketId: 16,
       commentId: 601,
       body: "After",
@@ -422,7 +422,7 @@ suite("Comment created_unresolved", () => {
   test("I-20 new comment draft はidentity frontmatter未保存ならqueueをcompletedにしない", async () => {
     initializeOfflineSyncStore(createTestMemento(), SCOPE);
     const documentUri = "file:///tmp/closed-new-comment-draft.md";
-    addOfflineCommentUpdate({
+    await addOfflineCommentUpdateAsync({
       ticketId: 17,
       body: "Created body",
       documentUri,
@@ -467,7 +467,7 @@ suite("Comment created_unresolved", () => {
     const document = await vscode.workspace.openTextDocument(vscode.Uri.file(file));
     const editor = await vscode.window.showTextDocument(document, { preview: false });
     const documentUri = document.uri.toString();
-    addOfflineCommentUpdate({
+    await addOfflineCommentUpdateAsync({
       ticketId: 18,
       body: "Active body",
       documentUri,
@@ -510,7 +510,7 @@ suite("Comment created_unresolved", () => {
       new vscode.Range(document.positionAt(0), document.positionAt(document.getText().length)),
       "Later body",
     ));
-    addOfflineCommentUpdate({
+    await addOfflineCommentUpdateAsync({
       ticketId: 18,
       body: "Later body",
       documentUri,
@@ -534,7 +534,7 @@ suite("Comment created_unresolved", () => {
   test("同一 comment operation の並行同期は single-flight で POST を1回にする", async () => {
     initializeOfflineSyncStore(createTestMemento(), SCOPE);
     const documentUri = "file:///tmp/comment-single-flight.md";
-    addOfflineCommentUpdate({ ticketId: 12, body: "Once", documentUri }, SCOPE);
+    await addOfflineCommentUpdateAsync({ ticketId: 12, body: "Once", documentUri }, SCOPE);
     let releasePost!: () => void;
     const postBlocked = new Promise<void>((resolve) => { releasePost = resolve; });
     let addCalls = 0;

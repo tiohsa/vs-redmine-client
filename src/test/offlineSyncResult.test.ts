@@ -1,7 +1,7 @@
 import * as assert from "assert";
 import {
-  addOfflineTicketUpdate,
-  clearOfflineSyncQueue,
+  addOfflineTicketUpdateAsync,
+  clearOfflineSyncQueueAsync,
   getOfflineSyncQueue,
   initializeOfflineSyncStore,
 } from "../views/offlineSyncStore";
@@ -10,13 +10,13 @@ import { createTestMemento } from "./helpers/vscodeMemento";
 import { buildIssueMetadataFixture } from "./helpers/ticketMetadataFixtures";
 
 suite("offlineSyncResult — 構造化戻り値", () => {
-  setup(() => {
+  setup(async () => {
     initializeOfflineSyncStore(createTestMemento());
-    clearOfflineSyncQueue();
+    await clearOfflineSyncQueueAsync();
   });
 
-  teardown(() => {
-    clearOfflineSyncQueue();
+  teardown(async () => {
+    await clearOfflineSyncQueueAsync();
   });
 
   test("キューが空の場合 nothing_to_sync を返す", async () => {
@@ -29,7 +29,7 @@ suite("offlineSyncResult — 構造化戻り値", () => {
   });
 
   test("ticket の Sync All は TicketSyncService.syncAll を一度だけ呼ぶ", async () => {
-    addOfflineTicketUpdate(42, {
+    await addOfflineTicketUpdateAsync(42, {
       ticketId: 42,
       baseSubject: "Base",
       baseDescription: "Old",
@@ -68,7 +68,7 @@ suite("offlineSyncResult — 構造化戻り値", () => {
 
   test("I-17/I-18 10件中3件処理後の cancellation は未処理7件を failed に含める", async () => {
     for (let ticketId = 1; ticketId <= 10; ticketId++) {
-      addOfflineTicketUpdate(ticketId, {
+      await addOfflineTicketUpdateAsync(ticketId, {
         ticketId,
         baseSubject: `Base ${ticketId}`,
         baseDescription: "Old",
@@ -93,6 +93,7 @@ suite("offlineSyncResult — 構造化戻り値", () => {
           })),
           remaining: plan.slice(3),
           cancelled: true,
+          stopReason: "user_cancelled",
         }),
       }),
     });
@@ -104,7 +105,7 @@ suite("offlineSyncResult — 構造化戻り値", () => {
     assert.strictEqual(result.synced + result.failed, result.total);
   });
 
-  test("OfflineSyncRunResult 型: nothing_to_sync の数値フィールドが 0", () => {
+  test("OfflineSyncRunResult 型: nothing_to_sync の数値フィールドが 0", async () => {
     const r: OfflineSyncRunResult = {
       status: "nothing_to_sync",
       total: 0,
@@ -116,7 +117,7 @@ suite("offlineSyncResult — 構造化戻り値", () => {
     assert.strictEqual(r.total, 0);
   });
 
-  test("OfflineSyncRunResult 型: success は failed と conflicts が 0", () => {
+  test("OfflineSyncRunResult 型: success は failed と conflicts が 0", async () => {
     const r: OfflineSyncRunResult = {
       status: "success",
       total: 3,
@@ -129,7 +130,7 @@ suite("offlineSyncResult — 構造化戻り値", () => {
     assert.strictEqual(r.failed, 0);
   });
 
-  test("OfflineSyncRunResult 型: partial_failure は synced と failed を持つ", () => {
+  test("OfflineSyncRunResult 型: partial_failure は synced と failed を持つ", async () => {
     const r: OfflineSyncRunResult = {
       status: "partial_failure",
       total: 3,
@@ -142,7 +143,7 @@ suite("offlineSyncResult — 構造化戻り値", () => {
     assert.strictEqual(r.failed, 1);
   });
 
-  test("OfflineSyncRunResult 型: cancelled は synced と failed を持つ", () => {
+  test("OfflineSyncRunResult 型: cancelled は synced と failed を持つ", async () => {
     const r: OfflineSyncRunResult = {
       status: "cancelled",
       total: 5,
@@ -155,7 +156,7 @@ suite("offlineSyncResult — 構造化戻り値", () => {
     assert.strictEqual(r.failed, 3);
   });
 
-  test("OfflineSyncRunResult 型: failed は全件失敗を示す", () => {
+  test("OfflineSyncRunResult 型: failed は全件失敗を示す", async () => {
     const r: OfflineSyncRunResult = {
       status: "failed",
       total: 2,

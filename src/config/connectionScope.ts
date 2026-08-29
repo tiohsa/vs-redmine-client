@@ -1,4 +1,4 @@
-import { normalizeBaseUrl } from "../redmine/client";
+import { getScopedBaseUrl, normalizeBaseUrl } from "../redmine/client";
 import { createHash } from "crypto";
 import { getBaseUrl } from "./settings";
 
@@ -20,7 +20,7 @@ export const getConnectionScope = (rawBaseUrl: string): string => {
 };
 
 export const getCurrentConnectionScope = (): string =>
-  getConnectionScope(getBaseUrl());
+  getConnectionScope(getScopedBaseUrl() ?? getBaseUrl());
 
 export const getConnectionScopeHash = (scope: string): string =>
   createHash("sha256").update(scope, "utf8").digest("hex").slice(0, 16);

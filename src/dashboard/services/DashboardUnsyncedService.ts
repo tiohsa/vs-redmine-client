@@ -6,7 +6,7 @@ import { syncUnsyncedFile } from "../../commands/syncUnsyncedFile";
 import type { SyncUnsyncedFileResult } from "../../commands/syncUnsyncedFile";
 import {
   getOfflineSyncQueue,
-  removeOfflineCommentEntry,
+  removeOfflineCommentEntryAsync,
   discardOfflineNewTicketAsync,
   discardOfflineTicketUpdateAsync,
 } from "../../views/offlineSyncStore";
@@ -16,12 +16,14 @@ import type { UnsyncedFileSyncKey } from "../../app/unsyncedTypes";
 import { getTicketEditors } from "../../views/ticketEditorRegistry";
 import type { SyncStatus } from "../../app/syncController";
 import { getCurrentConnectionScope } from "../../config/connectionScope";
+import type { SyncEngine } from "../../app/syncEngine";
 
 export class DashboardUnsyncedService {
   constructor(private readonly deps: {
     context: DashboardServiceContext;
     refreshTicketPresentation: () => void;
     loadComments: (ticketId: number) => Promise<void>;
+    syncEngine?: SyncEngine;
   }) {}
 
   refreshUnsynced(): void {
@@ -98,12 +100,23 @@ export class DashboardUnsyncedService {
     }
 
     const synced = results.filter((result) => result?.status === "success").length;
+    const queued = results.filter((result) => result?.status === "queued").length;
     if (synced === 0) {
-      this.deps.context.notifySuccess(requestId, vscode.l10n.t("No changes."));
+      this.deps.context.notifySuccess(
+        requestId,
+        queued > 0
+          ? vscode.l10n.t("Recovery completed. The item is queued for synchronization.")
+          : vscode.l10n.t("No changes."),
+      );
       return;
     }
     this.deps.context.onTicketsRefreshed();
-    this.deps.context.notifySuccess(requestId, vscode.l10n.t("Sync completed. Synced: {0}.", synced));
+    this.deps.context.notifySuccess(
+      requestId,
+      queued > 0
+        ? vscode.l10n.t("Sync completed. Synced: {0}; recovery queued: {1}.", synced, queued)
+        : vscode.l10n.t("Sync completed. Synced: {0}.", synced),
+    );
   }
 
   async handleDiscardOne(requestId: string, key: DashboardUnsyncedKey): Promise<void> {
@@ -133,7 +146,7 @@ export class DashboardUnsyncedService {
       );
       recoveryRequired = result === "recovery_required";
     } else if (key.kind === "comment") {
-      removeOfflineCommentEntry(
+      await removeOfflineCommentEntryAsync(
         { commentId: key.commentId, documentUri: key.documentUri },
         operationScope,
       );
@@ -154,7 +167,9 @@ export class DashboardUnsyncedService {
 
   async handleSyncAll(requestId: string): Promise<void> {
     this.deps.context.notifyOperationStarted(requestId, vscode.l10n.t("Syncing all…"));
-    const result = await runOfflineSync();
+    const result = await runOfflineSync(this.deps.syncEngine
+      ? { createSyncEngine: () => this.deps.syncEngine! }
+      : undefined);
     this.deps.context.onTicketsRefreshed();
     this.refreshUnsynced();
     this.deps.refreshTicketPresentation();
@@ -216,6 +231,9 @@ export class DashboardUnsyncedService {
       case "no_change":
         this.deps.context.notifySuccess(requestId, vscode.l10n.t("No changes."));
         break;
+      case "queued":
+        this.deps.context.notifySuccess(requestId, vscode.l10n.t("Recovery completed. The item is queued for synchronization."));
+        break;
       case "conflict":
         this.deps.context.notifyError(requestId, vscode.l10n.t("Conflicts with remote changes detected. Open the file to review."));
         break;
@@ -273,7 +291,12 @@ export class DashboardUnsyncedService {
 
     const result = await syncUnsyncedFile(
       { syncKey },
-      { onTicketCreated: () => this.deps.context.onTicketsRefreshed() },
+      {
+        onTicketCreated: () => this.deps.context.onTicketsRefreshed(),
+        createSyncEngine: this.deps.syncEngine
+          ? () => this.deps.syncEngine!
+          : undefined,
+      },
     );
     this.refreshUnsynced();
     this.deps.refreshTicketPresentation();

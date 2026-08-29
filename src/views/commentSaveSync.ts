@@ -28,7 +28,7 @@ import { CommentSaveResult } from "./commentSaveTypes";
 import { applyEditorContent } from "./ticketPreview";
 import { resolveUploadSummary } from "./ticketSync/ticketImageUploadSync";
 import { getOfflineSyncMode } from "../config/settings";
-import { addOfflineCommentUpdate, OfflineCommentUpdate } from "./offlineSyncStore";
+import { addOfflineCommentUpdateAsync, OfflineCommentUpdate } from "./offlineSyncStore";
 import { setCommentDraft } from "./commentDraftStore";
 import { isRemoteCommitUnknownError } from "./ticketSync/ticketSyncResult";
 import { containsConflictMarkers } from "../utils/threeWayMerge";
@@ -95,14 +95,14 @@ const mapErrorToResult = (error: unknown): CommentSaveResult => {
   return buildResult("failed", message);
 };
 
-const normalizeCommentBody = (body: string): string => body.trim();
+export const normalizeCommentBody = (body: string): string => body.trim();
 
-const resolveCreatedCommentId = (
+export const resolveCreatedCommentId = (
   comments: Comment[],
-  body: string,
+  submittedBody: string,
   currentUserId?: number,
 ): number | undefined => {
-  const normalized = normalizeCommentBody(body);
+  const normalized = normalizeCommentBody(submittedBody);
   if (!normalized) {
     return undefined;
   }
@@ -376,7 +376,7 @@ export const syncCommentDraft = async (input: {
       return buildResult("failed", "Missing comment edit state.");
     }
     const baseDir = resolveEditorBaseDir({ editor: input.editor, documentUri: input.documentUri });
-    addOfflineCommentUpdate({
+    await addOfflineCommentUpdateAsync({
       ticketId: edit.ticketId,
       commentId: input.commentId,
       baseBody: edit.baseBody,
@@ -466,7 +466,7 @@ export const syncNewCommentDraft = async (input: {
       return buildResult("failed", validation.message ?? "Invalid comment.");
     }
     const baseDir = resolveEditorBaseDir({ editor: input.editor, documentUri: input.documentUri });
-    addOfflineCommentUpdate({
+    await addOfflineCommentUpdateAsync({
       ticketId: input.ticketId,
       body: input.content,
       baseDir,
@@ -513,10 +513,10 @@ export const syncNewCommentDraft = async (input: {
   });
 };
 
-export const saveCommentDraftLocally = (
+export const saveCommentDraftLocally = async (
   editor: vscode.TextEditor,
   operationScope?: string,
-): CommentSaveResult | undefined => {
+): Promise<CommentSaveResult | undefined> => {
   if (!isTicketEditor(editor)) { return undefined; }
   const contentType = getEditorContentType(editor);
   if (contentType !== "comment" && contentType !== "commentDraft") { return undefined; }
@@ -528,7 +528,7 @@ export const saveCommentDraftLocally = (
   const edit = commentId === undefined
     ? undefined
     : getCommentEdit(commentId, operationScope);
-  addOfflineCommentUpdate({
+  await addOfflineCommentUpdateAsync({
     ticketId,
     commentId,
     baseBody: edit?.baseBody,
@@ -540,14 +540,14 @@ export const saveCommentDraftLocally = (
   return buildResult("queued", vscode.l10n.t("Saved locally. Run a sync command to apply changes to Redmine."));
 };
 
-export const saveCommentDocumentLocally = (input: {
+export const saveCommentDocumentLocally = async (input: {
   operationScope?: string;
   ticketId: number;
   commentId?: number;
   content: string;
   documentUri: vscode.Uri;
-}): CommentSaveResult => {
-  addOfflineCommentUpdate({
+}): Promise<CommentSaveResult> => {
+  await addOfflineCommentUpdateAsync({
     ticketId: input.ticketId,
     commentId: input.commentId,
     body: input.content,

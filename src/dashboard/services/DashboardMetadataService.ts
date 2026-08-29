@@ -3,7 +3,7 @@ import * as vscode from "vscode";
 import { getProjectTrackers, listProjectMembers } from "../../redmine/projects";
 import { getIssueAllowedStatuses } from "../../redmine/issues";
 import { ensureTicketDraft, markDraftStatus, setTicketDraftContent } from "../../views/ticketDraftStore";
-import { getOfflineSyncQueue, addOfflineTicketUpdate } from "../../views/offlineSyncStore";
+import { getOfflineSyncQueue, addOfflineTicketUpdateAsync } from "../../views/offlineSyncStore";
 import { buildTicketDetail } from "../viewModels/ticketDashboardViewModel";
 import { buildTicketEditorContent, parseTicketEditorContent, type TicketEditorContent } from "../../views/ticketEditorContent";
 import { getTicketEditors, registerTicketDocument } from "../../views/ticketEditorRegistry";
@@ -163,7 +163,7 @@ export class DashboardMetadataService {
     );
 
     const updated = await this.updateRegisteredTicketEditor(ticket, patch, operationScope)
-      || this.updateQueuedTicket(ticket, patch, operationScope);
+      || await this.updateQueuedTicket(ticket, patch, operationScope);
     if (!updated) {
       await this.deps.openEditor(ticketId);
       if (!await this.updateRegisteredTicketEditor(ticket, patch, operationScope)) {
@@ -320,7 +320,7 @@ export class DashboardMetadataService {
     }
     setTicketDraftContent(ticket.id, next, operationScope);
     markDraftStatus(ticket.id, "Dirty", operationScope);
-    addOfflineTicketUpdate(ticket.id, {
+    await addOfflineTicketUpdateAsync(ticket.id, {
       ticketId: ticket.id,
       baseSubject: ticket.subject,
       baseDescription: ticket.description ?? "",
@@ -343,11 +343,11 @@ export class DashboardMetadataService {
     return true;
   }
 
-  private updateQueuedTicket(
+  private async updateQueuedTicket(
     ticket: Ticket,
     patch: TicketMetadataPatch,
     operationScope: string,
-  ): boolean {
+  ): Promise<boolean> {
     const queued = getOfflineSyncQueue(operationScope).tickets.get(ticket.id);
     if (!queued) {
       return false;
@@ -379,7 +379,7 @@ export class DashboardMetadataService {
     });
     setTicketDraftContent(ticket.id, nextContent, operationScope);
     markDraftStatus(ticket.id, "Dirty", operationScope);
-    addOfflineTicketUpdate(ticket.id, {
+    await addOfflineTicketUpdateAsync(ticket.id, {
       ...queued,
       metadata: nextMetadata,
     }, operationScope);

@@ -1,6 +1,6 @@
 # redmine-client AGENTS Guide
 
-Last updated: 2026-08-13
+Last updated: 2026-08-23
 
 ## 1. Project Overview
 
@@ -12,8 +12,8 @@ Last updated: 2026-08-13
 ## 2. Repository Structure and Responsibilities
 
 * `src/extension.ts`: The composition root that wires together store initialization, views, synchronization, commands, and editor events.
-* `src/app/`: Application layer. Responsible for command/view registration, save classification, notifications, and synchronization orchestration.
-* `src/app/ticketSync/`: Owns ticket synchronization use cases, ports, reconciliation, and finalization after remote writes. Do not bypass this boundary when adding new write paths.
+* `src/app/`: Application layer. Responsible for command/view registration, save classification, notifications, and synchronization orchestration (`SyncEngine`).
+* `src/app/ticketSync/`: Owns generic synchronization state machine, operation handlers, repository interfaces, reconciliation, and finalization after remote writes. Do not bypass this boundary when adding new write paths.
 * `src/dashboard/`: Owns the Dashboard protocol, input validation, router, controller, state store, services, view models, HTML, CSS, and scripts.
 * `src/commands/`: Thin command handlers invoked from the Command Palette and Dashboard. Do not duplicate shared synchronization logic here.
 * `src/views/`: Responsible for the Markdown editor, drafts, persisted unsynced queue, conflict resolution, and presentation adapters. `src/views/ticketSync/` is the integration boundary between the editor/queue and the application layer.
@@ -49,8 +49,15 @@ Last updated: 2026-08-13
 ## 5. Synchronization and Persistence Invariants
 
 * Data in `src/views/offlineSyncStore.ts` is persistent state that survives VS Code restarts. When changing its shape, key, scope, revision, or phase, verify restoration of existing data and legacy compatibility.
+* All live offline queue mutations for the same `connectionScope` must use the store's scope transaction boundary. Acquire the queue snapshot after entering that boundary, persist the candidate before publishing it to memory, and keep production mutation APIs asynchronous; do not reintroduce direct live-memory writers or stale whole-queue replacement paths.
 * Synchronization must go through the lifecycle defined by `src/app/syncEngine.ts` and `src/app/ticketSync/`, preserving the ordering and checkpoints of remote write, read-back, and local finalize.
-* Do not automatically retry a remote write when its success or failure is unknown. Preserve reconciliation and explicit recovery paths to avoid duplicate issue or comment creation.
+* Primary Operation phase and Primary Effect state must transition atomically via `SyncOperationRepository.transitionPrimaryRemoteWrite` in a single persistence call to prevent state ledger divergence.
+* Planned effects are monotonic and idempotent; non-planned effects (committed/started/failed/commit_unknown) must never be rolled back to `planned` on re-planning unless explicitly compensated.
+* `attemptGeneration` is the Remote Attempt fence, separate from the Intent `revision`; legacy Memento v3 entries without it restore as generation `1`.
+* Full current-generation compensation closes the current Attempt only after the shared Operation-level rollback-obligation decision proves every Effect safe. The decision must use Effect kind/state, ownership, compensation coverage, revision, and `attemptGeneration`; `committed` is neither uniformly safe nor uniformly unsafe. A committed attachment is covered only when the compensated Primary Ticket CREATE snapshot contains its exact token, while an independent committed Child remains a blocker. At closure, effects and remote identities are removed from the active set, the operation is queued with the next `attemptGeneration`, and callbacks/retries from the previous generation must be rejected without a persistence write.
+* Ticket Update Recovery must use `reconcile_remote`, `assume_update_committed`, or an explicitly safe retry; `link_remote_ticket` is not a valid Ticket Update Recovery Action.
+* Do not automatically retry a remote write when its outcome is unknown (`commit_unknown`) or known non-retryable failure. Explicit retry on the same revision must reuse the frozen API-ready `RequestSnapshot`.
+* File and Clipboard attachment bytes identity (contentHash, contentSize, spoolFilePath) must be frozen prior to remote write to guarantee idempotency across restarts and retries.
 * Do not apply persistent effects while ignoring the revision fence or operation scope. When switching connections, do not mix drafts or queues from different Redmine environments.
 * When changing discard behavior for queue entries, force sync, migration, or remote-write retry conditions, describe the destructive impact and recovery method first.
 

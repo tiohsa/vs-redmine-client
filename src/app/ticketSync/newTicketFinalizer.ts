@@ -157,6 +157,7 @@ export class NewTicketFinalizer {
           lastKnownRemoteUpdatedAt: detail.ticket.updatedAt,
           subject: replacement.subject,
           description: replacement.description,
+          content: latestOperation.nextIntent.content ?? input.operation.content,
           metadata: replacement.metadata,
           layout: replacement.layout,
           metadataBlock: replacement.metadataBlock,

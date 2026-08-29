@@ -1,37 +1,24 @@
 import * as vscode from "vscode";
 import type {
-  NewTicketSyncPhase,
   OfflineNewTicket,
-  OfflineTicketUpdate,
-  TicketUpdateSyncPhase,
 } from "../../views/offlineSyncStore";
 import {
   addOfflineNewTicketAsync,
-  completeOfflineNewTicketAsync,
   completeOfflineTicketUpdateAsync,
   getOfflineSyncQueue,
-  getOfflineNewTicket,
-  transitionOfflineNewTicketLifecycleAsync,
-  transitionOfflineTicketUpdateLifecycleAsync,
-  planOfflineSyncEffectAsync,
-  transitionOfflineSyncEffectAsync,
 } from "../../views/offlineSyncStore";
 import {
   compareAndRewriteDocumentWithRegisteredFields,
   type RewriteDocumentDeps,
 } from "../../views/editorDocumentRewrite";
-import { createTicketFromContent } from "../../views/ticketSync/ticketCreateSync";
 import {
-  applyQueuedTicketUpdate,
   queueNewTicketDraft,
   queueTicketDraft,
 } from "../../views/ticketSync/ticketQueueSync";
 import { defaultCreateDeps, defaultDeps } from "../../views/ticketSync/ticketSyncDeps";
 import type { TicketCreateDependencies, TicketSaveDependencies } from "../../views/ticketSync/types";
-import type { DocumentPort, SyncContext, SyncJournal } from "./ports";
+import type { DocumentPort, SyncContext } from "./ports";
 import type { NewTicketLocalStatePort } from "./ports";
-import { NewTicketFinalizer } from "./newTicketFinalizer";
-import { TicketReconciler } from "./ticketReconciler";
 import type {
   SyncAllOutcome,
   TicketSyncOutcome,
@@ -46,58 +33,18 @@ import {
   registerTicketDocument,
   removeTicketEditorByUri,
 } from "../../views/ticketEditorRegistry";
-
-const defaultJournal: SyncJournal = {
-  planEffect: planOfflineSyncEffectAsync,
-  transitionEffect: transitionOfflineSyncEffectAsync,
-  getNewTicket: getOfflineNewTicket,
-  getTicketUpdate: (ticketId, scope) => getOfflineSyncQueue(scope).tickets.get(ticketId),
-  saveNewTicket: addOfflineNewTicketAsync,
-  transitionNewTicket: transitionOfflineNewTicketLifecycleAsync,
-  completeNewTicket: completeOfflineNewTicketAsync,
-  transitionTicketUpdate: transitionOfflineTicketUpdateLifecycleAsync,
-  completeTicketUpdate: completeOfflineTicketUpdateAsync,
-};
-
-const newTicketExpectation = (
-  operation: OfflineNewTicket,
-  sourcePhase: NewTicketSyncPhase,
-) => {
-  if (operation.revision === undefined) {
-    throw new Error("New ticket operation is missing its normalized revision.");
-  }
-  return {
-    operationId: operation.operationId ?? operation.queueId,
-    revision: operation.revision,
-    sourcePhase,
-  };
-};
-
-const ticketUpdateExpectation = (
-  operation: OfflineTicketUpdate,
-  sourcePhase: TicketUpdateSyncPhase,
-) => {
-  if (operation.revision === undefined) {
-    throw new Error("Ticket update operation is missing its normalized revision.");
-  }
-  return {
-    operationId: operation.operationId ?? `ticket:${operation.ticketId}`,
-    revision: operation.revision,
-    sourcePhase,
-  };
-};
-
-const childEffectsRequireRecovery = (
-  effects: OfflineNewTicket["effects"] | OfflineTicketUpdate["effects"],
-  operationFailed: boolean,
-): boolean => (effects ?? []).some((effect) =>
-  effect.kind === "child_create" && (
-    effect.state === "commit_unknown" ||
-    effect.state === "compensation_started" ||
-    effect.state === "compensation_unknown" ||
-    (operationFailed && effect.state === "committed")
-  )
-);
+import {
+  createSyncCoordinator,
+  SyncCoordinator,
+} from "./syncCoordinator";
+import {
+  TicketCreateHandler,
+  TicketUpdateHandler,
+} from "./operationHandlers";
+import { parseTicketEditorContent } from "../../views/ticketEditorContent";
+import { editorContentFromTicket } from "../../views/ticketSync/ticketRemoteContent";
+import type { TicketCreateIntent } from "./syncOperationTypes";
+import { getAttemptGeneration } from "../syncEffects";
 
 const defaultDocumentPort = (rewriteDeps: RewriteDocumentDeps = {}): DocumentPort => ({
   rewriteNewTicket: ({ documentUri, ticketId, projectId, replacement, expected }) =>
@@ -119,43 +66,87 @@ const defaultDocumentPort = (rewriteDeps: RewriteDocumentDeps = {}): DocumentPor
       expected,
     }),
   findOpenDocument: (uri) =>
-    vscode.workspace.textDocuments.find((document) => document.uri.toString() === uri),
+    (rewriteDeps.textDocuments ?? vscode.workspace.textDocuments).find((document) => document.uri.toString() === uri),
 });
 
 const defaultNewTicketLocalState = (
   documents: DocumentPort,
 ): NewTicketLocalStatePort => ({
-  register: ({ ticketId, documentUri, projectId, connectionScope }) => {
+  register: (input: any, ...args: any[]) => {
+    let ticketId: number;
+    let documentUri: string | undefined;
+    let projectId: number | undefined;
+    let connectionScope: string = "";
+
+    if (typeof input === "number") {
+      ticketId = input;
+      if (typeof args[0] === "string") {
+        documentUri = args[0];
+        projectId = typeof args[1] === "number" ? args[1] : undefined;
+        connectionScope = typeof args[2] === "string" ? args[2] : "";
+      } else if (args[0] && typeof args[0] === "object" && "uri" in args[0]) {
+        documentUri = args[0].uri.toString();
+        projectId = typeof args[1] === "number" ? args[1] : undefined;
+        connectionScope = typeof args[2] === "string" ? args[2] : "";
+      }
+    } else if (input && typeof input === "object") {
+      ticketId = input.ticketId;
+      documentUri = input.documentUri;
+      projectId = input.projectId;
+      connectionScope = input.connectionScope ?? "";
+    } else {
+      return;
+    }
+
     if (!documentUri) {
       return;
     }
-    const document = documents.findOpenDocument(documentUri);
-    if (!document) {
-      return;
-    }
     removeTicketEditorByUri(vscode.Uri.parse(documentUri));
-    registerTicketDocument(
-      ticketId,
-      document,
-      "ticket",
-      projectId,
-      connectionScope,
-    );
+    const document = documents.findOpenDocument(documentUri);
+    if (document) {
+      registerTicketDocument(
+        ticketId,
+        document,
+        "ticket",
+        projectId,
+        connectionScope,
+      );
+    }
   },
-  updateDraft: ({ ticketId, canonical, remoteUpdatedAt, connectionScope }) => {
-    updateDraftAfterSave(
-      ticketId,
-      canonical.subject,
-      canonical.description,
-      canonical.metadata,
-      remoteUpdatedAt,
-      connectionScope,
-    );
-  },
+    updateDraft: (input: any, ...args: any[]) => {
+      if (typeof input === "number") {
+        const firstArg = args[0];
+        if (firstArg && typeof firstArg === "object" && ("baseMetadata" in firstArg || "canonical" in firstArg || "metadata" in firstArg || "baseSubject" in firstArg)) {
+          const canonical = firstArg.canonical ?? firstArg;
+          const subject = canonical.baseSubject ?? canonical.subject ?? "";
+          const description = canonical.baseDescription ?? canonical.description ?? "";
+          const metadata = canonical.baseMetadata ?? canonical.metadata ?? { tracker: "", priority: "", status: "", due_date: "", children: [] };
+          const remoteUpdatedAt = firstArg.remoteUpdatedAt ?? args[1];
+          const connectionScope = typeof args[1] === "string" ? args[1] : (firstArg.connectionScope ?? args[2]);
+          updateDraftAfterSave(input, subject, description, metadata, remoteUpdatedAt, connectionScope);
+        } else {
+          const [subject, description, metadata, remoteUpdatedAt, connectionScope] = args;
+          updateDraftAfterSave(
+            input,
+            subject ?? "",
+            description ?? "",
+            metadata ?? { tracker: "", priority: "", status: "", due_date: "", children: [] },
+            remoteUpdatedAt,
+            connectionScope,
+          );
+        }
+      } else {
+        updateDraftAfterSave(
+          input.ticketId,
+          input.canonical?.subject ?? input.subject ?? "",
+          input.canonical?.description ?? input.description ?? "",
+          input.canonical?.metadata ?? input.metadata ?? { tracker: "", priority: "", status: "", due_date: "", children: [] },
+          input.remoteUpdatedAt,
+          input.connectionScope,
+        );
+      }
+    },
 });
-
-const newTicketFlights = new Map<string, Promise<TicketSyncOutcome>>();
-const ticketUpdateFlights = new Map<string, Promise<TicketSyncOutcome>>();
 
 export class TicketSyncQueueItemNotFoundError extends Error {
   public constructor(key: TicketSyncQueueKey) {
@@ -167,12 +158,12 @@ export class TicketSyncQueueItemNotFoundError extends Error {
 }
 
 export interface TicketSyncServiceDependencies {
-  journal?: SyncJournal;
   documents?: DocumentPort;
   create?: Partial<TicketCreateDependencies>;
   update?: Partial<TicketSaveDependencies>;
   rewrite?: RewriteDocumentDeps;
   newTicketLocalState?: NewTicketLocalStatePort;
+  coordinator?: SyncCoordinator;
   runInConnectionScope?: <T>(
     connectionScope: string,
     operation: () => Promise<T>,
@@ -180,37 +171,43 @@ export interface TicketSyncServiceDependencies {
 }
 
 export class TicketSyncService {
-  private readonly journal: SyncJournal;
   private readonly documents: DocumentPort;
   private readonly createDeps: TicketCreateDependencies;
   private readonly updateDeps: TicketSaveDependencies;
-  private readonly newTicketFinalizer: NewTicketFinalizer;
-  private readonly ticketReconciler: TicketReconciler;
+  private readonly newTicketLocalState?: NewTicketLocalStatePort;
+  private readonly coordinator: SyncCoordinator;
   private readonly runInConnectionScope: NonNullable<
     TicketSyncServiceDependencies["runInConnectionScope"]
   >;
 
   public constructor(deps: TicketSyncServiceDependencies = {}) {
-    this.journal = deps.journal ?? defaultJournal;
     this.documents = deps.documents ?? defaultDocumentPort(deps.rewrite);
     this.createDeps = { ...defaultCreateDeps, ...deps.create };
     this.updateDeps = { ...defaultDeps, ...deps.update };
+    this.newTicketLocalState = deps.newTicketLocalState ?? defaultNewTicketLocalState(this.documents);
     this.runInConnectionScope = deps.runInConnectionScope ?? runWithConnectionScope;
-    this.newTicketFinalizer = new NewTicketFinalizer(
-      this.journal,
-      this.documents,
-      deps.newTicketLocalState ?? defaultNewTicketLocalState(this.documents),
-    );
-    this.ticketReconciler = new TicketReconciler(this.journal, this.documents);
+    this.coordinator = deps.coordinator ?? createSyncCoordinator({
+      handlers: {
+        ticketCreate: new TicketCreateHandler(),
+        ticketUpdate: new TicketUpdateHandler(),
+      },
+    });
   }
 
   public async syncNewTicket(input: {
     context: SyncContext;
     operation: Omit<OfflineNewTicket, "queueId"> & { queueId?: string };
   }): Promise<TicketSyncOutcome> {
+    if (input.operation.connectionScope && input.operation.connectionScope !== input.context.connectionScope) {
+      return {
+        kind: "failed_before_commit",
+        error: new Error(`Operation connection scope ${input.operation.connectionScope} does not match context ${input.context.connectionScope}`),
+      };
+    }
+
     let operation: OfflineNewTicket;
     try {
-      operation = await this.journal.saveNewTicket(
+      operation = await addOfflineNewTicketAsync(
         {
           ...input.operation,
           connectionScope: input.context.connectionScope,
@@ -223,10 +220,20 @@ export class TicketSyncService {
         error: error instanceof Error ? error : new Error("Sync journal persistence failed."),
       };
     }
-    return this.createOrResume({
-      context: input.context,
-      operation,
-    });
+    const outcome = await this.coordinator.sync(
+      { kind: "newTicket", queueId: operation.queueId, documentUri: operation.documentUri },
+      input.context,
+      {
+        deps: {
+          ticketCreate: this.createDeps,
+          ticketUpdate: this.updateDeps,
+          documents: this.documents,
+          localState: this.newTicketLocalState,
+        },
+        runInConnectionScope: this.runInConnectionScope,
+      },
+    );
+    return outcome as TicketSyncOutcome;
   }
 
   public async syncEditor(input: {
@@ -236,6 +243,8 @@ export class TicketSyncService {
     newTicket: boolean;
     manual: boolean;
     projectId?: number;
+    uploads?: any[];
+    attachments?: any[];
   }): Promise<TicketSyncOutcome> {
     if (input.newTicket) {
       if (input.manual) {
@@ -245,15 +254,71 @@ export class TicketSyncService {
         });
         return this.preparationOutcome(queued, input.ticketId);
       }
-      return this.syncNewTicket({
-        context: input.context,
-        operation: {
-          content: input.editor.document.getText(),
-          projectId: input.projectId ?? getProjectIdForEditor(input.editor),
-          documentUri: input.editor.document.uri.toString(),
-          baseDir: resolveEditorBaseDir({ editor: input.editor }),
-        },
+      const rawAttachments = input.attachments ?? input.uploads ?? [];
+      const attachments = rawAttachments.map((a: any) => {
+        if (a.token) {
+          return { kind: "token" as const, token: a.token, filename: a.filename, contentType: a.contentType ?? a.content_type };
+        }
+        if (a.filePath || a.fsPath) {
+          return { kind: "file" as const, filePath: a.filePath ?? a.fsPath, filename: a.filename, contentType: a.contentType };
+        }
+        return { kind: "clipboard" as const, filename: a.filename, contentType: a.contentType };
       });
+      const parsed = parseTicketEditorContent(input.editor.document.getText(), {
+        allowMissingMetadata: true,
+        fallbackMetadata: { tracker: "", priority: "", status: "", due_date: "", children: [] },
+      });
+      const projectId = input.projectId ?? parsed.controlFields?.project_id ?? getProjectIdForEditor(input.editor) ?? 0;
+      const intent: TicketCreateIntent = {
+        projectId,
+        subject: parsed.subject,
+        description: parsed.description,
+        metadata: parsed.metadata,
+        layout: parsed.layout,
+        metadataBlock: parsed.metadataBlock,
+        controlFields: parsed.controlFields,
+        baseDir: resolveEditorBaseDir({ editor: input.editor }),
+        documentUri: input.editor.document.uri.toString(),
+        attachments: attachments.length > 0 ? attachments : undefined,
+      };
+
+      const repo = this.coordinator.getRepository();
+      const docUri = input.editor.document.uri.toString();
+      const queueId = `editor:${docUri}`;
+      const existing = repo.getOperation({ kind: "newTicket", documentUri: docUri }, input.context.connectionScope);
+
+      if (!existing) {
+        await repo.saveOperation({
+          operationId: `${input.context.connectionScope}:newTicket:${queueId}`,
+          kind: "ticket_create",
+          key: { kind: "newTicket", queueId, documentUri: docUri },
+          connectionScope: input.context.connectionScope,
+          phase: "queued",
+          revision: 1,
+          intentRevision: 1,
+          version: 1,
+          persistenceVersion: 1,
+          projectId,
+          documentUri: docUri,
+          intent,
+          createdAt: Date.now(),
+          updatedAt: Date.now(),
+        }, input.context.connectionScope);
+      }
+
+      const syncKey = existing?.key ?? { kind: "newTicket", queueId, documentUri: docUri };
+      const outcome = await this.coordinator.sync(
+        syncKey,
+        input.context,
+        {
+          deps: {
+            ticketCreate: this.createDeps,
+            documents: this.documents,
+            localState: this.newTicketLocalState,
+          },
+        },
+      );
+      return outcome as TicketSyncOutcome;
     }
 
     const prepared = await queueTicketDraft({
@@ -263,7 +328,33 @@ export class TicketSyncService {
       operationScope: input.context.connectionScope,
       queueUnchanged: !input.manual,
     });
-    if (input.manual || (prepared.status !== "queued" && prepared.status !== "no_change")) {
+    if (prepared.status === "no_change") {
+      if (!input.manual && this.documents.rewriteTicket) {
+        try {
+          const detail = await this.updateDeps.getIssueDetail(input.ticketId);
+          const canonical = editorContentFromTicket((detail as any).ticket ?? detail);
+          await this.documents.rewriteTicket({
+            documentUri: input.editor.document.uri.toString(),
+            ticketId: input.ticketId,
+            projectId: (detail as any).ticket?.projectId ?? (detail as any).projectId ?? 0,
+            replacement: canonical,
+            expected: {
+              content: input.editor.document.getText(),
+              operationRevision: 1,
+            },
+          });
+        } catch {
+          // ignore read-back failure on no_change
+        }
+      }
+      try {
+        await completeOfflineTicketUpdateAsync(input.ticketId, input.context.connectionScope);
+      } catch {
+        // ignore completion failure on no_change
+      }
+      return { kind: "no_change", ticketId: input.ticketId, saveResult: prepared };
+    }
+    if (input.manual || prepared.status !== "queued") {
       return this.preparationOutcome(prepared, input.ticketId);
     }
     return this.syncQueueItem(
@@ -300,1259 +391,81 @@ export class TicketSyncService {
     }
   }
 
-  public async createOrResume(input: {
-    context: SyncContext;
-    operation: OfflineNewTicket;
-  }): Promise<TicketSyncOutcome> {
-    const operationKey = [
-      input.context.connectionScope,
-      input.operation.operationId ?? input.operation.queueId ?? input.operation.documentUri,
-    ].join("::");
-    const existing = newTicketFlights.get(operationKey);
-    if (existing) {
-      return existing;
-    }
-    const flight = this.createOrResumeInternal(input);
-    newTicketFlights.set(operationKey, flight);
-    try {
-      return await flight;
-    } finally {
-      if (newTicketFlights.get(operationKey) === flight) {
-        newTicketFlights.delete(operationKey);
-      }
-    }
-  }
-
-  private async createOrResumeInternal(input: {
-    context: SyncContext;
-    operation: OfflineNewTicket;
-  }): Promise<TicketSyncOutcome> {
-    return this.runInConnectionScope(
-      input.context.connectionScope,
-      () => this.createOrResumeWithScope(input),
-    );
-  }
-
-  private async createOrResumeWithScope(input: {
-    context: SyncContext;
-    operation: OfflineNewTicket;
-  }): Promise<TicketSyncOutcome> {
-    if (
-      input.operation.connectionScope &&
-      input.operation.connectionScope !== input.context.connectionScope
-    ) {
-      return {
-        kind: "failed_before_commit",
-        error: new Error("Connection scope mismatch."),
-      };
-    }
-
-    const operationId = input.operation.operationId ?? input.operation.queueId;
-    const newTicketEffects = input.operation.effects ?? [];
-    const newTicketChildFailed = newTicketEffects.some((effect) =>
-      effect.kind === "child_create" && effect.state === "failed"
-    );
-    const newTicketRemoteEffectCommitted = newTicketEffects.some((effect) =>
-      (effect.kind === "ticket_create" || effect.kind === "child_create") &&
-      effect.state === "committed"
-    );
-    if (input.operation.createdIssueId !== undefined && (
-      newTicketEffects.some((effect) =>
-        effect.kind === "child_create" && (
-          effect.state === "commit_unknown" ||
-          effect.state === "compensation_started" ||
-          effect.state === "compensation_unknown"
-        )
-      ) || (newTicketChildFailed && newTicketRemoteEffectCommitted)
-    )) {
-      return {
-        kind: "remote_committed",
-        ticketId: input.operation.createdIssueId,
-        pending: "remote_reconcile",
-        message: "Created ticket compensation requires explicit recovery.",
-      };
-    }
-    if (
-      input.operation.phase === "remote_write_started" ||
-      input.operation.phase === "commit_unknown"
-    ) {
-      return {
-        kind: "commit_unknown",
-        operationId,
-        ticketId: input.operation.createdIssueId,
-        message: "The previous remote create may have committed. Resolve it before retrying.",
-      };
-    }
-
-    let ticketId = input.operation.createdIssueId;
-    let operation = input.operation;
-    if (!ticketId && operation.phase === "queued") {
-      const preparing = await this.journal.transitionNewTicket(
-        { queueId: operation.queueId, documentUri: operation.documentUri },
-        { kind: "begin_preparation" },
-        input.context.connectionScope,
-        newTicketExpectation(operation, "queued"),
-      );
-      if (!preparing) {
-        return {
-          kind: "failed_before_commit",
-          error: new Error("New ticket operation changed before preparation."),
-        };
-      }
-      operation = preparing;
-    }
-    if (!ticketId) {
-      const created = await createTicketFromContent({
-        content: operation.content,
-        projectId: operation.projectId,
-        baseDir: operation.baseDir,
-        deps: this.createDeps,
-        beforeRemoteWrite: async () => {
-          const started = await this.journal.transitionNewTicket(
-            { queueId: operation.queueId, documentUri: operation.documentUri },
-            { kind: "start_normal_remote_write" },
-            input.context.connectionScope,
-            newTicketExpectation(operation, "preparing"),
-          );
-          if (!started) {
-            throw new Error("New ticket operation disappeared before remote create.");
-          }
-          operation = started;
-        },
-        afterParentCreate: async (createdTicketId) => {
-          const durable = await this.journal.transitionNewTicket(
-            { queueId: operation.queueId, documentUri: operation.documentUri },
-            { kind: "record_remote_created", ticketId: createdTicketId },
-            input.context.connectionScope,
-            newTicketExpectation(operation, "remote_write_started"),
-          );
-          if (!durable) {
-            throw new Error("Created ticket could not be recorded in the sync journal.");
-          }
-          operation = durable;
-          ticketId = createdTicketId;
-        },
-        existingChildId: ({ ordinal }) => operation.effects?.find((effect) =>
-          effect.kind === "child_create" &&
-          effect.target.ordinal === ordinal &&
-          effect.state === "committed"
-        )?.remoteId,
-        beforeChildCreate: async ({ ordinal }) => {
-          const effectId = `child-create:${ordinal}`;
-          const planned = await this.journal.planEffect(
-            operationId,
-            {
-              effectId,
-              kind: "child_create",
-              operationRevision: operation.revision!,
-              state: "planned",
-              target: { parentTicketId: ticketId, ordinal },
-            },
-            input.context.connectionScope,
-            operation.revision!,
-          );
-          if (!planned) {
-            throw new Error("Child create effect could not be planned.");
-          }
-          const started = await this.journal.transitionEffect(
-            operationId,
-            effectId,
-            { kind: "start" },
-            input.context.connectionScope,
-            { operationRevision: operation.revision!, sourceState: "planned" },
-          );
-          if (!started) {
-            throw new Error("Child create effect could not be started.");
-          }
-          operation = this.journal.getNewTicket(
-            { queueId: operation.queueId, documentUri: operation.documentUri },
-            input.context.connectionScope,
-          ) ?? operation;
-        },
-        afterChildCreate: async ({ ordinal, childId }) => {
-          const committed = await this.journal.transitionEffect(
-            operationId,
-            `child-create:${ordinal}`,
-            { kind: "commit", remoteId: childId },
-            input.context.connectionScope,
-            { operationRevision: operation.revision!, sourceState: "started" },
-          );
-          if (!committed) {
-            throw new Error("Child create effect could not be committed.");
-          }
-          operation = this.journal.getNewTicket(
-            { queueId: operation.queueId, documentUri: operation.documentUri },
-            input.context.connectionScope,
-          ) ?? operation;
-        },
-        afterChildCreateFailure: async ({ ordinal, error, commitUnknown }) => {
-          const failed = await this.journal.transitionEffect(
-            operationId,
-            `child-create:${ordinal}`,
-            commitUnknown
-              ? {
-                kind: "mark_commit_unknown",
-                detail: error instanceof Error ? error.message : "Child create result is unknown.",
-              }
-              : {
-                kind: "mark_failed",
-                detail: error instanceof Error ? error.message : "Child create failed.",
-              },
-            input.context.connectionScope,
-            { operationRevision: operation.revision!, sourceState: "started" },
-          );
-          if (!failed) {
-            throw new Error("Child create result could not be recorded.");
-          }
-          operation = this.journal.getNewTicket(
-            { queueId: operation.queueId, documentUri: operation.documentUri },
-            input.context.connectionScope,
-          ) ?? operation;
-          if (!commitUnknown) { return; }
-          const pending = await this.journal.transitionNewTicket(
-            { queueId: operation.queueId, documentUri: operation.documentUri },
-            { kind: "mark_compensation_pending" },
-            input.context.connectionScope,
-            newTicketExpectation(operation, operation.phase!),
-          );
-          if (!pending) {
-            throw new Error("Child recovery phase could not be recorded.");
-          }
-          operation = pending;
-        },
-        beforeChildCompensation: async ({ ordinal }) => {
-          const compensating = await this.journal.transitionEffect(
-            operationId,
-            `child-create:${ordinal}`,
-            { kind: "start_compensation" },
-            input.context.connectionScope,
-            { operationRevision: operation.revision!, sourceState: "committed" },
-          );
-          if (!compensating) {
-            throw new Error("Child compensation could not be started.");
-          }
-          operation = this.journal.getNewTicket(
-            { queueId: operation.queueId, documentUri: operation.documentUri },
-            input.context.connectionScope,
-          ) ?? operation;
-        },
-        afterChildCompensation: async ({ ordinal, error }) => {
-          const compensated = await this.journal.transitionEffect(
-            operationId,
-            `child-create:${ordinal}`,
-            error
-              ? { kind: "mark_compensation_unknown", detail: error instanceof Error
-                ? error.message
-                : "Child compensation failed." }
-              : { kind: "complete_compensation" },
-            input.context.connectionScope,
-            { operationRevision: operation.revision!, sourceState: "compensation_started" },
-          );
-          if (!compensated) {
-            throw new Error("Child compensation result could not be recorded.");
-          }
-          operation = this.journal.getNewTicket(
-            { queueId: operation.queueId, documentUri: operation.documentUri },
-            input.context.connectionScope,
-          ) ?? operation;
-          if (error) {
-            const pending = await this.journal.transitionNewTicket(
-              { queueId: operation.queueId, documentUri: operation.documentUri },
-              { kind: "mark_compensation_pending" },
-              input.context.connectionScope,
-              newTicketExpectation(operation, operation.phase!),
-            );
-            if (!pending) {
-              throw new Error("Compensation pending phase could not be recorded.");
-            }
-            operation = pending;
-          }
-        },
-        beforeParentCompensation: async () => {
-          const compensating = await this.journal.transitionEffect(
-            operationId,
-            "ticket-create",
-            { kind: "start_compensation" },
-            input.context.connectionScope,
-            { operationRevision: operation.revision!, sourceState: "committed" },
-          );
-          if (!compensating) {
-            throw new Error("Parent compensation could not be started.");
-          }
-          operation = this.journal.getNewTicket(
-            { queueId: operation.queueId, documentUri: operation.documentUri },
-            input.context.connectionScope,
-          ) ?? operation;
-        },
-        afterParentCompensation: async ({ error }) => {
-          const compensated = await this.journal.transitionEffect(
-            operationId,
-            "ticket-create",
-            error
-              ? { kind: "mark_compensation_unknown", detail: error instanceof Error
-                ? error.message
-                : "Parent compensation failed." }
-              : { kind: "complete_compensation" },
-            input.context.connectionScope,
-            { operationRevision: operation.revision!, sourceState: "compensation_started" },
-          );
-          if (!compensated) {
-            throw new Error("Parent compensation result could not be recorded.");
-          }
-          operation = this.journal.getNewTicket(
-            { queueId: operation.queueId, documentUri: operation.documentUri },
-            input.context.connectionScope,
-          ) ?? operation;
-          if (error && operation.phase === "remote_created") {
-            const pending = await this.journal.transitionNewTicket(
-              { queueId: operation.queueId, documentUri: operation.documentUri },
-              { kind: "mark_compensation_pending" },
-              input.context.connectionScope,
-              newTicketExpectation(operation, "remote_created"),
-            );
-            if (!pending) {
-              throw new Error("Compensation pending phase could not be recorded.");
-            }
-            operation = pending;
-          }
-        },
-        afterCompensationComplete: async () => {
-          const reset = await this.journal.transitionNewTicket(
-            { queueId: operation.queueId, documentUri: operation.documentUri },
-            { kind: "complete_compensation" },
-            input.context.connectionScope,
-            newTicketExpectation(operation, "remote_created"),
-          );
-          if (!reset) { throw new Error("Completed compensation could not be recorded."); }
-          operation = reset;
-          ticketId = undefined;
-        },
-      });
-      if (created.remoteCommitUnknown) {
-        try {
-          await this.journal.transitionNewTicket(
-            { queueId: operation.queueId, documentUri: operation.documentUri },
-            { kind: "mark_commit_unknown" },
-            input.context.connectionScope,
-            newTicketExpectation(operation, "remote_write_started"),
-          );
-        } catch {
-          // remote_write_started is already durable and is treated as commit_unknown on restart.
-        }
-        return {
-          kind: "commit_unknown",
-          operationId,
-          message: "The remote create result is unknown. Automatic retry is disabled.",
-        };
-      }
-      if (
-        !created.createdId ||
-        (created.result.status !== "created" && !created.remoteIssueMayExist)
-      ) {
-        try {
-          if (operation.phase === "preparing") {
-            await this.journal.transitionNewTicket(
-              { queueId: operation.queueId, documentUri: operation.documentUri },
-              { kind: "abort_before_remote_write" },
-              input.context.connectionScope,
-              newTicketExpectation(operation, "preparing"),
-            );
-          }
-        } catch {
-          // A durable remote_write_started remains safe-side if it had been reached.
-        }
-        return {
-          kind: "failed_before_commit",
-          error: new Error(created.result.message),
-          saveResult: created.result,
-        };
-      }
-      ticketId = created.createdId;
-      if (childEffectsRequireRecovery(
-        operation.effects,
-        created.result.status !== "created",
-      )) {
-        return {
-          kind: "remote_committed",
-          ticketId,
-          pending: "remote_reconcile",
-          message: "Created ticket compensation requires explicit recovery.",
-        };
-      }
-      if (operation.phase !== "remote_created") {
-        return {
-          kind: "remote_committed",
-          ticketId,
-          pending: "local_finalize",
-          message: "Created issue could not be recorded in the sync journal.",
-        };
-      }
-    }
-
-    return this.newTicketFinalizer.finalize({
-      context: input.context,
-      operation,
-      ticketId,
-      deps: this.createDeps,
-    });
-  }
-
   public async syncQueueItem(
     key: TicketSyncQueueKey,
     context: SyncContext,
   ): Promise<TicketSyncOutcome> {
-    if (key.kind === "newTicket") {
-      const operation = getOfflineNewTicket(key, context.connectionScope);
-      if (!operation) {
-        return {
-          kind: "failed_before_commit",
-          error: new TicketSyncQueueItemNotFoundError(key),
-        };
-      }
-      return this.createOrResume({ context, operation });
-    }
-
-    const operation = getOfflineSyncQueue(context.connectionScope).tickets.get(key.ticketId);
-    if (!operation) {
-      return {
-        kind: "failed_before_commit",
-        error: new TicketSyncQueueItemNotFoundError(key),
-      };
-    }
-    const operationKey = `${context.connectionScope}::ticket::${operation.ticketId}`;
-    const existing = ticketUpdateFlights.get(operationKey);
-    if (existing) {
-      return existing;
-    }
-    const flight = this.updateOrReconcile(context, operation);
-    ticketUpdateFlights.set(operationKey, flight);
-    try {
-      return await flight;
-    } finally {
-      if (ticketUpdateFlights.get(operationKey) === flight) {
-        ticketUpdateFlights.delete(operationKey);
-      }
-    }
+    const outcome = await this.coordinator.sync(
+      key as any,
+      context,
+      {
+        deps: {
+          ticketCreate: this.createDeps,
+          ticketUpdate: this.updateDeps,
+          documents: this.documents,
+          localState: this.newTicketLocalState,
+        },
+        runInConnectionScope: this.runInConnectionScope,
+      },
+    );
+    return outcome as TicketSyncOutcome;
   }
 
-  public async resolveCommitUnknown(input: {
+  public resolveCommitUnknown(input: {
     key: TicketSyncQueueKey;
     context: SyncContext;
+    attemptGeneration?: number;
     resolution:
       | { kind: "link_created_ticket"; ticketId: number }
+      | { kind: "link_remote_ticket"; ticketId: number }
       | { kind: "assume_update_committed" }
-      | { kind: "retry_remote_write" };
+      | { kind: "retry_remote_write" }
+      | { kind: "reconcile_remote" }
+      | { kind: "reconcile_compensation" };
   }): Promise<TicketSyncOutcome> {
-    return this.runInConnectionScope(input.context.connectionScope, async () => {
-      if (input.key.kind === "newTicket") {
-        let operation = this.journal.getNewTicket(
-          input.key,
-          input.context.connectionScope,
-        );
-        if (!operation) {
-          return {
-            kind: "failed_before_commit",
-            error: new TicketSyncQueueItemNotFoundError(input.key),
-          };
-        }
-        if (operation.phase === "remote_write_started") {
-          return {
-            kind: "commit_unknown",
-            operationId: operation.operationId ?? operation.queueId,
-            ticketId: operation.createdIssueId,
-            message: "A remote create is already in flight or requires restart recovery.",
-          };
-        }
-        if (operation.phase !== "commit_unknown") {
-          return this.createOrResume({ context: input.context, operation });
-        }
-        if (input.resolution.kind === "retry_remote_write") {
-          return this.retryNewTicketRemoteWrite(input.context, operation);
-        }
-        if (input.resolution.kind !== "link_created_ticket") {
-          return {
-            kind: "failed_before_commit",
-            error: new Error("A new-ticket recovery requires a verified ticket ID."),
-          };
-        }
-        if (!this.createDeps.getIssueDetail) {
-          return {
-            kind: "failed_before_commit",
-            error: new Error("Remote ticket verification is unavailable."),
-          };
-        }
-        let detail;
-        try {
-          detail = await this.createDeps.getIssueDetail(input.resolution.ticketId);
-        } catch (error) {
-          return {
-            kind: "failed_before_commit",
-            error: error instanceof Error ? error : new Error("Remote ticket verification failed."),
-          };
-        }
-        if (
-          operation.projectId !== undefined &&
-          detail.ticket.projectId !== undefined &&
-          operation.projectId !== detail.ticket.projectId
-        ) {
-          return {
-            kind: "failed_before_commit",
-            error: new Error("The selected ticket belongs to a different project."),
-          };
-        }
-        const linked = await this.journal.transitionNewTicket(
-          input.key,
-          { kind: "link_created_ticket", ticketId: input.resolution.ticketId },
-          input.context.connectionScope,
-          newTicketExpectation(operation, "commit_unknown"),
-        );
-        if (!linked) {
-          return {
-            kind: "failed_before_commit",
-            error: new TicketSyncQueueItemNotFoundError(input.key),
-          };
-        }
-        return this.newTicketFinalizer.finalize({
-          context: input.context,
-          operation: linked,
-          ticketId: input.resolution.ticketId,
-          deps: this.createDeps,
-          detail,
-        });
-      }
-
-      let operation = this.journal.getTicketUpdate(
-        input.key.ticketId,
-        input.context.connectionScope,
-      );
-      if (!operation) {
-        return {
-          kind: "failed_before_commit",
-          error: new TicketSyncQueueItemNotFoundError(input.key),
-        };
-      }
-      if (input.resolution.kind === "link_created_ticket") {
-        return {
-          kind: "failed_before_commit",
-          error: new Error("An existing-ticket recovery cannot link another ticket ID."),
-        };
-      }
-      if (operation.phase === "remote_write_started") {
-        return {
-          kind: "commit_unknown",
-          operationId: operation.operationId ?? `ticket:${operation.ticketId}`,
-          ticketId: operation.ticketId,
-          message: "A remote update is already in flight or requires restart recovery.",
-        };
-      }
-      if (operation.phase !== "commit_unknown") {
-        return this.updateOrReconcile(input.context, operation);
-      }
-      if (input.resolution.kind === "retry_remote_write") {
-        return this.updateOrReconcile(input.context, operation, true);
-      }
-      const resolved = await this.journal.transitionTicketUpdate(
-        operation.ticketId,
-        { kind: "assume_update_committed" },
-        input.context.connectionScope,
-        ticketUpdateExpectation(operation, "commit_unknown"),
-      );
-      return resolved
-        ? this.updateOrReconcile(input.context, resolved)
-        : {
-          kind: "failed_before_commit",
-          error: new TicketSyncQueueItemNotFoundError(input.key),
-        };
-    });
-  }
-
-  private async retryNewTicketRemoteWrite(
-    context: SyncContext,
-    initialOperation: OfflineNewTicket,
-  ): Promise<TicketSyncOutcome> {
-    let operation = initialOperation;
-    const operationId = operation.operationId ?? operation.queueId;
-    let ticketId = operation.createdIssueId;
-    const created = await createTicketFromContent({
-      content: operation.content,
-      projectId: operation.projectId,
-      baseDir: operation.baseDir,
-      deps: this.createDeps,
-      beforeRemoteWrite: async () => {
-        const started = await this.journal.transitionNewTicket(
-          { queueId: operation.queueId, documentUri: operation.documentUri },
-          { kind: "start_explicit_retry_remote_write" },
-          context.connectionScope,
-          newTicketExpectation(operation, "commit_unknown"),
-        );
-        if (!started) {
-          throw new Error("New ticket recovery changed before the explicit retry.");
-        }
-        operation = started;
+    const operation = this.coordinator.getRepository().getOperation(input.key as any, input.context.connectionScope);
+    const attemptGeneration = input.attemptGeneration ?? getAttemptGeneration(operation);
+    const resolution: any = input.resolution.kind === "link_created_ticket"
+      ? { kind: "link_remote_ticket", ticketId: input.resolution.ticketId, explicitLink: true }
+      : (input.resolution.kind === "assume_update_committed"
+        ? { kind: "assume_remote_commit" }
+        : input.resolution);
+    return this.coordinator.resolveCommitUnknown({
+      key: input.key as any,
+      operationId: operation?.operationId ?? "",
+      operationRevision: operation?.intentRevision ?? operation?.revision ?? 1,
+      context: input.context,
+      attemptGeneration,
+      resolution,
+      deps: {
+        ticketCreate: this.createDeps,
+        ticketUpdate: this.updateDeps,
+        documents: this.documents,
+        localState: this.newTicketLocalState,
       },
-      afterParentCreate: async (createdTicketId) => {
-        const durable = await this.journal.transitionNewTicket(
-          { queueId: operation.queueId, documentUri: operation.documentUri },
-          { kind: "record_remote_created", ticketId: createdTicketId },
-          context.connectionScope,
-          newTicketExpectation(operation, "remote_write_started"),
-        );
-        if (!durable) {
-          throw new Error("Created ticket could not be recorded in the sync journal.");
-        }
-        operation = durable;
-        ticketId = createdTicketId;
-      },
-      existingChildId: ({ ordinal }) => operation.effects?.find((effect) =>
-        effect.kind === "child_create" &&
-        effect.target.ordinal === ordinal &&
-        effect.state === "committed"
-      )?.remoteId,
-      beforeChildCreate: async ({ ordinal }) => {
-        const effectId = `child-create:${ordinal}`;
-        const planned = await this.journal.planEffect(
-          operationId,
-          {
-            effectId,
-            kind: "child_create",
-            operationRevision: operation.revision!,
-            state: "planned",
-            target: { parentTicketId: ticketId, ordinal },
-          },
-          context.connectionScope,
-          operation.revision!,
-        );
-        if (!planned) { throw new Error("Child create effect could not be planned."); }
-        const started = await this.journal.transitionEffect(
-          operationId,
-          effectId,
-          { kind: "start" },
-          context.connectionScope,
-          { operationRevision: operation.revision!, sourceState: "planned" },
-        );
-        if (!started) { throw new Error("Child create effect could not be started."); }
-        operation = this.journal.getNewTicket(
-          { queueId: operation.queueId, documentUri: operation.documentUri },
-          context.connectionScope,
-        ) ?? operation;
-      },
-      afterChildCreate: async ({ ordinal, childId }) => {
-        const committed = await this.journal.transitionEffect(
-          operationId,
-          `child-create:${ordinal}`,
-          { kind: "commit", remoteId: childId },
-          context.connectionScope,
-          { operationRevision: operation.revision!, sourceState: "started" },
-        );
-        if (!committed) { throw new Error("Child create effect could not be committed."); }
-        operation = this.journal.getNewTicket(
-          { queueId: operation.queueId, documentUri: operation.documentUri },
-          context.connectionScope,
-        ) ?? operation;
-      },
-      afterChildCreateFailure: async ({ ordinal, error, commitUnknown }) => {
-        const failed = await this.journal.transitionEffect(
-          operationId,
-          `child-create:${ordinal}`,
-          commitUnknown
-            ? {
-              kind: "mark_commit_unknown",
-              detail: error instanceof Error ? error.message : "Child create result is unknown.",
-            }
-            : {
-              kind: "mark_failed",
-              detail: error instanceof Error ? error.message : "Child create failed.",
-            },
-          context.connectionScope,
-          { operationRevision: operation.revision!, sourceState: "started" },
-        );
-        if (!failed) { throw new Error("Child create result could not be recorded."); }
-        operation = this.journal.getNewTicket(
-          { queueId: operation.queueId, documentUri: operation.documentUri },
-          context.connectionScope,
-        ) ?? operation;
-        if (!commitUnknown) { return; }
-        const pending = await this.journal.transitionNewTicket(
-          { queueId: operation.queueId, documentUri: operation.documentUri },
-          { kind: "mark_compensation_pending" },
-          context.connectionScope,
-          newTicketExpectation(operation, operation.phase!),
-        );
-        if (!pending) { throw new Error("Child recovery phase could not be recorded."); }
-        operation = pending;
-      },
-      beforeChildCompensation: async ({ ordinal }) => {
-        const compensating = await this.journal.transitionEffect(
-          operationId,
-          `child-create:${ordinal}`,
-          { kind: "start_compensation" },
-          context.connectionScope,
-          { operationRevision: operation.revision!, sourceState: "committed" },
-        );
-        if (!compensating) { throw new Error("Child compensation could not be started."); }
-        operation = this.journal.getNewTicket(
-          { queueId: operation.queueId, documentUri: operation.documentUri },
-          context.connectionScope,
-        ) ?? operation;
-      },
-      afterChildCompensation: async ({ ordinal, error }) => {
-        const compensated = await this.journal.transitionEffect(
-          operationId,
-          `child-create:${ordinal}`,
-          error
-            ? { kind: "mark_compensation_unknown", detail: error instanceof Error
-              ? error.message
-              : "Child compensation failed." }
-            : { kind: "complete_compensation" },
-          context.connectionScope,
-          { operationRevision: operation.revision!, sourceState: "compensation_started" },
-        );
-        if (!compensated) { throw new Error("Child compensation result could not be recorded."); }
-        operation = this.journal.getNewTicket(
-          { queueId: operation.queueId, documentUri: operation.documentUri },
-          context.connectionScope,
-        ) ?? operation;
-        if (error) {
-          const pending = await this.journal.transitionNewTicket(
-            { queueId: operation.queueId, documentUri: operation.documentUri },
-            { kind: "mark_compensation_pending" },
-            context.connectionScope,
-            newTicketExpectation(operation, operation.phase!),
-          );
-          if (!pending) { throw new Error("Compensation pending phase could not be recorded."); }
-          operation = pending;
-        }
-      },
-      beforeParentCompensation: async () => {
-        const compensating = await this.journal.transitionEffect(
-          operationId,
-          "ticket-create",
-          { kind: "start_compensation" },
-          context.connectionScope,
-          { operationRevision: operation.revision!, sourceState: "committed" },
-        );
-        if (!compensating) { throw new Error("Parent compensation could not be started."); }
-        operation = this.journal.getNewTicket(
-          { queueId: operation.queueId, documentUri: operation.documentUri },
-          context.connectionScope,
-        ) ?? operation;
-      },
-      afterParentCompensation: async ({ error }) => {
-        const compensated = await this.journal.transitionEffect(
-          operationId,
-          "ticket-create",
-          error
-            ? { kind: "mark_compensation_unknown", detail: error instanceof Error
-              ? error.message
-              : "Parent compensation failed." }
-            : { kind: "complete_compensation" },
-          context.connectionScope,
-          { operationRevision: operation.revision!, sourceState: "compensation_started" },
-        );
-        if (!compensated) { throw new Error("Parent compensation result could not be recorded."); }
-        operation = this.journal.getNewTicket(
-          { queueId: operation.queueId, documentUri: operation.documentUri },
-          context.connectionScope,
-        ) ?? operation;
-        if (error && operation.phase === "remote_created") {
-          const pending = await this.journal.transitionNewTicket(
-            { queueId: operation.queueId, documentUri: operation.documentUri },
-            { kind: "mark_compensation_pending" },
-            context.connectionScope,
-            newTicketExpectation(operation, "remote_created"),
-          );
-          if (!pending) { throw new Error("Compensation pending phase could not be recorded."); }
-          operation = pending;
-        }
-      },
-      afterCompensationComplete: async () => {
-        const reset = await this.journal.transitionNewTicket(
-          { queueId: operation.queueId, documentUri: operation.documentUri },
-          { kind: "complete_compensation" },
-          context.connectionScope,
-          newTicketExpectation(operation, "remote_created"),
-        );
-        if (!reset) { throw new Error("Completed compensation could not be recorded."); }
-        operation = reset;
-        ticketId = undefined;
-      },
-    });
-    if (created.remoteCommitUnknown) {
-      try {
-        await this.journal.transitionNewTicket(
-          { queueId: operation.queueId, documentUri: operation.documentUri },
-          { kind: "mark_commit_unknown" },
-          context.connectionScope,
-          newTicketExpectation(operation, "remote_write_started"),
-        );
-      } catch {
-        // remote_write_started remains a conservative commit-unknown checkpoint.
-      }
-      return {
-        kind: "commit_unknown",
-        operationId,
-        message: "The explicit retry result is unknown. Automatic retry is disabled.",
-      };
-    }
-    if (operation.createdIssueId !== undefined && childEffectsRequireRecovery(
-      operation.effects,
-      created.result.status !== "created",
-    )) {
-      return {
-        kind: "remote_committed",
-        ticketId: operation.createdIssueId!,
-        pending: "remote_reconcile",
-        message: "Created ticket child recovery requires explicit resolution.",
-      };
-    }
-    if (!created.createdId || created.result.status !== "created") {
-      if (operation.phase === "queued" && !created.remoteIssueMayExist) {
-        return {
-          kind: "failed_before_commit",
-          error: new Error(created.result.message),
-          saveResult: created.result,
-        };
-      }
-      if (operation.phase === "remote_write_started") {
-        try {
-          await this.journal.transitionNewTicket(
-            { queueId: operation.queueId, documentUri: operation.documentUri },
-            { kind: "mark_commit_unknown" },
-            context.connectionScope,
-            newTicketExpectation(operation, "remote_write_started"),
-          );
-        } catch {
-          // Keep the durable remote-write checkpoint.
-        }
-      }
-      return {
-        kind: "commit_unknown",
-        operationId,
-        message: created.result.message,
-      };
-    }
-    ticketId = created.createdId;
-    if (operation.phase !== "remote_created") {
-      return {
-        kind: "remote_committed",
-        ticketId,
-        pending: "local_finalize",
-        message: "Created issue could not be recorded in the sync journal.",
-      };
-    }
-    return this.newTicketFinalizer.finalize({
-      context,
-      operation,
-      ticketId,
-      deps: this.createDeps,
-    });
-  }
-
-  private async updateOrReconcile(
-    context: SyncContext,
-    operation: OfflineTicketUpdate,
-    explicitRetry = false,
-  ): Promise<TicketSyncOutcome> {
-    return this.runInConnectionScope(
-      context.connectionScope,
-      () => this.updateOrReconcileAtScope(context, operation, explicitRetry),
-    );
-  }
-
-  private async updateOrReconcileAtScope(
-    context: SyncContext,
-    operation: OfflineTicketUpdate,
-    explicitRetry: boolean,
-  ): Promise<TicketSyncOutcome> {
-    if (operation.connectionScope && operation.connectionScope !== context.connectionScope) {
-      return {
-        kind: "failed_before_commit",
-        error: new Error("Connection scope mismatch."),
-      };
-    }
-    const operationId = operation.operationId ?? `ticket:${operation.ticketId}`;
-    const updateEffects = operation.effects ?? [];
-    const failedChildEffect = updateEffects.some((effect) =>
-      effect.kind === "child_create" && effect.state === "failed"
-    );
-    const committedChildEffect = updateEffects.some((effect) =>
-      effect.kind === "child_create" && effect.state === "committed"
-    );
-    if (
-      updateEffects.some((effect) =>
-        effect.kind === "child_create" && (
-          effect.state === "commit_unknown" ||
-          effect.state === "compensation_started" ||
-          effect.state === "compensation_unknown"
-        )
-      ) || (failedChildEffect && committedChildEffect)
-    ) {
-      return {
-        kind: "remote_committed",
-        ticketId: operation.ticketId,
-        pending: "remote_reconcile",
-        message: "Child ticket compensation requires explicit recovery.",
-      };
-    }
-    if (!explicitRetry && (
-      operation.phase === "remote_write_started" ||
-      operation.phase === "commit_unknown"
-    )) {
-      return {
-        kind: "commit_unknown",
-        operationId,
-        ticketId: operation.ticketId,
-        message: "The previous remote update may have committed. Resolve it before retrying.",
-      };
-    }
-    if (explicitRetry && operation.phase !== "commit_unknown") {
-      return {
-        kind: "failed_before_commit",
-        error: new Error("Ticket update is no longer eligible for explicit retry."),
-      };
-    }
-    if (operation.phase === "queued") {
-      const preparing = await this.journal.transitionTicketUpdate(
-        operation.ticketId,
-        { kind: "begin_preparation" },
-        context.connectionScope,
-        ticketUpdateExpectation(operation, "queued"),
-      );
-      if (!preparing) {
-        return {
-          kind: "failed_before_commit",
-          error: new Error("Ticket update operation changed before preparation."),
-        };
-      }
-      operation = preparing;
-    }
-    let remoteWriteStarted = false;
-    const result = await applyQueuedTicketUpdate({
-      operationScope: context.connectionScope,
-      update: operation,
-      deps: this.updateDeps,
-      deferReconciliation: true,
-      existingChildId: ({ ordinal }) => operation.effects?.find((effect) =>
-        effect.kind === "child_create" &&
-        effect.target.ordinal === ordinal &&
-        effect.state === "committed"
-      )?.remoteId,
-      beforeChildCreate: async ({ ordinal }) => {
-        const effectId = `child-create:${ordinal}`;
-        const planned = await this.journal.planEffect(
-          operationId,
-          {
-            effectId,
-            kind: "child_create",
-            operationRevision: operation.revision!,
-            state: "planned",
-            target: { parentTicketId: operation.ticketId, ordinal },
-          },
-          context.connectionScope,
-          operation.revision!,
-        );
-        if (!planned) { throw new Error("Child create effect could not be planned."); }
-        const started = await this.journal.transitionEffect(
-          operationId,
-          effectId,
-          { kind: "start" },
-          context.connectionScope,
-          { operationRevision: operation.revision!, sourceState: "planned" },
-        );
-        if (!started) { throw new Error("Child create effect could not be started."); }
-        operation = getOfflineSyncQueue(context.connectionScope).tickets.get(
-          operation.ticketId,
-        ) ?? operation;
-      },
-      afterChildCreate: async ({ ordinal, childId }) => {
-        const committed = await this.journal.transitionEffect(
-          operationId,
-          `child-create:${ordinal}`,
-          { kind: "commit", remoteId: childId },
-          context.connectionScope,
-          { operationRevision: operation.revision!, sourceState: "started" },
-        );
-        if (!committed) { throw new Error("Child create effect could not be committed."); }
-        operation = getOfflineSyncQueue(context.connectionScope).tickets.get(
-          operation.ticketId,
-        ) ?? operation;
-      },
-      afterChildCreateFailure: async ({ ordinal, error, commitUnknown }) => {
-        const failed = await this.journal.transitionEffect(
-          operationId,
-          `child-create:${ordinal}`,
-          commitUnknown
-            ? {
-              kind: "mark_commit_unknown",
-              detail: error instanceof Error ? error.message : "Child create result is unknown.",
-            }
-            : {
-              kind: "mark_failed",
-              detail: error instanceof Error ? error.message : "Child create failed.",
-            },
-          context.connectionScope,
-          { operationRevision: operation.revision!, sourceState: "started" },
-        );
-        if (!failed) {
-          throw new Error("Child create result could not be recorded.");
-        }
-        operation = getOfflineSyncQueue(context.connectionScope).tickets.get(
-          operation.ticketId,
-        ) ?? operation;
-        if (!commitUnknown) { return; }
-        const pending = await this.journal.transitionTicketUpdate(
-          operation.ticketId,
-          { kind: "mark_compensation_pending" },
-          context.connectionScope,
-          ticketUpdateExpectation(operation, operation.phase!),
-        );
-        if (!pending) {
-          throw new Error("Child recovery phase could not be recorded.");
-        }
-        operation = pending;
-      },
-      beforeChildCompensation: async ({ ordinal }) => {
-        const compensating = await this.journal.transitionEffect(
-          operationId,
-          `child-create:${ordinal}`,
-          { kind: "start_compensation" },
-          context.connectionScope,
-          { operationRevision: operation.revision!, sourceState: "committed" },
-        );
-        if (!compensating) {
-          throw new Error("Child compensation could not be started.");
-        }
-        operation = getOfflineSyncQueue(context.connectionScope).tickets.get(
-          operation.ticketId,
-        ) ?? operation;
-      },
-      afterChildCompensation: async ({ ordinal, error }) => {
-        const compensated = await this.journal.transitionEffect(
-          operationId,
-          `child-create:${ordinal}`,
-          error
-            ? { kind: "mark_compensation_unknown", detail: error instanceof Error
-              ? error.message
-              : "Child compensation failed." }
-            : { kind: "complete_compensation" },
-          context.connectionScope,
-          { operationRevision: operation.revision!, sourceState: "compensation_started" },
-        );
-        if (!compensated) {
-          throw new Error("Child compensation result could not be recorded.");
-        }
-        operation = getOfflineSyncQueue(context.connectionScope).tickets.get(
-          operation.ticketId,
-        ) ?? operation;
-        if (error) {
-          const pending = await this.journal.transitionTicketUpdate(
-            operation.ticketId,
-            { kind: "mark_compensation_pending" },
-            context.connectionScope,
-            ticketUpdateExpectation(operation, operation.phase!),
-          );
-          if (!pending) { throw new Error("Compensation pending phase could not be recorded."); }
-          operation = pending;
-        }
-      },
-      beforeRemoteWrite: async () => {
-        const sourcePhase = explicitRetry ? "commit_unknown" : "preparing";
-        const started = await this.journal.transitionTicketUpdate(
-          operation.ticketId,
-          {
-            kind: explicitRetry
-              ? "start_explicit_retry_remote_write"
-              : "start_normal_remote_write",
-          },
-          context.connectionScope,
-          ticketUpdateExpectation(operation, sourcePhase),
-        );
-        if (!started) {
-          throw new Error("Ticket update operation disappeared before remote update.");
-        }
-        operation = started;
-        remoteWriteStarted = true;
-      },
-      afterRemoteWrite: async (createdChildIds) => {
-        const committed = await this.journal.transitionTicketUpdate(
-          operation.ticketId,
-          { kind: "record_remote_commit", createdChildIds },
-          context.connectionScope,
-          ticketUpdateExpectation(operation, "remote_write_started"),
-        );
-        if (!committed) {
-          throw new Error("Ticket update commit could not be recorded.");
-        }
-        operation = committed;
-      },
-    });
-    if (result.remoteCommitUnknown) {
-      if (operation.phase === "reconciliation_pending") {
-        return {
-          kind: "remote_committed",
-          ticketId: operation.ticketId,
-          pending: "remote_reconcile",
-          message: "A child ticket create result is unknown. Automatic retry is disabled.",
-        };
-      }
-      try {
-        await this.journal.transitionTicketUpdate(
-          operation.ticketId,
-          { kind: "mark_commit_unknown" },
-          context.connectionScope,
-          ticketUpdateExpectation(operation, "remote_write_started"),
-        );
-      } catch {
-        // remote_write_started remains a conservative commit-unknown checkpoint.
-      }
-      return {
-        kind: "commit_unknown",
-        operationId,
-        ticketId: operation.ticketId,
-        message: "The remote update result is unknown. Automatic retry is disabled.",
-      };
-    }
-    if (result.status === "success" || result.status === "no_change") {
-      const current = getOfflineSyncQueue(context.connectionScope).tickets.get(
-        operation.ticketId,
-      ) ?? operation;
-      const remoteCommitted = result.status === "success" && (
-        current.phase === "remote_committed" ||
-        current.phase === "reconciliation_pending" ||
-        current.phase === "local_finalize_pending"
-      );
-      return this.ticketReconciler.reconcile({
-        context,
-        operation: current,
-        deps: this.updateDeps,
-        remoteCommitted,
-        noChange: result.status === "no_change",
-        completionResult: result,
-      });
-    }
-    if (result.status === "conflict") {
-      if (explicitRetry) {
-        return {
-          kind: "commit_unknown",
-          operationId,
-          ticketId: operation.ticketId,
-          message: result.message,
-        };
-      }
-      try {
-        await this.journal.transitionTicketUpdate(
-          operation.ticketId,
-          { kind: "abort_before_remote_write" },
-          context.connectionScope,
-          ticketUpdateExpectation(operation, "preparing"),
-        );
-      } catch {
-        // Keep the conflict outcome even when its local cleanup cannot be persisted.
-      }
-      return {
-        kind: "conflict",
-        ticketId: operation.ticketId,
-        message: result.message,
-        conflictContext: result.conflictContext,
-      };
-    }
-    if (explicitRetry) {
-      if (remoteWriteStarted && operation.phase === "remote_write_started") {
-        try {
-          await this.journal.transitionTicketUpdate(
-            operation.ticketId,
-            { kind: "mark_commit_unknown" },
-            context.connectionScope,
-            ticketUpdateExpectation(operation, "remote_write_started"),
-          );
-        } catch {
-          // Keep the durable remote-write checkpoint.
-        }
-      }
-      return {
-        kind: "commit_unknown",
-        operationId,
-        ticketId: operation.ticketId,
-        message: result.message,
-      };
-    }
-    const beforeCleanup = getOfflineSyncQueue(context.connectionScope).tickets.get(
-      operation.ticketId,
-    ) ?? operation;
-    if (childEffectsRequireRecovery(beforeCleanup.effects, true)) {
-      return {
-        kind: "remote_committed",
-        ticketId: operation.ticketId,
-        pending: "remote_reconcile",
-        message: result.message,
-      };
-    }
-    try {
-      if (operation.phase === "preparing") {
-        await this.journal.transitionTicketUpdate(
-          operation.ticketId,
-          { kind: "abort_before_remote_write" },
-          context.connectionScope,
-          ticketUpdateExpectation(operation, "preparing"),
-        );
-      }
-    } catch {
-      // Preserve the safe-side remote_write_started checkpoint if it had been reached.
-    }
-    const pending = getOfflineSyncQueue(context.connectionScope).tickets.get(
-      operation.ticketId,
-    );
-    if (
-      pending?.phase === "remote_committed" ||
-      pending?.phase === "reconciliation_pending" ||
-      pending?.phase === "local_finalize_pending"
-    ) {
-      return {
-        kind: "remote_committed",
-        ticketId: operation.ticketId,
-        pending: pending.phase === "local_finalize_pending"
-          ? "local_finalize"
-          : "remote_reconcile",
-        message: result.message,
-      };
-    }
-    return {
-      kind: "failed_before_commit",
-      error: new Error(result.message),
-      saveResult: result,
-    };
+      runInConnectionScope: this.runInConnectionScope,
+    } as any) as Promise<TicketSyncOutcome>;
   }
 
   public async syncAll(
     context: SyncContext,
     options: { shouldContinue?: () => boolean } = {},
   ): Promise<SyncAllOutcome> {
-    const queue = getOfflineSyncQueue(context.connectionScope);
-    const keys: TicketSyncQueueKey[] = [
-      ...queue.newTickets.map((operation) => ({
-        kind: "newTicket" as const,
-        queueId: operation.queueId,
-        documentUri: operation.documentUri,
-      })),
-      ...Array.from(queue.tickets.keys()).map((ticketId) => ({
-        kind: "ticket" as const,
-        ticketId,
-      })),
-    ];
-    const results: SyncAllOutcome["results"] = [];
-    for (let index = 0; index < keys.length; index++) {
-      const key = keys[index];
-      if (options.shouldContinue && !options.shouldContinue()) {
-        return {
-          plan: keys,
-          results,
-          remaining: keys.slice(index),
-          cancelled: true,
-        };
-      }
-      results.push({ key, outcome: await this.syncQueueItem(key, context) });
-    }
-    return { plan: keys, results, remaining: [], cancelled: false };
+    const outcome = await this.coordinator.syncAll(context, {
+      shouldContinue: options.shouldContinue,
+      deps: {
+        ticketCreate: this.createDeps,
+        ticketUpdate: this.updateDeps,
+        documents: this.documents,
+        localState: this.newTicketLocalState,
+      },
+    });
+    return {
+      plan: outcome.plan as TicketSyncQueueKey[],
+      results: outcome.results as any,
+      remaining: outcome.remaining as TicketSyncQueueKey[],
+      cancelled: outcome.cancelled,
+    };
   }
 }
 

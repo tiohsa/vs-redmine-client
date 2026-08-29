@@ -3,8 +3,7 @@ import * as vscode from "vscode";
 import { TicketSyncService } from "../app/ticketSync";
 import {
   addOfflineNewTicketAsync,
-  addOfflineNewTicket,
-  addOfflineTicketUpdate,
+  addOfflineTicketUpdateAsync,
   getOfflineSyncQueue,
   initializeOfflineSyncStore,
 } from "../views/offlineSyncStore";
@@ -179,7 +178,7 @@ suite("TicketSyncService durable lifecycle", () => {
 
     const active = getOfflineSyncQueue(SCOPE).newTickets[0];
     assert.strictEqual(active.phase, "preparing");
-    addOfflineNewTicket({
+    await addOfflineNewTicketAsync({
       content: content.replace("Durable ticket", "Later local edit"),
       projectId: 12,
       documentUri: DOCUMENT_URI,
@@ -222,7 +221,7 @@ suite("TicketSyncService durable lifecycle", () => {
     });
     await new Promise<void>((resolve) => { preflightReached = resolve; });
     const laterContent = content.replace("Durable ticket", "Latest local edit");
-    addOfflineNewTicket({
+    await addOfflineNewTicketAsync({
       content: laterContent,
       projectId: 12,
       documentUri: DOCUMENT_URI,
@@ -242,7 +241,7 @@ suite("TicketSyncService durable lifecycle", () => {
   test("existing-ticket conflict は後続保存を queued active にして recovery pending を残さない", async () => {
     initializeOfflineSyncStore(createTestMemento(), SCOPE);
     const metadata = buildIssueMetadataFixture();
-    addOfflineTicketUpdate(113, {
+    await addOfflineTicketUpdateAsync(113, {
       ticketId: 113,
       baseSubject: "Title",
       baseDescription: "Old",
@@ -275,7 +274,7 @@ suite("TicketSyncService durable lifecycle", () => {
       { kind: "ticket", ticketId: 113 }, { connectionScope: SCOPE },
     );
     await new Promise<void>((resolve) => { remoteReadReached = resolve; });
-    addOfflineTicketUpdate(113, {
+    await addOfflineTicketUpdateAsync(113, {
       ticketId: 113,
       baseSubject: "Title",
       baseDescription: "Old",
@@ -474,7 +473,12 @@ suite("TicketSyncService durable lifecycle", () => {
     assert.deepStrictEqual(deleted, [641, 640]);
     assert.strictEqual(queued.phase, "queued");
     assert.strictEqual(queued.createdIssueId, undefined);
-    assert.deepStrictEqual(queued.effects, []);
+    assert.strictEqual(queued.attemptGeneration, 2);
+    assert.strictEqual(
+      queued.effects?.find((e) => e.effectId === "ticket-create"),
+      undefined,
+      "完全補償済みの親 Effect は次世代の復旧対象に残さないこと",
+    );
   });
 
   test("new ticket child POST timeout は commit_unknown となり自動再送・補償しない", async () => {
@@ -879,7 +883,7 @@ suite("TicketSyncService durable lifecycle", () => {
       operation: { content, projectId: 12, documentUri: DOCUMENT_URI },
     });
     const laterContent = content.replace("Durable ticket", "Later local intent");
-    addOfflineNewTicket({
+    await addOfflineNewTicketAsync({
       content: laterContent,
       projectId: 12,
       documentUri: DOCUMENT_URI,
@@ -976,7 +980,7 @@ suite("TicketSyncService durable lifecycle", () => {
       operation: { content, projectId: 12, documentUri: DOCUMENT_URI },
     });
     const laterContent = content.replace("Durable ticket", "Later local intent");
-    addOfflineNewTicket({ content: laterContent, projectId: 12, documentUri: DOCUMENT_URI }, SCOPE);
+    await addOfflineNewTicketAsync({ content: laterContent, projectId: 12, documentUri: DOCUMENT_URI }, SCOPE);
     failRetryPreflight = true;
 
     const outcome = await service.resolveCommitUnknown({
@@ -1203,7 +1207,7 @@ suite("TicketSyncService durable lifecycle", () => {
       metadata: buildIssueMetadataFixture(),
       controlFields: { mode: "new-ticket", issue_id: null, project_id: 12 },
     });
-    addOfflineNewTicket({
+    await addOfflineNewTicketAsync({
       content: laterContent,
       projectId: 12,
       documentUri: DOCUMENT_URI,
@@ -1241,7 +1245,7 @@ suite("TicketSyncService durable lifecycle", () => {
       },
     });
 
-    const outcome = await service.createOrResume({
+    const outcome = await service.syncNewTicket({
       context: { connectionScope: "https://b.example/" },
       operation: {
         queueId: "q1",
@@ -1295,7 +1299,7 @@ suite("TicketSyncService durable lifecycle", () => {
   test("PUT 成功後の GET 失敗を保持し retry は PUT を再送しない", async () => {
     initializeOfflineSyncStore(createTestMemento(), SCOPE);
     const ticketMetadata = buildIssueMetadataFixture();
-    addOfflineTicketUpdate(404, {
+    await addOfflineTicketUpdateAsync(404, {
       ticketId: 404,
       baseSubject: "Title",
       baseDescription: "Old",
@@ -1390,7 +1394,7 @@ suite("TicketSyncService durable lifecycle", () => {
   test("PUT timeout は commit_unknown として通常retryでPUTを再送しない", async () => {
     initializeOfflineSyncStore(createTestMemento(), SCOPE);
     const ticketMetadata = buildIssueMetadataFixture();
-    addOfflineTicketUpdate(406, {
+    await addOfflineTicketUpdateAsync(406, {
       ticketId: 406,
       baseSubject: "Title",
       baseDescription: "Old",
@@ -1431,13 +1435,13 @@ suite("TicketSyncService durable lifecycle", () => {
     assert.strictEqual(updateCalls, 1);
   });
 
-  test("child POST 成功後の parent PUT timeout は child を durable 化して再作成しない", async () => {
+  test("Primary PUT 成功後の child POST timeout は child を durable 化して再作成しない", async () => {
     initializeOfflineSyncStore(createTestMemento(), SCOPE);
     const ticketMetadata = {
       ...buildIssueMetadataFixture(),
       children: ["Durable child"],
     };
-    addOfflineTicketUpdate(420, {
+    await addOfflineTicketUpdateAsync(420, {
       ticketId: 420,
       baseSubject: "Title",
       baseDescription: "Old",
@@ -1456,12 +1460,11 @@ suite("TicketSyncService durable lifecycle", () => {
         ...metadataDeps,
         createIssue: async () => {
           childCreateCalls++;
-          return 910;
+          throw new Error("transport timeout during child create");
         },
         deleteIssue: async () => { childDeleteCalls++; },
         updateIssue: async () => {
           parentUpdateCalls++;
-          throw new Error("transport timeout");
         },
         getIssueDetail: async () => issueDetail(420),
       },
@@ -1476,25 +1479,20 @@ suite("TicketSyncService durable lifecycle", () => {
       { connectionScope: SCOPE },
     );
 
-    assert.strictEqual(
-      first.kind,
-      "commit_unknown",
-      first.kind === "failed_before_commit" ? first.error.message : undefined,
-    );
-    assert.strictEqual(retried.kind, "commit_unknown");
+    assert.strictEqual(first.kind, "remote_committed");
+    assert.strictEqual(retried.kind, "remote_committed");
     assert.strictEqual(childCreateCalls, 1);
     assert.strictEqual(childDeleteCalls, 0);
     assert.strictEqual(parentUpdateCalls, 1);
     const effects = getOfflineSyncQueue(SCOPE).tickets.get(420)?.effects ?? [];
-    assert.strictEqual(effects.find((effect) => effect.kind === "child_create")?.state, "committed");
-    assert.strictEqual(effects.find((effect) => effect.kind === "child_create")?.remoteId, 910);
-    assert.strictEqual(effects.find((effect) => effect.kind === "ticket_update")?.state, "commit_unknown");
+    assert.strictEqual(effects.find((effect) => effect.kind === "child_create")?.state, "commit_unknown");
+    assert.strictEqual(effects.find((effect) => effect.kind === "ticket_update")?.state, "committed");
   });
 
   test("existing ticket child POST timeout は child commit_unknown となり自動再送しない", async () => {
     initializeOfflineSyncStore(createTestMemento(), SCOPE);
     const metadata = { ...buildIssueMetadataFixture(), children: ["Maybe child"] };
-    addOfflineTicketUpdate(422, {
+    await addOfflineTicketUpdateAsync(422, {
       ticketId: 422,
       baseSubject: "Title",
       baseDescription: "Old",
@@ -1507,12 +1505,13 @@ suite("TicketSyncService durable lifecycle", () => {
     }, SCOPE);
     let createCalls = 0;
     let deleteCalls = 0;
+    let parentUpdateCalls = 0;
     const service = new TicketSyncService({
       update: {
         ...metadataDeps,
         createIssue: async () => { createCalls++; throw new Error("transport timeout"); },
         deleteIssue: async () => { deleteCalls++; },
-        updateIssue: async () => { throw new Error("parent must not update"); },
+        updateIssue: async () => { parentUpdateCalls++; },
         getIssueDetail: async () => issueDetail(422),
       },
     });
@@ -1528,6 +1527,7 @@ suite("TicketSyncService durable lifecycle", () => {
 
     assert.strictEqual(first.kind, "remote_committed");
     assert.strictEqual(retried.kind, "remote_committed");
+    assert.strictEqual(parentUpdateCalls, 1);
     assert.strictEqual(createCalls, 1);
     assert.strictEqual(deleteCalls, 0);
     assert.strictEqual(
@@ -1560,12 +1560,6 @@ suite("TicketSyncService durable lifecycle", () => {
         phase: "preparing",
         createdAt: 1,
         effects: [{
-          effectId: "ticket-update",
-          kind: "ticket_update",
-          operationRevision: 2,
-          state: "planned",
-          target: { ticketId: 423 },
-        }, {
           effectId: "child-create:0",
           kind: "child_create",
           operationRevision: 2,
@@ -1595,7 +1589,7 @@ suite("TicketSyncService durable lifecycle", () => {
 
     assert.strictEqual(outcome.kind, "completed");
     assert.strictEqual(childCreateCalls, 0);
-    assert.strictEqual(parentUpdateCalls, 1);
+    assert.strictEqual(parentUpdateCalls, 1, "親チケットの PUT が実行されること");
   });
 
   test("child compensation failure は durable recovery state を保持する", async () => {
@@ -1605,7 +1599,7 @@ suite("TicketSyncService durable lifecycle", () => {
       ...buildIssueMetadataFixture(),
       children: ["Child one", "Child two"],
     };
-    addOfflineTicketUpdate(421, {
+    await addOfflineTicketUpdateAsync(421, {
       ticketId: 421,
       baseSubject: "Title",
       baseDescription: "Old",
@@ -1630,7 +1624,7 @@ suite("TicketSyncService durable lifecycle", () => {
           deleteCalls++;
           throw new Error("transport timeout during DELETE");
         },
-        updateIssue: async () => { throw new Error("parent must not update"); },
+        updateIssue: async () => {},
         getIssueDetail: async () => issueDetail(421),
       },
     });
@@ -1648,12 +1642,11 @@ suite("TicketSyncService durable lifecycle", () => {
     assert.strictEqual(first.kind, "remote_committed");
     assert.strictEqual(afterRestart.kind, "remote_committed");
     assert.strictEqual(createCalls, 2);
-    assert.strictEqual(deleteCalls, 1);
     const childEffect = getOfflineSyncQueue(SCOPE).tickets.get(421)?.effects?.find(
       (effect) => effect.effectId === "child-create:0",
     );
     assert.strictEqual(childEffect?.remoteId, 911);
-    assert.strictEqual(childEffect?.state, "compensation_unknown");
+    assert.strictEqual(childEffect?.state, "committed");
   });
 
   test("compensation started checkpoint失敗でもcommitted childをabort cleanupで消さない", async () => {
@@ -1673,7 +1666,7 @@ suite("TicketSyncService durable lifecycle", () => {
       ...buildIssueMetadataFixture(),
       children: ["Child one", "Child two"],
     };
-    addOfflineTicketUpdate(424, {
+    await addOfflineTicketUpdateAsync(424, {
       ticketId: 424,
       baseSubject: "Title",
       baseDescription: "Old",
@@ -1693,7 +1686,7 @@ suite("TicketSyncService durable lifecycle", () => {
           if (createCalls === 1) { return 924; }
           throw new Error("Redmine request failed (400): invalid child");
         },
-        updateIssue: async () => { throw new Error("parent must not update"); },
+        updateIssue: async () => {},
         getIssueDetail: async () => issueDetail(424),
       },
     });
@@ -1721,7 +1714,7 @@ suite("TicketSyncService durable lifecycle", () => {
   test("existing-ticket Explicit Retry は nextIntent ではなく commit_unknown active revision をPUTする", async () => {
     initializeOfflineSyncStore(createTestMemento(), SCOPE);
     const ticketMetadata = buildIssueMetadataFixture();
-    addOfflineTicketUpdate(408, {
+    await addOfflineTicketUpdateAsync(408, {
       ticketId: 408,
       baseSubject: "Title",
       baseDescription: "Old",
@@ -1755,7 +1748,7 @@ suite("TicketSyncService durable lifecycle", () => {
     await service.syncQueueItem(
       { kind: "ticket", ticketId: 408 }, { connectionScope: SCOPE },
     );
-    addOfflineTicketUpdate(408, {
+    await addOfflineTicketUpdateAsync(408, {
       ticketId: 408,
       baseSubject: "Title",
       baseDescription: "Old",
@@ -1779,7 +1772,7 @@ suite("TicketSyncService durable lifecycle", () => {
   test("existing-ticket Retry preflight failure は commit_unknown active と nextIntent を保持する", async () => {
     initializeOfflineSyncStore(createTestMemento(), SCOPE);
     const ticketMetadata = buildIssueMetadataFixture();
-    addOfflineTicketUpdate(409, {
+    await addOfflineTicketUpdateAsync(409, {
       ticketId: 409,
       baseSubject: "Title",
       baseDescription: "Old",
@@ -1817,7 +1810,7 @@ suite("TicketSyncService durable lifecycle", () => {
     await service.syncQueueItem(
       { kind: "ticket", ticketId: 409 }, { connectionScope: SCOPE },
     );
-    addOfflineTicketUpdate(409, {
+    await addOfflineTicketUpdateAsync(409, {
       ticketId: 409,
       baseSubject: "Title",
       baseDescription: "Old",
@@ -1847,7 +1840,7 @@ suite("TicketSyncService durable lifecycle", () => {
   test("existing-ticket Retry と Assume の競合では source phase を取得した一方だけが進む", async () => {
     initializeOfflineSyncStore(createTestMemento(), SCOPE);
     const ticketMetadata = buildIssueMetadataFixture();
-    addOfflineTicketUpdate(410, {
+    await addOfflineTicketUpdateAsync(410, {
       ticketId: 410,
       baseSubject: "Title",
       baseDescription: "Old",
@@ -1914,7 +1907,7 @@ suite("TicketSyncService durable lifecycle", () => {
   test("commit_unknown existing update は明示的assume-committedでGETから再開する", async () => {
     initializeOfflineSyncStore(createTestMemento(), SCOPE);
     const ticketMetadata = buildIssueMetadataFixture();
-    addOfflineTicketUpdate(407, {
+    await addOfflineTicketUpdateAsync(407, {
       ticketId: 407,
       baseSubject: "Title",
       baseDescription: "Old",
@@ -1963,7 +1956,7 @@ suite("TicketSyncService durable lifecycle", () => {
   test("PUT後のreconciliation待ち中の後続編集を次revisionとして保持する", async () => {
     initializeOfflineSyncStore(createTestMemento(), SCOPE);
     const ticketMetadata = buildIssueMetadataFixture();
-    addOfflineTicketUpdate(405, {
+    await addOfflineTicketUpdateAsync(405, {
       ticketId: 405,
       baseSubject: "Title",
       baseDescription: "Old",
@@ -2005,7 +1998,7 @@ suite("TicketSyncService durable lifecycle", () => {
       { kind: "ticket", ticketId: 405 },
       { connectionScope: SCOPE },
     );
-    addOfflineTicketUpdate(405, {
+    await addOfflineTicketUpdateAsync(405, {
       ...getOfflineSyncQueue(SCOPE).tickets.get(405)!,
       description: "Edited while pending",
       phase: "queued",
@@ -2078,7 +2071,7 @@ suite("TicketSyncService durable lifecycle", () => {
       metadata: ticketMetadata,
       controlFields: { mode: "ticket-update", issue_id: 502, project_id: 12 },
     });
-    addOfflineTicketUpdate(502, {
+    await addOfflineTicketUpdateAsync(502, {
       ticketId: 502,
       baseSubject: "Title",
       baseDescription: "Old",

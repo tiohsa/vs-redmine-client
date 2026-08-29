@@ -170,6 +170,15 @@ export const parseTicketEditorContent = (
 
   const { subject, subjectIndex } = extractSubjectLine(lines, 0);
   if (subjectIndex === -1) {
+    if (options.allowMissingSubject) {
+      return {
+        subject: "",
+        description: normalizeDescription(lines),
+        metadata: options.fallbackMetadata ?? { tracker: "", priority: "", status: "", due_date: "", children: [] },
+        layout: "subject-first",
+        metadataBlock: "missing",
+      };
+    }
     throw new Error("Subject line is missing.");
   }
   const { metadata, description, metadataBlock, controlFields } = extractMetadataBlock(

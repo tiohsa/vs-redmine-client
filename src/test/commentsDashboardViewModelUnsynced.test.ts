@@ -1,10 +1,12 @@
 import * as assert from "assert";
 import { buildCommentDashboardItems } from "../dashboard/viewModels/commentsDashboardViewModel";
 import {
-  addOfflineCommentUpdate,
-  clearOfflineSyncQueue,
+  addOfflineCommentUpdateAsync,
+  clearOfflineSyncQueueAsync,
+  initializeOfflineSyncStore,
 } from "../views/offlineSyncStore";
 import { Comment } from "../redmine/types";
+import { createTestMemento } from "./helpers/vscodeMemento";
 
 const makeComment = (id: number): Comment => ({
   id,
@@ -16,16 +18,21 @@ const makeComment = (id: number): Comment => ({
 });
 
 suite("commentsDashboardViewModel – hasUnsyncedEdit", () => {
-  setup(() => { clearOfflineSyncQueue(); });
-  teardown(() => { clearOfflineSyncQueue(); });
+  setup(async () => {
+    initializeOfflineSyncStore(createTestMemento());
+    await clearOfflineSyncQueueAsync();
+  });
+  teardown(async () => {
+    await clearOfflineSyncQueueAsync();
+  });
 
-  test("未同期エントリがなければ hasUnsyncedEdit = false", () => {
+  test("未同期エントリがなければ hasUnsyncedEdit = false", async () => {
     const items = buildCommentDashboardItems([makeComment(1), makeComment(2)]);
     assert.ok(items.every((i) => !i.hasUnsyncedEdit));
   });
 
-  test("sourceNotesHash 付きエントリがあるコメントは hasUnsyncedEdit = true", () => {
-    addOfflineCommentUpdate({
+  test("sourceNotesHash 付きエントリがあるコメントは hasUnsyncedEdit = true", async () => {
+    await addOfflineCommentUpdateAsync({
       ticketId: 10,
       commentId: 2,
       body: "edited",
@@ -38,8 +45,8 @@ suite("commentsDashboardViewModel – hasUnsyncedEdit", () => {
     assert.deepStrictEqual(items[1]!.syncKey, { kind: "comment", ticketId: 10, commentId: 2 });
   });
 
-  test("別チケットの同じ commentId は hasUnsyncedEdit = false", () => {
-    addOfflineCommentUpdate({
+  test("別チケットの同じ commentId は hasUnsyncedEdit = false", async () => {
+    await addOfflineCommentUpdateAsync({
       ticketId: 99,
       commentId: 2,
       body: "edited",
@@ -50,8 +57,8 @@ suite("commentsDashboardViewModel – hasUnsyncedEdit", () => {
     assert.strictEqual(items[0]!.hasUnsyncedEdit, false);
   });
 
-  test("編集不可コメントはキューがあっても hasUnsyncedEdit = false", () => {
-    addOfflineCommentUpdate({
+  test("編集不可コメントはキューがあっても hasUnsyncedEdit = false", async () => {
+    await addOfflineCommentUpdateAsync({
       ticketId: 10,
       commentId: 2,
       body: "edited",
@@ -64,8 +71,8 @@ suite("commentsDashboardViewModel – hasUnsyncedEdit", () => {
     assert.strictEqual(items[0]!.hasUnsyncedEdit, false);
   });
 
-  test("sourceNotesHash なしエントリは hasUnsyncedEdit = false (comment-create 区別)", () => {
-    addOfflineCommentUpdate({
+  test("sourceNotesHash なしエントリは hasUnsyncedEdit = false (comment-create 区別)", async () => {
+    await addOfflineCommentUpdateAsync({
       ticketId: 10,
       commentId: 3,
       body: "new comment",
@@ -76,8 +83,8 @@ suite("commentsDashboardViewModel – hasUnsyncedEdit", () => {
     assert.strictEqual(items[0]!.hasUnsyncedEdit, false);
   });
 
-  test("新規コメント用キューはローカル未同期コメントとして先頭に表示する", () => {
-    addOfflineCommentUpdate({
+  test("新規コメント用キューはローカル未同期コメントとして先頭に表示する", async () => {
+    await addOfflineCommentUpdateAsync({
       ticketId: 10,
       body: "new comment",
       documentUri: "file:///tmp/new-comment.md",
@@ -96,8 +103,8 @@ suite("commentsDashboardViewModel – hasUnsyncedEdit", () => {
     assert.strictEqual(items[1]!.hasUnsyncedEdit, false);
   });
 
-  test("別チケットの新規コメント用キューは表示しない", () => {
-    addOfflineCommentUpdate({
+  test("別チケットの新規コメント用キューは表示しない", async () => {
+    await addOfflineCommentUpdateAsync({
       ticketId: 99,
       body: "new comment",
       documentUri: "file:///tmp/new-comment.md",

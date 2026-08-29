@@ -134,11 +134,11 @@ suite("commentUpdateFile", () => {
     }, "newer local edit");
     fs.writeFileSync(file, newer);
 
-    const result = await updateCommentUpdateFileAfterSync(
-      vscode.Uri.file(file).toString(),
-      "remote canonical",
-      "old",
-    );
+    const result = await updateCommentUpdateFileAfterSync({
+      documentUri: vscode.Uri.file(file).toString(),
+      syncedBody: "remote canonical",
+      expectedBody: "old",
+    });
 
     assert.strictEqual(result, "not_available");
     assert.strictEqual(fs.readFileSync(file, "utf8"), newer);

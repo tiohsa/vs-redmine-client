@@ -1,6 +1,6 @@
 import type { CommentSaveDependencies } from "../views/commentSaveSync";
 import {
-  addOfflineCommentUpdate,
+  addOfflineCommentUpdateAsync,
   type OfflineCommentUpdate,
 } from "../views/offlineSyncStore";
 import { runWithConnectionScope } from "../redmine/client";
@@ -11,7 +11,7 @@ export const queueAndSyncComment = async (input: {
   connectionScope: string;
   deps?: Partial<CommentSaveDependencies>;
 }): Promise<SyncEngineOutcome> => {
-  addOfflineCommentUpdate(input.operation, input.connectionScope);
+  await addOfflineCommentUpdateAsync(input.operation, input.connectionScope);
   const key = {
     kind: "comment" as const,
     ticketId: input.operation.ticketId,

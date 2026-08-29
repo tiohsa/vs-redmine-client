@@ -169,4 +169,36 @@ suite("syncEditorToRedmine — draft status management", () => {
     assert.strictEqual(getConnectionScopeForDocument(editor.document), currentScope);
     await vscode.commands.executeCommand("workbench.action.closeActiveEditor");
   });
+
+  test("手動 ticket 同期は注入された共有 SyncEngine の editor 経路を使う", async () => {
+    const ticketId = 105;
+    const metadata = buildIssueMetadataFixture();
+    const editor = createMutableEditorStub(
+      vscode.Uri.parse("test://ticket-105"),
+      buildTicketEditorContent({
+        subject: "Title",
+        description: "Updated body",
+        metadata,
+      }),
+    );
+    registerTicketEditor(ticketId, editor, "primary", "ticket");
+    initializeTicketDraft(ticketId, "Title", "Original body", metadata, "t1");
+    let sharedEditorSyncCalls = 0;
+
+    const result = await syncEditorToRedmine(editor, {
+      syncEngine: {
+        syncOne: async () => ({ kind: "no_change", ticketId }),
+        syncTicketEditor: async (input) => {
+          sharedEditorSyncCalls += 1;
+          assert.strictEqual(input.editor, editor);
+          assert.strictEqual(input.ticketId, ticketId);
+          return { kind: "completed", ticketId };
+        },
+      },
+    });
+
+    assert.strictEqual(sharedEditorSyncCalls, 1);
+    assert.strictEqual(result?.kind, "ticket");
+    assert.strictEqual(result?.result.status, "success");
+  });
 });

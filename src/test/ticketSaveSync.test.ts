@@ -6,11 +6,16 @@ import {
   markDraftStatus,
   setTicketDraftContent,
 } from "../views/ticketDraftStore";
-import { addOfflineTicketUpdate, getOfflineSyncQueue } from "../views/offlineSyncStore";
+import {
+  addOfflineTicketUpdateAsync,
+  clearOfflineSyncQueueAsync,
+  getOfflineSyncQueue,
+} from "../views/offlineSyncStore";
 import { buildTicketEditorContent } from "../views/ticketEditorContent";
 import { applyQueuedTicketUpdate } from "../views/ticketSync/ticketQueueSync";
 import { reloadTicketEditor, syncTicketDraft } from "../views/ticketSync/ticketUpdateSync";
-import { mergeTicketContent } from "../views/conflictResolver";
+import { forceSaveLocal, mergeTicketContent } from "../views/conflictResolver";
+import { createTicketSyncService } from "../app/ticketSync";
 import { createEditorStub, createMutableEditorStub } from "./helpers/editorStubs";
 import { buildIssueMetadataFixture } from "./helpers/ticketMetadataFixtures";
 import { buildTicketEditorMetadataContentWithChildren } from "./helpers/ticketEditorMetadataStubs";
@@ -53,7 +58,13 @@ suite("Ticket save sync", () => {
   });
 
   test("refreshes remote fields when there is no local change", async () => {
-    const metadata = buildIssueMetadataFixture({ status: "New" });
+    const metadata = {
+      tracker: "Task",
+      priority: "Normal",
+      status: "New",
+      due_date: "",
+      children: [],
+    };
     initializeTicketDraft(12, "Title", "Body", metadata, "t1");
     let content = buildTicketEditorContent({ subject: "Title", description: "Body", metadata });
     const editor = {
@@ -183,7 +194,7 @@ suite("Ticket save sync", () => {
       metadata: baseMetadata,
     });
     initializeTicketDraft(102, "Title", "Body", baseMetadata, "t1");
-    addOfflineTicketUpdate(102, {
+    await addOfflineTicketUpdateAsync(102, {
       ticketId: 102,
       baseSubject: "Title",
       baseDescription: "Body",
@@ -231,6 +242,143 @@ suite("Ticket save sync", () => {
     assert.ok(editor.document.getText().includes("status:    Closed"));
     assert.strictEqual(getTicketDraft(102)?.baseMetadata.status, "Closed");
     assert.strictEqual(getOfflineSyncQueue().tickets.has(102), false);
+  });
+
+  test("local priority replaces the stale conflict snapshot before retrying sync", async () => {
+    const scope = "test:local-priority-conflict";
+    const ticketId = 103;
+    const metadata = buildIssueMetadataFixture({ status: "New" });
+    const localContent = buildTicketEditorContent({
+      subject: "Created title",
+      description: "Local edit after create",
+      metadata,
+    });
+    initializeTicketDraft(
+      ticketId,
+      "Created title",
+      "Created body",
+      metadata,
+      "t1",
+      scope,
+    );
+    await addOfflineTicketUpdateAsync(ticketId, {
+      ticketId,
+      baseSubject: "Created title",
+      baseDescription: "Created body",
+      baseMetadata: metadata,
+      lastKnownRemoteUpdatedAt: "t1",
+      subject: "Created title",
+      description: "Local edit after create",
+      content: localContent,
+      metadata,
+      documentUri: "untitled:ticket-103.md",
+      connectionScope: scope,
+      operationId: `${scope}:ticket:${ticketId}`,
+      phase: "queued",
+    }, scope);
+
+    const conflict = await syncTicketDraft({
+      operationScope: scope,
+      ticketId,
+      content: localContent,
+      deps: {
+        getIssueDetail: async () => ({
+          ticket: {
+            id: ticketId,
+            subject: "Server edit",
+            description: "Created body",
+            projectId: 1,
+            trackerName: "Task",
+            priorityName: "Normal",
+            statusName: "New",
+            updatedAt: "t2",
+          },
+          comments: [],
+        }),
+        updateIssue: async () => {
+          throw new Error("conflicting update must not be written");
+        },
+        createIssue: async () => {
+          throw new Error("child ticket must not be created");
+        },
+        deleteIssue: async () => undefined,
+        listIssueStatuses: async () => [],
+        listTrackers: async () => [],
+        listIssuePriorities: async () => [],
+      },
+    });
+    assert.strictEqual(conflict.status, "conflict");
+    assert.ok(conflict.conflictContext);
+
+    let updateCalls = 0;
+    let updated = false;
+    let revisionAtRemoteWrite: number | undefined;
+    let intentRevisionAtRemoteWrite: number | undefined;
+    const syncService = createTicketSyncService({
+      update: {
+        getIssueDetail: async () => ({
+          ticket: {
+            id: ticketId,
+            subject: updated ? "Created title" : "Server edit",
+            description: updated ? "Local edit after create" : "Created body",
+            projectId: 1,
+            trackerName: "Task",
+            priorityName: "Normal",
+            statusName: "New",
+            updatedAt: updated ? "t3" : "t2",
+          },
+          comments: [],
+        }),
+        updateIssue: async () => {
+          updateCalls += 1;
+          const queued = getOfflineSyncQueue(scope).tickets.get(ticketId);
+          revisionAtRemoteWrite = queued?.revision;
+          intentRevisionAtRemoteWrite = queued?.intentRevision;
+          updated = true;
+        },
+        createIssue: async () => {
+          throw new Error("child ticket must not be created");
+        },
+        deleteIssue: async () => undefined,
+        listIssueStatuses: async () => [{ id: 1, name: "New" }],
+        listTrackers: async () => [{ id: 2, name: "Task" }],
+        listIssuePriorities: async () => [{ id: 3, name: "Normal" }],
+        searchUsers: async () => [],
+        uploadFile: async () => ({
+          token: "test-token",
+          filename: "test.txt",
+          contentType: "text/plain",
+        }),
+        getProjectTrackers: async () => [{ id: 2, name: "Task" }],
+        listProjectMembers: async () => [],
+      },
+      documents: {
+        rewriteNewTicket: async () => ({ kind: "applied" }),
+        rewriteTicket: async () => ({ kind: "applied" }),
+        findOpenDocument: () => undefined,
+      },
+      runInConnectionScope: async (_connectionScope, operation) => operation(),
+    });
+
+    try {
+      const editor = createMutableEditorStub(
+        vscode.Uri.parse("untitled:ticket-103.md"),
+        localContent,
+      );
+      const resolved = await forceSaveLocal(
+        conflict.conflictContext!,
+        editor,
+        scope,
+        syncService,
+      );
+
+      assert.notStrictEqual(resolved.status, "conflict");
+      assert.strictEqual(updateCalls, 1, resolved.message);
+      assert.strictEqual(revisionAtRemoteWrite, 2);
+      assert.strictEqual(intentRevisionAtRemoteWrite, 2);
+    } finally {
+      await clearOfflineSyncQueueAsync(scope);
+    }
   });
 
   test("returns unreachable on server error", async () => {

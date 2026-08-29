@@ -34,10 +34,57 @@ export const buildRegisteredDocumentContent = (
   );
   return buildTicketEditorContent({
     ...(replacement ?? parsed),
+    metadata: replacement?.metadata ?? parsed.metadata,
     layout: replacement?.layout ?? parsed.layout,
-    metadataBlock: replacement?.metadataBlock ?? parsed.metadataBlock,
+    metadataBlock: replacement?.metadataBlock ?? "present",
     controlFields: newControlFields,
   });
+};
+
+const isAlreadyApplied = (
+  currentContent: string,
+  createdId: number,
+  projectId?: number,
+  replacement?: TicketEditorContent,
+): boolean => {
+  if (!replacement) {
+    return false;
+  }
+  try {
+    const parsed = parseTicketEditorContent(currentContent, {
+      allowMissingMetadata: true,
+      fallbackMetadata: FALLBACK_METADATA,
+      allowMissingSubject: true,
+    });
+    if (parsed.subject !== replacement.subject) {
+      return false;
+    }
+    if (parsed.description !== replacement.description) {
+      return false;
+    }
+    const control = parsed.controlFields ?? {};
+    if (control.issue_id !== createdId && (control as any).ticket_id !== createdId) {
+      return false;
+    }
+    if (projectId !== undefined && control.project_id !== undefined && control.project_id !== projectId) {
+      return false;
+    }
+    if (replacement.metadata) {
+      const m1 = parsed.metadata ?? {};
+      const m2 = replacement.metadata;
+      if (
+        (m1.tracker ?? "") !== (m2.tracker ?? "") ||
+        (m1.status ?? "") !== (m2.status ?? "") ||
+        (m1.priority ?? "") !== (m2.priority ?? "") ||
+        (m1.due_date ?? "") !== (m2.due_date ?? "")
+      ) {
+        return false;
+      }
+    }
+    return true;
+  } catch {
+    return false;
+  }
 };
 
 export type RewriteDocumentDeps = {
@@ -64,13 +111,17 @@ export const compareAndRewriteDocumentWithRegisteredFields = async (input: {
   const document = textDocuments.find((doc) => doc.uri.toString() === input.documentUri);
 
   if (document) {
-    if (document.getText() !== input.expected.content) {
-      return { kind: "stale_source" };
-    }
-    let newContent: string;
+    let targetFromExpected: string;
+    let targetFromCurrent: string;
     try {
-      newContent = buildRegisteredDocumentContent(
+      targetFromExpected = buildRegisteredDocumentContent(
         input.expected.content,
+        input.ticketId,
+        input.projectId,
+        input.replacement,
+      );
+      targetFromCurrent = buildRegisteredDocumentContent(
+        document.getText(),
         input.ticketId,
         input.projectId,
         input.replacement,
@@ -78,9 +129,24 @@ export const compareAndRewriteDocumentWithRegisteredFields = async (input: {
     } catch {
       return { kind: "write_failed" };
     }
-    if (newContent === input.expected.content) {
+
+    // Already applied in a previous run (INV-F06, T-F10)
+    if (
+      document.getText() === targetFromCurrent ||
+      document.getText() === targetFromExpected ||
+      isAlreadyApplied(document.getText(), input.ticketId, input.projectId, input.replacement)
+    ) {
       return { kind: "applied" };
     }
+
+    if (document.getText() !== input.expected.content) {
+      return { kind: "stale_source" };
+    }
+    if (targetFromExpected === input.expected.content) {
+      return { kind: "applied" };
+    }
+
+    const newContent = targetFromExpected;
 
     suppressSaveSync(input.documentUri);
     try {
@@ -93,6 +159,7 @@ export const compareAndRewriteDocumentWithRegisteredFields = async (input: {
       if (!editor) {
         return { kind: "not_available" };
       }
+      const initialVersion = document.version;
       try {
         await applyEditorContent(editor, newContent);
       } catch {
@@ -100,7 +167,7 @@ export const compareAndRewriteDocumentWithRegisteredFields = async (input: {
           ? { kind: "write_failed" }
           : { kind: "stale_source" };
       }
-      if (document.getText() !== newContent) {
+      if ((initialVersion !== undefined && document.version !== undefined && document.version !== initialVersion + 1) || document.getText() !== newContent) {
         return { kind: "stale_source" };
       }
       if (document.isDirty && !(await saveDocument(document))) {
