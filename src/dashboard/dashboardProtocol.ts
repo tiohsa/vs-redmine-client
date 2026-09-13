@@ -235,6 +235,8 @@ export interface DashboardGeneralSettingsPatch {
   offlineSyncMode?: "auto" | "manual";
   includeChildProjects?: boolean;
   ticketListLimit?: number;
+  showStatus?: boolean;
+  showDueDate?: boolean;
 }
 
 export type DashboardRequest =

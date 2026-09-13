@@ -110,4 +110,65 @@ suite("Dashboard Webview 改善", () => {
     assert.ok(dashboardStyles.includes("overflow:auto"));
     assert.ok(dashboardStyles.includes("z-index:50"));
   });
+
+  test("監査補修でフィルター表示・説明文省略・未同期件数を維持する", () => {
+    assert.ok(dashboardWebviewScript.includes("function renderFilterChips()"));
+    assert.ok(dashboardWebviewScript.includes("renderFilterChips();"));
+    assert.ok(dashboardWebviewScript.includes("filter-chip-x"));
+    assert.ok(dashboardWebviewScript.includes("detail-description'+(ticketDetailExpanded ? '' : ' detail-description-collapsed')"));
+    assert.ok(dashboardStyles.includes(".detail-description-collapsed"));
+    assert.ok(dashboardStyles.includes("-webkit-line-clamp: 3"));
+    assert.ok(dashboardStyles.includes("max-height: 4.5em"));
+    assert.ok(dashboardWebviewScript.includes("STRINGS.unsyncedCountLabel"));
+    assert.ok(buildDashboardStrings().unsyncedCountLabel);
+  });
+
+  test("未同期 lifecycle は既知状態を安全な表示へ変換する", () => {
+    assert.ok(dashboardWebviewScript.includes("queued:{kind:'queued'"));
+    assert.ok(dashboardWebviewScript.includes("recovery_pending:{kind:'review'"));
+    assert.ok(dashboardWebviewScript.includes("commit_unknown:{kind:'review'"));
+    assert.ok(dashboardWebviewScript.includes("conflict:{kind:'conflict'"));
+    assert.ok(dashboardWebviewScript.includes("failed:{kind:'failed'"));
+    assert.ok(dashboardWebviewScript.includes("UNSYNCED_BADGE_META[lifecycle] || UNSYNCED_BADGE_META.queued"));
+    assert.ok(dashboardWebviewScript.includes("const lifecycle=item && typeof item.lifecycle === 'string' ? item.lifecycle : 'queued'"));
+  });
+
+  test("ボタン階層・semantic shell・外部依存なしを静的保証する", () => {
+    const html = buildDashboardHtml("nonce", buildDashboardStrings());
+    assert.ok(html.includes('<header id="header" class="dashboard-header">'));
+    assert.ok(html.includes('role="tab"'));
+    assert.ok(html.includes('role="tabpanel"'));
+    assert.ok(html.includes('aria-selected="true"'));
+    assert.ok(html.includes('aria-labelledby="tab-tickets"'));
+    assert.ok(html.includes('id="sync-all-btn" class="btn btn-primary'));
+    assert.ok(dashboardWebviewScript.includes("data-sync-key=\"'+safeJson(item.key)+'\""));
+    assert.ok(dashboardWebviewScript.includes("id=\"add-comment-btn\" type=\"button\">'+STRINGS.addCommentBtn"));
+    assert.ok(dashboardWebviewScript.includes("id=\"reload-comments-btn\" type=\"button\">'+STRINGS.reloadComments"));
+    assert.ok(dashboardStyles.includes("body.vscode-high-contrast"));
+    assert.ok(dashboardStyles.includes("@media (max-width: 699px)"));
+    assert.ok(dashboardStyles.includes("@media (max-width: 480px)"));
+    assert.ok(dashboardStyles.includes("@media (max-width: 360px)"));
+    assert.ok(dashboardStyles.includes("@media (min-width: 700px)"));
+    assert.ok(dashboardStyles.includes("@media (min-width: 1000px)"));
+    assert.ok(!dashboardStyles.includes("http://") && !dashboardStyles.includes("https://"));
+    assert.ok(!dashboardWebviewScript.includes("https://"));
+  });
+
+  test("狭幅でも同期状態 badge を残し、Unsynced feedback は対象操作だけ更新する", () => {
+    assert.ok(dashboardStyles.includes(".badges .ticket-status, .badges .due-overdue"));
+    assert.ok(dashboardStyles.includes(".badges .due-1day, .badges .due-3days, .badges .due-7days"));
+    assert.ok(dashboardWebviewScript.includes("const unsyncedFeedbackRequests = new Set();"));
+    assert.ok(dashboardWebviewScript.includes("type === 'unsynced.syncOne' || type === 'unsynced.syncAll'"));
+    assert.ok(dashboardWebviewScript.includes("finishOperation('success',message.requestId,message.message)"));
+    assert.ok(dashboardWebviewScript.includes("else if(message.type === 'toast'){ showToast(message.level,message.message); }"));
+    assert.ok(!dashboardWebviewScript.includes("else if(message.type === 'toast'){ setOperationFeedback"));
+  });
+
+  test("設定パネルに表示設定を公開する", () => {
+    assert.ok(dashboardWebviewScript.includes("STRINGS.sectionDisplay"));
+    assert.ok(dashboardWebviewScript.includes('id="set-show-status"'));
+    assert.ok(dashboardWebviewScript.includes('id="set-show-due-date"'));
+    assert.ok(dashboardWebviewScript.includes("req('settings.updateGeneral',{patch:{showStatus:this.checked}})"));
+    assert.ok(dashboardWebviewScript.includes("req('settings.updateGeneral',{patch:{showDueDate:this.checked}})"));
+  });
 });

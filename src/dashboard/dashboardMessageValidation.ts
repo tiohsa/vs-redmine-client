@@ -80,6 +80,8 @@ const validateGeneralPatch = (v: unknown): boolean => {
   if (!isObject(v)) { return false; }
   if ("offlineSyncMode" in v && !OFFLINE_SYNC_MODES.has(v["offlineSyncMode"] as string)) { return false; }
   if ("includeChildProjects" in v && !isBoolean(v["includeChildProjects"])) { return false; }
+  if ("showStatus" in v && !isBoolean(v["showStatus"])) { return false; }
+  if ("showDueDate" in v && !isBoolean(v["showDueDate"])) { return false; }
   if ("ticketListLimit" in v) {
     const limit = v["ticketListLimit"];
     if (!isNumber(limit) || !Number.isInteger(limit) || (limit as number) < 1 || (limit as number) > 500) {

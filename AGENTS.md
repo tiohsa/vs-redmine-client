@@ -1,88 +1,289 @@
-# redmine-client AGENTS Guide
+# AGENTS.md
 
-Last updated: 2026-08-23
+## Project
 
-## 1. Project Overview
+`redmine-client` is a VS Code extension for managing Redmine 6.1 issues, comments, Markdown editing, Dashboard interactions, and offline synchronization.
 
-* `redmine-client` is a VS Code extension for managing Redmine 6.1 issues, comments, Markdown editing, and offline synchronization from a single Dashboard Webview.
-* Responses, documentation, and review comments must be written in Japanese. Preserve the original notation for commands, API names, and identifiers.
-* The technical baseline is TypeScript 5.9, VS Code `^1.107.0`, webpack 5, `@vscode/test-cli` + Mocha, and ESLint 9.
-* The extension runs in the Node.js Extension Host and is activated from `src/extension.ts`. Keep TypeScript `strict` mode enabled.
+* TypeScript 5.9 in `strict` mode
+* VS Code `^1.107.0`
+* webpack 5
+* `@vscode/test-cli` + Mocha
+* ESLint 9
+* Extension entry point: `src/extension.ts`
 
-## 2. Repository Structure and Responsibilities
+Write responses, documentation, and review comments in Japanese. Preserve commands, API names, identifiers, and source notation as-is.
 
-* `src/extension.ts`: The composition root that wires together store initialization, views, synchronization, commands, and editor events.
-* `src/app/`: Application layer. Responsible for command/view registration, save classification, notifications, and synchronization orchestration (`SyncEngine`).
-* `src/app/ticketSync/`: Owns generic synchronization state machine, operation handlers, repository interfaces, reconciliation, and finalization after remote writes. Do not bypass this boundary when adding new write paths.
-* `src/dashboard/`: Owns the Dashboard protocol, input validation, router, controller, state store, services, view models, HTML, CSS, and scripts.
-* `src/commands/`: Thin command handlers invoked from the Command Palette and Dashboard. Do not duplicate shared synchronization logic here.
-* `src/views/`: Responsible for the Markdown editor, drafts, persisted unsynced queue, conflict resolution, and presentation adapters. `src/views/ticketSync/` is the integration boundary between the editor/queue and the application layer.
-* `src/redmine/`: Responsible for the Redmine HTTP API, authentication, and types and operations for projects/issues/comments/users/attachments.
-* `src/config/`: Responsible for VS Code configuration, connection scope, project selection, and API key management through SecretStorage.
-* `src/utils/`: Contains functionality that does not belong to a specific UI, such as URL handling, notifications, images, Mermaid conversion, and three-way merge.
-* `src/test/`: Extension Host tests. Shared stubs/fixtures belong in `src/test/helpers/`.
-* `docs/planning/`, `docs/implementation-decisions/`, `docs/review/`: When present, use these directories separately for plans, implementation decisions, and review results.
-* `l10n/`, `package.nls.json`, `package.nls.ja.json`: Localization assets for UI strings and the extension manifest.
-* `dist/` and `out/` are generated artifacts. Do not edit them directly; regenerate them through webpack and TypeScript compilation respectively.
+Use the repository as the primary source of truth.
 
-## 3. Development Commands
+Consult these only when relevant:
 
-* `pnpm install`: Install dependencies according to `pnpm-lock.yaml`.
-* `pnpm run compile`: Build `src/extension.ts` into `dist/extension.js` for development.
-* `pnpm run watch`: Run webpack in watch mode.
-* `pnpm run package`: Generate the production bundle for publishing.
-* `pnpm run compile-tests`: Remove `out/test/`, then compile all TypeScript into `out/`.
-* `pnpm run lint`: Run `eslint src`.
-* `pnpm test`: Run all Extension Host tests after `compile-tests`, `compile`, and `lint`.
-* `pnpm run test:unsafe`: Alternative test path for sandbox-restricted environments. Use only when the normal `pnpm test` fails due to sandbox restrictions.
+* `docs/planning/` for plans
+* `docs/implementation-decisions/` for design and lifecycle decisions
+* `docs/review/` for review results
+* nearby tests for established executable behavior
+* local `DESIGN.md` for Dashboard UI decisions, if it exists
 
-## 4. Implementation Conventions
+If a local `DESIGN.md` exists, treat it as the authority for Dashboard visual/layout decisions. If it does not exist, do not invent design-system values.
 
-* Assume `strict` mode from `tsconfig.json`. Do not work around problems with `any`, unnecessary type assertions, or disabled type checking.
-* Follow the naming, `curly`, `eqeqeq`, `no-throw-literal`, and semicolon rules defined in `eslint.config.mjs`.
-* Reuse existing module boundaries and helpers. Do not mix in large-scale refactoring or new dependencies that are outside the requested scope.
-* Validate values received from the Dashboard at the `dashboardProtocol.ts` and `dashboardMessageValidation.ts` boundaries. Do not pass unvalidated Webview messages to controllers.
-* Use `vscode.l10n.t` for user-facing strings. When adding or changing strings, also update the corresponding `l10n/bundle.l10n*.json` or `package.nls*.json`.
-* Before modifying the Dashboard UI, check for a local `DESIGN.md` and treat it as the SSoT if it exists. This file is not tracked by git; if it does not exist, do not guess design values and ask the user instead.
-* API keys must be handled only through VS Code SecretStorage. Never write real values into settings, logs, fixtures, or documentation. Limit `ignoreSSLErrors` to development and verification use cases.
+## Architecture Boundaries
 
-## 5. Synchronization and Persistence Invariants
+Preserve the existing ownership model.
 
-* Data in `src/views/offlineSyncStore.ts` is persistent state that survives VS Code restarts. When changing its shape, key, scope, revision, or phase, verify restoration of existing data and legacy compatibility.
-* All live offline queue mutations for the same `connectionScope` must use the store's scope transaction boundary. Acquire the queue snapshot after entering that boundary, persist the candidate before publishing it to memory, and keep production mutation APIs asynchronous; do not reintroduce direct live-memory writers or stale whole-queue replacement paths.
-* Synchronization must go through the lifecycle defined by `src/app/syncEngine.ts` and `src/app/ticketSync/`, preserving the ordering and checkpoints of remote write, read-back, and local finalize.
-* Primary Operation phase and Primary Effect state must transition atomically via `SyncOperationRepository.transitionPrimaryRemoteWrite` in a single persistence call to prevent state ledger divergence.
-* Planned effects are monotonic and idempotent; non-planned effects (committed/started/failed/commit_unknown) must never be rolled back to `planned` on re-planning unless explicitly compensated.
-* `attemptGeneration` is the Remote Attempt fence, separate from the Intent `revision`; legacy Memento v3 entries without it restore as generation `1`.
-* Full current-generation compensation closes the current Attempt only after the shared Operation-level rollback-obligation decision proves every Effect safe. The decision must use Effect kind/state, ownership, compensation coverage, revision, and `attemptGeneration`; `committed` is neither uniformly safe nor uniformly unsafe. A committed attachment is covered only when the compensated Primary Ticket CREATE snapshot contains its exact token, while an independent committed Child remains a blocker. At closure, effects and remote identities are removed from the active set, the operation is queued with the next `attemptGeneration`, and callbacks/retries from the previous generation must be rejected without a persistence write.
-* Ticket Update Recovery must use `reconcile_remote`, `assume_update_committed`, or an explicitly safe retry; `link_remote_ticket` is not a valid Ticket Update Recovery Action.
-* Do not automatically retry a remote write when its outcome is unknown (`commit_unknown`) or known non-retryable failure. Explicit retry on the same revision must reuse the frozen API-ready `RequestSnapshot`.
-* File and Clipboard attachment bytes identity (contentHash, contentSize, spoolFilePath) must be frozen prior to remote write to guarantee idempotency across restarts and retries.
-* Do not apply persistent effects while ignoring the revision fence or operation scope. When switching connections, do not mix drafts or queues from different Redmine environments.
-* When changing discard behavior for queue entries, force sync, migration, or remote-write retry conditions, describe the destructive impact and recovery method first.
+* `src/extension.ts`: composition root only.
+* `src/app/`: application orchestration, command/view registration, notifications, save classification, synchronization coordination.
+* `src/app/ticketSync/`: synchronization state machine, operation handlers, repositories, reconciliation, remote-write finalization.
+* `src/dashboard/`: Dashboard protocol, validation, routing, controllers, state, services, view models, HTML/CSS/scripts.
+* `src/commands/`: thin command adapters; do not duplicate synchronization logic here.
+* `src/views/`: Markdown editor, drafts, persisted unsynced queue, conflicts, presentation adapters.
+* `src/views/ticketSync/`: editor/queue integration boundary with the application layer.
+* `src/redmine/`: Redmine HTTP API, authentication, domain API operations and types.
+* `src/config/`: VS Code configuration, connection scope, project selection, SecretStorage-backed API keys.
+* `src/utils/`: generic utilities only; do not move domain-specific logic here.
+* `src/test/`: Extension Host tests; shared test helpers belong under `src/test/helpers/`.
 
-## 6. Testing and Verification
+Generated artifacts:
 
-* When changing behavior, add or update the corresponding `src/test/*.test.ts`. For synchronization changes, verify not only the normal path but also conflicts, partial failures, restart restoration, revision mismatches, and remote writes with unknown outcomes.
-* At minimum, run tests covering the affected area, `pnpm run compile-tests`, and `pnpm run lint`. Use `pnpm test` for release-equivalent verification.
-* For Webview UI changes, verify protocol validation, message routing, and state restoration. When possible, also verify rendering and interaction in an actual Extension Host.
-* If both `pnpm test` and `pnpm run test:unsafe` cannot start because of Electron/Chromium sandbox restrictions, run compile and lint separately and report the tests that were not run, the key points from the full error output, and the expected impact.
-* Even when classifying a test failure as a pre-existing defect, do not ignore it without evidence. Verify and report whether it reproduces before the change.
+* `dist/`: webpack output
+* `out/`: TypeScript/test compilation output
 
-## 7. Agent Workflow
+Never edit generated artifacts directly.
 
-* Before editing, check `git status` and the relevant diff. Do not revert changes that you did not make.
-* For non-trivial decisions involving specifications or the synchronization lifecycle, review existing documents under `docs/planning/` and `docs/implementation-decisions/`, and update documentation with the same responsibility when necessary.
-* Limit changes to the requested scope. Before making broad synchronization design changes, incompatible persisted-format changes, dependency upgrades, secret-related operations, or destructive queue operations, ask the user for confirmation.
-* Work reports must include changed files, preserved invariants, validations performed, and validations that could not be performed together with the reasons.
+## Non-Negotiable Invariants
 
-## 8. Update Rules
+Preserve these unless the requested task explicitly changes the corresponding behavior.
 
-* Update `AGENTS.md` in the same PR when changing any of the following:
+### Dashboard protocol boundary
 
-  * `package.json` scripts, the VS Code/TypeScript baseline, or major development workflows
-  * Major directories, entry points, or module boundaries
-  * Persisted queue schema, synchronization lifecycle, or recovery policy
-  * Placement and operational rules for major planning/specification documents
+Treat Webview messages as untrusted input.
+
+Validate Dashboard payloads at the existing protocol/validation boundary before controller or service use, including:
+
+* `dashboardProtocol.ts`
+* `dashboardMessageValidation.ts`
+
+Do not bypass validation by routing raw Webview messages directly into application logic.
+
+### Localization and secrets
+
+Use `vscode.l10n.t` for user-facing strings and keep the corresponding localization resources in sync.
+
+API keys must remain in VS Code SecretStorage. Never write real credentials to settings, logs, fixtures, tests, or documentation.
+
+Keep `ignoreSSLErrors` limited to development/verification scenarios.
+
+### Persistent offline state
+
+`src/views/offlineSyncStore.ts` contains state that survives VS Code restarts.
+
+Changes to its schema, keying, scope, revision, generation, or phase must preserve restart restoration and explicitly account for legacy data.
+
+For all live queue mutations within one `connectionScope`:
+
+1. enter the store's scope transaction boundary;
+2. obtain the current snapshot inside that boundary;
+3. persist the candidate state before exposing it in memory;
+4. keep production mutation APIs asynchronous.
+
+Do not reintroduce:
+
+* direct live-memory writers;
+* stale whole-queue replacement;
+* cross-scope queue mutation.
+
+Never mix drafts, queues, or persistent effects across Redmine connection scopes.
+
+### Synchronization lifecycle
+
+All synchronization writes must pass through the existing lifecycle in:
+
+* `src/app/syncEngine.ts`
+* `src/app/ticketSync/`
+
+Preserve the repository's remote-write, read-back/reconciliation, and local-finalization ordering.
+
+Do not add a new write path that bypasses this lifecycle.
+
+Primary Operation phase and Primary Effect state must transition atomically through:
+
+`SyncOperationRepository.transitionPrimaryRemoteWrite`
+
+Keep them in one persistence operation so the operation ledger and effect ledger cannot diverge.
+
+### Revision and remote-attempt fences
+
+Intent `revision` and Remote Attempt `attemptGeneration` are different fences. Preserve both.
+
+Legacy Memento v3 entries without `attemptGeneration` restore as generation `1`.
+
+Persistent callbacks, retries, reconciliation results, or finalization from an obsolete generation must not update the active operation and must be rejected without a persistence write.
+
+Never apply persistent effects while ignoring operation scope, revision, or attempt generation.
+
+### Effects and compensation
+
+Planned Effects are monotonic and idempotent.
+
+Effects already in a non-planned state such as:
+
+* `committed`
+* `started`
+* `failed`
+* `commit_unknown`
+
+must not be moved back to `planned` during replanning unless an explicit compensation flow justifies it.
+
+Full current-generation compensation may close the current Attempt only when the shared Operation-level rollback-obligation decision proves every Effect safe.
+
+That decision must account for:
+
+* Effect kind and state
+* ownership
+* compensation coverage
+* revision
+* `attemptGeneration`
+
+Do not classify all `committed` effects as uniformly safe or unsafe.
+
+Repository-specific rule:
+
+* a committed attachment is covered only when the compensated Primary Ticket CREATE snapshot contains its exact token;
+* an independently committed Child remains a blocker.
+
+When a compensated attempt is safely closed:
+
+* remove its Effects and remote identities from the active set;
+* queue the operation for the next `attemptGeneration`;
+* reject late callbacks/retries from the previous generation.
+
+Do not weaken this decision merely to make recovery or tests simpler.
+
+### Unknown remote outcomes and retries
+
+Treat `commit_unknown` as an uncertain remote result, not as an ordinary retryable failure.
+
+Do not automatically retry:
+
+* `commit_unknown`;
+* known non-retryable remote failures.
+
+An explicit retry of the same revision must reuse the frozen API-ready `RequestSnapshot`.
+
+Ticket Update Recovery must use one of the supported update-recovery paths such as:
+
+* `reconcile_remote`
+* `assume_update_committed`
+* an explicitly safe retry
+
+`link_remote_ticket` is not a valid Ticket Update Recovery Action.
+
+### Attachment identity
+
+For File and Clipboard attachments, freeze remote-write identity before the write begins, including:
+
+* `contentHash`
+* `contentSize`
+* `spoolFilePath`
+
+Preserve this identity across retries and VS Code restarts.
+
+Do not regenerate attachment identity in a way that breaks idempotency.
+
+### Destructive operations
+
+Discard, force-sync, migration, compensation, or remote-write retry behavior may destroy or detach local/remote state.
+
+Do not silently broaden destructive behavior.
+
+When the requested change introduces a materially new destructive operation or incompatible persistent-state transition, make the impact and recovery behavior explicit in the implementation/report.
+
+## Implementation Discipline
+
+Keep TypeScript strict. Do not solve typing problems with unnecessary `any`, broad assertions, disabled checks, or weakened interfaces.
+
+Follow existing ESLint rules and module boundaries.
+
+Reuse existing synchronization and persistence primitives rather than creating parallel abstractions.
+
+Do not introduce unrelated:
+
+* large refactors
+* dependencies
+* persisted-format changes
+* synchronization redesigns
+* formatting churn
+
+When changing persisted formats, synchronization state transitions, recovery policy, or scope semantics, inspect the relevant implementation-decision documents and existing restoration/recovery tests before editing.
+
+For Dashboard UI changes, use `DESIGN.md` when present. If visual intent remains unspecified, preserve the existing design rather than inventing a new one.
+
+## Validation
+
+Use the smallest validation set that can reliably detect regressions in the changed area, then expand according to risk.
+
+For synchronization or persistence changes, validate the relevant failure modes, especially:
+
+* conflicts
+* partial remote success
+* restart restoration
+* revision mismatch
+* obsolete `attemptGeneration`
+* `commit_unknown`
+* retry/reconciliation behavior
+* connection-scope isolation
+
+For Dashboard changes, validate protocol input, routing, state restoration, and the changed interaction/rendering behavior.
+
+Typical repository validation includes affected tests plus compile/type validation and lint. Use the release-equivalent Extension Host path when the change risk warrants it.
+
+If Electron/Chromium sandbox restrictions prevent Extension Host execution, run the validations that can execute and report the blocked test path and its impact. Do not use a sandbox-specific alternative merely to hide a functional failure.
+
+When a validation fails, first classify it as:
+
+1. caused by the current change;
+2. pre-existing;
+3. environment/infrastructure.
+
+Do not ignore a claimed pre-existing failure without evidence that it reproduces independently of the change.
+
+Do not weaken assertions, skip lifecycle checks, or retry the same ineffective fix repeatedly.
+
+## Working With Existing Changes
+
+Before editing, inspect the relevant working-tree state and diff so existing user changes are not accidentally reverted.
+
+Do not revert or rewrite unrelated modifications.
+
+Use repository history or documentation only as much as needed to understand the affected behavior; do not perform a full repository audit for a narrow task.
+
+## Completion
+
+Continue through implementation, directly caused regression fixes, and relevant validation without stopping after the first code change for routine approval.
+
+A task is complete when:
+
+* the requested behavior is implemented;
+* affected architecture boundaries and synchronization invariants remain intact;
+* persistent-state compatibility is preserved or intentionally handled;
+* directly caused regressions are fixed;
+* relevant validation passes;
+* generated artifacts are regenerated when required;
+* secrets, localization, and connection-scope isolation remain correct.
+
+Report:
+
+* changed files;
+* important invariants preserved or intentionally changed;
+* validation performed;
+* validation that could not be performed and why.
+
+Report unrelated worthwhile improvements separately instead of expanding the requested scope.
+
+Update `AGENTS.md` when the repository itself changes any rule that this file is intended to encode, especially:
+
+* toolchain or major development workflow;
+* major module boundaries or entry points;
+* persisted queue schema;
+* synchronization lifecycle or recovery policy;
+* planning/specification document ownership.
 
 <!-- headroom:rtk-instructions -->
