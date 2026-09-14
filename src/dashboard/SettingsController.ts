@@ -14,7 +14,10 @@ import {
   type EditorDefaultField,
 } from "../config/settings";
 import { normalizeBaseUrl } from "../redmine/client";
-import { validateEditorDefaultValue } from "../views/ticketEditorDefaultsValidation";
+import {
+  normalizeEditorDefaultValue,
+  validateEditorDefaultValue,
+} from "../views/ticketEditorDefaultsValidation";
 import type {
   DashboardConnectionSettingsPatch,
   DashboardEditorSettingsPatch,
@@ -27,6 +30,24 @@ import {
   setStoredTicketListSettings,
   clearStoredTicketListSettings,
 } from "../views/ticketListSettingsStore";
+
+const resetConfigurationValue = async (
+  config: vscode.WorkspaceConfiguration,
+  section: string,
+): Promise<void> => {
+  const inspected = config.inspect<unknown>(section);
+  const targets = [
+    [inspected?.workspaceFolderValue, vscode.ConfigurationTarget.WorkspaceFolder],
+    [inspected?.workspaceValue, vscode.ConfigurationTarget.Workspace],
+    [inspected?.globalValue, vscode.ConfigurationTarget.Global],
+  ] as const;
+
+  for (const [value, target] of targets) {
+    if (value !== undefined) {
+      await config.update(section, undefined, target);
+    }
+  }
+};
 
 export class SettingsController {
   private settings: TicketListSettings = getStoredTicketListSettings();
@@ -59,15 +80,31 @@ export class SettingsController {
     this.pushSettings();
   }
 
+  async resetDisplaySettings(): Promise<void> {
+    this.settings = { ...DEFAULT_TICKET_LIST_SETTINGS };
+    clearStoredTicketListSettings();
+    const config = vscode.workspace.getConfiguration("redmine-client");
+    for (const section of [
+      "includeChildProjects",
+      "ticketListLimit",
+      "ticketList.showStatus",
+      "ticketList.showDueDate",
+    ]) {
+      await resetConfigurationValue(config, section);
+    }
+    this.pushSettings();
+  }
+
   updateEditorDefault(field: string, value: string): void {
     if (!EDITOR_DEFAULT_FIELDS.includes(field as EditorDefaultField)) {
       return;
     }
     const editorField = field as EditorDefaultField;
-    if (validateEditorDefaultValue(editorField, value)) {
+    const normalizedValue = normalizeEditorDefaultValue(editorField, value);
+    if (validateEditorDefaultValue(editorField, normalizedValue)) {
       return;
     }
-    updateTicketEditorDefaultField(editorField, value);
+    updateTicketEditorDefaultField(editorField, normalizedValue);
     this.pushSettings();
   }
 

@@ -1,7 +1,10 @@
 import type { DashboardRequest, DashboardUnsyncedKey } from "./dashboardProtocol";
 import { EDITOR_DEFAULT_FIELDS } from "../config/settings";
 import { normalizeBaseUrl } from "../redmine/client";
-import { validateEditorDefaultValue } from "../views/ticketEditorDefaultsValidation";
+import {
+  normalizeEditorDefaultValue,
+  validateEditorDefaultValue,
+} from "../views/ticketEditorDefaultsValidation";
 
 type ValidationResult =
   | { ok: true; request: DashboardRequest }
@@ -380,10 +383,12 @@ export const validateDashboardMessage = (raw: unknown): ValidationResult => {
       if (!isString(value)) {
         return { ok: false, reason: "settings.updateEditorDefault: value must be a string" };
       }
-      if (validateEditorDefaultValue(field as import("../config/settings").EditorDefaultField, value)) {
+      const editorField = field as import("../config/settings").EditorDefaultField;
+      const normalizedValue = normalizeEditorDefaultValue(editorField, value);
+      if (validateEditorDefaultValue(editorField, normalizedValue)) {
         return { ok: false, reason: "settings.updateEditorDefault: value is invalid" };
       }
-      return { ok: true, request: { type, requestId, field, value } };
+      return { ok: true, request: { type, requestId, field, value: normalizedValue } };
     }
 
     case "settings.resetEditorDefaults": {

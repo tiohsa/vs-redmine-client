@@ -511,10 +511,12 @@ export const registerCommands = (
         return;
       }
       await setApiKey(key);
+      settingsPresentation.refresh();
       showSuccess(vscode.l10n.t("API key saved to secure storage."));
     }),
     vscode.commands.registerCommand("redmine-client.clearApiKey", async () => {
       await clearApiKey();
+      settingsPresentation.refresh();
       showSuccess(vscode.l10n.t("API key removed."));
     }),
     vscode.commands.registerCommand("redmine-client.showApiKeyStatus", async () => {

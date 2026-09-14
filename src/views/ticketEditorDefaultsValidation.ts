@@ -3,6 +3,11 @@ import { TicketEditorDefaults } from "./ticketEditorTypes";
 
 const hasNewline = (value: string): boolean => /[\r\n]/.test(value);
 
+export const normalizeEditorDefaultValue = (
+  field: EditorDefaultField,
+  value: string,
+): string => field === "description" ? value : value.trim();
+
 export const validateEditorDefaultValue = (
   field: EditorDefaultField,
   value: string,

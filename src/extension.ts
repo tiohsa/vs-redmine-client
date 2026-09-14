@@ -106,6 +106,7 @@ export async function activate(context: vscode.ExtensionContext) {
         }
       }
       const affectsDashboardSettings =
+        event.affectsConfiguration("redmine-client.baseUrl") ||
         event.affectsConfiguration("redmine-client.defaultProjectId") ||
         event.affectsConfiguration("redmine-client.requestTimeoutMs") ||
         event.affectsConfiguration("redmine-client.ignoreSSLErrors") ||
@@ -123,6 +124,12 @@ export async function activate(context: vscode.ExtensionContext) {
         event.affectsConfiguration("redmine-client.ticketListLimit")
       ) {
         views.dashboardProvider.refreshTickets();
+      }
+      if (
+        event.affectsConfiguration("redmine-client.ticketList.showStatus") ||
+        event.affectsConfiguration("redmine-client.ticketList.showDueDate")
+      ) {
+        views.ticketsPresentation.notifyChange();
       }
       if (event.affectsConfiguration("redmine-client.offlineSyncMode")) {
         void refreshOfflineSyncContext();

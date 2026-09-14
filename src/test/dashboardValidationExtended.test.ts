@@ -206,6 +206,27 @@ suite("Dashboard バリデーション拡張", () => {
     assert.strictEqual(r.ok, true);
   });
 
+  test("settings.updateEditorDefault: 正規化後の値を Controller へ渡す", () => {
+    const cases = [
+      ["subject", "  test  ", "test"],
+      ["tracker", "  Bug  ", "Bug"],
+      ["priority", " Normal ", "Normal"],
+      ["status", " New ", "New"],
+      ["due_date", " 2026-09-30 ", "2026-09-30"],
+      ["description", "  first line\nsecond line  ", "  first line\nsecond line  "],
+    ] as const;
+
+    for (const [field, value, expected] of cases) {
+      const r = validateDashboardMessage({
+        type: "settings.updateEditorDefault", requestId: "r", field, value,
+      });
+      assert.strictEqual(r.ok, true);
+      if (r.ok && r.request.type === "settings.updateEditorDefault") {
+        assert.strictEqual(r.request.value, expected);
+      }
+    }
+  });
+
   test("settings.updateEditorDefault: value が文字列でないと拒否される", () => {
     const r = validateDashboardMessage({
       type: "settings.updateEditorDefault", requestId: "r",
