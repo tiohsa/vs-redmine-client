@@ -1775,7 +1775,7 @@ export const completeOfflineNewTicketAsync = async (
         return skipQueueMutation(true);
       }
       const current = queue.newTickets[index];
-      if (expectedRevision !== undefined && current.revision !== expectedRevision) {
+      if (expectedRevision === undefined || current.revision !== expectedRevision) {
         return skipQueueMutation(false);
       }
       if (current.nextIntent && (
@@ -2040,7 +2040,7 @@ export const completeOfflineTicketUpdateAsync = async (
       if (!current) {
         return skipQueueMutation(true);
       }
-      if (expectedRevision !== undefined && current.revision !== expectedRevision) {
+      if (expectedRevision === undefined || (current.intentRevision ?? current.revision) !== expectedRevision) {
         return skipQueueMutation(false);
       }
       if (current.nextIntent) {
@@ -2065,6 +2065,8 @@ export const completeOfflineTicketUpdateAsync = async (
           connectionScope: current.connectionScope ?? scope,
           phase: "queued",
           revision: next.revision ?? (current.revision ?? 0) + 1,
+          intentRevision: next.revision ?? (current.intentRevision ?? current.revision ?? 0) + 1,
+          attemptGeneration: getAttemptGeneration(current),
         });
       } else {
         queue.tickets.delete(ticketId);
@@ -2248,7 +2250,7 @@ export const completeOfflineCommentAsync = async (
       const index = findCommentIndex(queue, key);
       if (index === -1) { return skipQueueMutation(true); }
       const current = queue.comments[index];
-      if (current.revision !== expectedRevision) { return skipQueueMutation(false); }
+      if ((current.intentRevision ?? current.revision) !== expectedRevision) { return skipQueueMutation(false); }
       queue.comments = current.nextIntent
         ? queue.comments.map((comment, currentIndex) =>
           currentIndex === index ? promoteCommentIntent(comment) : comment)
@@ -2261,11 +2263,15 @@ export const completeOfflineCommentAsync = async (
 };
 
 export const removeOfflineCommentEntryAsync = (
-  params: { commentId?: number; documentUri?: string },
+  params: { ticketId?: number; commentId?: number; documentUri?: string },
   scope = activeScope,
 ): Promise<void> => mutateQueueAsync(scope, (queue) => {
+  const hasIdentity = params.commentId !== undefined || params.documentUri !== undefined;
   const previousLength = queue.comments.length;
   queue.comments = queue.comments.filter((item) => {
+    if (!hasIdentity || (params.ticketId !== undefined && item.ticketId !== params.ticketId)) {
+      return true;
+    }
     if (params.commentId !== undefined && item.commentId === params.commentId) {
       return false;
     }
@@ -2356,7 +2362,7 @@ export const discardSyncOperation = async (
     case "commentUpdate": {
       const comment = operation.payload as OfflineCommentUpdate;
       await removeOfflineCommentEntryAsync(
-        { commentId: comment.commentId, documentUri: comment.documentUri },
+        { ticketId: comment.ticketId, commentId: comment.commentId, documentUri: comment.documentUri },
         scope,
       );
       return "discarded";

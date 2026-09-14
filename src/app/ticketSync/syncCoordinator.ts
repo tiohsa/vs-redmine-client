@@ -528,8 +528,9 @@ export class SyncCoordinator {
       const compRes = await repository.completeOperation(
         getOpKey(currentOp),
         scope,
-        undefined,
+        currentOp.intentRevision ?? currentOp.revision ?? 1,
         { canonical, remoteUpdatedAt: currentOp.remoteUpdatedAt },
+        getAttemptGeneration(currentOp),
       );
       if (!compRes) {
         return {
@@ -711,6 +712,27 @@ export class SyncCoordinator {
         };
       }
 
+      // A live remote write owns the Attempt until it reaches a durable
+      // commit_unknown state. Linking or assuming while it is still
+      // remote_write_started can race the writer and incorrectly complete a
+      // different outcome. Restart normalization turns this state into
+      // commit_unknown before recovery actions are offered.
+      if (
+        (input.resolution?.kind === "link_remote_ticket" ||
+          input.resolution?.kind === "link_remote_comment" ||
+          (input.resolution as { kind?: string } | undefined)?.kind === "assume_remote_commit" ||
+          (input.resolution as { kind?: string } | undefined)?.kind === "assume_update_committed") &&
+        freshOp.phase !== "commit_unknown"
+      ) {
+        return {
+          kind: "commit_unknown",
+          operationId: freshOp.operationId,
+          ticketId: freshOp.ticketId,
+          commentId: freshOp.commentId,
+          message: vscode.l10n.t("The remote write is still in progress; wait for it to finish before resolving the outcome."),
+        };
+      }
+
       if (input.resolution?.kind === "retry_remote_write") {
         // INV-N03, INV-N04: 未解決の Prerequisite Effect (attachment, image) があれば Primary retry を拒絶
         const activeEffects = getEffectsForRevision(freshOp, freshRevision);
@@ -801,7 +823,7 @@ export class SyncCoordinator {
 
         const fin = await handler.finalizeLocal(committedOp, reconciled.canonical, handlerCtx, depsWithRepo);
         if (fin.ok) {
-          const compOp = await repository.completeOperation(input.key, scope, undefined, { canonical: reconciled.canonical, remoteUpdatedAt: committedOp.remoteUpdatedAt });
+          const compOp = await repository.completeOperation(input.key, scope, committedOp.intentRevision ?? committedOp.revision ?? 1, { canonical: reconciled.canonical, remoteUpdatedAt: committedOp.remoteUpdatedAt }, getAttemptGeneration(committedOp));
           if (compOp) {
             return {
               kind: "completed",
@@ -829,6 +851,7 @@ export class SyncCoordinator {
         const remoteId = input.resolution.kind === "link_remote_comment" ? input.resolution.commentId : input.resolution.ticketId;
 
         let detail: any = undefined;
+        let linkedProjectId: number | undefined;
         if (isComment) {
           const commentDeps = { ...defaultCommentDeps, ...input.deps?.comment };
           const verified = await reconcileCommentCommitUnknown(
@@ -853,6 +876,7 @@ export class SyncCoordinator {
               message: verified.message,
             };
           }
+          linkedProjectId = verified.projectId;
         } else {
           const getDetail = (freshOp.kind === "ticket_create" ? input.deps?.ticketCreate?.getIssueDetail : input.deps?.ticketUpdate?.getIssueDetail)
             ?? input.deps?.ticketCreate?.getIssueDetail
@@ -896,11 +920,14 @@ export class SyncCoordinator {
           }
         }
 
+        const identityAction = isComment
+          ? { kind: "record_reconciled_identity" as const, remoteId, projectId: linkedProjectId }
+          : { kind: "record_reconciled_identity" as const, remoteId };
         const transitioned = await repository.transitionOperation(
           input.key,
-          { kind: "record_reconciled_identity", remoteId },
+          identityAction,
           scope,
-          { operationId: freshOp.operationId, sourcePhase: "commit_unknown", revision: freshOp.intentRevision ?? freshOp.revision },
+          { operationId: freshOp.operationId, sourcePhase: freshOp.phase, revision: freshOp.intentRevision ?? freshOp.revision },
         );
         if (!transitioned) {
           return {
@@ -913,7 +940,7 @@ export class SyncCoordinator {
         }
         const fin = await handler.finalizeLocal(transitioned, detail, handlerCtx, depsWithRepo);
         if (fin.ok) {
-          const compOp = await repository.completeOperation(input.key, scope, undefined, { canonical: detail, remoteUpdatedAt: transitioned.remoteUpdatedAt });
+          const compOp = await repository.completeOperation(input.key, scope, transitioned.intentRevision ?? transitioned.revision ?? 1, { canonical: detail, remoteUpdatedAt: transitioned.remoteUpdatedAt }, getAttemptGeneration(transitioned));
           if (compOp) {
             return {
               kind: "completed",
@@ -931,7 +958,7 @@ export class SyncCoordinator {
           input.key,
           { kind: "assume_remote_commit" },
           scope,
-          { operationId: freshOp.operationId, sourcePhase: "commit_unknown", revision: freshOp.intentRevision ?? freshOp.revision },
+          { operationId: freshOp.operationId, sourcePhase: freshOp.phase, revision: freshOp.intentRevision ?? freshOp.revision },
         );
         if (!assumed) {
           return {
@@ -943,9 +970,18 @@ export class SyncCoordinator {
           };
         }
         const reconciled = await handler.reconcileRemote(assumed, handlerCtx, depsWithRepo);
-        const fin = await handler.finalizeLocal(assumed, reconciled.ok ? reconciled.canonical : undefined, handlerCtx, depsWithRepo);
+        if (!reconciled.ok) {
+          return {
+            kind: "remote_committed",
+            ticketId: assumed.createdRemoteId ?? assumed.ticketId ?? 0,
+            commentId: assumed.commentId,
+            pending: "remote_reconcile",
+            message: reconciled.message,
+          };
+        }
+        const fin = await handler.finalizeLocal(assumed, reconciled.canonical, handlerCtx, depsWithRepo);
         if (fin.ok) {
-          const compOp = await repository.completeOperation(input.key, scope, undefined, { canonical: reconciled.ok ? reconciled.canonical : undefined, remoteUpdatedAt: assumed.remoteUpdatedAt });
+          const compOp = await repository.completeOperation(input.key, scope, assumed.intentRevision ?? assumed.revision ?? 1, { canonical: reconciled.canonical, remoteUpdatedAt: assumed.remoteUpdatedAt }, getAttemptGeneration(assumed));
           if (compOp) {
             return {
               kind: "completed",
@@ -982,7 +1018,7 @@ export class SyncCoordinator {
         }
         const fin = await handler.finalizeLocal(transitioned, reconciled.canonical, handlerCtx, depsWithRepo);
         if (fin.ok) {
-          const compOp = await repository.completeOperation(input.key, scope, undefined, { canonical: reconciled.canonical, remoteUpdatedAt: transitioned.remoteUpdatedAt });
+          const compOp = await repository.completeOperation(input.key, scope, transitioned.intentRevision ?? transitioned.revision ?? 1, { canonical: reconciled.canonical, remoteUpdatedAt: transitioned.remoteUpdatedAt }, getAttemptGeneration(transitioned));
           if (compOp) {
             return {
               kind: "completed",

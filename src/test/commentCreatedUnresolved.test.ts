@@ -335,6 +335,59 @@ suite("Comment created_unresolved", () => {
     assert.strictEqual(getOfflineSyncQueue(SCOPE).comments.length, 0);
   });
 
+  test("link_remote_comment は検証済み projectId を新規コメントの finalize に渡す", async () => {
+    initializeOfflineSyncStore(createTestMemento(), SCOPE);
+    const filePath = path.join(os.tmpdir(), `redmine-client-comment-project-${Date.now()}.md`);
+    fs.writeFileSync(filePath, "Project-aware comment");
+    const document = await vscode.workspace.openTextDocument(vscode.Uri.file(filePath));
+    await vscode.window.showTextDocument(document, { preview: false });
+    const documentUri = document.uri.toString();
+
+    try {
+      await addOfflineCommentUpdateAsync({
+        ticketId: 20,
+        body: "Project-aware comment",
+        documentUri,
+        finalizeDraft: true,
+      }, SCOPE);
+      const engine = createSyncEngine({
+        comments: {
+          addComment: async () => { throw new Error("transport timeout"); },
+          updateComment: async () => { throw new Error("should not update"); },
+          getIssueDetail: async () => ({
+            ticket: { id: 20, subject: "T", projectId: 3 },
+            comments: [{
+              id: 920,
+              body: "Project-aware comment",
+              authorId: 7,
+              ticketId: 20,
+              authorName: "User",
+              editableByCurrentUser: true,
+            }],
+          }),
+          getCurrentUserId: async () => 7,
+          updateIssue: async () => undefined,
+        },
+      });
+      const key = { kind: "comment" as const, ticketId: 20, documentUri };
+
+      assert.strictEqual((await engine.syncOne(key, { connectionScope: SCOPE })).kind, "commit_unknown");
+      const linked = await engine.resolveCommentCommitUnknown({
+        key,
+        context: { connectionScope: SCOPE },
+        resolution: { kind: "link_remote_comment", commentId: 920 },
+      });
+
+      assert.strictEqual(linked.kind, "completed");
+      assert.match(document.getText(), /project_id: 3/);
+    } finally {
+      await vscode.commands.executeCommand("workbench.action.closeActiveEditor");
+      if (fs.existsSync(filePath)) {
+        fs.unlinkSync(filePath);
+      }
+    }
+  });
+
   test("comment PUT timeout は明示的GET reconciliationでjournal IDとbodyを照合する", async () => {
     initializeOfflineSyncStore(createTestMemento(), SCOPE);
     await addOfflineCommentUpdateAsync({

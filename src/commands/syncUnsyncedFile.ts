@@ -1,5 +1,6 @@
 import * as vscode from "vscode";
 import {
+  getOfflineNewTicket,
   getOfflineSyncQueue,
 } from "../views/offlineSyncStore";
 import { UnsyncedFileSyncKey } from "../app/unsyncedTypes";
@@ -466,10 +467,7 @@ const syncUnsyncedFileAtScope = async (
   }
 
   if (syncKey.kind === "newTicket") {
-    const previousPhase = getOfflineSyncQueue(operationScope).newTickets.find(
-      (candidate) =>
-        syncKey.documentUri && candidate.documentUri === syncKey.documentUri,
-    )?.phase;
+    const previousPhase = getOfflineNewTicket(syncKey, operationScope)?.phase;
     const engine = engineFactory({ tickets: serviceFactory({ rewrite: rewriteDeps }) });
     let outcome = await engine.syncOne(
       syncKey,

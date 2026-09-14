@@ -1,6 +1,20 @@
 import * as vscode from "vscode";
 
 export interface DashboardStrings {
+  language: string;
+  dashboardTitle: string;
+  selectTicketHint: string;
+  searchEmptyHint: string;
+  retry: string;
+  startDate: string;
+  dueDateLabel: string;
+  descriptionLabel: string;
+  selectOption: string;
+  parentLabel: string;
+  projectLabel: string;
+  synced: string;
+  draft: string;
+  composerHint: string;
   // Header
   selectProjectPlaceholder: string;
   selectProjectTitle: string;
@@ -21,6 +35,7 @@ export interface DashboardStrings {
   syncConflict: string;
   syncFailed: string;
   syncSyncing: string;
+  syncReviewRequired: string;
   // Due date badges
   dueOverdue: string;
   due1Day: string;
@@ -72,6 +87,7 @@ export interface DashboardStrings {
   discardAction: string;
   discardTitle: string;
   syncAllBtn: string;
+  unsyncedCountLabel: string;
   // Comments tab
   commentsForTicket: string;
   addCommentBtn: string;
@@ -111,6 +127,9 @@ export interface DashboardStrings {
   offlineSyncModeLabel: string;
   offlineSyncAuto: string;
   offlineSyncManual: string;
+  sectionDisplay: string;
+  showStatusLabel: string;
+  showDueDateLabel: string;
   sectionGeneral: string;
   ticketLimitLabel: string;
   resetSettings: string;
@@ -119,6 +138,20 @@ export interface DashboardStrings {
 }
 
 export const buildDashboardStrings = (): DashboardStrings => ({
+  language: vscode.env.language,
+  dashboardTitle: vscode.l10n.t("Dashboard"),
+  selectTicketHint: vscode.l10n.t("Select a ticket to view its details and actions."),
+  searchEmptyHint: vscode.l10n.t("Try another search or review your ticket filters in Settings."),
+  retry: vscode.l10n.t("Retry"),
+  startDate: vscode.l10n.t("Start date"),
+  dueDateLabel: vscode.l10n.t("Due date"),
+  descriptionLabel: vscode.l10n.t("Description"),
+  selectOption: vscode.l10n.t("Select…"),
+  parentLabel: vscode.l10n.t("Parent"),
+  projectLabel: vscode.l10n.t("Project"),
+  synced: vscode.l10n.t("Synced"),
+  draft: vscode.l10n.t("Draft"),
+  composerHint: vscode.l10n.t("Create a draft, edit it in the editor, then sync the ticket."),
   // Header
   selectProjectPlaceholder: vscode.l10n.t("— Select project —"),
   selectProjectTitle: vscode.l10n.t("Select project"),
@@ -139,6 +172,7 @@ export const buildDashboardStrings = (): DashboardStrings => ({
   syncConflict: vscode.l10n.t("Conflict"),
   syncFailed: vscode.l10n.t("Failed"),
   syncSyncing: vscode.l10n.t("Syncing"),
+  syncReviewRequired: vscode.l10n.t("Review required"),
   // Due date badges
   dueOverdue: vscode.l10n.t("Overdue"),
   due1Day: vscode.l10n.t("Within 1 day"),
@@ -190,6 +224,7 @@ export const buildDashboardStrings = (): DashboardStrings => ({
   discardAction: vscode.l10n.t("Discard"),
   discardTitle: vscode.l10n.t("Discard unsynced local changes"),
   syncAllBtn: vscode.l10n.t("Sync all"),
+  unsyncedCountLabel: vscode.l10n.t("Unsynced changes: {0}"),
   // Comments tab
   commentsForTicket: vscode.l10n.t("Comments for ticket"),
   addCommentBtn: vscode.l10n.t("Add"),
@@ -229,6 +264,9 @@ export const buildDashboardStrings = (): DashboardStrings => ({
   offlineSyncModeLabel: vscode.l10n.t("Offline sync mode"),
   offlineSyncAuto: vscode.l10n.t("Auto"),
   offlineSyncManual: vscode.l10n.t("Manual"),
+  sectionDisplay: vscode.l10n.t("Display"),
+  showStatusLabel: vscode.l10n.t("Show status"),
+  showDueDateLabel: vscode.l10n.t("Show due date"),
   sectionGeneral: vscode.l10n.t("General"),
   ticketLimitLabel: vscode.l10n.t("Tickets per load"),
   resetSettings: vscode.l10n.t("Reset settings"),

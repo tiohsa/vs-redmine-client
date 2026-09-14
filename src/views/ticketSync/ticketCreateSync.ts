@@ -1,6 +1,6 @@
 import * as vscode from "vscode";
 import { getDefaultProjectId, getOfflineSyncMode } from "../../config/settings";
-import { getProjectSelection } from "../../config/projectSelection";
+import { getProjectSelection, parseConfiguredProjectId } from "../../config/projectSelection";
 import { processMarkdownImageUploads } from "../../utils/markdownImageUpload";
 import { resolveEditorBaseDir } from "../../utils/editorBaseDir";
 import { markNewTicketDraftFailed, markNewTicketDraftSynced, markNewTicketDraftSyncing } from "../newTicketDraftStore";
@@ -33,8 +33,7 @@ const resolveProjectIdForCreate = (projectId?: number): number | undefined => {
     return selection.id;
   }
 
-  const fallback = Number(getDefaultProjectId());
-  return Number.isNaN(fallback) ? undefined : fallback;
+  return parseConfiguredProjectId(getDefaultProjectId());
 };
 
 const resolveProjectIdForEditor = (editor: vscode.TextEditor): number | undefined =>

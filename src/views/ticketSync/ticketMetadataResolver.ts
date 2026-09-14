@@ -158,7 +158,7 @@ export const resolveMetadataUpdates = async (
   }
 
   if (changes.assignee_id !== undefined) {
-    updateFields.assignedToId = (changes.assignee_id === 0 ? "" : changes.assignee_id) as any;
+    updateFields.assignedToId = changes.assignee_id === 0 ? "" : changes.assignee_id;
   } else if (changes.assignee !== undefined) {
     if (changes.assignee.length === 0) {
       updateFields.assignedToId = "";

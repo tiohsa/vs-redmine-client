@@ -1,6 +1,10 @@
 import * as vscode from "vscode";
 import { listIssuePriorities, listIssueStatuses, listTrackers } from "../redmine/issues";
-import { onOfflineSyncQueueChanged } from "../views/offlineSyncStore";
+import {
+  getOfflineSyncQueue,
+  onOfflineSyncQueueChanged,
+  sameDocumentIdentity,
+} from "../views/offlineSyncStore";
 import { DashboardProjectService } from "./services/DashboardProjectService";
 import { DashboardTicketService } from "./services/DashboardTicketService";
 import { DashboardCommentService } from "./services/DashboardCommentService";
@@ -22,6 +26,18 @@ import type { TicketSaveResult } from "../views/ticketSaveTypes";
 import type { DashboardServiceContext } from "./services/DashboardServiceContext";
 import { clearTicketSummaries } from "../views/ticketSummaryStore";
 import type { SyncEngine } from "../app/syncEngine";
+import { getCurrentConnectionScope } from "../config/connectionScope";
+
+const isKnownUnsyncedDocumentUri = (documentUri: string): boolean => {
+  const queue = getOfflineSyncQueue(getCurrentConnectionScope());
+  return Array.from(queue.tickets.values()).some((ticket) =>
+    sameDocumentIdentity(ticket.documentUri, documentUri),
+  ) || queue.comments.some((comment) =>
+    sameDocumentIdentity(comment.documentUri, documentUri),
+  ) || queue.newTickets.some((ticket) =>
+    sameDocumentIdentity(ticket.documentUri, documentUri),
+  );
+};
 
 export interface ComposerSyncTestHooks {
   syncFn?: (editor: vscode.TextEditor) => Promise<TicketSaveResult>;
@@ -152,7 +168,8 @@ export class DashboardController {
 
   async initialize(): Promise<void> {
     this.settingsCtrl.pushSettings();
-    await Promise.all([this.loadProjects(), this.loadMetadataOptions(), this.loadTickets()]);
+    await this.loadProjects();
+    await Promise.all([this.loadMetadataOptions(), this.loadTickets()]);
   }
 
   async handle(req: DashboardRequest): Promise<void> {
@@ -316,6 +333,10 @@ export class DashboardController {
       case "unsynced.openLocalFile": {
         const uri = vscode.Uri.parse(req.documentUri);
         if (uri.scheme !== "file" && uri.scheme !== "vscode-userdata") {
+          this.opts.notifyError(req.requestId, vscode.l10n.t("This URI cannot be opened."));
+          return;
+        }
+        if (!isKnownUnsyncedDocumentUri(req.documentUri)) {
           this.opts.notifyError(req.requestId, vscode.l10n.t("This URI cannot be opened."));
           return;
         }
@@ -502,6 +523,7 @@ export class DashboardController {
       tracker: string;
       priority: string;
       status: string;
+      assigned_to?: string;
       start_date?: string;
       due_date?: string;
       description?: string;

@@ -1,4 +1,5 @@
 import type { DashboardProjectNode } from "./dashboardProtocol";
+import { isValidProjectId, parseConfiguredProjectId } from "../config/projectSelection";
 
 export interface ResolvedProject {
   id: number;
@@ -7,7 +8,7 @@ export interface ResolvedProject {
 
 /**
  * 現在のプロジェクトを解決する純粋関数。
- * 優先順位: 選択済みプロジェクト ID > defaultProjectId (数値) > undefined
+ * 優先順位: 選択済みプロジェクト ID > defaultProjectId (ID / identifier) > undefined
  */
 export const resolveCurrentProject = (opts: {
   selectionId?: number;
@@ -15,18 +16,20 @@ export const resolveCurrentProject = (opts: {
   defaultProjectId?: string;
   projects?: DashboardProjectNode[];
 }): ResolvedProject | undefined => {
-  if (opts.selectionId && opts.selectionId > 0) {
+  if (isValidProjectId(opts.selectionId)) {
     return { id: opts.selectionId, name: opts.selectionName ?? "" };
   }
 
-  if (!opts.defaultProjectId) {
+  const defaultProjectId = opts.defaultProjectId?.trim();
+  if (!defaultProjectId) {
     return undefined;
   }
-  const fallbackId = Number(opts.defaultProjectId);
-  if (Number.isNaN(fallbackId) || fallbackId <= 0) {
-    return undefined;
+  const fallbackId = parseConfiguredProjectId(defaultProjectId);
+  if (fallbackId !== undefined) {
+    const project = opts.projects?.find((p) => p.id === fallbackId);
+    return { id: fallbackId, name: project?.name ?? `Project #${fallbackId}` };
   }
 
-  const project = opts.projects?.find((p) => p.id === fallbackId);
-  return { id: fallbackId, name: project?.name ?? `Project #${fallbackId}` };
+  const project = opts.projects?.find((p) => p.identifier === defaultProjectId);
+  return project ? { id: project.id, name: project.name } : undefined;
 };

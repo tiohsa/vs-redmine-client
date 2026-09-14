@@ -71,6 +71,43 @@ suite("Ticket due date display", () => {
     assert.strictEqual(window, "overdue");
     assert.strictEqual(label, "Overdue");
   });
+
+  test("compares date-only due dates with the local calendar date", () => {
+    const localEarlyMorning = new Date(2026, 8, 15, 1, 0, 0);
+    const ticket = {
+      id: 4,
+      subject: "JST date boundary",
+      projectId: 1,
+      dueDate: "2026-09-14",
+    };
+
+    assert.strictEqual(resolveDueDateWindow(ticket, baseRule, localEarlyMorning), "overdue");
+  });
+
+  test("shows within one day for today and tomorrow", () => {
+    const now = new Date(2026, 8, 15, 12, 0, 0);
+
+    assert.strictEqual(
+      resolveDueDateWindow({ id: 5, subject: "Today", projectId: 1, dueDate: "2026-09-15" }, baseRule, now),
+      "within1Day",
+    );
+    assert.strictEqual(
+      resolveDueDateWindow({ id: 6, subject: "Tomorrow", projectId: 1, dueDate: "2026-09-16" }, baseRule, now),
+      "within1Day",
+    );
+  });
+
+  test("does not display a badge for an invalid date-only value", () => {
+    const now = new Date(2026, 8, 15, 12, 0, 0);
+    const window = resolveDueDateWindow(
+      { id: 7, subject: "Invalid", projectId: 1, dueDate: "invalid-date" },
+      baseRule,
+      now,
+    );
+
+    assert.strictEqual(window, undefined);
+    assert.strictEqual(formatDueDateIndicator(window), undefined);
+  });
 });
 
 suite("buildDueIndicatorsMap", () => {

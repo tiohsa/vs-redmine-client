@@ -60,6 +60,35 @@ export const DUE_DATE_PRIORITY_ORDER: DueDateWindow[] = [
   "overdue",
 ];
 
+const DATE_ONLY_PATTERN = /^(\d{4})-(\d{2})-(\d{2})$/;
+const DAY_MS = 24 * 60 * 60 * 1000;
+
+export const daysUntilDateOnly = (
+  value: string,
+  now: Date = new Date(),
+): number | undefined => {
+  const match = DATE_ONLY_PATTERN.exec(value);
+  if (!match) {
+    return undefined;
+  }
+
+  const year = Number(match[1]);
+  const month = Number(match[2]);
+  const day = Number(match[3]);
+  const target = Date.UTC(year, month - 1, day);
+  const targetDate = new Date(target);
+  if (
+    targetDate.getUTCFullYear() !== year ||
+    targetDate.getUTCMonth() !== month - 1 ||
+    targetDate.getUTCDate() !== day
+  ) {
+    return undefined;
+  }
+
+  const today = Date.UTC(now.getFullYear(), now.getMonth(), now.getDate());
+  return Math.round((target - today) / DAY_MS);
+};
+
 export const applyTicketFilters = (
   tickets: Ticket[],
   filters: TicketFilterSelection,
@@ -180,19 +209,10 @@ export const resolveDueDateWindow = (
     return undefined;
   }
 
-  const dueDate = new Date(ticket.dueDate);
-  if (Number.isNaN(dueDate.getTime())) {
+  const diffDays = daysUntilDateOnly(ticket.dueDate, now);
+  if (diffDays === undefined) {
     return undefined;
   }
-
-  const dayMs = 24 * 60 * 60 * 1000;
-  const startOfNow = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate());
-  const startOfDue = Date.UTC(
-    dueDate.getUTCFullYear(),
-    dueDate.getUTCMonth(),
-    dueDate.getUTCDate(),
-  );
-  const diffDays = Math.floor((startOfDue - startOfNow) / dayMs);
 
   const candidates: DueDateWindow[] = [];
   if (diffDays < 0) {

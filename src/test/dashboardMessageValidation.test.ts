@@ -129,8 +129,18 @@ suite("Dashboard メッセージバリデーション", () => {
     assert.strictEqual(r.ok, true);
   });
 
+  test("unsynced.syncOne: URI なしでも queueId があれば正常", () => {
+    const r = validateDashboardMessage({ type: "unsynced.syncOne", requestId: "r", key: { kind: "newTicket", queueId: "queue-1" } });
+    assert.strictEqual(r.ok, true);
+  });
+
   test("unsynced.syncOne: newTicket key の documentUri が空なら拒否される", () => {
     const r = validateDashboardMessage({ type: "unsynced.syncOne", requestId: "r", key: { kind: "newTicket", documentUri: "" } });
+    assert.strictEqual(r.ok, false);
+  });
+
+  test("unsynced.syncOne: newTicket key に識別子がなければ拒否される", () => {
+    const r = validateDashboardMessage({ type: "unsynced.syncOne", requestId: "r", key: { kind: "newTicket" } });
     assert.strictEqual(r.ok, false);
   });
 

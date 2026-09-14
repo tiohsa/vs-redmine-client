@@ -500,6 +500,202 @@ suite("F-01 〜 F-20: Reproduction & Invariant Tests", () => {
     assert.ok(snap.contentSize > 0, "F-13: contentSize は 0 より大きいこと");
   });
 
+  test("F-13b: File attachment は spool identity を保存し、元ファイル変更後も spool を retry する", async () => {
+    const tmpFile = path.join(os.tmpdir(), `f13b-file-${Date.now()}.txt`);
+    const originalContent = `F13b original ${Date.now()}`;
+    fs.writeFileSync(tmpFile, originalContent);
+    const queueId = `f13b-${Date.now()}`;
+    const repo = createSyncOperationRepository();
+    const operation: UnifiedSyncOperation<TicketCreateIntent> = {
+      operationId: queueId,
+      kind: "ticket_create",
+      key: { kind: "newTicket", queueId },
+      connectionScope: SCOPE,
+      phase: "preparing",
+      revision: 1,
+      intentRevision: 1,
+      version: 1,
+      persistenceVersion: 1,
+      projectId: 1,
+      intent: {
+        projectId: 1,
+        subject: "File attachment identity",
+        description: "File attachment identity",
+        metadata: { tracker: "Feature", priority: "Normal", status: "New", due_date: "", children: [] },
+        attachments: [{ kind: "file", filePath: tmpFile, filename: "identity.txt", contentType: "text/plain" }],
+      },
+    };
+    await repo.saveOperation(operation, SCOPE);
+
+    const uploadedPaths: string[] = [];
+    let firstUpload = true;
+    const handler = new TicketCreateHandler();
+    const uploadFile = async (filePath: string) => {
+      uploadedPaths.push(filePath);
+      if (firstUpload) {
+        firstUpload = false;
+        throw new Error("network timeout");
+      }
+      return { token: "f13b-token", filename: "identity.txt", contentType: "text/plain" };
+    };
+
+    const first = await handler.executeSecondaryEffects(
+      operation,
+      { uploadTokens: [] } as any,
+      { connectionScope: SCOPE },
+      { repository: repo, ticketCreate: { uploadFile } } as any,
+    );
+    assert.strictEqual(first.ok, false);
+    const failed = repo.getOperation<TicketCreateIntent>(operation.key!, SCOPE)!;
+    const effect = failed.effects?.find((entry) => entry.effectId.startsWith("attachment:file:"));
+    assert.ok(effect);
+    const snapshot = effect.requestSnapshot as any;
+    assert.ok(snapshot.spoolFilePath);
+    assert.notStrictEqual(snapshot.spoolFilePath, tmpFile);
+    assert.strictEqual(fs.readFileSync(snapshot.spoolFilePath, "utf8"), originalContent);
+
+    const restoredRepo = createSyncOperationRepository();
+    const restored = restoredRepo.getOperation<TicketCreateIntent>(operation.key!, SCOPE)!;
+    const restoredSnapshot = restored.effects?.find((entry) => entry.effectId === effect.effectId)?.requestSnapshot as any;
+    assert.strictEqual(restoredSnapshot.spoolFilePath, snapshot.spoolFilePath);
+    assert.strictEqual(restoredSnapshot.contentHash, snapshot.contentHash);
+    assert.strictEqual(restoredSnapshot.contentSize, snapshot.contentSize);
+
+    fs.writeFileSync(tmpFile, "changed source content");
+    const retried = await handler.resolveEffect({
+      key: operation.key!,
+      effectId: effect.effectId,
+      operation: restored,
+      context: { connectionScope: SCOPE },
+      deps: { repository: restoredRepo, ticketCreate: { uploadFile } } as any,
+      resolution: { kind: "retry_effect" },
+    });
+
+    assert.strictEqual(retried.kind, "remote_committed");
+    assert.strictEqual(uploadedPaths[1], snapshot.spoolFilePath);
+    assert.strictEqual(fs.readFileSync(uploadedPaths[1], "utf8"), originalContent);
+    assert.notStrictEqual(uploadedPaths[1], tmpFile);
+    if (fs.existsSync(tmpFile)) { fs.unlinkSync(tmpFile); }
+    if (fs.existsSync(snapshot.spoolFilePath)) { fs.unlinkSync(snapshot.spoolFilePath); }
+  });
+
+  test("F-13c: File attachment は元ファイル削除後も spool があれば retry できる", async () => {
+    const tmpFile = path.join(os.tmpdir(), `f13c-file-${Date.now()}.txt`);
+    fs.writeFileSync(tmpFile, `F13c content ${Date.now()}`);
+    const repo = createSyncOperationRepository();
+    const queueId = `f13c-${Date.now()}`;
+    const operation: UnifiedSyncOperation<TicketCreateIntent> = {
+      operationId: queueId,
+      kind: "ticket_create",
+      key: { kind: "newTicket", queueId },
+      connectionScope: SCOPE,
+      phase: "preparing",
+      revision: 1,
+      intentRevision: 1,
+      version: 1,
+      persistenceVersion: 1,
+      projectId: 1,
+      intent: {
+        projectId: 1,
+        subject: "Deleted source attachment",
+        description: "Deleted source attachment",
+        metadata: { tracker: "Feature", priority: "Normal", status: "New", due_date: "", children: [] },
+        attachments: [{ kind: "file", filePath: tmpFile, filename: "deleted.txt", contentType: "text/plain" }],
+      },
+    };
+    await repo.saveOperation(operation, SCOPE);
+    let attempt = 0;
+    const uploadedPaths: string[] = [];
+    const uploadFile = async (filePath: string) => {
+      uploadedPaths.push(filePath);
+      attempt++;
+      if (attempt === 1) { throw new Error("network timeout"); }
+      return { token: "f13c-token", filename: "deleted.txt", contentType: "text/plain" };
+    };
+    const handler = new TicketCreateHandler();
+
+    await handler.executeSecondaryEffects(
+      operation,
+      { uploadTokens: [] } as any,
+      { connectionScope: SCOPE },
+      { repository: repo, ticketCreate: { uploadFile } } as any,
+    );
+    const failed = repo.getOperation<TicketCreateIntent>(operation.key!, SCOPE)!;
+    const effect = failed.effects?.find((entry) => entry.effectId.startsWith("attachment:file:"))!;
+    const snapshot = effect.requestSnapshot as any;
+    fs.unlinkSync(tmpFile);
+
+    const retried = await handler.resolveEffect({
+      key: operation.key!,
+      effectId: effect.effectId,
+      operation: failed,
+      context: { connectionScope: SCOPE },
+      deps: { repository: repo, ticketCreate: { uploadFile } } as any,
+      resolution: { kind: "retry_effect" },
+    });
+
+    assert.strictEqual(retried.kind, "remote_committed");
+    assert.strictEqual(uploadedPaths[1], snapshot.spoolFilePath);
+    if (fs.existsSync(snapshot.spoolFilePath)) { fs.unlinkSync(snapshot.spoolFilePath); }
+  });
+
+  test("F-13d: File attachment の spool 消失時は元ファイルから再構築せず failure にする", async () => {
+    const tmpFile = path.join(os.tmpdir(), `f13d-file-${Date.now()}.txt`);
+    fs.writeFileSync(tmpFile, `F13d content ${Date.now()}`);
+    const repo = createSyncOperationRepository();
+    const queueId = `f13d-${Date.now()}`;
+    const operation: UnifiedSyncOperation<TicketCreateIntent> = {
+      operationId: queueId,
+      kind: "ticket_create",
+      key: { kind: "newTicket", queueId },
+      connectionScope: SCOPE,
+      phase: "preparing",
+      revision: 1,
+      intentRevision: 1,
+      version: 1,
+      persistenceVersion: 1,
+      projectId: 1,
+      intent: {
+        projectId: 1,
+        subject: "Missing spool attachment",
+        description: "Missing spool attachment",
+        metadata: { tracker: "Feature", priority: "Normal", status: "New", due_date: "", children: [] },
+        attachments: [{ kind: "file", filePath: tmpFile, filename: "missing-spool.txt", contentType: "text/plain" }],
+      },
+    };
+    await repo.saveOperation(operation, SCOPE);
+    let uploadCalls = 0;
+    const uploadFile = async () => {
+      uploadCalls++;
+      throw new Error("network timeout");
+    };
+    const handler = new TicketCreateHandler();
+    await handler.executeSecondaryEffects(
+      operation,
+      { uploadTokens: [] } as any,
+      { connectionScope: SCOPE },
+      { repository: repo, ticketCreate: { uploadFile } } as any,
+    );
+    const failed = repo.getOperation<TicketCreateIntent>(operation.key!, SCOPE)!;
+    const effect = failed.effects?.find((entry) => entry.effectId.startsWith("attachment:file:"))!;
+    const snapshot = effect.requestSnapshot as any;
+    fs.unlinkSync(snapshot.spoolFilePath);
+
+    const retry = await handler.resolveEffect({
+      key: operation.key!,
+      effectId: effect.effectId,
+      operation: failed,
+      context: { connectionScope: SCOPE },
+      deps: { repository: repo, ticketCreate: { uploadFile } } as any,
+      resolution: { kind: "retry_effect" },
+    });
+
+    assert.strictEqual(retry.kind, "failed_before_commit");
+    assert.strictEqual(uploadCalls, 1);
+    assert.ok(fs.existsSync(tmpFile), "元ファイルは存在していても spool から再構築しないこと");
+    fs.unlinkSync(tmpFile);
+  });
+
   // F-15: Operation/Effect ownership separation
   test("F-15: applyGenericTransition は effects[] を直接変更しない", () => {
     const initialOp: UnifiedSyncOperation = {

@@ -79,6 +79,16 @@ export class SettingsController {
         .getConfiguration("redmine-client")
         .update("includeChildProjects", patch.includeChildProjects, vscode.ConfigurationTarget.Global);
     }
+    if (patch.showStatus !== undefined) {
+      await vscode.workspace
+        .getConfiguration("redmine-client")
+        .update("ticketList.showStatus", patch.showStatus, vscode.ConfigurationTarget.Global);
+    }
+    if (patch.showDueDate !== undefined) {
+      await vscode.workspace
+        .getConfiguration("redmine-client")
+        .update("ticketList.showDueDate", patch.showDueDate, vscode.ConfigurationTarget.Global);
+    }
     if (patch.ticketListLimit !== undefined && patch.ticketListLimit >= 1 && patch.ticketListLimit <= 500) {
       await vscode.workspace
         .getConfiguration("redmine-client")

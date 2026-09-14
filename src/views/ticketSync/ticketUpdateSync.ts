@@ -152,6 +152,7 @@ export const syncTicketDraft = async (
         markDraftStatus(input.ticketId, "Conflict", input.operationScope);
         return buildResult("conflict", "Remote changes detected. Refresh before saving.", {
           conflictContext: {
+            ...(input.operationScope ? { connectionScope: input.operationScope } : {}),
             ticketId: input.ticketId,
             baseSubject: draft.baseSubject,
             baseDescription: draft.baseDescription,

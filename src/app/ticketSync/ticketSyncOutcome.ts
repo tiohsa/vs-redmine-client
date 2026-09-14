@@ -49,3 +49,4 @@ export type SyncAllOutcome = {
   remaining: TicketSyncQueueKey[];
   cancelled: boolean;
 };
+  

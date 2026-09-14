@@ -306,6 +306,22 @@ suite("Dashboard バリデーション拡張", () => {
     assert.strictEqual(r.ok, false);
   });
 
+  test("settings.updateGeneral: Display 設定の boolean patch を受け入れる", () => {
+    const r = validateDashboardMessage({
+      type: "settings.updateGeneral", requestId: "r",
+      patch: { showStatus: false, showDueDate: true },
+    });
+    assert.strictEqual(r.ok, true);
+  });
+
+  test("settings.updateGeneral: Display 設定に boolean 以外を拒否する", () => {
+    const r = validateDashboardMessage({
+      type: "settings.updateGeneral", requestId: "r",
+      patch: { showStatus: "yes" },
+    });
+    assert.strictEqual(r.ok, false);
+  });
+
   test("settings.updateGeneral: 複数フィールドの正常ケース", () => {
     const r = validateDashboardMessage({
       type: "settings.updateGeneral", requestId: "r",

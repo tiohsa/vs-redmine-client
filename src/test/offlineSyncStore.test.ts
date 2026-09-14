@@ -20,6 +20,7 @@ import {
   transitionOfflineNewTicketLifecycleAsync,
   transitionOfflineTicketUpdateLifecycleAsync,
   listSyncOperations,
+  removeOfflineCommentEntryAsync,
 } from "../views/offlineSyncStore";
 import { createTestMemento } from "./helpers/vscodeMemento";
 import { buildIssueMetadataFixture } from "./helpers/ticketMetadataFixtures";
@@ -134,6 +135,21 @@ suite("offlineSyncStore — workspaceState 永続化", () => {
     assert.strictEqual(q.comments.length, 1);
     assert.strictEqual(q.comments[0].commentId, undefined);
     assert.strictEqual(q.comments[0].ticketId, 20);
+  });
+
+  test("コメント削除は ticketId と commentId の組み合わせで対象を限定する", async () => {
+    await replaceOfflineSyncQueueAsync({
+      tickets: new Map(),
+      comments: [
+        { ticketId: 1, commentId: 42, body: "A", documentUri: "file:///a.md" },
+        { ticketId: 2, commentId: 42, body: "B", documentUri: "file:///b.md" },
+      ],
+      newTickets: [],
+    });
+
+    await removeOfflineCommentEntryAsync({ ticketId: 1, commentId: 42 });
+
+    assert.deepStrictEqual(getOfflineSyncQueue().comments.map((comment) => comment.ticketId), [2]);
   });
 
   test("新規チケットを追加後に復元される", async () => {

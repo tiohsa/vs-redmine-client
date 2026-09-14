@@ -20,6 +20,16 @@ suite("Comment edit", () => {
     });
   });
 
+  test("journal 更新 payload には uploads を含めない", () => {
+    const payload = buildCommentUpdatePayload("Updated", [{
+      token: "upload-token",
+      filename: "image.png",
+      content_type: "image/png",
+    }]);
+
+    assert.deepStrictEqual(payload, { journal: { notes: "Updated" } });
+  });
+
   test("prefers draft body when present", () => {
     initializeCommentEdit(1, 10, "Saved");
     setCommentDraftBody(1, "Draft");

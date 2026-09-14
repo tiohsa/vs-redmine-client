@@ -96,7 +96,7 @@ export type DashboardUnsyncedKind = "ticket" | "newTicket" | "comment";
 
 export type DashboardUnsyncedKey =
   | { kind: "ticket"; ticketId: number }
-  | { kind: "newTicket"; documentUri?: string }
+  | { kind: "newTicket"; queueId?: string; documentUri?: string }
   | { kind: "comment"; ticketId: number; commentId?: number; documentUri?: string };
 
 export interface DashboardUnsyncedItem {
@@ -235,6 +235,8 @@ export interface DashboardGeneralSettingsPatch {
   offlineSyncMode?: "auto" | "manual";
   includeChildProjects?: boolean;
   ticketListLimit?: number;
+  showStatus?: boolean;
+  showDueDate?: boolean;
 }
 
 export type DashboardRequest =

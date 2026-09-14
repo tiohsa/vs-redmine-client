@@ -207,7 +207,26 @@ suite("UnsyncedFilesTreeProvider", () => {
 
     const items = await getItems(provider);
     const item = items[0] as UnsyncedFileTreeItem;
-    assert.deepStrictEqual(item.syncKey, { kind: "newTicket", documentUri: "file:///tmp/new.md" });
+    assert.strictEqual(item.syncKey.kind, "newTicket");
+    if (item.syncKey.kind === "newTicket") {
+      assert.ok(item.syncKey.queueId, "queueId must be included for stable identity");
+      assert.strictEqual(item.syncKey.documentUri, "file:///tmp/new.md");
+    }
+  });
+
+  test("URI なしの新規チケットも queueId で個別表示できる", async () => {
+    await addOfflineNewTicketAsync({ content: "A" });
+    await addOfflineNewTicketAsync({ content: "B" });
+
+    const items = await getItems(provider);
+    assert.strictEqual(items.length, 2);
+    const queueIds = items.map((item) => {
+      const key = (item as UnsyncedFileTreeItem).syncKey;
+      return key.kind === "newTicket" ? key.queueId : undefined;
+    });
+    assert.ok(queueIds[0]);
+    assert.ok(queueIds[1]);
+    assert.notStrictEqual(queueIds[0], queueIds[1]);
   });
 
   test("コメント更新エントリの syncKey が正しく設定される", async () => {

@@ -2,7 +2,7 @@ import * as fs from "fs";
 import * as path from "path";
 import * as vscode from "vscode";
 import { getDefaultProjectId, getEditorStorageDirectory } from "../config/settings";
-import { getProjectSelection, ProjectSelection } from "../config/projectSelection";
+import { getProjectSelection, parseConfiguredProjectId, ProjectSelection } from "../config/projectSelection";
 import {
   getNewTicketDraftUri,
   registerNewTicketDraft,
@@ -48,8 +48,7 @@ const resolveProjectId = (selection: ProjectSelection): number | undefined => {
     return selection.id;
   }
 
-  const fallback = Number(getDefaultProjectId());
-  return Number.isNaN(fallback) ? undefined : fallback;
+  return parseConfiguredProjectId(getDefaultProjectId());
 };
 
 const isFileExistsOrOpen = (candidate: string): boolean => {

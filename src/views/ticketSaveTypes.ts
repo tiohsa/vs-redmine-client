@@ -14,6 +14,8 @@ export type TicketSaveStatus =
   | "failed";
 
 export interface ConflictContext {
+  /** Conflict data must stay bound to the Redmine connection that produced it. */
+  connectionScope?: string;
   ticketId: number;
   baseSubject: string;
   baseDescription: string;

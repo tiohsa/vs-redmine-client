@@ -12,6 +12,8 @@ export type CommentSaveStatus =
   | "failed";
 
 export interface CommentConflictContext {
+  /** Conflict data must stay bound to the Redmine connection that produced it. */
+  connectionScope?: string;
   commentId: number;
   ticketId: number;
   baseBody: string;

@@ -34,7 +34,7 @@ import {
 } from "../ticketEditorRegistry";
 import { isSaveSyncSuppressed } from "../saveSyncSuppression";
 import { getDefaultProjectId } from "../../config/settings";
-import { getProjectSelection } from "../../config/projectSelection";
+import { getProjectSelection, parseConfiguredProjectId } from "../../config/projectSelection";
 import { editorContentFromTicket, metadataFromTicket } from "./ticketRemoteContent";
 import { rewriteDocumentWithRegisteredFields } from "../editorDocumentRewrite";
 import { containsConflictMarkers } from "../../utils/threeWayMerge";
@@ -176,6 +176,7 @@ const detectTicketUpdatedAtConflict = async (input: {
     if (remoteUpdatedAt && remoteUpdatedAt !== input.update.lastKnownRemoteUpdatedAt) {
       return buildResult("conflict", "Remote changes detected. Refresh before saving.", {
         conflictContext: {
+          ...(input.update.connectionScope ? { connectionScope: input.update.connectionScope } : {}),
           ticketId: input.update.ticketId,
           baseSubject: input.update.baseSubject,
           baseDescription: input.update.baseDescription,
@@ -630,8 +631,7 @@ const resolveProjectIdForCreate = (projectId?: number): number | undefined => {
     return selection.id;
   }
 
-  const fallback = Number(getDefaultProjectId());
-  return Number.isNaN(fallback) ? undefined : fallback;
+  return parseConfiguredProjectId(getDefaultProjectId());
 };
 
 const resolveProjectIdForEditor = (editor: vscode.TextEditor): number | undefined =>

@@ -136,18 +136,18 @@ export class DashboardUnsyncedService {
       const result = await discardOfflineTicketUpdateAsync(key.ticketId, operationScope);
       recoveryRequired = result === "recovery_required";
     } else if (key.kind === "newTicket") {
-      if (!key.documentUri) {
+      if (!key.queueId && !key.documentUri) {
         this.deps.context.notifyError(requestId, vscode.l10n.t("Cannot identify the target new ticket draft."));
         return;
       }
       const result = await discardOfflineNewTicketAsync(
-        { documentUri: key.documentUri },
+        { queueId: key.queueId, documentUri: key.documentUri },
         operationScope,
       );
       recoveryRequired = result === "recovery_required";
     } else if (key.kind === "comment") {
       await removeOfflineCommentEntryAsync(
-        { commentId: key.commentId, documentUri: key.documentUri },
+        { ticketId: key.ticketId, commentId: key.commentId, documentUri: key.documentUri },
         operationScope,
       );
     }
@@ -275,7 +275,7 @@ export class DashboardUnsyncedService {
     if (key.kind === "ticket" && key.ticketId !== undefined) {
       syncKey = { kind: "ticket", ticketId: key.ticketId };
     } else if (key.kind === "newTicket") {
-      syncKey = { kind: "newTicket", documentUri: key.documentUri };
+      syncKey = { kind: "newTicket", queueId: key.queueId, documentUri: key.documentUri };
     } else if (key.kind === "comment" && key.ticketId !== undefined) {
       syncKey = {
         kind: "comment",

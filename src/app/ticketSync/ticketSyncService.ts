@@ -348,7 +348,15 @@ export class TicketSyncService {
         }
       }
       try {
-        await completeOfflineTicketUpdateAsync(input.ticketId, input.context.connectionScope);
+        const queuedUpdate = getOfflineSyncQueue(input.context.connectionScope).tickets.get(input.ticketId);
+        if (queuedUpdate) {
+          await completeOfflineTicketUpdateAsync(
+            input.ticketId,
+            input.context.connectionScope,
+            undefined,
+            queuedUpdate.intentRevision ?? queuedUpdate.revision ?? 1,
+          );
+        }
       } catch {
         // ignore completion failure on no_change
       }
