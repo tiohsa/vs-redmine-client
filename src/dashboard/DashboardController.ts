@@ -368,6 +368,12 @@ export class DashboardController {
       case "settings.resetEditorDefaults":
         this.settingsCtrl.resetEditorDefaults(req.fields);
         break;
+      case "settings.updateConnection":
+        await this.settingsCtrl.updateConnection(req.patch);
+        break;
+      case "settings.updateEditor":
+        await this.settingsCtrl.updateEditor(req.patch);
+        break;
       case "settings.updateGeneral":
         await this.settingsCtrl.updateGeneral(req.patch);
         await this.loadTickets();

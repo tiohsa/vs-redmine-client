@@ -193,6 +193,21 @@ async function main() {
   await push();
   assert.equal(await evaluate(`document.getElementById('project-select').value`), '');
 
+  // Settings の主要セクション、編集可能なコントロール、キーボード到達性を検証。
+  await evaluate(`document.getElementById('tab-settings').click()`);
+  const settingSections = await evaluate(`[...document.querySelectorAll('#settings-content h3')].map(node=>node.textContent)`);
+  assert.equal(settingSections.includes(strings.sectionConnection), true);
+  assert.equal(settingSections.includes(strings.sectionTickets), true);
+  assert.equal(settingSections.includes(strings.sectionSync), true);
+  assert.equal(settingSections.includes(strings.sectionEditor), true);
+  for (const id of ['set-base-url', 'set-default-project', 'set-request-timeout', 'set-ignore-ssl', 'set-ticket-limit', 'set-editor-storage', 'set-editor-subject']) {
+    assert.equal(await evaluate(`document.getElementById(${JSON.stringify(id)}) !== null`), true, `missing setting control: ${id}`);
+  }
+  await evaluate(`document.getElementById('set-base-url').focus(); document.getElementById('set-base-url').value='https://redmine.example.com'; document.getElementById('set-base-url').dispatchEvent(new Event('change'))`);
+  assert.equal(await evaluate('window.messages.at(-1).type'), 'settings.updateConnection');
+  await key('Tab');
+  assert.equal(await evaluate('document.activeElement.id'), 'set-default-project');
+
   // 日本語・テーマ・320/480/768/1200px で設定の横はみ出しを検証。
   for (const width of [320, 480, 768, 1200]) {
     await call('Emulation.setDeviceMetricsOverride', { width, height: 800, deviceScaleFactor: 1, mobile: false });
@@ -222,7 +237,7 @@ async function main() {
     fs.writeFileSync(path.join(directory, `${theme}-${width}.png`), Buffer.from(data, 'base64'));
   }
   assert.deepEqual(errors, []);
-  console.log('PASS: 日本語、折りたたみ維持、子チケット検索、メニューのキーボード操作/表示領域、タブ横断の新規作成、入力/フォーカス維持、下書き前の同期抑止、ローディング/エラー再試行、5画面幅、3テーマ');
+  console.log('PASS: 日本語、Settings セクション/編集/キーボード操作、折りたたみ維持、子チケット検索、メニューのキーボード操作/表示領域、タブ横断の新規作成、入力/フォーカス維持、下書き前の同期抑止、ローディング/エラー再試行、5画面幅、3テーマ');
   console.log('検証用 HTML: ' + fixture);
 }
 main().catch(error => { console.error(error); process.exitCode = 1; }).finally(() => {

@@ -1,5 +1,7 @@
 import type { DashboardRequest, DashboardUnsyncedKey } from "./dashboardProtocol";
 import { EDITOR_DEFAULT_FIELDS } from "../config/settings";
+import { normalizeBaseUrl } from "../redmine/client";
+import { validateEditorDefaultValue } from "../views/ticketEditorDefaultsValidation";
 
 type ValidationResult =
   | { ok: true; request: DashboardRequest }
@@ -93,6 +95,34 @@ const validateGeneralPatch = (v: unknown): boolean => {
     }
   }
   return true;
+};
+
+const isValidBaseUrl = (value: unknown): value is string => {
+  if (!isString(value)) { return false; }
+  const trimmed = value.trim();
+  if (!trimmed) { return true; }
+  try {
+    normalizeBaseUrl(trimmed);
+    return true;
+  } catch {
+    return false;
+  }
+};
+
+const validateConnectionPatch = (v: unknown): boolean => {
+  if (!isObject(v)) { return false; }
+  if ("baseUrl" in v && !isValidBaseUrl(v["baseUrl"])) { return false; }
+  if ("defaultProjectId" in v && !isString(v["defaultProjectId"])) { return false; }
+  if ("requestTimeoutMs" in v && (!isNumber(v["requestTimeoutMs"]) || (v["requestTimeoutMs"] as number) <= 0)) {
+    return false;
+  }
+  if ("ignoreSSLErrors" in v && !isBoolean(v["ignoreSSLErrors"])) { return false; }
+  return true;
+};
+
+const validateEditorPatch = (v: unknown): boolean => {
+  if (!isObject(v)) { return false; }
+  return !("editorStorageDirectory" in v) || isString(v["editorStorageDirectory"]);
 };
 
 const validateMetadataPatch = (v: unknown): boolean => {
@@ -350,6 +380,9 @@ export const validateDashboardMessage = (raw: unknown): ValidationResult => {
       if (!isString(value)) {
         return { ok: false, reason: "settings.updateEditorDefault: value must be a string" };
       }
+      if (validateEditorDefaultValue(field as import("../config/settings").EditorDefaultField, value)) {
+        return { ok: false, reason: "settings.updateEditorDefault: value is invalid" };
+      }
       return { ok: true, request: { type, requestId, field, value } };
     }
 
@@ -364,6 +397,36 @@ export const validateDashboardMessage = (raw: unknown): ValidationResult => {
         return { ok: false, reason: `settings.resetEditorDefaults: unknown field "${invalid}"` };
       }
       return { ok: true, request: { type, requestId, fields } };
+    }
+
+    case "settings.updateConnection": {
+      const patch = raw["patch"];
+      if (!validateConnectionPatch(patch)) {
+        return { ok: false, reason: "settings.updateConnection: patch is invalid" };
+      }
+      return {
+        ok: true,
+        request: {
+          type,
+          requestId,
+          patch: patch as import("./dashboardProtocol").DashboardConnectionSettingsPatch,
+        },
+      };
+    }
+
+    case "settings.updateEditor": {
+      const patch = raw["patch"];
+      if (!validateEditorPatch(patch)) {
+        return { ok: false, reason: "settings.updateEditor: patch is invalid" };
+      }
+      return {
+        ok: true,
+        request: {
+          type,
+          requestId,
+          patch: patch as import("./dashboardProtocol").DashboardEditorSettingsPatch,
+        },
+      };
     }
 
     case "settings.updateGeneral": {

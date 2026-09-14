@@ -13,6 +13,12 @@ import {
   EDITOR_DEFAULT_FIELDS,
   type EditorDefaultField,
 } from "../config/settings";
+import { normalizeBaseUrl } from "../redmine/client";
+import { validateEditorDefaultValue } from "../views/ticketEditorDefaultsValidation";
+import type {
+  DashboardConnectionSettingsPatch,
+  DashboardEditorSettingsPatch,
+} from "./dashboardProtocol";
 import { buildSettingsDashboardViewModel } from "./viewModels/settingsDashboardViewModel";
 import { DashboardStateStore } from "./DashboardStateStore";
 import type { DashboardGeneralSettingsPatch } from "./dashboardProtocol";
@@ -57,7 +63,12 @@ export class SettingsController {
     if (!EDITOR_DEFAULT_FIELDS.includes(field as EditorDefaultField)) {
       return;
     }
-    updateTicketEditorDefaultField(field as EditorDefaultField, value);
+    const editorField = field as EditorDefaultField;
+    if (validateEditorDefaultValue(editorField, value)) {
+      return;
+    }
+    updateTicketEditorDefaultField(editorField, value);
+    this.pushSettings();
   }
 
   resetEditorDefaults(fields: string[]): void {
@@ -68,6 +79,7 @@ export class SettingsController {
       return;
     }
     resetTicketEditorDefaultFields(validFields);
+    this.pushSettings();
   }
 
   async updateGeneral(patch: DashboardGeneralSettingsPatch): Promise<void> {
@@ -93,6 +105,55 @@ export class SettingsController {
       await vscode.workspace
         .getConfiguration("redmine-client")
         .update("ticketListLimit", patch.ticketListLimit, vscode.ConfigurationTarget.Global);
+    }
+    this.pushSettings();
+  }
+
+  async updateConnection(patch: DashboardConnectionSettingsPatch): Promise<void> {
+    const config = vscode.workspace.getConfiguration("redmine-client");
+    if (patch.baseUrl !== undefined) {
+      const baseUrl = patch.baseUrl.trim();
+      if (baseUrl) {
+        normalizeBaseUrl(baseUrl);
+      }
+      await config.update("baseUrl", baseUrl, vscode.ConfigurationTarget.Global);
+    }
+    if (patch.defaultProjectId !== undefined) {
+      await config.update(
+        "defaultProjectId",
+        patch.defaultProjectId.trim(),
+        vscode.ConfigurationTarget.Global,
+      );
+    }
+    if (patch.requestTimeoutMs !== undefined) {
+      if (!Number.isFinite(patch.requestTimeoutMs) || patch.requestTimeoutMs <= 0) {
+        throw new Error("Request timeout must be greater than zero.");
+      }
+      await config.update(
+        "requestTimeoutMs",
+        patch.requestTimeoutMs,
+        vscode.ConfigurationTarget.Global,
+      );
+    }
+    if (patch.ignoreSSLErrors !== undefined) {
+      await config.update(
+        "ignoreSSLErrors",
+        patch.ignoreSSLErrors,
+        vscode.ConfigurationTarget.Global,
+      );
+    }
+    this.pushSettings();
+  }
+
+  async updateEditor(patch: DashboardEditorSettingsPatch): Promise<void> {
+    if (patch.editorStorageDirectory !== undefined) {
+      await vscode.workspace
+        .getConfiguration("redmine-client")
+        .update(
+          "editorStorageDirectory",
+          patch.editorStorageDirectory.trim(),
+          vscode.ConfigurationTarget.Global,
+        );
     }
     this.pushSettings();
   }

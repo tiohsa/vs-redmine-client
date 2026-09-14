@@ -125,10 +125,24 @@ export interface DashboardTicketSettingsViewModel {
   filters: TicketFilterSelection;
   sort: TicketSortPreference;
   dueDate: DueDateDisplayRule;
+  baseUrl: string;
+  defaultProjectId: string;
+  requestTimeoutMs: number;
+  ignoreSSLErrors: boolean;
+  includeChildProjects: boolean;
   offlineSyncMode: "auto" | "manual";
   ticketListLimit: number;
   showStatus: boolean;
   showDueDate: boolean;
+  editorStorageDirectory: string;
+  editorDefaults: {
+    subject: string;
+    description: string;
+    tracker: string;
+    priority: string;
+    status: string;
+    due_date: string;
+  };
   apiKeyStatus: "set" | "notSet";
 }
 
@@ -222,6 +236,17 @@ export interface DashboardState {
 
 export type DashboardSettingsPatch = Partial<TicketListSettings>;
 
+export interface DashboardConnectionSettingsPatch {
+  baseUrl?: string;
+  defaultProjectId?: string;
+  requestTimeoutMs?: number;
+  ignoreSSLErrors?: boolean;
+}
+
+export interface DashboardEditorSettingsPatch {
+  editorStorageDirectory?: string;
+}
+
 export type TicketMetadataPatch = {
   tracker?: string;
   priority?: string;
@@ -282,6 +307,8 @@ export type DashboardRequest =
   | { type: "settings.reset"; requestId: string }
   | { type: "settings.updateEditorDefault"; requestId: string; field: string; value: string }
   | { type: "settings.resetEditorDefaults"; requestId: string; fields: string[] }
+  | { type: "settings.updateConnection"; requestId: string; patch: DashboardConnectionSettingsPatch }
+  | { type: "settings.updateEditor"; requestId: string; patch: DashboardEditorSettingsPatch }
   | { type: "settings.updateGeneral"; requestId: string; patch: DashboardGeneralSettingsPatch }
   | { type: "apiKey.set"; requestId: string }
   | { type: "apiKey.clear"; requestId: string };

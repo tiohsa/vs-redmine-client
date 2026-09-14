@@ -81,6 +81,20 @@ suite("dashboardSettingsState — 初期設定状態", () => {
   test("buildSettingsDashboardViewModel に apiKeyStatus が含まれる", () => {
     const vm = buildSettingsDashboardViewModel(DEFAULT_TICKET_LIST_SETTINGS);
     assert.ok(vm.apiKeyStatus === "set" || vm.apiKeyStatus === "notSet");
+    assert.strictEqual("apiKey" in vm, false, "API key 本体を ViewModel に含めないこと");
+  });
+
+  test("buildSettingsDashboardViewModel に Connection／Editor 設定が含まれる", () => {
+    const vm = buildSettingsDashboardViewModel(DEFAULT_TICKET_LIST_SETTINGS);
+    assert.strictEqual(typeof vm.baseUrl, "string");
+    assert.strictEqual(typeof vm.defaultProjectId, "string");
+    assert.strictEqual(typeof vm.requestTimeoutMs, "number");
+    assert.strictEqual(typeof vm.ignoreSSLErrors, "boolean");
+    assert.strictEqual(typeof vm.includeChildProjects, "boolean");
+    assert.strictEqual(typeof vm.editorStorageDirectory, "string");
+    assert.strictEqual(typeof vm.editorDefaults.subject, "string");
+    assert.strictEqual(typeof vm.editorDefaults.description, "string");
+    assert.strictEqual(typeof vm.editorDefaults.due_date, "string");
   });
 
   test("DEFAULT_STATE の settings に apiKeyStatus が含まれる", () => {

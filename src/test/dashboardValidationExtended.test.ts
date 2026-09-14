@@ -330,6 +330,60 @@ suite("Dashboard バリデーション拡張", () => {
     assert.strictEqual(r.ok, true);
   });
 
+  // ── settings.updateConnection / settings.updateEditor ───────────────────
+
+  test("settings.updateConnection: Connection 設定の正常ケース", () => {
+    const r = validateDashboardMessage({
+      type: "settings.updateConnection", requestId: "r",
+      patch: { baseUrl: " https://redmine.example.com ", defaultProjectId: "12", requestTimeoutMs: 30000, ignoreSSLErrors: false },
+    });
+    assert.strictEqual(r.ok, true);
+  });
+
+  test("settings.updateConnection: 不正 URL を拒否する", () => {
+    const r = validateDashboardMessage({
+      type: "settings.updateConnection", requestId: "r",
+      patch: { baseUrl: "ftp://redmine.example.com" },
+    });
+    assert.strictEqual(r.ok, false);
+  });
+
+  test("settings.updateConnection: timeout の 0／負数／NaN／型違いを拒否する", () => {
+    for (const requestTimeoutMs of [0, -1, Number.NaN, "30000"]) {
+      const r = validateDashboardMessage({
+        type: "settings.updateConnection", requestId: "r", patch: { requestTimeoutMs },
+      });
+      assert.strictEqual(r.ok, false);
+    }
+  });
+
+  test("settings.updateConnection: boolean 以外の SSL 設定を拒否する", () => {
+    const r = validateDashboardMessage({
+      type: "settings.updateConnection", requestId: "r",
+      patch: { ignoreSSLErrors: "false" },
+    });
+    assert.strictEqual(r.ok, false);
+  });
+
+  test("settings.updateEditor: storage directory を受け入れる", () => {
+    const r = validateDashboardMessage({
+      type: "settings.updateEditor", requestId: "r",
+      patch: { editorStorageDirectory: "/tmp/redmine" },
+    });
+    assert.strictEqual(r.ok, true);
+  });
+
+  test("settings.updateEditorDefault: 不正な due_date と改行を拒否する", () => {
+    const invalidDate = validateDashboardMessage({
+      type: "settings.updateEditorDefault", requestId: "r", field: "due_date", value: "2026/01/01",
+    });
+    const multilineSubject = validateDashboardMessage({
+      type: "settings.updateEditorDefault", requestId: "r", field: "subject", value: "line 1\nline 2",
+    });
+    assert.strictEqual(invalidDate.ok, false);
+    assert.strictEqual(multilineSubject.ok, false);
+  });
+
   // ── unsynced.openLocalFile ───────────────────────────────────────────────
 
   test("unsynced.openLocalFile: 空文字列の documentUri は拒否される", () => {

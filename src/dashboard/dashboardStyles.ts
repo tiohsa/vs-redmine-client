@@ -283,6 +283,9 @@ button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-
 .setting-select { max-width: 180px; }
 .setting-input-num { max-width: 72px; text-align: right; }
 .setting-check { accent-color: var(--app-accent); }
+.setting-row-stacked { align-items: stretch; flex-direction: column; }
+.setting-row-stacked .setting-input { width: 100%; max-width: none; }
+.setting-warning { margin: 3px 0 7px; color: var(--app-warning); font-size: 10px; }
 .apikey-status-set { color: var(--app-success); }
 .apikey-status-notset { color: var(--app-warning); }
 .apikey-actions { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; }
