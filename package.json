@@ -315,6 +315,7 @@
     "pretest": "pnpm run compile-tests && pnpm run compile && pnpm run lint",
     "lint": "eslint src",
     "test": "vscode-test",
+    "test:dashboard-ui": "pnpm run compile-tests && node scripts/check-dashboard-ui.cjs",
     "test:unsafe": "bash ./scripts/vscode-test-nosandbox.sh"
   },
   "pnpm": {

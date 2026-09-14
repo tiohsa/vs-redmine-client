@@ -89,6 +89,34 @@ export const defaultCommentDeps: CommentSaveDependencies = {
   uploadFile: uploadFileAttachment,
 };
 
+const createFileAttachmentSpool = async (
+  sourcePath: string,
+  identity: { contentHash: string; contentSize: number },
+): Promise<string> => {
+  const spoolDir = path.join(os.tmpdir(), "vs-redmine-spool");
+  await fs.promises.mkdir(spoolDir, { recursive: true });
+  const extension = path.extname(sourcePath) || ".bin";
+  const spoolFilePath = path.join(spoolDir, `${identity.contentHash}${extension}`);
+
+  try {
+    await fs.promises.copyFile(sourcePath, spoolFilePath, fs.constants.COPYFILE_EXCL);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== "EEXIST") {
+      throw error;
+    }
+  }
+
+  const spoolIdentity = await computeFileHashAndSizeAsync(spoolFilePath);
+  if (
+    !spoolIdentity ||
+    spoolIdentity.contentHash !== identity.contentHash ||
+    spoolIdentity.contentSize !== identity.contentSize
+  ) {
+    throw new Error(`Spool file identity mismatch: ${spoolFilePath}`);
+  }
+  return spoolFilePath;
+};
+
 export const normalizeTicketText = (text: string | undefined | null): string => {
   if (text === undefined || text === null) {
     return "";
@@ -558,26 +586,57 @@ export class TicketCreateHandler implements OperationHandler<TicketCreateIntent,
           continue;
         }
 
-        const fileId = await computeFileHashAndSizeAsync(att.filePath);
-        if (!fileId) {
-          return { ok: false, error: new Error(`Failed to compute hash for file attachment: ${att.filePath}`) };
-        }
-
+        let uploadSnapshot: UploadRequestSnapshot;
+        let uploadFilePath: string;
         if (existingEffect?.requestSnapshot) {
-          const existingSnap = existingEffect.requestSnapshot as UploadRequestSnapshot;
-          if (existingSnap.contentHash && existingSnap.contentHash !== fileId.contentHash) {
-            return { ok: false, error: new Error(`File content has changed since original snapshot: ${att.filePath}`) };
+          uploadSnapshot = existingEffect.requestSnapshot as UploadRequestSnapshot;
+          if (uploadSnapshot.spoolFilePath !== undefined) {
+            if (!uploadSnapshot.spoolFilePath || !fs.existsSync(uploadSnapshot.spoolFilePath)) {
+              return { ok: false, error: new Error(`Spool file not found for file attachment: ${effectId}`) };
+            }
+            uploadFilePath = uploadSnapshot.spoolFilePath;
+            const spoolIdentity = await computeFileHashAndSizeAsync(uploadFilePath);
+            if (
+              !spoolIdentity ||
+              spoolIdentity.contentHash !== uploadSnapshot.contentHash ||
+              spoolIdentity.contentSize !== uploadSnapshot.contentSize
+            ) {
+              return { ok: false, error: new Error(`Spool file identity mismatch for file attachment: ${effectId}`) };
+            }
+          } else {
+            uploadFilePath = uploadSnapshot.filePath ?? att.filePath;
+            const fileId = await computeFileHashAndSizeAsync(uploadFilePath);
+            if (!fileId) {
+              return { ok: false, error: new Error(`Failed to compute hash for file attachment: ${uploadFilePath}`) };
+            }
+            if (
+              uploadSnapshot.contentHash &&
+              (uploadSnapshot.contentHash !== fileId.contentHash || uploadSnapshot.contentSize !== fileId.contentSize)
+            ) {
+              return { ok: false, error: new Error(`File content has changed since original snapshot: ${uploadFilePath}`) };
+            }
+          }
+        } else {
+          const fileId = await computeFileHashAndSizeAsync(att.filePath);
+          if (!fileId) {
+            return { ok: false, error: new Error(`Failed to compute hash for file attachment: ${att.filePath}`) };
+          }
+          try {
+            const spoolFilePath = await createFileAttachmentSpool(att.filePath, fileId);
+            uploadSnapshot = {
+              kind: "upload",
+              filePath: att.filePath,
+              spoolFilePath,
+              filename: att.filename ?? path.basename(att.filePath),
+              contentType: att.contentType ?? "application/octet-stream",
+              contentHash: fileId.contentHash,
+              contentSize: fileId.contentSize,
+            };
+            uploadFilePath = spoolFilePath;
+          } catch (error) {
+            return { ok: false, error: error as Error };
           }
         }
-
-        const uploadSnapshot: UploadRequestSnapshot = {
-          kind: "upload",
-          filePath: att.filePath,
-          filename: att.filename ?? path.basename(att.filePath),
-          contentType: att.contentType ?? "application/octet-stream",
-          contentHash: fileId.contentHash,
-          contentSize: fileId.contentSize,
-        };
 
         const planRes = await repo.planEffect(
           opKey,
@@ -586,7 +645,7 @@ export class TicketCreateHandler implements OperationHandler<TicketCreateIntent,
             kind: "attachment_upload",
             operationRevision: revision,
             state: "planned",
-            target: { filePath: att.filePath, filename: att.filename },
+            target: { filePath: uploadSnapshot.filePath ?? att.filePath, filename: att.filename },
             requestSnapshot: uploadSnapshot,
           },
           context.connectionScope,
@@ -609,11 +668,11 @@ export class TicketCreateHandler implements OperationHandler<TicketCreateIntent,
 
         try {
           const uploadFn = (createDeps as any).uploadFile ?? uploadFileAttachment;
-          const res = await uploadFn(att.filePath);
+          const res = await uploadFn(uploadFilePath);
           const commitRes = await repo.transitionEffect(
             opKey,
             effectId,
-            { kind: "commit", token: res.token, target: { filePath: att.filePath, filename: att.filename ?? res.filename }, requestSnapshot: uploadSnapshot },
+            { kind: "commit", token: res.token, target: { filePath: uploadSnapshot.filePath ?? att.filePath, filename: att.filename ?? res.filename }, requestSnapshot: uploadSnapshot },
             context.connectionScope,
             { operationRevision: revision, sourceState: "started" },
           );
@@ -1514,31 +1573,58 @@ export class TicketCreateHandler implements OperationHandler<TicketCreateIntent,
             error: new Error(`Cannot retry uncertain upload without snapshot content hash/size for effect ${effectId}`),
           };
         }
-        const filePath = effect.target.filePath ?? snapshot?.filePath;
-        if (!filePath) {
+        const hasFrozenSpool = snapshot?.spoolFilePath !== undefined;
+        const uploadFilePath = hasFrozenSpool ? snapshot?.spoolFilePath : effect.target.filePath ?? snapshot?.filePath;
+        if (!uploadFilePath) {
           return { kind: "failed_before_commit", error: new Error(`Cannot retry attachment without filePath for effect ${effectId}`) };
         }
 
-        // Upload retry 前検証: hash / size
-        const currentFile = await computeFileHashAndSizeAsync(filePath);
-        if (!currentFile) {
+        let contentHash = snapshot?.contentHash;
+        let contentSize = snapshot?.contentSize;
+        if (hasFrozenSpool) {
+          if (!uploadFilePath || !fs.existsSync(uploadFilePath)) {
+            return { kind: "failed_before_commit", error: new Error(`Spool file not found for attachment effect ${effectId}`) };
+          }
+          const spoolIdentity = await computeFileHashAndSizeAsync(uploadFilePath);
+          if (
+            !spoolIdentity ||
+            spoolIdentity.contentHash !== contentHash ||
+            spoolIdentity.contentSize !== contentSize
+          ) {
+            return { kind: "failed_before_commit", error: new Error(`Spool file identity mismatch for attachment effect ${effectId}`) };
+          }
+        } else {
+          // Legacy snapshots without spoolFilePath retain the old source-file fallback.
+          const currentFile = await computeFileHashAndSizeAsync(uploadFilePath);
+          if (!currentFile) {
+            return {
+              kind: "failed_before_commit",
+              error: new Error(`Cannot compute hash for file: ${uploadFilePath}`),
+            };
+          }
+          if (
+            snapshot?.contentHash &&
+            (snapshot.contentHash !== currentFile.contentHash || snapshot.contentSize !== currentFile.contentSize)
+          ) {
+            return {
+              kind: "failed_before_commit",
+              error: new Error(`File content has changed since snapshot (expected hash ${snapshot.contentHash}, found ${currentFile.contentHash}). Retry rejected.`),
+            };
+          }
+          contentHash = currentFile.contentHash;
+          contentSize = currentFile.contentSize;
+        }
+
+        if (!contentHash || contentSize === undefined) {
           return {
             kind: "failed_before_commit",
-            error: new Error(`Cannot compute hash for file: ${filePath}`),
+            error: new Error(`Cannot retry attachment without frozen content identity for effect ${effectId}`),
           };
         }
-        if (snapshot?.contentHash && snapshot.contentHash !== currentFile.contentHash) {
-          return {
-            kind: "failed_before_commit",
-            error: new Error(`File content has changed since snapshot (expected hash ${snapshot.contentHash}, found ${currentFile.contentHash}). Retry rejected.`),
-          };
-        }
-        const contentHash = currentFile.contentHash;
-        const contentSize = currentFile.contentSize;
 
         const uploadSnapshot: UploadRequestSnapshot = {
           kind: "upload",
-          filePath,
+          filePath: snapshot?.filePath ?? effect.target.filePath ?? uploadFilePath,
           filename: effect.target.filename ?? snapshot?.filename ?? "attachment",
           contentType: snapshot?.contentType ?? "application/octet-stream",
           contentHash,
@@ -1558,11 +1644,11 @@ export class TicketCreateHandler implements OperationHandler<TicketCreateIntent,
         }
         try {
           const uploadFn = (createDeps as any).uploadFile ?? uploadFileAttachment;
-          const res = await uploadFn(filePath);
+          const res = await uploadFn(uploadFilePath);
           const committed = await repo.transitionEffect(
             key,
             effectId,
-            { kind: "commit", token: res.token, target: { filePath, filename: effect.target.filename ?? res.filename }, requestSnapshot: uploadSnapshot },
+            { kind: "commit", token: res.token, target: { filePath: uploadSnapshot.filePath, filename: effect.target.filename ?? res.filename }, requestSnapshot: uploadSnapshot },
             scope,
             { operationRevision: revision, sourceState: "started" },
           );

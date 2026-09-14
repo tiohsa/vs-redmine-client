@@ -35,3 +35,8 @@ jobs:
           ELECTRON_DISABLE_SANDBOX: '1'
           ELECTRON_NO_SANDBOX: '1'
           VSCODE_TEST_ELECTRON_ARGS: '--no-sandbox --disable-setuid-sandbox'
+
+      - name: Dashboard UI test
+        run: pnpm run test:dashboard-ui
+        env:
+          DASHBOARD_UI_NO_SANDBOX: '1'

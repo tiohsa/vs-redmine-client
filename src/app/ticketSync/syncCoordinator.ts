@@ -851,6 +851,7 @@ export class SyncCoordinator {
         const remoteId = input.resolution.kind === "link_remote_comment" ? input.resolution.commentId : input.resolution.ticketId;
 
         let detail: any = undefined;
+        let linkedProjectId: number | undefined;
         if (isComment) {
           const commentDeps = { ...defaultCommentDeps, ...input.deps?.comment };
           const verified = await reconcileCommentCommitUnknown(
@@ -875,6 +876,7 @@ export class SyncCoordinator {
               message: verified.message,
             };
           }
+          linkedProjectId = verified.projectId;
         } else {
           const getDetail = (freshOp.kind === "ticket_create" ? input.deps?.ticketCreate?.getIssueDetail : input.deps?.ticketUpdate?.getIssueDetail)
             ?? input.deps?.ticketCreate?.getIssueDetail
@@ -918,9 +920,12 @@ export class SyncCoordinator {
           }
         }
 
+        const identityAction = isComment
+          ? { kind: "record_reconciled_identity" as const, remoteId, projectId: linkedProjectId }
+          : { kind: "record_reconciled_identity" as const, remoteId };
         const transitioned = await repository.transitionOperation(
           input.key,
-          { kind: "record_reconciled_identity", remoteId },
+          identityAction,
           scope,
           { operationId: freshOp.operationId, sourcePhase: freshOp.phase, revision: freshOp.intentRevision ?? freshOp.revision },
         );
