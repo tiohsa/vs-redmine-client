@@ -96,6 +96,27 @@ async function main() {
   assert.equal(await evaluate('document.documentElement.lang'), 'ja');
   await push();
 
+  // 担当者ありは既存アバターを維持し、未設定時は一覧・詳細からアバター自体を除去する。
+  state.selectedTicketId = 10;
+  state.tickets[0].assigneeName = 'Taro Yamada';
+  state.selectedTicket = { ...state.tickets[0], projectName: '検証プロジェクト', description: '担当者表示を確認します。' };
+  await push();
+  assert.equal(await evaluate(`document.querySelectorAll('.ticket-avatar').length`), 1);
+  assert.equal(await evaluate(`document.querySelector('.ticket-avatar').textContent`), 'TA');
+  assert.equal(await evaluate(`document.querySelectorAll('.detail-avatar').length`), 1);
+  assert.equal(await evaluate(`document.querySelector('.detail-avatar').textContent`), 'TA');
+  assert.equal(await evaluate(`document.querySelector('.detail-avatar').getAttribute('aria-label')`), 'Taro Yamada');
+  await evaluate(`document.getElementById('ticket-detail-toggle').click()`);
+  assert.equal(await evaluate(`document.querySelectorAll('.detail-avatar').length`), 1);
+  for (const assigneeName of [undefined, null, '', '   ']) {
+    if (assigneeName === undefined) delete state.tickets[0].assigneeName;
+    else state.tickets[0].assigneeName = assigneeName;
+    state.selectedTicket = { ...state.tickets[0], projectName: '検証プロジェクト', description: '未設定の担当者表示を確認します。' };
+    await push();
+    assert.equal(await evaluate(`document.querySelectorAll('.ticket-avatar').length`), 0);
+    assert.equal(await evaluate(`document.querySelectorAll('.detail-avatar').length`), 0);
+  }
+
   // 折りたたみ後の状態更新・子チケット検索・キーボードフォーカス。
   await evaluate(`document.querySelector('[data-expand="10"]').focus()`);
   await key('Enter');
