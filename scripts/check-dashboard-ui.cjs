@@ -24,7 +24,7 @@ Module._load = originalLoad;
 
 const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'dashboard-ui-'));
 const fixture = path.join(directory, 'dashboard.html');
-const bootstrap = `<style nonce="ui-check">:root{--vscode-font-family:system-ui;--vscode-font-size:13px;--vscode-button-background:#1456f0;--vscode-button-foreground:#fff;--vscode-focusBorder:#1456f0;--vscode-sideBar-background:#f0f0f0;--vscode-editor-background:#fff;--vscode-foreground:#222;--vscode-descriptionForeground:#45515e;--vscode-panel-border:#e5e7eb;--vscode-list-hoverBackground:#f0f0f0;--vscode-errorForeground:#b3261e;--vscode-editorWarning-foreground:#795e00;--vscode-testing-iconPassed:#16825d}:root:has(body.vscode-dark){--vscode-sideBar-background:#252526;--vscode-editor-background:#1e1e1e;--vscode-foreground:#ddd;--vscode-descriptionForeground:#bbb;--vscode-panel-border:#666;--vscode-list-hoverBackground:#333}:root:has(body.vscode-high-contrast-light){--vscode-contrastBorder:#000;--vscode-panel-border:#000}</style><script nonce="ui-check">window.messages=[];window.acquireVsCodeApi=()=>({postMessage:m=>window.messages.push(m)});</script>`;
+const bootstrap = `<style nonce="ui-check">:root{--vscode-font-family:system-ui;--vscode-font-size:13px;--vscode-button-background:#1456f0;--vscode-button-foreground:#fff;--vscode-focusBorder:#1456f0;--vscode-sideBar-background:#f0f0f0;--vscode-editor-background:#fff;--vscode-foreground:#222;--vscode-descriptionForeground:#45515e;--vscode-panel-border:#e5e7eb;--vscode-errorForeground:#b3261e;--vscode-editorWarning-foreground:#795e00;--vscode-testing-iconPassed:#16825d}:root:has(body.vscode-dark){--vscode-sideBar-background:#252526;--vscode-editor-background:#1e1e1e;--vscode-foreground:#ddd;--vscode-descriptionForeground:#bbb;--vscode-panel-border:#666}:root:has(body.vscode-high-contrast-light){--vscode-contrastBorder:#000;--vscode-panel-border:#000}</style><script nonce="ui-check">window.messages=[];window.acquireVsCodeApi=()=>({postMessage:m=>window.messages.push(m)});const NativeDate=Date;const fixedNow=NativeDate.UTC(2026,8,14,16,0,0);window.Date=class extends NativeDate{constructor(...args){if(args.length===0)super(fixedNow);else super(...args)}static now(){return fixedNow}};</script>`;
 fs.writeFileSync(fixture, buildDashboardHtml('ui-check', strings).replace('<head>', '<head>' + bootstrap));
 const chrome = spawn(process.env.CHROME_BIN || 'google-chrome', [
   '--headless', '--disable-gpu', '--no-first-run', '--no-default-browser-check',
@@ -90,11 +90,26 @@ async function main() {
   ({ sessionId } = await call('Target.attachToTarget', { targetId, flatten: true }));
   await call('Runtime.enable');
   await call('Page.enable');
+  await call('Emulation.setTimezoneOverride', { timezoneId: 'Asia/Tokyo' });
   await call('Page.bringToFront');
   await call('Page.navigate', { url: 'file://' + fixture });
   await evaluate(`new Promise(resolve=>{if(document.readyState==='complete')resolve();else window.addEventListener('load',resolve,{once:true})})`);
   assert.equal(await evaluate('document.documentElement.lang'), 'ja');
   await push();
+
+  // date-only はローカル暦日で判定し、固定日時で日付境界と不正値を検証する。
+  async function assertDueDateBadge(dueDate, className) {
+    state.tickets[0].dueDate = dueDate;
+    await push();
+    const selector = ['due-overdue', 'due-1day', 'due-3days', 'due-7days'].map(name => `.ticket-row[data-id="10"] .${name}`).join(',');
+    assert.equal(await evaluate(`document.querySelector(${JSON.stringify(selector)})?.className || null`), className ? `badge ${className}` : null);
+  }
+  await assertDueDateBadge('2026-09-14', 'due-overdue');
+  await assertDueDateBadge('2026-09-15', 'due-1day');
+  await assertDueDateBadge('2026-09-16', 'due-1day');
+  await assertDueDateBadge('invalid-date', null);
+  await assertDueDateBadge('2026-02-30', null);
+  await assertDueDateBadge('2020-01-01', 'due-overdue');
 
   // 担当者ありは既存アバターを維持し、未設定時は一覧・詳細からアバター自体を除去する。
   state.selectedTicketId = 10;

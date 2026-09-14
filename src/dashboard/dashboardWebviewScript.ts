@@ -168,15 +168,25 @@ function avatar(name, className){
   const label = name || STRINGS.assigneeUnassigned;
   return '<span class="avatar '+(className || '')+'" role="img" aria-label="'+esc(label)+'">'+esc(initials(name))+'</span>';
 }
-function resolveDueDateBadge(dueDate, rule){
+const DATE_ONLY_PATTERN = /^(\d{4})-(\d{2})-(\d{2})$/;
+const DAY_MS = 86400000;
+function daysUntilDateOnly(value, now){
+  const match = DATE_ONLY_PATTERN.exec(String(value || ''));
+  if(!match) return undefined;
+  const year = Number(match[1]);
+  const month = Number(match[2]);
+  const day = Number(match[3]);
+  const target = Date.UTC(year,month - 1,day);
+  const targetDate = new Date(target);
+  if(targetDate.getUTCFullYear() !== year || targetDate.getUTCMonth() !== month - 1 || targetDate.getUTCDate() !== day) return undefined;
+  const current = now || new Date();
+  const today = Date.UTC(current.getFullYear(),current.getMonth(),current.getDate());
+  return Math.round((target - today) / DAY_MS);
+}
+function resolveDueDateBadge(dueDate, rule, now){
   if(!dueDate || !rule) return null;
-  const due = new Date(dueDate);
-  if(Number.isNaN(due.getTime())) return null;
-  const now = new Date();
-  const day = 86400000;
-  const today = Date.UTC(now.getUTCFullYear(),now.getUTCMonth(),now.getUTCDate());
-  const target = Date.UTC(due.getUTCFullYear(),due.getUTCMonth(),due.getUTCDate());
-  const difference = Math.floor((target - today) / day);
+  const difference = daysUntilDateOnly(dueDate, now);
+  if(difference === undefined) return null;
   if(difference < 0 && rule.showOverdue) return {label:STRINGS.dueOverdue,cls:'due-overdue',icon:'!'};
   if(difference >= 0 && difference <= 1 && rule.showWithin1Day) return {label:STRINGS.due1Day,cls:'due-1day',icon:'!'};
   if(difference >= 0 && difference <= 3 && rule.showWithin3Days) return {label:STRINGS.due3Days,cls:'due-3days',icon:'•'};
