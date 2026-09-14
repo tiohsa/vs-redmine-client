@@ -11,7 +11,7 @@ import { getCurrentConnectionScope } from "../config/connectionScope";
 
 export type UnsyncedFileSyncKey =
   | { kind: "ticket"; ticketId: number }
-  | { kind: "newTicket"; documentUri?: string }
+  | { kind: "newTicket"; queueId?: string; documentUri?: string }
   | { kind: "comment"; ticketId: number; commentId?: number; documentUri?: string };
 
 export class UnsyncedFileTreeItem extends vscode.TreeItem {
@@ -164,7 +164,7 @@ export class UnsyncedFilesTreeProvider
         new UnsyncedFileTreeItem(
           "New ticket",
           "new-file",
-          { kind: "newTicket", documentUri: newTicket.documentUri },
+          { kind: "newTicket", queueId: newTicket.queueId, documentUri: newTicket.documentUri },
           newTicket.documentUri,
           tooltipParts.join("\n"),
         ),

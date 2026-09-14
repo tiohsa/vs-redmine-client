@@ -1543,6 +1543,7 @@ export class TicketCreateHandler implements OperationHandler<TicketCreateIntent,
           contentType: snapshot?.contentType ?? "application/octet-stream",
           contentHash,
           contentSize,
+          spoolFilePath: snapshot?.spoolFilePath,
         };
 
         const started = await repo.transitionEffect(
@@ -1915,10 +1916,10 @@ export class TicketCreateHandler implements OperationHandler<TicketCreateIntent,
     }
 
     const key = op.key ?? { kind: "newTicket", documentUri: op.documentUri };
-    const compOp = await deps.repository.completeOperation(key, context.connectionScope, undefined, {
+    const compOp = await deps.repository.completeOperation(key, context.connectionScope, op.intentRevision ?? op.revision ?? 1, {
       canonical: reconciled.canonical,
       remoteUpdatedAt: op.remoteUpdatedAt,
-    });
+    }, getAttemptGeneration(op));
     if (compOp) {
       return {
         kind: "completed",
@@ -2069,6 +2070,7 @@ export class TicketUpdateHandler implements OperationHandler<TicketUpdateIntent,
                 ticketId,
                 message: vscode.l10n.t("Remote changes detected. Refresh before saving."),
                 conflictContext: {
+                  ...(context.connectionScope ? { connectionScope: context.connectionScope } : {}),
                   ticketId,
                   baseSubject: intent.baseSubject,
                   baseDescription: intent.baseDescription,
@@ -3088,10 +3090,10 @@ export class TicketUpdateHandler implements OperationHandler<TicketUpdateIntent,
     }
 
     const key = op.key ?? { kind: "ticket", ticketId: op.ticketId ?? 0 };
-    const compOp = await deps.repository.completeOperation(key, context.connectionScope, undefined, {
+    const compOp = await deps.repository.completeOperation(key, context.connectionScope, op.intentRevision ?? op.revision ?? 1, {
       canonical: reconciled.canonical,
       remoteUpdatedAt: op.remoteUpdatedAt,
-    });
+    }, getAttemptGeneration(op));
     if (compOp) {
       return {
         kind: "completed",
@@ -3741,6 +3743,7 @@ export class CommentUpdateHandler implements OperationHandler<CommentUpdateInten
                 commentId,
                 message: vscode.l10n.t("Comment was updated in Redmine. Review the diff before syncing."),
                 commentConflictContext: {
+                  ...(context.connectionScope ? { connectionScope: context.connectionScope } : {}),
                   ticketId,
                   commentId,
                   baseBody: intent.baseBody ?? "",
@@ -4014,10 +4017,20 @@ export class CommentUpdateHandler implements OperationHandler<CommentUpdateInten
     }
 
     try {
+      // Redmine の journal 更新 API は uploads を受け付けないため、画像 token は
+      // issue 側へ先に登録し、journal には本文だけを送る。upload effect は
+      // executeSecondaryEffects で既に永続化されているため、再試行時も同じ token を使う。
+      const uploads = requestSnapshot.request?.uploads;
+      if (uploads && uploads.length > 0) {
+        await commentDeps.updateIssue({
+          issueId: prepared.ticketId,
+          fields: { uploads },
+        });
+      }
       await commentDeps.updateComment(
         requestSnapshot.request?.commentId ?? prepared.commentId!,
         requestSnapshot.request?.notes ?? prepared.body,
-        requestSnapshot.request?.uploads ?? (prepared.uploads.length > 0 ? prepared.uploads : undefined),
+        uploads,
       );
 
       const committed = await repo.transitionPrimaryRemoteWrite(

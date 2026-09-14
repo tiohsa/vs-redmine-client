@@ -171,7 +171,11 @@ export const buildIssueUpdatePayload = (
   if (fields.statusId !== undefined) {
     payload.status_id = fields.statusId;
   }
-  if (fields.assigneeId !== undefined) {
+  if (fields.assignedToId !== undefined) {
+    // TicketUpdateHandler は編集時の metadata 解決結果を assignedToId に保持する。
+    // create 系で使う assigneeId も後方互換のため受け付けるが、編集値を優先する。
+    payload.assigned_to_id = fields.assignedToId;
+  } else if (fields.assigneeId !== undefined) {
     // Redmine では 0 を送ると "not found" エラーになるため、クリア時は空文字を送る
     payload.assigned_to_id = fields.assigneeId === 0 ? "" : fields.assigneeId;
   }

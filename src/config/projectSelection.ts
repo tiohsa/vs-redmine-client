@@ -7,14 +7,25 @@ export interface ProjectSelection {
   name?: string;
 }
 
+export const isValidProjectId = (value: unknown): value is number =>
+  typeof value === "number" && Number.isSafeInteger(value) && value > 0;
+
+export const parseConfiguredProjectId = (raw: string | undefined): number | undefined => {
+  if (!raw?.trim()) {
+    return undefined;
+  }
+  const id = Number(raw.trim());
+  return isValidProjectId(id) ? id : undefined;
+};
+
 export const getProjectSelection = (): ProjectSelection => {
   const config = vscode.workspace.getConfiguration(CONFIG_SECTION);
   const idRaw = config.get<string>("selectedProjectId", "").trim();
   const name = config.get<string>("selectedProjectName", "").trim();
-  const id = Number(idRaw);
+  const id = parseConfiguredProjectId(idRaw);
 
   return {
-    id: !idRaw || Number.isNaN(id) ? undefined : id,
+    id,
     name: name || undefined,
   };
 };

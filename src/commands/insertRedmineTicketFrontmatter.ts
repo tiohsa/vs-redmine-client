@@ -1,6 +1,6 @@
 import * as path from "path";
 import * as vscode from "vscode";
-import { getProjectSelection } from "../config/projectSelection";
+import { getProjectSelection, parseConfiguredProjectId } from "../config/projectSelection";
 import { getDefaultProjectId } from "../config/settings";
 import { getTicketEditorDefaults } from "../views/ticketEditorDefaultsStore";
 import { buildRedmineTicketFrontmatterContent } from "../views/redmineTicketFrontmatterTemplate";
@@ -69,10 +69,7 @@ export const insertRedmineTicketFrontmatter = async (
   } else {
     const defaultProj = deps.getDefaultProjectId();
     if (defaultProj) {
-      const parsed = Number(defaultProj);
-      if (!Number.isNaN(parsed)) {
-        projectId = parsed;
-      }
+      projectId = parseConfiguredProjectId(defaultProj);
     }
   }
 

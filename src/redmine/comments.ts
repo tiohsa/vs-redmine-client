@@ -8,11 +8,10 @@ export const filterEditableComments = <T extends { editableByCurrentUser: boolea
 
 export const buildCommentUpdatePayload = (
   notes: string,
-  uploads?: UploadToken[],
+  _uploads?: UploadToken[],
 ): Record<string, unknown> => ({
   journal: {
     notes,
-    ...(uploads ? { uploads } : {}),
   },
 });
 

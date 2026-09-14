@@ -33,12 +33,16 @@ const hasValidDateField = (
   return isString(date) && (date.length === 0 || DATE_RE.test(date));
 };
 
-const validateUnsyncedKey = (v: unknown): v is DashboardUnsyncedKey => {
+export const validateDashboardUnsyncedKey = (v: unknown): v is DashboardUnsyncedKey => {
   if (!isObject(v)) { return false; }
   const kind = v["kind"];
   if (!isString(kind) || !UNSYNCED_KINDS.has(kind)) { return false; }
   if (kind === "ticket" && !isPositiveInt(v["ticketId"])) { return false; }
-  if (kind === "newTicket" && "documentUri" in v && !isNonEmptyString(v["documentUri"])) { return false; }
+  if (kind === "newTicket") {
+    if ("queueId" in v && !isNonEmptyString(v["queueId"])) { return false; }
+    if ("documentUri" in v && !isNonEmptyString(v["documentUri"])) { return false; }
+    if (!isNonEmptyString(v["queueId"]) && !isNonEmptyString(v["documentUri"])) { return false; }
+  }
   if (kind === "comment") {
     if (!isPositiveInt(v["ticketId"])) { return false; }
     if ("commentId" in v && !isPositiveInt(v["commentId"])) { return false; }
@@ -224,6 +228,9 @@ export const validateDashboardMessage = (raw: unknown): ValidationResult => {
       if ("assigned_to" in values && values["assigned_to"] !== undefined && !isString(values["assigned_to"])) {
         return { ok: false, reason: "ticket.createDraftFromComposer: values.assigned_to must be a string" };
       }
+      if ("description" in values && values["description"] !== undefined && !isString(values["description"])) {
+        return { ok: false, reason: "ticket.createDraftFromComposer: values.description must be a string" };
+      }
       return {
         ok: true,
         request: {
@@ -314,7 +321,7 @@ export const validateDashboardMessage = (raw: unknown): ValidationResult => {
     case "unsynced.syncOne":
     case "unsynced.discardOne": {
       const key = raw["key"];
-      if (!validateUnsyncedKey(key)) {
+      if (!validateDashboardUnsyncedKey(key)) {
         return { ok: false, reason: `${type}: key is invalid` };
       }
       return { ok: true, request: { type, requestId, key } };

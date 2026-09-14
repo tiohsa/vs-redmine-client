@@ -1,4 +1,5 @@
 import type { DashboardServiceContext } from "./DashboardServiceContext";
+import * as vscode from "vscode";
 import { getIssueDetail } from "../../redmine/issues";
 import { listComments } from "../../redmine/comments";
 import { getCurrentUserId } from "../../redmine/users";
@@ -22,13 +23,20 @@ export class DashboardCommentService {
   }
 
   async loadComments(ticketId: number): Promise<void> {
-    const generation = ++this.loadGeneration;
     const { store } = this.context;
+    if (store.getState().selectedTicketId !== ticketId) {
+      return;
+    }
+    const generation = ++this.loadGeneration;
     store.updateNested("comments", { ticketId, loading: true, error: undefined });
     try {
       const currentUserId = await getCurrentUserId();
       const comments = await listComments(ticketId, currentUserId);
-      if (generation !== this.loadGeneration || store.getState().comments.ticketId !== ticketId) {
+      if (
+        generation !== this.loadGeneration ||
+        store.getState().selectedTicketId !== ticketId ||
+        store.getState().comments.ticketId !== ticketId
+      ) {
         return;
       }
       store.updateNested("comments", {
@@ -36,7 +44,11 @@ export class DashboardCommentService {
         items: buildCommentDashboardItems(comments, ticketId),
       });
     } catch (err) {
-      if (generation !== this.loadGeneration || store.getState().comments.ticketId !== ticketId) {
+      if (
+        generation !== this.loadGeneration ||
+        store.getState().selectedTicketId !== ticketId ||
+        store.getState().comments.ticketId !== ticketId
+      ) {
         return;
       }
       const msg = (err as Error).message;
@@ -67,13 +79,28 @@ export class DashboardCommentService {
 
   async editTicketComment(ticketId: number, commentId: number): Promise<void> {
     try {
-      const detail = await getIssueDetail(ticketId);
+      const [detail, currentUserId] = await Promise.all([
+        getIssueDetail(ticketId),
+        getCurrentUserId(),
+      ]);
       const comment = detail.comments.find((c) => c.id === commentId);
-      if (comment) {
-        await openCommentUpdateDraft(comment, detail.ticket);
+      if (!comment) {
+        return;
       }
-    } catch {
-      // Ignore preparation failures.
+      if (comment.authorId !== currentUserId) {
+        this.context.notifyToast(
+          "error",
+          vscode.l10n.t("You do not have permission to edit this comment. Check Redmine permission settings."),
+        );
+        return;
+      }
+      await openCommentUpdateDraft(comment, detail.ticket);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      this.context.notifyToast(
+        "error",
+        vscode.l10n.t("Unable to resolve the comment for this editor.") + ` (${message})`,
+      );
     }
   }
 

@@ -2,56 +2,76 @@ import * as vscode from "vscode";
 import { ConflictContext } from "./ticketSaveTypes";
 import { CommentConflictContext } from "./commentSaveTypes";
 import { buildTicketPreviewContent } from "./ticketPreview";
+import { getConnectionScopeHash, getCurrentConnectionScope } from "../config/connectionScope";
 
 export const CONFLICT_SCHEME = "redmine-conflict";
 export const COMMENT_CONFLICT_SCHEME = "redmine-comment-conflict";
 
-// Store for ticket conflict context, keyed by ticketId.
-const conflictContexts = new Map<number, ConflictContext>();
+// Store for ticket conflict context, keyed by connection scope and ticketId.
+const conflictContexts = new Map<string, ConflictContext>();
 
-// Store for comment conflict context, keyed by commentId.
-const commentConflictContexts = new Map<number, CommentConflictContext>();
+// Store for comment conflict context, keyed by connection scope and commentId.
+const commentConflictContexts = new Map<string, CommentConflictContext>();
+
+const scopedKey = (scopeHash: string, id: number): string => `${scopeHash}\u0000${id}`;
+const contextScope = (scope: string | undefined): string => scope ?? getCurrentConnectionScope();
+const scopeHashFromUri = (uri: vscode.Uri): string | undefined => {
+    const match = uri.query.match(/(?:^|&)scope=([^&]+)/);
+    return match ? decodeURIComponent(match[1]) : undefined;
+};
 
 /**
  * Register a conflict context for a ticket.
  */
 export function registerConflictContext(context: ConflictContext): void {
-    conflictContexts.set(context.ticketId, context);
+    conflictContexts.set(
+        scopedKey(getConnectionScopeHash(contextScope(context.connectionScope)), context.ticketId),
+        context,
+    );
 }
 
 /**
  * Get a conflict context for a ticket.
  */
-export function getConflictContext(ticketId: number): ConflictContext | undefined {
-    return conflictContexts.get(ticketId);
+export function getConflictContext(
+    ticketId: number,
+    scope = getCurrentConnectionScope(),
+): ConflictContext | undefined {
+    return conflictContexts.get(scopedKey(getConnectionScopeHash(scope), ticketId));
 }
 
 /**
  * Clear a conflict context for a ticket.
  */
-export function clearConflictContext(ticketId: number): void {
-    conflictContexts.delete(ticketId);
+export function clearConflictContext(ticketId: number, scope = getCurrentConnectionScope()): void {
+    conflictContexts.delete(scopedKey(getConnectionScopeHash(scope), ticketId));
 }
 
 /**
  * Register a conflict context for a comment.
  */
 export function registerCommentConflictContext(context: CommentConflictContext): void {
-    commentConflictContexts.set(context.commentId, context);
+    commentConflictContexts.set(
+        scopedKey(getConnectionScopeHash(contextScope(context.connectionScope)), context.commentId),
+        context,
+    );
 }
 
 /**
  * Get a conflict context for a comment.
  */
-export function getCommentConflictContext(commentId: number): CommentConflictContext | undefined {
-    return commentConflictContexts.get(commentId);
+export function getCommentConflictContext(
+    commentId: number,
+    scope = getCurrentConnectionScope(),
+): CommentConflictContext | undefined {
+    return commentConflictContexts.get(scopedKey(getConnectionScopeHash(scope), commentId));
 }
 
 /**
  * Clear a conflict context for a comment.
  */
-export function clearCommentConflictContext(commentId: number): void {
-    commentConflictContexts.delete(commentId);
+export function clearCommentConflictContext(commentId: number, scope = getCurrentConnectionScope()): void {
+    commentConflictContexts.delete(scopedKey(getConnectionScopeHash(scope), commentId));
 }
 
 /**
@@ -69,7 +89,10 @@ export class ConflictDiffProvider implements vscode.TextDocumentContentProvider 
         }
 
         const ticketId = parseInt(match[1], 10);
-        const context = getConflictContext(ticketId);
+        const scopeHash = scopeHashFromUri(uri);
+        const context = scopeHash
+            ? conflictContexts.get(scopedKey(scopeHash, ticketId))
+            : getConflictContext(ticketId);
 
         if (!context) {
             return "// Conflict context not found. Please try saving again.";
@@ -89,7 +112,8 @@ export class ConflictDiffProvider implements vscode.TextDocumentContentProvider 
     }
 
     refresh(ticketId: number): void {
-        const uri = vscode.Uri.parse(`${CONFLICT_SCHEME}:/${ticketId}/remote.md`);
+        const scopeHash = getConnectionScopeHash(getCurrentConnectionScope());
+        const uri = vscode.Uri.parse(`${CONFLICT_SCHEME}:/${ticketId}/remote.md?scope=${scopeHash}`);
         this.onDidChangeEmitter.fire(uri);
     }
 
@@ -113,7 +137,10 @@ export class CommentConflictDiffProvider implements vscode.TextDocumentContentPr
         }
 
         const commentId = parseInt(match[1], 10);
-        const context = getCommentConflictContext(commentId);
+        const scopeHash = scopeHashFromUri(uri);
+        const context = scopeHash
+            ? commentConflictContexts.get(scopedKey(scopeHash, commentId))
+            : getCommentConflictContext(commentId);
 
         if (!context) {
             return "// Comment conflict context not found. Please try saving again.";
@@ -124,7 +151,8 @@ export class CommentConflictDiffProvider implements vscode.TextDocumentContentPr
     }
 
     refresh(commentId: number): void {
-        const uri = vscode.Uri.parse(`${COMMENT_CONFLICT_SCHEME}:/${commentId}/remote.md`);
+        const scopeHash = getConnectionScopeHash(getCurrentConnectionScope());
+        const uri = vscode.Uri.parse(`${COMMENT_CONFLICT_SCHEME}:/${commentId}/remote.md?scope=${scopeHash}`);
         this.onDidChangeEmitter.fire(uri);
     }
 

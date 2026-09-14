@@ -1,6 +1,20 @@
 import * as vscode from "vscode";
 
 export interface DashboardStrings {
+  language: string;
+  dashboardTitle: string;
+  selectTicketHint: string;
+  searchEmptyHint: string;
+  retry: string;
+  startDate: string;
+  dueDateLabel: string;
+  descriptionLabel: string;
+  selectOption: string;
+  parentLabel: string;
+  projectLabel: string;
+  synced: string;
+  draft: string;
+  composerHint: string;
   // Header
   selectProjectPlaceholder: string;
   selectProjectTitle: string;
@@ -124,6 +138,20 @@ export interface DashboardStrings {
 }
 
 export const buildDashboardStrings = (): DashboardStrings => ({
+  language: vscode.env.language,
+  dashboardTitle: vscode.l10n.t("Dashboard"),
+  selectTicketHint: vscode.l10n.t("Select a ticket to view its details and actions."),
+  searchEmptyHint: vscode.l10n.t("Try another search or review your ticket filters in Settings."),
+  retry: vscode.l10n.t("Retry"),
+  startDate: vscode.l10n.t("Start date"),
+  dueDateLabel: vscode.l10n.t("Due date"),
+  descriptionLabel: vscode.l10n.t("Description"),
+  selectOption: vscode.l10n.t("Select…"),
+  parentLabel: vscode.l10n.t("Parent"),
+  projectLabel: vscode.l10n.t("Project"),
+  synced: vscode.l10n.t("Synced"),
+  draft: vscode.l10n.t("Draft"),
+  composerHint: vscode.l10n.t("Create a draft, edit it in the editor, then sync the ticket."),
   // Header
   selectProjectPlaceholder: vscode.l10n.t("— Select project —"),
   selectProjectTitle: vscode.l10n.t("Select project"),

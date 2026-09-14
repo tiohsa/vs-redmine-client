@@ -39,7 +39,8 @@ suite("Dashboard Webview 改善", () => {
   });
 
   test("開始日と日付ピッカー視認性のスタイルを持つ", () => {
-    assert.ok(dashboardWebviewScript.includes("Start date"));
+    assert.ok(dashboardWebviewScript.includes("STRINGS.startDate"));
+    assert.ok(buildDashboardStrings().startDate);
     assert.ok(dashboardWebviewScript.includes('data-metadata-field="start_date"'));
     assert.ok(dashboardStyles.includes('detail-input[type="date"]::-webkit-calendar-picker-indicator'));
     assert.ok(dashboardStyles.includes("body.vscode-high-contrast"));
@@ -73,7 +74,7 @@ suite("Dashboard Webview 改善", () => {
   });
 
   test("ローカル未同期コメントは Redmine 操作を条件付きにする", () => {
-    assert.ok(dashboardWebviewScript.includes("const editBtn=cm.id?"));
+    assert.ok(dashboardWebviewScript.includes("const editBtn=cm.id&&cm.editableByCurrentUser?"));
     assert.ok(dashboardWebviewScript.includes("const browserBtn=cm.id?"));
     assert.ok(dashboardWebviewScript.includes("const journalId=cm.id?"));
   });
@@ -114,7 +115,7 @@ suite("Dashboard Webview 改善", () => {
   test("監査補修でフィルター表示・説明文省略・未同期件数を維持する", () => {
     assert.ok(dashboardWebviewScript.includes("function renderFilterChips()"));
     assert.ok(dashboardWebviewScript.includes("renderFilterChips();"));
-    assert.ok(dashboardWebviewScript.includes("filter-chip-x"));
+    assert.ok(!dashboardWebviewScript.includes("filter-chip-x"));
     assert.ok(dashboardWebviewScript.includes("detail-description'+(ticketDetailExpanded ? '' : ' detail-description-collapsed')"));
     assert.ok(dashboardStyles.includes(".detail-description-collapsed"));
     assert.ok(dashboardStyles.includes("-webkit-line-clamp: 3"));
@@ -155,8 +156,8 @@ suite("Dashboard Webview 改善", () => {
   });
 
   test("狭幅でも同期状態 badge を残し、Unsynced feedback は対象操作だけ更新する", () => {
-    assert.ok(dashboardStyles.includes(".badges .ticket-status, .badges .due-overdue"));
-    assert.ok(dashboardStyles.includes(".badges .due-1day, .badges .due-3days, .badges .due-7days"));
+    assert.ok(dashboardStyles.includes(".badges { order: 1; flex-basis: 100%; flex-wrap: wrap;"));
+    assert.ok(!dashboardStyles.includes(".badges .due-7days { display: none; }"));
     assert.ok(dashboardWebviewScript.includes("const unsyncedFeedbackRequests = new Set();"));
     assert.ok(dashboardWebviewScript.includes("type === 'unsynced.syncOne' || type === 'unsynced.syncAll'"));
     assert.ok(dashboardWebviewScript.includes("finishOperation('success',message.requestId,message.message)"));

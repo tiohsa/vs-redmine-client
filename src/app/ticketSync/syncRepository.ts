@@ -371,16 +371,17 @@ const getOperationFromQueue = (
     return ticket ? toUnifiedOperationFromTicket(ticket, scope) : undefined;
   }
   if (key.kind === "newTicket") {
-    const ticket = key.documentUri
+    const ticketByQueueId = key.queueId !== undefined
+      ? queue.newTickets.find((candidate) =>
+        candidate.queueId === key.queueId ||
+        candidate.operationId === key.queueId ||
+        Boolean(candidate.operationId?.endsWith(`:${key.queueId}`)))
+      : undefined;
+    const ticket = ticketByQueueId ?? (key.documentUri
       ? queue.newTickets.find((candidate) =>
         candidate.documentUri !== undefined &&
         sameDocumentIdentity(candidate.documentUri, key.documentUri))
-      : key.queueId !== undefined
-        ? queue.newTickets.find((candidate) =>
-          candidate.queueId === key.queueId ||
-          candidate.operationId === key.queueId ||
-          Boolean(candidate.operationId?.endsWith(`:${key.queueId}`)))
-        : queue.newTickets[0];
+      : undefined);
     return ticket ? toUnifiedOperationFromNewTicket(ticket, scope) : undefined;
   }
   const comment = queue.comments.find((candidate) =>
@@ -1196,7 +1197,13 @@ export class DefaultSyncOperationRepository implements SyncOperationRepository {
   ): Promise<boolean> {
     return this.runExclusive(scope, async () => {
       const current = this.getOperation(key, scope);
-      const revision = expectedRevision ?? current?.revision ?? 1;
+      // Completion without the callback's original revision is ambiguous: the
+      // current operation may already contain a newer nextIntent. Fail closed
+      // instead of deleting or promoting that newer intent.
+      if (current && expectedRevision === undefined) {
+        return false;
+      }
+      const revision = expectedRevision ?? current?.intentRevision ?? current?.revision ?? 1;
 
       if (
         current &&
@@ -1294,6 +1301,8 @@ export class DefaultSyncOperationRepository implements SyncOperationRepository {
             connectionScope: scope,
             phase: "queued",
             revision: next.revision ?? (current.revision ?? 0) + 1,
+            intentRevision: next.revision ?? (current.intentRevision ?? current.revision ?? 0) + 1,
+            attemptGeneration: getAttemptGeneration(current),
             sourceRevision: next.revision,
           };
         }
@@ -1352,7 +1361,7 @@ export class DefaultSyncOperationRepository implements SyncOperationRepository {
       }
       if (key.kind === "comment") {
         await removeOfflineCommentEntryAsync(
-          { commentId: key.commentId, documentUri: key.documentUri },
+          { ticketId: key.ticketId, commentId: key.commentId, documentUri: key.documentUri },
           scope,
         );
         return true;

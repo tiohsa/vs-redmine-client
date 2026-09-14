@@ -249,6 +249,7 @@ export const performSyncOnSave = async (
       const currentHash = computeNotesHash(classification.parsed.body);
       if (currentHash === classification.parsed.fields.sourceNotesHash) {
         await removeOfflineCommentEntryAsync({
+          ticketId: classification.parsed.fields.issueId,
           commentId: classification.parsed.fields.journalId,
           documentUri: document.uri.toString(),
         }, operationScope);

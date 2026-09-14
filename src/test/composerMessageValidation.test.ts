@@ -70,6 +70,15 @@ suite("コンポーザー メッセージバリデーション", () => {
     assert.strictEqual(r.ok, false);
   });
 
+  test("ticket.createDraftFromComposer: description が文字列でないと拒否される", () => {
+    const r = validateDashboardMessage({
+      type: "ticket.createDraftFromComposer",
+      requestId: "r7-description",
+      values: { tracker: "Task", priority: "Normal", status: "New", description: { unsafe: true } },
+    });
+    assert.strictEqual(r.ok, false);
+  });
+
   test("ticket.createDraftFromComposer: 正しい日付形式は受け入れられる", () => {
     const r = validateDashboardMessage({
       type: "ticket.createDraftFromComposer",

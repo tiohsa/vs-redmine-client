@@ -40,6 +40,15 @@ suite("プロジェクト解決 — resolveCurrentProject", () => {
     assert.strictEqual(result?.name, "マイプロジェクト");
   });
 
+  test("defaultProjectId の identifier からプロジェクトを解決する", () => {
+    const result = resolveCurrentProject({
+      selectionId: undefined,
+      defaultProjectId: "proj-7",
+      projects: [makeNode(7, "識別子プロジェクト")],
+    });
+    assert.deepStrictEqual(result, { id: 7, name: "識別子プロジェクト" });
+  });
+
   test("選択なし・defaultProjectId なしの場合は undefined", () => {
     const result = resolveCurrentProject({
       selectionId: undefined,
@@ -80,6 +89,15 @@ suite("プロジェクト解決 — resolveCurrentProject", () => {
     const result = resolveCurrentProject({
       selectionId: undefined,
       defaultProjectId: "-1",
+      projects: [],
+    });
+    assert.strictEqual(result, undefined);
+  });
+
+  test("defaultProjectId が小数の場合は undefined", () => {
+    const result = resolveCurrentProject({
+      selectionId: undefined,
+      defaultProjectId: "1.5",
       projects: [],
     });
     assert.strictEqual(result, undefined);

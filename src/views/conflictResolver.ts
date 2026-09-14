@@ -25,6 +25,7 @@ import { registerConflictContext } from "./conflictDiffProvider";
 import { buildTicketEditorContent, parseTicketEditorContent } from "./ticketEditorContent";
 import { mergeThreeWay } from "../utils/threeWayMerge";
 import { computeNotesHash } from "../utils/notesHash";
+import { getConnectionScopeHash, getCurrentConnectionScope } from "../config/connectionScope";
 
 export type ConflictResolution = "local" | "remote" | "merge" | "cancel";
 
@@ -113,8 +114,9 @@ export async function openDiffEditor(
     // Register the conflict context so the diff provider can access it.
     registerConflictContext(context);
 
+    const scopeHash = getConnectionScopeHash(context.connectionScope ?? getCurrentConnectionScope());
     const remoteUri = vscode.Uri.parse(
-        `redmine-conflict:/${context.ticketId}/remote.md?ts=${Date.now()}`,
+        `redmine-conflict:/${context.ticketId}/remote.md?scope=${scopeHash}&ts=${Date.now()}`,
     );
 
     const localUri = editor.document.uri;
@@ -430,8 +432,9 @@ export async function openCommentDiffEditor(
 ): Promise<void> {
     registerCommentConflictContext(context);
 
+    const scopeHash = getConnectionScopeHash(context.connectionScope ?? getCurrentConnectionScope());
     const remoteUri = vscode.Uri.parse(
-        `redmine-comment-conflict:/${context.commentId}/remote.md?ts=${Date.now()}`,
+        `redmine-comment-conflict:/${context.commentId}/remote.md?scope=${scopeHash}&ts=${Date.now()}`,
     );
 
     const localUri = editor.document.uri;

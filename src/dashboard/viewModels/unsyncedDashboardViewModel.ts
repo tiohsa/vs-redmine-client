@@ -51,7 +51,7 @@ export const buildUnsyncedDashboardItems = (): DashboardUnsyncedItem[] => {
       lifecycle === "commit_unknown" ? "Remote commit status unknown" : undefined,
     ].filter((value): value is string => value !== undefined);
     items.push({
-      key: { kind: "newTicket", documentUri: newTicket.documentUri },
+      key: { kind: "newTicket", queueId: newTicket.queueId, documentUri: newTicket.documentUri },
       label: "New ticket",
       detail: details.length > 0 ? details.join(" · ") : undefined,
       documentUri: newTicket.documentUri,

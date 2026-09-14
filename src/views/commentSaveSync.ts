@@ -103,16 +103,16 @@ export const resolveCreatedCommentId = (
   currentUserId?: number,
 ): number | undefined => {
   const normalized = normalizeCommentBody(submittedBody);
-  if (!normalized) {
+  // Without the current user identity, a body-only match can link an
+  // unrelated user's existing comment after a successful POST. Fail closed
+  // and leave the entry in created_unresolved for explicit reconciliation.
+  if (!normalized || currentUserId === undefined) {
     return undefined;
   }
 
   const candidates = comments.filter((comment) => {
     if (normalizeCommentBody(comment.body) !== normalized) {
       return false;
-    }
-    if (currentUserId === undefined) {
-      return true;
     }
     return comment.authorId === currentUserId;
   });
@@ -219,12 +219,14 @@ const buildConflictResult = (input: {
   message: string;
   commentId: number;
   ticketId: number;
+  operationScope?: string;
   baseBody: string;
   localBody: string;
   remoteComment: Comment;
 }): CommentSaveResult =>
   buildResult("conflict", input.message, {
     conflictContext: {
+      ...(input.operationScope ? { connectionScope: input.operationScope } : {}),
       commentId: input.commentId,
       ticketId: input.ticketId,
       baseBody: input.baseBody,
@@ -238,6 +240,7 @@ const detectUpdatedAtConflict = async (input: {
   deps: CommentSaveDependencies;
   commentId: number;
   ticketId: number;
+  operationScope?: string;
   lastKnownRemoteUpdatedAt: string;
   baseBody: string;
   localBody: string;
@@ -250,6 +253,7 @@ const detectUpdatedAtConflict = async (input: {
         message: "Remote changes detected. Refresh before saving.",
         commentId: input.commentId,
         ticketId: input.ticketId,
+        operationScope: input.operationScope,
         baseBody: input.baseBody,
         localBody: input.localBody,
         remoteComment,
@@ -266,6 +270,7 @@ const enrichConflictWithRemote = async (input: {
   result: CommentSaveResult;
   commentId: number;
   ticketId: number;
+  operationScope?: string;
   baseBody: string;
   localBody: string;
 }): Promise<CommentSaveResult> => {
@@ -280,6 +285,7 @@ const enrichConflictWithRemote = async (input: {
         message: input.result.message,
         commentId: input.commentId,
         ticketId: input.ticketId,
+        operationScope: input.operationScope,
         baseBody: input.baseBody,
         localBody: input.localBody,
         remoteComment,
@@ -419,6 +425,7 @@ export const syncCommentDraft = async (input: {
       deps,
       commentId: input.commentId,
       ticketId: edit.ticketId,
+      operationScope: input.operationScope,
       lastKnownRemoteUpdatedAt: edit.lastKnownRemoteUpdatedAt,
       baseBody: edit.baseBody,
       localBody: nextContent,
@@ -432,13 +439,14 @@ export const syncCommentDraft = async (input: {
     if (uploads.length > 0) {
       await deps.updateIssue({ issueId: edit.ticketId, fields: { uploads } });
     }
-    await deps.updateComment(input.commentId, nextContent);
+    await deps.updateComment(input.commentId, nextContent, uploads.length > 0 ? uploads : undefined);
   } catch (error) {
     return enrichConflictWithRemote({
       deps,
       result: mapErrorToResult(error),
       commentId: input.commentId,
       ticketId: edit.ticketId,
+      operationScope: input.operationScope,
       baseBody: edit.baseBody,
       localBody: nextContent,
     });
@@ -568,6 +576,7 @@ const detectHashBasedConflict = async (input: {
   deps: CommentSaveDependencies;
   commentId: number;
   ticketId: number;
+  operationScope?: string;
   sourceNotesHash: string;
   baseBody: string;
   localBody: string;
@@ -584,6 +593,7 @@ const detectHashBasedConflict = async (input: {
         message: vscode.l10n.t("Comment was updated in Redmine. Review the diff before syncing."),
         commentId: input.commentId,
         ticketId: input.ticketId,
+        operationScope: input.operationScope,
         baseBody: input.baseBody,
         localBody: input.localBody,
         remoteComment,
@@ -640,6 +650,7 @@ const applyQueuedExistingComment = async (input: {
       deps,
       commentId: update.commentId,
       ticketId: update.ticketId,
+      operationScope: input.operationScope,
       sourceNotesHash: update.sourceNotesHash,
       baseBody: update.baseBody ?? "",
       localBody: nextContent,
@@ -650,6 +661,7 @@ const applyQueuedExistingComment = async (input: {
       deps,
       commentId: update.commentId,
       ticketId: update.ticketId,
+      operationScope: input.operationScope,
       lastKnownRemoteUpdatedAt: update.lastKnownRemoteUpdatedAt,
       baseBody: update.baseBody ?? "",
       localBody: nextContent,

@@ -40,6 +40,16 @@ suite("Ticket update payload", () => {
     });
   });
 
+  test("maps TicketUpdateHandler の assignedToId to assigned_to_id", () => {
+    const payload = buildIssueUpdatePayload({ assignedToId: 20 });
+    assert.deepStrictEqual(payload, { issue: { assigned_to_id: 20 } });
+  });
+
+  test("preserves empty assignedToId when unassigning", () => {
+    const payload = buildIssueUpdatePayload({ assignedToId: "" });
+    assert.deepStrictEqual(payload, { issue: { assigned_to_id: "" } });
+  });
+
   test("includes new metadata fields", () => {
     const payload = buildIssueUpdatePayload({
       startDate: "2025-01-01",

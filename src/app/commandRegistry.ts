@@ -48,6 +48,7 @@ import type { SyncController, SyncStatus } from "./syncController";
 import type { SyncEngine } from "./syncEngine";
 import type { DashboardWebviewProvider } from "../dashboard/DashboardWebviewProvider";
 import type { DashboardCommentItem, DashboardState, DashboardUnsyncedKey } from "../dashboard/dashboardProtocol";
+import { validateDashboardUnsyncedKey } from "../dashboard/dashboardMessageValidation";
 
 export interface CommandDeps {
   ticketsPresentation: TicketPresentationPort;
@@ -138,13 +139,7 @@ const pickDashboardComment = async (state: DashboardState): Promise<Comment | un
   };
 };
 
-const isDashboardUnsyncedKey = (value: unknown): value is DashboardUnsyncedKey => {
-  if (!value || typeof value !== "object") {
-    return false;
-  }
-  const candidate = value as { kind?: unknown };
-  return candidate.kind === "ticket" || candidate.kind === "newTicket" || candidate.kind === "comment";
-};
+const isDashboardUnsyncedKey = validateDashboardUnsyncedKey;
 
 const registerStubMessage = (
   commandId: string,

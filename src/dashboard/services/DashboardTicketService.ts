@@ -139,6 +139,9 @@ export class DashboardTicketService {
         rememberTicketSummaries(result.tickets);
         this.pushTickets();
       } catch (err) {
+        if (generation !== this.ticketLoadGeneration) {
+          return;
+        }
         const msg = (err as Error).message;
         store.updateNested("errors", { tickets: `Failed to load more: ${msg}` });
       }
@@ -162,6 +165,9 @@ export class DashboardTicketService {
       rememberTicketSummaries(result.tickets);
       this.pushTickets();
     } catch (err) {
+      if (generation !== this.ticketLoadGeneration) {
+        return;
+      }
       const msg = (err as Error).message;
       store.updateNested("errors", { tickets: `Failed to load more: ${msg}` });
     }
@@ -259,6 +265,7 @@ export class DashboardTicketService {
 
   pushTickets(): void {
     const tickets = this.deps.getTickets();
+    const state = this.deps.context.store.getState();
     const settings = this.deps.getSettings();
     const filtered = applyTicketFilters(tickets, settings.filters);
     const sorted = applyTicketSort(filtered, settings.sort);
@@ -274,6 +281,9 @@ export class DashboardTicketService {
         .map(([id, name]) => ({ id, name }))
         .sort((left, right) => left.name.localeCompare(right.name, "ja"));
     const globalStatuses = this.deps.context.store.getState().metadataOptions.statuses;
+    const selectedTicket = state.selectedTicketId === undefined
+      ? undefined
+      : tickets.find((ticket) => ticket.id === state.selectedTicketId);
     this.deps.context.store.update({
       tickets: nodes,
       totalTicketCount: this.deps.getTotalCount(),
@@ -282,6 +292,22 @@ export class DashboardTicketService {
         assignees: toSortedAssigneeOptions(assignees),
         statuses: globalStatuses,
       },
+      ...(state.selectedTicketId === undefined
+        ? {}
+        : selectedTicket
+          ? { selectedTicket: buildTicketDetail(selectedTicket, tickets) }
+          : {
+            selectedTicketId: undefined,
+            selectedTicket: undefined,
+            workPanel: undefined,
+            comments: {
+              ...state.comments,
+              ticketId: undefined,
+              items: [],
+              loading: false,
+              error: undefined,
+            },
+          }),
     });
   }
 

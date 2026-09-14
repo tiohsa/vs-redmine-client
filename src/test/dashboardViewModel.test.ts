@@ -242,7 +242,24 @@ suite("Dashboard ViewModel — 未同期アイテム変換", () => {
     const items = buildUnsyncedDashboardItems();
     assert.strictEqual(items.length, 1);
     assert.strictEqual(items[0].key.kind, "newTicket");
+    assert.strictEqual(items[0].key.queueId, "test-q1");
     assert.strictEqual(items[0].key.documentUri, "file:///new.md");
+  });
+
+  test("URI なしの新規チケットも queueId で個別識別できる", async () => {
+    await replaceOfflineSyncQueueAsync({
+      tickets: new Map(),
+      comments: [],
+      newTickets: [
+        { queueId: "test-q-a", projectId: 1, content: "A" },
+        { queueId: "test-q-b", projectId: 1, content: "B" },
+      ],
+    });
+    const items = buildUnsyncedDashboardItems();
+    assert.deepStrictEqual(
+      items.map((item) => item.key.kind === "newTicket" ? item.key.queueId : undefined),
+      ["test-q-a", "test-q-b"],
+    );
   });
 
   test("remote checkpoint を持つitemも確認済みの破棄を許可する", async () => {

@@ -4,7 +4,7 @@ import { dashboardWebviewScript } from "./dashboardWebviewScript";
 
 /** Dashboard Webview HTML を生成する */
 export const buildDashboardHtml = (nonce: string, strings: DashboardStrings): string => `<!DOCTYPE html>
-<html lang="en">
+<html lang="${strings.language.replace(/[^a-zA-Z0-9-]/g, '') || 'en'}">
 <head>
 <meta charset="UTF-8">
 <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'nonce-${nonce}'; script-src 'nonce-${nonce}';">
@@ -24,7 +24,7 @@ ${dashboardStyles}
     </div>
   </div>
 </header>
-<div id="tabs" role="tablist" aria-label="Dashboard">
+<div id="tabs" role="tablist" aria-label="${strings.dashboardTitle}">
   <button class="tab active" id="tab-tickets" role="tab" aria-selected="true" aria-controls="panel-tickets" data-tab="tickets" tabindex="0" type="button">${strings.tabTickets}</button>
   <button class="tab" id="tab-unsynced" role="tab" aria-selected="false" aria-controls="panel-unsynced" data-tab="unsynced" tabindex="-1" type="button">${strings.tabUnsynced} <span class="tab-badge hidden" id="unsynced-badge" aria-label="0">0</span></button>
   <button class="tab" id="tab-comments" role="tab" aria-selected="false" aria-controls="panel-comments" data-tab="comments" tabindex="-1" type="button">${strings.tabComments}</button>
@@ -35,9 +35,9 @@ ${dashboardStyles}
     <div class="tickets-layout">
       <div class="tickets-master">
         <div id="filter-bar"><div id="search-row"><div class="search-box"><label class="sr-only" for="search-input">${strings.searchPlaceholder}</label><input id="search-input" type="search" placeholder="${strings.searchPlaceholder}" autocomplete="off"><button id="search-clear-btn" class="search-clear-btn hidden" type="button" title="${strings.clearSearch}" aria-label="${strings.clearSearch}">×</button></div></div><div id="filter-chips" aria-live="polite"></div></div>
-        <div id="ticket-scroll"><div id="ticket-list" role="list" aria-live="polite"></div><button id="load-more-row" class="load-more-row hidden" type="button"></button></div>
+        <div id="ticket-scroll"><div id="ticket-list" role="list" aria-label="${strings.tabTickets}"></div><button id="load-more-row" class="load-more-row hidden" type="button"></button></div>
       </div>
-      <div class="tickets-detail"><div id="ticket-detail-card" class="ticket-work-panel ticket-detail-card hidden" aria-live="polite"></div></div>
+      <div class="tickets-detail"><div id="ticket-detail-empty" class="state-msg">${strings.selectTicketHint}</div><div id="ticket-detail-card" class="ticket-work-panel ticket-detail-card hidden"></div></div>
     </div>
   </section>
   <section class="tab-panel" id="panel-unsynced" role="tabpanel" aria-labelledby="tab-unsynced" hidden>
