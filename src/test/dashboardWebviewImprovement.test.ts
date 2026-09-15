@@ -18,9 +18,9 @@ suite("Dashboard Webview 改善", () => {
     assert.ok(dashboardStyles.includes(".ticket-action-btn{opacity:.45;pointer-events:auto"));
   });
 
-  test("Settings DOM に重複項目を生成しない", () => {
+  test("Settings DOM に旧フィルター入力を重複生成せず、正式な設定項目を表示する", () => {
     assert.ok(!dashboardWebviewScript.includes("set-subject"));
-    assert.ok(!dashboardWebviewScript.includes("set-include-children"));
+    assert.ok(dashboardWebviewScript.includes('id="set-include-children"'));
     assert.ok(!dashboardWebviewScript.includes("件名検索"));
     assert.ok(!dashboardWebviewScript.includes("子プロジェクトを含める"));
   });
@@ -165,8 +165,8 @@ suite("Dashboard Webview 改善", () => {
     assert.ok(!dashboardWebviewScript.includes("else if(message.type === 'toast'){ setOperationFeedback"));
   });
 
-  test("設定パネルに表示設定を公開する", () => {
-    assert.ok(dashboardWebviewScript.includes("STRINGS.sectionDisplay"));
+  test("設定パネルの Tickets セクションに表示設定を公開する", () => {
+    assert.ok(dashboardWebviewScript.includes("STRINGS.sectionTickets"));
     assert.ok(dashboardWebviewScript.includes('id="set-show-status"'));
     assert.ok(dashboardWebviewScript.includes('id="set-show-due-date"'));
     assert.ok(dashboardWebviewScript.includes("req('settings.updateGeneral',{patch:{showStatus:this.checked}})"));
