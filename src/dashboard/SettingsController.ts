@@ -36,16 +36,12 @@ const resetConfigurationValue = async (
   section: string,
 ): Promise<void> => {
   const inspected = config.inspect<unknown>(section);
-  const targets = [
-    [inspected?.workspaceFolderValue, vscode.ConfigurationTarget.WorkspaceFolder],
-    [inspected?.workspaceValue, vscode.ConfigurationTarget.Workspace],
-    [inspected?.globalValue, vscode.ConfigurationTarget.Global],
-  ] as const;
-
-  for (const [value, target] of targets) {
-    if (value !== undefined) {
-      await config.update(section, undefined, target);
-    }
+  if (inspected?.globalValue !== undefined) {
+    await config.update(
+      section,
+      undefined,
+      vscode.ConfigurationTarget.Global,
+    );
   }
 };
 

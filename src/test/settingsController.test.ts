@@ -173,6 +173,72 @@ suite("SettingsController", () => {
     assert.strictEqual(getTicketEditorDefaults().subject, "Keep this default");
   });
 
+  test("resetDisplaySettings は Global のみ削除し Workspace / WorkspaceFolder を保持する", async () => {
+    const config = vscode.workspace.getConfiguration("redmine-client");
+    const hasWorkspaceFolder = (vscode.workspace.workspaceFolders?.length ?? 0) > 0;
+    if (!hasWorkspaceFolder) {
+      // .vscode-test.mjs の標準実行は workspace を開かないため、scope 書き込みを検証できない。
+      return;
+    }
+    const previousValues = new Map<string, unknown>();
+    const previousWorkspaceFolderValue = config.inspect<unknown>("ticketList.showStatus")?.workspaceFolderValue;
+    const previousWorkspaceValue = config.inspect<unknown>("ticketListLimit")?.workspaceValue;
+    const previousGlobalLimitValue = config.inspect<unknown>("ticketListLimit")?.globalValue;
+    const previousGlobalStatusValue = config.inspect<unknown>("ticketList.showStatus")?.globalValue;
+
+    previousValues.set("ticketListLimit.workspace", previousWorkspaceValue);
+    previousValues.set("ticketListLimit.global", previousGlobalLimitValue);
+    previousValues.set("ticketList.showStatus.global", previousGlobalStatusValue);
+    if (hasWorkspaceFolder) {
+      previousValues.set("ticketList.showStatus.workspaceFolder", previousWorkspaceFolderValue);
+    }
+
+    try {
+      await config.update("ticketListLimit", 100, vscode.ConfigurationTarget.Global);
+      await config.update("ticketListLimit", 200, vscode.ConfigurationTarget.Workspace);
+      await config.update("ticketList.showStatus", false, vscode.ConfigurationTarget.Global);
+      if (hasWorkspaceFolder) {
+        await config.update("ticketList.showStatus", false, vscode.ConfigurationTarget.WorkspaceFolder);
+      }
+
+      await new SettingsController(makeStore()).resetDisplaySettings();
+
+      const limitInspection = config.inspect<unknown>("ticketListLimit");
+      assert.strictEqual(limitInspection?.globalValue, undefined);
+      assert.strictEqual(limitInspection?.workspaceValue, 200);
+      assert.strictEqual(config.get<unknown>("ticketListLimit"), 200);
+
+      const statusInspection = config.inspect<unknown>("ticketList.showStatus");
+      assert.strictEqual(statusInspection?.globalValue, undefined);
+      if (hasWorkspaceFolder) {
+        assert.strictEqual(statusInspection?.workspaceFolderValue, false);
+      }
+    } finally {
+      await config.update(
+        "ticketListLimit",
+        previousValues.get("ticketListLimit.workspace"),
+        vscode.ConfigurationTarget.Workspace,
+      );
+      await config.update(
+        "ticketListLimit",
+        previousValues.get("ticketListLimit.global"),
+        vscode.ConfigurationTarget.Global,
+      );
+      await config.update(
+        "ticketList.showStatus",
+        previousValues.get("ticketList.showStatus.global"),
+        vscode.ConfigurationTarget.Global,
+      );
+      if (hasWorkspaceFolder) {
+        await config.update(
+          "ticketList.showStatus",
+          previousValues.get("ticketList.showStatus.workspaceFolder"),
+          vscode.ConfigurationTarget.WorkspaceFolder,
+        );
+      }
+    }
+  });
+
   test("updateEditorDefault: 未知フィールドは無視される", () => {
     const ctrl = new SettingsController(makeStore());
     const before = getTicketEditorDefaults();
