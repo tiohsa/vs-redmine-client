@@ -104,8 +104,26 @@ export interface DashboardStrings {
   apiKeyStatusSet: string;
   apiKeyStatusNotSet: string;
   setApiKeyBtn: string;
+  changeApiKeyBtn: string;
   clearApiKeyBtn: string;
   // Settings tab
+  sectionConnection: string;
+  redmineUrlLabel: string;
+  defaultProjectLabel: string;
+  requestTimeoutLabel: string;
+  ignoreSSLErrorsLabel: string;
+  ignoreSSLErrorsWarning: string;
+  sectionTickets: string;
+  includeChildProjectsLabel: string;
+  sectionEditor: string;
+  editorStorageDirectoryLabel: string;
+  defaultSubjectLabel: string;
+  defaultDescriptionLabel: string;
+  defaultTrackerLabel: string;
+  defaultPriorityLabel: string;
+  defaultStatusLabel: string;
+  defaultDueDateLabel: string;
+  resetEditorDefaults: string;
   sectionTicketFilter: string;
   filterAssigneeLabel: string;
   filterAssigneeAria: string;
@@ -241,8 +259,26 @@ export const buildDashboardStrings = (): DashboardStrings => ({
   apiKeyStatusSet: vscode.l10n.t("Configured"),
   apiKeyStatusNotSet: vscode.l10n.t("Not configured"),
   setApiKeyBtn: vscode.l10n.t("Set API Key"),
+  changeApiKeyBtn: vscode.l10n.t("Change API Key"),
   clearApiKeyBtn: vscode.l10n.t("Clear API Key"),
   // Settings tab
+  sectionConnection: vscode.l10n.t("Connection"),
+  redmineUrlLabel: vscode.l10n.t("Redmine URL"),
+  defaultProjectLabel: vscode.l10n.t("Default project"),
+  requestTimeoutLabel: vscode.l10n.t("Request timeout (ms)"),
+  ignoreSSLErrorsLabel: vscode.l10n.t("Ignore SSL certificate errors"),
+  ignoreSSLErrorsWarning: vscode.l10n.t("Use only in trusted development environments."),
+  sectionTickets: vscode.l10n.t("Tickets"),
+  includeChildProjectsLabel: vscode.l10n.t("Include child projects"),
+  sectionEditor: vscode.l10n.t("Editor"),
+  editorStorageDirectoryLabel: vscode.l10n.t("Storage directory"),
+  defaultSubjectLabel: vscode.l10n.t("Default subject"),
+  defaultDescriptionLabel: vscode.l10n.t("Default description"),
+  defaultTrackerLabel: vscode.l10n.t("Default tracker"),
+  defaultPriorityLabel: vscode.l10n.t("Default priority"),
+  defaultStatusLabel: vscode.l10n.t("Default status"),
+  defaultDueDateLabel: vscode.l10n.t("Default due date"),
+  resetEditorDefaults: vscode.l10n.t("Reset editor defaults"),
   sectionTicketFilter: vscode.l10n.t("Ticket filters"),
   filterAssigneeLabel: vscode.l10n.t("Assignee"),
   filterAssigneeAria: vscode.l10n.t("Assignee filter"),
@@ -260,7 +296,7 @@ export const buildDashboardStrings = (): DashboardStrings => ({
   sortAsc: vscode.l10n.t("Ascending"),
   sortDesc: vscode.l10n.t("Descending"),
   sectionDueDate: vscode.l10n.t("Due date indicators"),
-  sectionSync: vscode.l10n.t("Sync"),
+  sectionSync: vscode.l10n.t("Synchronization"),
   offlineSyncModeLabel: vscode.l10n.t("Offline sync mode"),
   offlineSyncAuto: vscode.l10n.t("Auto"),
   offlineSyncManual: vscode.l10n.t("Manual"),
@@ -269,7 +305,7 @@ export const buildDashboardStrings = (): DashboardStrings => ({
   showDueDateLabel: vscode.l10n.t("Show due date"),
   sectionGeneral: vscode.l10n.t("General"),
   ticketLimitLabel: vscode.l10n.t("Tickets per load"),
-  resetSettings: vscode.l10n.t("Reset settings"),
+  resetSettings: vscode.l10n.t("Reset display settings"),
   // Project label
   projectNone: vscode.l10n.t("(none)"),
 });

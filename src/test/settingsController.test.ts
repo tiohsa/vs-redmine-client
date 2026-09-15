@@ -1,13 +1,17 @@
 import * as assert from "assert";
+import * as vscode from "vscode";
 import { SettingsController } from "../dashboard/SettingsController";
 import { DashboardStateStore } from "../dashboard/DashboardStateStore";
 import { DEFAULT_TICKET_LIST_SETTINGS } from "../views/projectListSettings";
+import { type EditorDefaultField } from "../config/settings";
+import { isApiKeyConfigured } from "../config/apiKeyStore";
 import {
   getTicketEditorDefaults,
   resetTicketEditorDefaults,
   updateTicketEditorDefaultField,
 } from "../views/ticketEditorDefaultsStore";
 import { initializeTicketListSettingsStore } from "../views/ticketListSettingsStore";
+import { normalizeEditorDefaultValue } from "../views/ticketEditorDefaultsValidation";
 
 const makeStore = (): DashboardStateStore => new DashboardStateStore();
 
@@ -95,6 +99,144 @@ suite("SettingsController", () => {
     ctrl.updateEditorDefault("tracker", "Bug");
     const defaults = getTicketEditorDefaults();
     assert.strictEqual(defaults.metadata.tracker, "Bug");
+  });
+
+  test("Editor Default は入力経路によらず共通ルールで正規化される", () => {
+    const cases: Array<[EditorDefaultField, string, string]> = [
+      ["subject", "  test  ", "test"],
+      ["tracker", "  Bug  ", "Bug"],
+      ["priority", " Normal ", "Normal"],
+      ["status", " New ", "New"],
+      ["due_date", " 2026-09-30 ", "2026-09-30"],
+      ["description", "  first line\nsecond line  ", "  first line\nsecond line  "],
+    ];
+    const ctrl = new SettingsController(makeStore());
+
+    for (const [field, rawValue, expected] of cases) {
+      assert.strictEqual(normalizeEditorDefaultValue(field, rawValue), expected);
+      ctrl.updateEditorDefault(field, rawValue);
+      const defaults = getTicketEditorDefaults();
+      const actual = field === "subject"
+        ? defaults.subject
+        : field === "description"
+          ? defaults.description
+          : defaults.metadata[field];
+      assert.strictEqual(actual, expected);
+    }
+  });
+
+  test("resetDisplaySettings は表示設定だけを既定値へ戻す", async () => {
+    const config = vscode.workspace.getConfiguration("redmine-client");
+    const untouchedKeys = [
+      "baseUrl",
+      "defaultProjectId",
+      "requestTimeoutMs",
+      "ignoreSSLErrors",
+      "offlineSyncMode",
+      "editorStorageDirectory",
+      "selectedProjectId",
+      "selectedProjectName",
+    ];
+    const untouchedValues = new Map(
+      untouchedKeys.map((key) => [key, config.get<unknown>(key)] as const),
+    );
+    const apiKeyConfigured = isApiKeyConfigured();
+    await config.update("includeChildProjects", true, vscode.ConfigurationTarget.Global);
+    await config.update("ticketListLimit", 100, vscode.ConfigurationTarget.Global);
+    await config.update("ticketList.showStatus", false, vscode.ConfigurationTarget.Global);
+    await config.update("ticketList.showDueDate", false, vscode.ConfigurationTarget.Global);
+
+    const ctrl = new SettingsController(makeStore());
+    ctrl.updateTicketList({
+      filters: { ...DEFAULT_TICKET_LIST_SETTINGS.filters, subjectQuery: "changed" },
+      sort: { field: "priority", direction: "desc" },
+      dueDate: { ...DEFAULT_TICKET_LIST_SETTINGS.dueDate, showOverdue: false },
+    });
+    ctrl.updateEditorDefault("subject", "Keep this default");
+
+    await ctrl.resetDisplaySettings();
+
+    assert.deepStrictEqual(ctrl.getSettings(), DEFAULT_TICKET_LIST_SETTINGS);
+    for (const key of [
+      "includeChildProjects",
+      "ticketListLimit",
+      "ticketList.showStatus",
+      "ticketList.showDueDate",
+    ]) {
+      const inspected = config.inspect<unknown>(key);
+      assert.strictEqual(config.get<unknown>(key), inspected?.defaultValue);
+    }
+    for (const key of untouchedKeys) {
+      assert.strictEqual(config.get<unknown>(key), untouchedValues.get(key));
+    }
+    assert.strictEqual(isApiKeyConfigured(), apiKeyConfigured);
+    assert.strictEqual(getTicketEditorDefaults().subject, "Keep this default");
+  });
+
+  test("resetDisplaySettings は Global のみ削除し Workspace / WorkspaceFolder を保持する", async () => {
+    const config = vscode.workspace.getConfiguration("redmine-client");
+    const hasWorkspaceFolder = (vscode.workspace.workspaceFolders?.length ?? 0) > 0;
+    if (!hasWorkspaceFolder) {
+      // .vscode-test.mjs の標準実行は workspace を開かないため、scope 書き込みを検証できない。
+      return;
+    }
+    const previousValues = new Map<string, unknown>();
+    const previousWorkspaceFolderValue = config.inspect<unknown>("ticketList.showStatus")?.workspaceFolderValue;
+    const previousWorkspaceValue = config.inspect<unknown>("ticketListLimit")?.workspaceValue;
+    const previousGlobalLimitValue = config.inspect<unknown>("ticketListLimit")?.globalValue;
+    const previousGlobalStatusValue = config.inspect<unknown>("ticketList.showStatus")?.globalValue;
+
+    previousValues.set("ticketListLimit.workspace", previousWorkspaceValue);
+    previousValues.set("ticketListLimit.global", previousGlobalLimitValue);
+    previousValues.set("ticketList.showStatus.global", previousGlobalStatusValue);
+    if (hasWorkspaceFolder) {
+      previousValues.set("ticketList.showStatus.workspaceFolder", previousWorkspaceFolderValue);
+    }
+
+    try {
+      await config.update("ticketListLimit", 100, vscode.ConfigurationTarget.Global);
+      await config.update("ticketListLimit", 200, vscode.ConfigurationTarget.Workspace);
+      await config.update("ticketList.showStatus", false, vscode.ConfigurationTarget.Global);
+      if (hasWorkspaceFolder) {
+        await config.update("ticketList.showStatus", false, vscode.ConfigurationTarget.WorkspaceFolder);
+      }
+
+      await new SettingsController(makeStore()).resetDisplaySettings();
+
+      const limitInspection = config.inspect<unknown>("ticketListLimit");
+      assert.strictEqual(limitInspection?.globalValue, undefined);
+      assert.strictEqual(limitInspection?.workspaceValue, 200);
+      assert.strictEqual(config.get<unknown>("ticketListLimit"), 200);
+
+      const statusInspection = config.inspect<unknown>("ticketList.showStatus");
+      assert.strictEqual(statusInspection?.globalValue, undefined);
+      if (hasWorkspaceFolder) {
+        assert.strictEqual(statusInspection?.workspaceFolderValue, false);
+      }
+    } finally {
+      await config.update(
+        "ticketListLimit",
+        previousValues.get("ticketListLimit.workspace"),
+        vscode.ConfigurationTarget.Workspace,
+      );
+      await config.update(
+        "ticketListLimit",
+        previousValues.get("ticketListLimit.global"),
+        vscode.ConfigurationTarget.Global,
+      );
+      await config.update(
+        "ticketList.showStatus",
+        previousValues.get("ticketList.showStatus.global"),
+        vscode.ConfigurationTarget.Global,
+      );
+      if (hasWorkspaceFolder) {
+        await config.update(
+          "ticketList.showStatus",
+          previousValues.get("ticketList.showStatus.workspaceFolder"),
+          vscode.ConfigurationTarget.WorkspaceFolder,
+        );
+      }
+    }
   });
 
   test("updateEditorDefault: 未知フィールドは無視される", () => {

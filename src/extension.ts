@@ -105,6 +105,32 @@ export async function activate(context: vscode.ExtensionContext) {
           });
         }
       }
+      const affectsDashboardSettings =
+        event.affectsConfiguration("redmine-client.baseUrl") ||
+        event.affectsConfiguration("redmine-client.defaultProjectId") ||
+        event.affectsConfiguration("redmine-client.requestTimeoutMs") ||
+        event.affectsConfiguration("redmine-client.ignoreSSLErrors") ||
+        event.affectsConfiguration("redmine-client.includeChildProjects") ||
+        event.affectsConfiguration("redmine-client.ticketListLimit") ||
+        event.affectsConfiguration("redmine-client.editorStorageDirectory") ||
+        event.affectsConfiguration("redmine-client.ticketList.showStatus") ||
+        event.affectsConfiguration("redmine-client.ticketList.showDueDate");
+      if (affectsDashboardSettings) {
+        views.dashboardProvider.refreshSettings();
+      }
+      if (
+        event.affectsConfiguration("redmine-client.defaultProjectId") ||
+        event.affectsConfiguration("redmine-client.includeChildProjects") ||
+        event.affectsConfiguration("redmine-client.ticketListLimit")
+      ) {
+        views.dashboardProvider.refreshTickets();
+      }
+      if (
+        event.affectsConfiguration("redmine-client.ticketList.showStatus") ||
+        event.affectsConfiguration("redmine-client.ticketList.showDueDate")
+      ) {
+        views.ticketsPresentation.notifyChange();
+      }
       if (event.affectsConfiguration("redmine-client.offlineSyncMode")) {
         void refreshOfflineSyncContext();
         views.settingsPresentation.refresh();
@@ -113,12 +139,6 @@ export async function activate(context: vscode.ExtensionContext) {
         if (getIgnoreSSLErrors()) {
           showWarning(vscode.l10n.t("ignoreSSLErrors is enabled. Do not use in production."));
         }
-      }
-      if (
-        event.affectsConfiguration("redmine-client.ticketList.showStatus") ||
-        event.affectsConfiguration("redmine-client.ticketList.showDueDate")
-      ) {
-        views.settingsPresentation.refresh();
       }
     }),
   );

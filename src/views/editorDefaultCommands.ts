@@ -5,7 +5,10 @@ import {
   resetTicketEditorDefaultFields,
   updateTicketEditorDefaultField,
 } from "./ticketEditorDefaultsStore";
-import { validateEditorDefaultValue } from "./ticketEditorDefaultsValidation";
+import {
+  normalizeEditorDefaultValue,
+  validateEditorDefaultValue,
+} from "./ticketEditorDefaultsValidation";
 
 const DEFAULT_FIELD_LABELS: Record<EditorDefaultField, string> = {
   subject: "Subject",
@@ -50,7 +53,7 @@ export const configureEditorDefaultField = async (
     return;
   }
 
-  const normalized = field === "description" ? next : next.trim();
+  const normalized = normalizeEditorDefaultValue(field, next);
   const error = validateEditorDefaultValue(field, normalized);
   if (error) {
     await vscode.window.showErrorMessage(error);

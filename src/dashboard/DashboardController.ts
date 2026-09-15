@@ -358,7 +358,7 @@ export class DashboardController {
         this.opts.notifySuccess(req.requestId, vscode.l10n.t("Settings updated."));
         break;
       case "settings.reset":
-        this.settingsCtrl.resetTicketList();
+        await this.settingsCtrl.resetDisplaySettings();
         this.pushTickets();
         this.opts.notifySuccess(req.requestId, vscode.l10n.t("Settings reset."));
         break;
@@ -368,9 +368,14 @@ export class DashboardController {
       case "settings.resetEditorDefaults":
         this.settingsCtrl.resetEditorDefaults(req.fields);
         break;
+      case "settings.updateConnection":
+        await this.settingsCtrl.updateConnection(req.patch);
+        break;
+      case "settings.updateEditor":
+        await this.settingsCtrl.updateEditor(req.patch);
+        break;
       case "settings.updateGeneral":
         await this.settingsCtrl.updateGeneral(req.patch);
-        await this.loadTickets();
         break;
       case "apiKey.set":
         await vscode.commands.executeCommand("redmine-client.setApiKey");
