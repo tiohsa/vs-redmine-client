@@ -13,10 +13,16 @@ import {
 import { buildUnsyncedDashboardItems } from "../viewModels/unsyncedDashboardViewModel";
 import type { DashboardUnsyncedKey } from "../dashboardProtocol";
 import type { UnsyncedFileSyncKey } from "../../app/unsyncedTypes";
-import { getTicketEditors } from "../../views/ticketEditorRegistry";
+import {
+  getConnectionScopeForEditor,
+  getTicketEditors,
+} from "../../views/ticketEditorRegistry";
+import { handleConflict, handleCommentConflict } from "../../views/conflictResolver";
+import type { TicketSaveResult } from "../../views/ticketSaveTypes";
+import type { CommentSaveResult } from "../../views/commentSaveTypes";
 import type { SyncStatus } from "../../app/syncController";
 import { getCurrentConnectionScope } from "../../config/connectionScope";
-import type { SyncEngine } from "../../app/syncEngine";
+import { createSyncEngine, type SyncEngine } from "../../app/syncEngine";
 
 export class DashboardUnsyncedService {
   constructor(private readonly deps: {
@@ -42,8 +48,9 @@ export class DashboardUnsyncedService {
     this.deps.context.notifyOperationStarted(requestId, vscode.l10n.t("Syncing…"));
     const result = await this.syncOne(key);
     if (result?.status === "conflict") {
-      const status = await this.resolveConflictInEditor(key);
+      const status = await this.resolveConflictInEditor(key, result);
       if (status) {
+        await this.refreshAfterConflict(key, status);
         this.notifySyncStatusResult(requestId, status);
         return;
       }
@@ -72,15 +79,24 @@ export class DashboardUnsyncedService {
 
     this.deps.context.notifyOperationStarted(requestId, vscode.l10n.t("Syncing…"));
     const results: Array<SyncUnsyncedFileResult | undefined> = [];
+    let merged = 0;
     for (const key of keys) {
       const result = await this.syncOne(key);
       if (result?.status === "conflict") {
-        const status = await this.resolveConflictInEditor(key);
+        const status = await this.resolveConflictInEditor(key, result);
         if (status === "uploaded") {
+          await this.refreshAfterConflict(key, status);
           results.push({ status: "success", kind: key.kind, id: key.kind === "ticket" ? key.ticketId : undefined });
           continue;
         }
         if (status === "noChange") {
+          await this.refreshAfterConflict(key, status);
+          results.push({ status: "no_change", kind: key.kind, id: key.kind === "ticket" ? key.ticketId : undefined });
+          continue;
+        }
+        if (status === "merged") {
+          merged++;
+          await this.refreshAfterConflict(key, status);
           results.push({ status: "no_change", kind: key.kind, id: key.kind === "ticket" ? key.ticketId : undefined });
           continue;
         }
@@ -104,7 +120,9 @@ export class DashboardUnsyncedService {
     if (synced === 0) {
       this.deps.context.notifySuccess(
         requestId,
-        queued > 0
+        merged > 0
+          ? vscode.l10n.t("Merge result is ready. Review and save to sync.")
+          : queued > 0
           ? vscode.l10n.t("Recovery completed. The item is queued for synchronization.")
           : vscode.l10n.t("No changes."),
       );
@@ -304,7 +322,10 @@ export class DashboardUnsyncedService {
     return result;
   }
 
-  private async resolveConflictInEditor(key: DashboardUnsyncedKey): Promise<SyncStatus | undefined> {
+  private async resolveConflictInEditor(
+    key: DashboardUnsyncedKey,
+    result: Extract<SyncUnsyncedFileResult, { status: "conflict" }>,
+  ): Promise<SyncStatus | undefined> {
     if (key.kind !== "ticket" && key.kind !== "comment") {
       return undefined;
     }
@@ -317,10 +338,54 @@ export class DashboardUnsyncedService {
     if (!editor) {
       return undefined;
     }
-    return vscode.commands.executeCommand<SyncStatus | undefined>(
-      "redmine-client.syncOpenEditor",
-      { uri: editor.uri },
-    );
+    const document = await vscode.workspace.openTextDocument(vscode.Uri.parse(editor.uri));
+    const textEditor = vscode.window.visibleTextEditors.find(
+      (candidate) => candidate.document === document,
+    ) ?? await vscode.window.showTextDocument(document, { preview: false });
+    const operationScope = getConnectionScopeForEditor(textEditor) ?? getCurrentConnectionScope();
+    const syncEngine = this.deps.syncEngine ?? createSyncEngine();
+
+    if (key.kind === "ticket" && result.kind === "ticket" && result.conflictContext) {
+      const resolved = await handleConflict(
+        {
+          status: "conflict",
+          message: vscode.l10n.t("Remote changes detected. Review diff before syncing."),
+          conflictContext: result.conflictContext,
+        } satisfies TicketSaveResult,
+        textEditor,
+        undefined,
+        operationScope,
+        syncEngine,
+      );
+      return toSyncStatus(resolved.status);
+    }
+
+    if (key.kind === "comment" && result.kind === "comment" && result.commentConflictContext) {
+      const resolved = await handleCommentConflict(
+        {
+          status: "conflict",
+          message: vscode.l10n.t("Comment was updated in Redmine. Review diff before syncing."),
+          commentId: result.commentConflictContext.commentId,
+          conflictContext: result.commentConflictContext,
+        } satisfies CommentSaveResult,
+        textEditor,
+        operationScope,
+        syncEngine,
+      );
+      return toSyncStatus(resolved.status);
+    }
+
+    return undefined;
+  }
+
+  private async refreshAfterConflict(key: DashboardUnsyncedKey, status: SyncStatus): Promise<void> {
+    if (status === "uploaded" || status === "noChange" || status === "merged") {
+      this.refreshUnsynced();
+      this.deps.refreshTicketPresentation();
+      if (key.kind === "comment") {
+        await this.deps.loadComments(key.ticketId);
+      }
+    }
   }
 
   private async refreshSyncedComments(
@@ -337,3 +402,19 @@ export class DashboardUnsyncedService {
     await this.deps.loadComments(key.ticketId);
   }
 }
+
+const toSyncStatus = (status: TicketSaveResult["status"] | CommentSaveResult["status"]): SyncStatus => {
+  switch (status) {
+    case "created":
+    case "success":
+      return "uploaded";
+    case "merged":
+      return "merged";
+    case "no_change":
+      return "noChange";
+    case "conflict":
+      return "conflict";
+    default:
+      return "failed";
+  }
+};

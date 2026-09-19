@@ -186,6 +186,7 @@ export class DashboardComposerService {
       });
     const syncFn = hooks?.syncFn ?? (async (editor: vscode.TextEditor) => {
       const synced = await syncEditorToRedmine(editor, {
+        trigger: "explicit",
         syncEngine: this.deps.syncEngine,
       });
       return synced?.kind === "ticket"

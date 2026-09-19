@@ -19,6 +19,8 @@ import type {
 } from "../app/ticketSync";
 import { isPrimaryEffectKind } from "../app/syncEffects";
 import { getTicketDraft } from "../views/ticketDraftStore";
+import type { ConflictContext } from "../views/ticketSaveTypes";
+import type { CommentConflictContext } from "../views/commentSaveTypes";
 
 export type SyncFailureReason =
   | "parse_error"
@@ -33,7 +35,8 @@ export type SyncUnsyncedFileResult =
   | { status: "success"; kind: "ticket" | "newTicket" | "comment"; id?: number }
   | { status: "queued"; kind: "ticket" | "newTicket" | "comment"; id?: number }
   | { status: "no_change"; kind: "ticket" | "newTicket" | "comment"; id?: number }
-  | { status: "conflict"; kind: "ticket" | "newTicket" | "comment"; id?: number }
+  | { status: "conflict"; kind: "ticket"; id: number; conflictContext?: ConflictContext }
+  | { status: "conflict"; kind: "comment"; id?: number; commentConflictContext?: CommentConflictContext }
   | { status: "failed"; kind: "ticket" | "newTicket" | "comment"; message?: string; reason?: SyncFailureReason };
 
 type SyncUnsyncedFileOptions = {
@@ -444,7 +447,12 @@ const syncUnsyncedFileAtScope = async (
       return { status: "queued", kind: "ticket", id: syncKey.ticketId };
     } else if (outcome.kind === "conflict") {
       showWarning(vscode.l10n.t("Conflicts with remote changes detected. Open the file to review."));
-      return { status: "conflict", kind: "ticket", id: syncKey.ticketId };
+      return {
+        status: "conflict",
+        kind: "ticket",
+        id: syncKey.ticketId,
+        conflictContext: "conflictContext" in outcome ? outcome.conflictContext : undefined,
+      };
     } else {
       if (
         outcome.kind === "failed_before_commit" &&
@@ -580,7 +588,12 @@ const syncUnsyncedFileAtScope = async (
       return { status: "queued", kind: "comment" };
     } else if (outcome.kind === "conflict") {
       showWarning(vscode.l10n.t("Conflicts with remote changes detected. Open the file to review."));
-      return { status: "conflict", kind: "comment" };
+      return {
+        status: "conflict",
+        kind: "comment",
+        id: "commentId" in outcome ? outcome.commentId : syncKey.commentId,
+        commentConflictContext: "commentConflictContext" in outcome ? outcome.commentConflictContext : undefined,
+      };
     } else {
       const message = outcome.kind === "failed_before_commit"
         ? outcome.error.message
