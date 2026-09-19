@@ -184,21 +184,30 @@ suite("syncEditorToRedmine — draft status management", () => {
     registerTicketEditor(ticketId, editor, "primary", "ticket");
     initializeTicketDraft(ticketId, "Title", "Original body", metadata, "t1");
     let sharedEditorSyncCalls = 0;
+    const settings = vscode.workspace.getConfiguration("redmine-client");
+    const previousOfflineSyncMode = settings.get<string>("offlineSyncMode");
+    await settings.update("offlineSyncMode", "manual", vscode.ConfigurationTarget.Workspace);
 
-    const result = await syncEditorToRedmine(editor, {
-      syncEngine: {
-        syncOne: async () => ({ kind: "no_change", ticketId }),
-        syncTicketEditor: async (input) => {
-          sharedEditorSyncCalls += 1;
-          assert.strictEqual(input.editor, editor);
-          assert.strictEqual(input.ticketId, ticketId);
-          return { kind: "completed", ticketId };
+    try {
+      const result = await syncEditorToRedmine(editor, {
+        trigger: "explicit",
+        syncEngine: {
+          syncOne: async () => ({ kind: "no_change", ticketId }),
+          syncTicketEditor: async (input) => {
+            sharedEditorSyncCalls += 1;
+            assert.strictEqual(input.editor, editor);
+            assert.strictEqual(input.ticketId, ticketId);
+            assert.strictEqual(input.manual, false, "明示同期では manual 設定でも queue-only にしないこと");
+            return { kind: "completed", ticketId };
+          },
         },
-      },
-    });
+      });
 
-    assert.strictEqual(sharedEditorSyncCalls, 1);
-    assert.strictEqual(result?.kind, "ticket");
-    assert.strictEqual(result?.result.status, "success");
+      assert.strictEqual(sharedEditorSyncCalls, 1);
+      assert.strictEqual(result?.kind, "ticket");
+      assert.strictEqual(result?.result.status, "success");
+    } finally {
+      await settings.update("offlineSyncMode", previousOfflineSyncMode, vscode.ConfigurationTarget.Workspace);
+    }
   });
 });

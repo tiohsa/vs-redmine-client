@@ -38,7 +38,10 @@ export type SyncToRedmineResult =
   | { kind: "comment"; result: CommentSaveResult; ticketId: number }
   | undefined;
 
+export type SyncTrigger = "save" | "explicit";
+
 export interface SyncToRedmineOptions {
+  trigger?: SyncTrigger;
   onSubjectUpdated?: (ticketId: number, subject: string) => void;
   onTicketCreated?: () => void;
   onCommentsRefresh?: (ticketId: number) => void;
@@ -117,12 +120,13 @@ const syncEditorToRedmineAtScope = async (
   }
 
   if (ticketId === NEW_TICKET_DRAFT_ID) {
+    const queueOnly = getOfflineSyncMode() === "manual" && options.trigger !== "explicit";
     const input = {
       context: { connectionScope: operationScope },
       editor,
       ticketId,
       newTicket: true,
-      manual: getOfflineSyncMode() === "manual",
+      manual: queueOnly,
     };
     const outcome = options.syncEngine?.syncTicketEditor
       ? await options.syncEngine.syncTicketEditor(input)
@@ -139,6 +143,7 @@ const syncEditorToRedmineAtScope = async (
   }
 
   if (contentType === "ticket") {
+    const queueOnly = getOfflineSyncMode() === "manual" && options.trigger !== "explicit";
     markDraftStatus(ticketId, "Syncing", operationScope);
     let result: TicketSaveResult;
     try {
@@ -147,7 +152,7 @@ const syncEditorToRedmineAtScope = async (
         editor,
         ticketId,
         newTicket: false,
-        manual: getOfflineSyncMode() === "manual",
+        manual: queueOnly,
       };
       const outcome = options.syncEngine?.syncTicketEditor
         ? await options.syncEngine.syncTicketEditor(input)
@@ -177,7 +182,7 @@ const syncEditorToRedmineAtScope = async (
 
   if (contentType === "commentDraft") {
     const queued = await saveCommentDraftLocally(editor, operationScope);
-    if (!queued || getOfflineSyncMode() === "manual") {
+    if (!queued || (getOfflineSyncMode() === "manual" && options.trigger !== "explicit")) {
       return queued ? { kind: "comment", result: queued, ticketId } : undefined;
     }
     const outcome = await (options.syncEngine ?? createSyncEngine({ comments: options.deps })).syncOne(
@@ -201,7 +206,7 @@ const syncEditorToRedmineAtScope = async (
       return undefined;
     }
     const queued = await saveCommentDraftLocally(editor, operationScope);
-    if (!queued || getOfflineSyncMode() === "manual") {
+    if (!queued || (getOfflineSyncMode() === "manual" && options.trigger !== "explicit")) {
       return queued ? { kind: "comment", result: queued, ticketId } : undefined;
     }
     const outcome = await (options.syncEngine ?? createSyncEngine({ comments: options.deps })).syncOne(

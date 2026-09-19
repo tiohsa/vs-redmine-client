@@ -18,11 +18,11 @@ import type { OfflineSyncMode } from "../config/settings";
 export type SyncStatus = "uploaded" | "merged" | "noChange" | "conflict" | "failed";
 
 const toSyncStatus = (s: string): SyncStatus =>
-  s === "updated" || s === "created"
+  s === "updated" || s === "created" || s === "success"
     ? "uploaded"
     : s === "merged"
       ? "merged"
-    : s === "noChange"
+    : s === "noChange" || s === "no_change"
       ? "noChange"
       : s === "conflict"
         ? "conflict"
@@ -54,6 +54,7 @@ export const createSyncController = (deps: SyncControllerDeps): SyncController =
   const syncEditorAndNotify = async (editor: vscode.TextEditor): Promise<SyncStatus> => {
     try {
       const syncResult = await syncEditorToRedmine(editor, {
+        trigger: "explicit",
         onSubjectUpdated: updateTicketListSubject,
         onTicketCreated: () => ticketsPresentation.refresh(),
         onCommentsRefresh: (ticketId) => commentsPresentation.refreshForTicket(ticketId),

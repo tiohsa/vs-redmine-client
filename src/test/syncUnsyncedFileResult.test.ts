@@ -7,6 +7,10 @@ import {
 import { syncUnsyncedFile, type SyncUnsyncedFileResult } from "../commands/syncUnsyncedFile";
 import { createTestMemento } from "./helpers/vscodeMemento";
 import { buildIssueMetadataFixture } from "./helpers/ticketMetadataFixtures";
+import { createSyncEngine, type SyncEngineOutcome } from "../app/syncEngine";
+import { getCurrentConnectionScope } from "../config/connectionScope";
+import type { ConflictContext } from "../views/ticketSaveTypes";
+import type { CommentConflictContext } from "../views/commentSaveTypes";
 
 suite("syncUnsyncedFileResult — 構造化戻り値", () => {
   setup(async () => {
@@ -59,6 +63,99 @@ suite("syncUnsyncedFileResult — 構造化戻り値", () => {
     assert.strictEqual(r.kind, "newTicket");
     assert.strictEqual(r.message, "APIエラー");
   });
+
+  test("ticket conflict の context と scope を保持し、再同期しない", async () => {
+    const connectionScope = getCurrentConnectionScope();
+    const conflictContext: ConflictContext = {
+      connectionScope,
+      ticketId: 42,
+      baseSubject: "Base",
+      baseDescription: "Base body",
+      localSubject: "Local",
+      localDescription: "Local body",
+      remoteSubject: "Remote",
+      remoteDescription: "Remote body",
+      remoteMetadata: buildIssueMetadataFixture(),
+      remoteUpdatedAt: "2026-09-19T10:00:00Z",
+    };
+    const engine = createSyncEngine();
+    let syncOneCalls = 0;
+    engine.syncOne = async (key, context) => {
+      syncOneCalls++;
+      assert.deepStrictEqual(key, { kind: "ticket", ticketId: 42 });
+      assert.deepStrictEqual(context, { connectionScope });
+      return { kind: "conflict", ticketId: 42, conflictContext };
+    };
+    engine.getRecoveryItems = () => [];
+
+    const result = await syncUnsyncedFile(
+      { syncKey: { kind: "ticket", ticketId: 42 } },
+      { createSyncEngine: () => engine },
+    );
+
+    assert.ok(result?.status === "conflict" && result.kind === "ticket");
+    assert.strictEqual(result.id, 42);
+    assert.strictEqual(result.conflictContext, conflictContext);
+    assert.strictEqual(result.conflictContext.connectionScope, connectionScope);
+    assert.strictEqual(syncOneCalls, 1);
+  });
+
+  test("comment conflict の context と baseBodyKnown を保持し、再同期しない", async () => {
+    const connectionScope = getCurrentConnectionScope();
+    const commentConflictContext: CommentConflictContext = {
+      connectionScope,
+      ticketId: 42,
+      commentId: 123,
+      baseBody: "",
+      baseBodyKnown: false,
+      localBody: "Local comment",
+      remoteBody: "Remote comment",
+      remoteUpdatedAt: "2026-09-19T10:00:00Z",
+    };
+    const engine = createSyncEngine();
+    let syncOneCalls = 0;
+    engine.syncOne = async (key, context) => {
+      syncOneCalls++;
+      assert.deepStrictEqual(key, { kind: "comment", ticketId: 42, documentUri: "file:///comment.md" });
+      assert.deepStrictEqual(context, { connectionScope });
+      return { kind: "conflict", ticketId: 42, commentId: 123, message: "Conflict", commentConflictContext };
+    };
+
+    const result = await syncUnsyncedFile(
+      { syncKey: { kind: "comment", ticketId: 42, documentUri: "file:///comment.md" } },
+      { createSyncEngine: () => engine },
+    );
+
+    assert.ok(result?.status === "conflict" && result.kind === "comment");
+    assert.strictEqual(result.id, 123);
+    assert.strictEqual(result.commentConflictContext, commentConflictContext);
+    assert.strictEqual(result.commentConflictContext.connectionScope, connectionScope);
+    assert.strictEqual(result.commentConflictContext.baseBodyKnown, false);
+    assert.strictEqual(syncOneCalls, 1);
+  });
+
+  for (const kind of ["ticket", "comment"] as const) {
+    test(`${kind} conflict に context がない場合も conflict として返す`, async () => {
+      const engine = createSyncEngine();
+      engine.syncOne = async (): Promise<SyncEngineOutcome> => ({ kind: "conflict", ticketId: 42 });
+      engine.getRecoveryItems = () => [];
+
+      const result = await syncUnsyncedFile(
+        { syncKey: { kind, ticketId: 42, commentId: 123 } },
+        { createSyncEngine: () => engine },
+      );
+
+      assert.ok(result?.status === "conflict");
+      assert.strictEqual(result.kind, kind);
+      if (result.kind === "ticket") {
+        assert.strictEqual(result.id, 42);
+        assert.strictEqual(result.conflictContext, undefined);
+      } else {
+        assert.strictEqual(result.id, 123);
+        assert.strictEqual(result.commentConflictContext, undefined);
+      }
+    });
+  }
 
   test("SyncUnsyncedFileResult の kind は ticket / newTicket / comment のみ", async () => {
     const kinds: SyncUnsyncedFileResult["kind"][] = ["ticket", "newTicket", "comment"];
