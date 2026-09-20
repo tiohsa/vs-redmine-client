@@ -186,7 +186,7 @@ suite("syncEditorToRedmine — draft status management", () => {
     let sharedEditorSyncCalls = 0;
     const settings = vscode.workspace.getConfiguration("redmine-client");
     const previousOfflineSyncMode = settings.get<string>("offlineSyncMode");
-    await settings.update("offlineSyncMode", "manual", vscode.ConfigurationTarget.Workspace);
+    await settings.update("offlineSyncMode", "manual", vscode.ConfigurationTarget.Global);
 
     try {
       const result = await syncEditorToRedmine(editor, {
@@ -207,7 +207,7 @@ suite("syncEditorToRedmine — draft status management", () => {
       assert.strictEqual(result?.kind, "ticket");
       assert.strictEqual(result?.result.status, "success");
     } finally {
-      await settings.update("offlineSyncMode", previousOfflineSyncMode, vscode.ConfigurationTarget.Workspace);
+      await settings.update("offlineSyncMode", previousOfflineSyncMode, vscode.ConfigurationTarget.Global);
     }
   });
 });
