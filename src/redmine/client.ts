@@ -3,6 +3,7 @@ import * as http from "http";
 import { getBaseUrl, getIgnoreSSLErrors, getRequestTimeoutMs } from "../config/settings";
 import { resolveApiKey } from "../config/apiKeyStore";
 import { AsyncLocalStorage } from "async_hooks";
+import * as vscode from "vscode";
 
 type HttpMethod = "GET" | "POST" | "PUT" | "DELETE";
 type FetchBody = string | Uint8Array;
@@ -14,6 +15,8 @@ type ConnectionContext = {
 
 export type QueryParams = Record<string, string | number | boolean | undefined>;
 const connectionScopeContext = new AsyncLocalStorage<ConnectionContext>();
+// JSON/text API の応答を制限する。添付ファイルの送信サイズには適用しない。
+const MAX_RESPONSE_BYTES = 10 * 1024 * 1024;
 
 export const runWithConnectionScope = <T>(
   connectionScope: string,
@@ -120,8 +123,29 @@ const performRequest = (
 
     const req = requestModule.request(url, reqOptions, (res) => {
       const chunks: Buffer[] = [];
-      res.on("data", (chunk) => chunks.push(chunk));
+      let responseBytes = 0;
+      let responseFailed = false;
+      const failResponse = (error: Error): void => {
+        if (responseFailed) { return; }
+        responseFailed = true;
+        chunks.length = 0;
+        reject(error);
+        res.destroy();
+        req.destroy();
+      };
+      res.on("error", () => failResponse(new Error(vscode.l10n.t("Redmine response stream failed."))));
+      res.on("aborted", () => failResponse(new Error(vscode.l10n.t("Redmine response was interrupted."))));
+      res.on("data", (chunk: Buffer) => {
+        if (responseFailed) { return; }
+        responseBytes += chunk.length;
+        if (responseBytes > MAX_RESPONSE_BYTES) {
+          failResponse(new Error(vscode.l10n.t("Redmine response exceeded the maximum size of {0} MiB.", 10)));
+          return;
+        }
+        chunks.push(chunk);
+      });
       res.on("end", () => {
+        if (responseFailed) { return; }
         const buffer = Buffer.concat(chunks);
         resolve({
           statusCode: res.statusCode || 0,

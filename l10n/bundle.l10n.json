@@ -1,4 +1,7 @@
 {
+    "Redmine response stream failed.": "Redmine response stream failed.",
+    "Redmine response was interrupted.": "Redmine response was interrupted.",
+    "Redmine response exceeded the maximum size of {0} MiB.": "Redmine response exceeded the maximum size of {0} MiB.",
     "Conflict detected in ticket #{0}. Remote has been updated.": "Conflict detected in ticket #{0}. Remote has been updated.",
     "Conflict detected in comment #{0}. Remote has been updated.": "Conflict detected in comment #{0}. Remote has been updated.",
     "Local Priority": "Local Priority",

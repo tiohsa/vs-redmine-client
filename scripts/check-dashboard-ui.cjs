@@ -90,12 +90,15 @@ async function main() {
   ({ sessionId } = await call('Target.attachToTarget', { targetId, flatten: true }));
   await call('Runtime.enable');
   await call('Page.enable');
+  await call('Page.addScriptToEvaluateOnNewDocument', { source: "window.cspViolations=[];document.addEventListener('securitypolicyviolation',event=>window.cspViolations.push({directive:event.effectiveDirective,blockedURI:event.blockedURI}));" });
   await call('Emulation.setTimezoneOverride', { timezoneId: 'Asia/Tokyo' });
   await call('Page.bringToFront');
   await call('Page.navigate', { url: 'file://' + fixture });
   await evaluate(`new Promise(resolve=>{if(document.readyState==='complete')resolve();else window.addEventListener('load',resolve,{once:true})})`);
   assert.equal(await evaluate('document.documentElement.lang'), 'ja');
   await push();
+  assert.equal(await evaluate(`getComputedStyle(document.querySelector('.ticket-row[data-id="10"]')).paddingLeft`), '12px');
+  assert.equal(await evaluate(`getComputedStyle(document.querySelector('.ticket-row[data-id="11"]')).paddingLeft`), '26px');
 
   // date-only はローカル暦日で判定し、固定日時で日付境界と不正値を検証する。
   async function assertDueDateBadge(dueDate, className) {
@@ -237,6 +240,7 @@ async function main() {
     fs.writeFileSync(path.join(directory, `${theme}-${width}.png`), Buffer.from(data, 'base64'));
   }
   assert.deepEqual(errors, []);
+  assert.deepEqual(await evaluate('window.cspViolations'), [], 'Dashboard は CSP 違反を発生させない');
   console.log('PASS: 日本語、Settings セクション/編集/キーボード操作、折りたたみ維持、子チケット検索、メニューのキーボード操作/表示領域、タブ横断の新規作成、入力/フォーカス維持、下書き前の同期抑止、ローディング/エラー再試行、5画面幅、3テーマ');
   console.log('検証用 HTML: ' + fixture);
 }

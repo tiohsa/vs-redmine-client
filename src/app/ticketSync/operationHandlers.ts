@@ -44,6 +44,8 @@ import {
   buildMarkdownImageUploadFailureMessage,
   hasMarkdownImageUploadFailure,
   processMarkdownImageUploads,
+  resolveFallbackImagePath,
+  resolveLocalPath,
 } from "../../utils/markdownImageUpload";
 import { validateComment } from "../../utils/commentValidation";
 import { resolveUploadSummary } from "../../views/ticketSync/ticketImageUploadSync";
@@ -2026,6 +2028,7 @@ export interface PreparedTicketUpdate {
   projectId?: number;
   changes: TicketUpdateFields;
   uniqueChildren: string[];
+  imageLinks: Array<{ path: string; range: { start: number; end: number }; resolvedPath: string }>;
   request?: IssueUpdateInput;
   snapshot?: TicketUpdateRequestSnapshot;
   uploadSummary?: any;
@@ -2060,6 +2063,7 @@ export class TicketUpdateHandler implements OperationHandler<TicketUpdateIntent,
     let request: IssueUpdateInput;
     let changes: TicketUpdateFields;
     let uniqueChildren: string[] = [];
+    let imageLinks: PreparedTicketUpdate["imageLinks"] = [];
     let projectId = operation.projectId;
     let remoteDetail: any = undefined;
     const ensureRemoteDetail = async () => {
@@ -2081,6 +2085,56 @@ export class TicketUpdateHandler implements OperationHandler<TicketUpdateIntent,
         }
       }
     } else {
+      const links = extractMarkdownImageLinks(intent.description);
+      for (const link of links) {
+        if (isExternalMarkdownImagePath(link.path)) {
+          continue;
+        }
+
+        let resolvedPath = await resolveLocalPath(link.path, intent.baseDir);
+        if (!resolvedPath) {
+          return {
+            ok: false,
+            outcome: {
+              kind: "failed_before_commit",
+              ticketId,
+              error: new Error(`Relative path cannot be resolved: ${link.path}`),
+            },
+          };
+        }
+
+        const validation = await validateLocalImagePath({ filePath: resolvedPath });
+        if (!validation.valid) {
+          const fallbackPath = await resolveFallbackImagePath(link.path, intent.baseDir);
+          if (fallbackPath) {
+            const fallbackValidation = await validateLocalImagePath({ filePath: fallbackPath });
+            if (fallbackValidation.valid) {
+              resolvedPath = fallbackPath;
+            } else {
+              return {
+                ok: false,
+                outcome: {
+                  kind: "failed_before_commit",
+                  ticketId,
+                  error: new Error(validation.reason ?? `Invalid image path: ${link.path}`),
+                },
+              };
+            }
+          } else {
+            return {
+              ok: false,
+              outcome: {
+                kind: "failed_before_commit",
+                ticketId,
+                error: new Error(validation.reason ?? `Invalid image path: ${link.path}`),
+              },
+            };
+          }
+        }
+
+        imageLinks.push({ path: link.path, range: link.range, resolvedPath });
+      }
+
       // 1. 変更計算
       const contentChanges = computeChanges(
         intent.baseSubject ?? "",
@@ -2233,6 +2287,7 @@ export class TicketUpdateHandler implements OperationHandler<TicketUpdateIntent,
         projectId,
         changes,
         uniqueChildren,
+        imageLinks,
         request,
         snapshot,
       },
@@ -2240,12 +2295,168 @@ export class TicketUpdateHandler implements OperationHandler<TicketUpdateIntent,
   }
 
   public async executeSecondaryEffects(
-    _operation: UnifiedSyncOperation<TicketUpdateIntent>,
-    _prepared: PreparedTicketUpdate,
-    _context: OperationHandlerContext,
-    _deps?: OperationHandlerDeps,
-  ): Promise<{ ok: true } | { ok: false; error: Error; commitUnknown?: boolean }> {
-    return { ok: true };
+    operation: UnifiedSyncOperation<TicketUpdateIntent>,
+    prepared: PreparedTicketUpdate,
+    context: OperationHandlerContext,
+    deps?: OperationHandlerDeps,
+  ): Promise<{ ok: true; uploadTokens?: IssueUploadInput[] } | { ok: false; error: Error; commitUnknown?: boolean }> {
+    if (prepared.imageLinks.length === 0) {
+      return { ok: true };
+    }
+
+    const saveDeps = { ...defaultTicketDeps, ...deps?.ticketUpdate };
+    const repo = deps?.repository ?? createSyncOperationRepository();
+    const opKey: SyncOperationKey = operation.key ?? { kind: "ticket", ticketId: prepared.ticketId };
+    const revision = operation.intentRevision ?? operation.revision ?? 1;
+    const resolvedMap = new Map<string, UploadToken>();
+
+    const currentOp = repo.getOperation(opKey, context.connectionScope);
+    if (!currentOp) {
+      await repo.saveOperation(operation, context.connectionScope);
+    }
+
+    const uniquePaths = Array.from(new Set(prepared.imageLinks.map((link) => link.resolvedPath)));
+    for (const filePath of uniquePaths) {
+      const effectId = `image:markdown:${filePath}`;
+      const operationSnapshot = repo.getOperation(opKey, context.connectionScope) ?? operation;
+      const existingEffect = getEffectsForRevision(operationSnapshot, revision)
+        .find((effect) => effect.effectId === effectId);
+
+      if (existingEffect?.state === "committed" && existingEffect.token) {
+        resolvedMap.set(filePath, {
+          token: existingEffect.token,
+          filename: existingEffect.target?.filename ?? path.basename(filePath),
+          content_type: "image/png",
+        });
+        continue;
+      }
+
+      if (existingEffect && existingEffect.state !== "planned") {
+        return {
+          ok: false,
+          error: new Error(`Markdown image effect ${effectId} requires explicit recovery.`),
+          commitUnknown: existingEffect.state === "commit_unknown" || existingEffect.state === "started",
+        };
+      }
+
+      const fileId = await computeFileHashAndSizeAsync(filePath);
+      if (!fileId) {
+        return { ok: false, error: new Error(`Failed to compute hash for image: ${filePath}`) };
+      }
+
+      const uploadSnapshot: UploadRequestSnapshot = {
+        kind: "upload",
+        filePath,
+        filename: path.basename(filePath),
+        contentType: "image/png",
+        contentHash: fileId.contentHash,
+        contentSize: fileId.contentSize,
+      };
+
+      const planned = await repo.planEffect(
+        opKey,
+        {
+          effectId,
+          kind: "image_upload",
+          operationRevision: revision,
+          state: "planned",
+          target: { filePath, filename: path.basename(filePath) },
+          requestSnapshot: uploadSnapshot,
+        },
+        context.connectionScope,
+        revision,
+      );
+      if (!planned) {
+        return { ok: false, error: new Error(`Failed to plan effect ${effectId}`) };
+      }
+
+      const started = await repo.transitionEffect(
+        opKey,
+        effectId,
+        { kind: "start", requestSnapshot: uploadSnapshot },
+        context.connectionScope,
+        { operationRevision: revision, sourceState: "planned" },
+      );
+      if (!started) {
+        return { ok: false, error: new Error(`Failed to start effect ${effectId}`) };
+      }
+
+      try {
+        const upload = await saveDeps.uploadFile(filePath);
+        const committed = await repo.transitionEffect(
+          opKey,
+          effectId,
+          {
+            kind: "commit",
+            token: upload.token,
+            target: { filePath, filename: upload.filename },
+            requestSnapshot: uploadSnapshot,
+          },
+          context.connectionScope,
+          { operationRevision: revision, sourceState: "started" },
+        );
+        if (!committed) {
+          await repo.transitionEffect(
+            opKey,
+            effectId,
+            { kind: "mark_commit_unknown" },
+            context.connectionScope,
+            { operationRevision: revision, sourceState: "started" },
+          );
+          return {
+            ok: false,
+            error: new Error(`Failed to commit effect ${effectId}`),
+            commitUnknown: true,
+          };
+        }
+        resolvedMap.set(filePath, {
+          token: upload.token,
+          filename: upload.filename,
+          content_type: upload.contentType,
+        });
+      } catch (error) {
+        const commitUnknown = isRemoteCommitUnknownError(error);
+        const disposition = classifyFailureDisposition(error);
+        await repo.transitionEffect(
+          opKey,
+          effectId,
+          commitUnknown
+            ? { kind: "mark_commit_unknown" }
+            : { kind: "mark_failed", detail: (error as Error).message, disposition },
+          context.connectionScope,
+          { operationRevision: revision, sourceState: "started" },
+        );
+        return { ok: false, error: error as Error, commitUnknown };
+      }
+    }
+
+    const replacements = prepared.imageLinks.flatMap((link) => {
+      const upload = resolvedMap.get(link.resolvedPath);
+      return upload ? [{ range: link.range, value: upload.filename }] : [];
+    });
+    const description = applyMarkdownImageReplacements(operation.intent?.description ?? "", replacements);
+    const uploads = [...(operation.intent?.uploadTokens ?? [])];
+    for (const upload of resolvedMap.values()) {
+      if (!uploads.some((existing) => existing.token === upload.token)) {
+        uploads.push(upload);
+      }
+    }
+
+    prepared.changes = {
+      ...prepared.changes,
+      description,
+      ...(uploads.length > 0 ? { uploads } : {}),
+    };
+    prepared.request = {
+      issueId: prepared.ticketId,
+      fields: prepared.changes,
+    };
+    prepared.snapshot = {
+      kind: "ticket_update",
+      request: prepared.request,
+    };
+
+    return { ok: true, uploadTokens: uploads };
   }
 
   public async executeRemoteWrite(
@@ -2279,9 +2490,11 @@ export class TicketUpdateHandler implements OperationHandler<TicketUpdateIntent,
     const existingPrimaryEffect = getPrimaryEffectForRevision(currentOp ?? operation);
     if (!existingPrimaryEffect || existingPrimaryEffect.state !== "committed") {
       const isRetry = existingPrimaryEffect?.state === "failed" || existingPrimaryEffect?.state === "commit_unknown";
-      const requestToUse: IssueUpdateInput = (existingPrimaryEffect?.requestSnapshot as TicketUpdateRequestSnapshot | undefined)?.request
-        ?? prepared.request
-        ?? { issueId: ticketId, fields: prepared.changes };
+      const requestToUse: IssueUpdateInput = existingPrimaryEffect?.state === "planned"
+        ? (prepared.request ?? { issueId: ticketId, fields: prepared.changes })
+        : (existingPrimaryEffect?.requestSnapshot as TicketUpdateRequestSnapshot | undefined)?.request
+          ?? prepared.request
+          ?? { issueId: ticketId, fields: prepared.changes };
 
       const updateSnapshot: TicketUpdateRequestSnapshot = {
         kind: "ticket_update",
@@ -3243,12 +3456,7 @@ export class CommentCreateHandler implements OperationHandler<CommentCreateInten
       if (isExternalMarkdownImagePath(link.path)) {
         continue;
       }
-      let resolvedPath: string | undefined = undefined;
-      if (path.isAbsolute(link.path)) {
-        resolvedPath = link.path;
-      } else if (intent.baseDir) {
-        resolvedPath = path.resolve(intent.baseDir, link.path);
-      }
+      let resolvedPath = await resolveLocalPath(link.path, intent.baseDir);
 
       if (!resolvedPath) {
         return {
@@ -3261,9 +3469,11 @@ export class CommentCreateHandler implements OperationHandler<CommentCreateInten
       if (!val.valid) {
         // fallback to baseDir/images/filename
         if (intent.baseDir) {
-          const fallbackPath = path.resolve(intent.baseDir, "images", link.path);
-          const fallbackVal = await validateLocalImagePath({ filePath: fallbackPath });
-          if (fallbackVal.valid) {
+          const fallbackPath = await resolveFallbackImagePath(link.path, intent.baseDir);
+          const fallbackVal = fallbackPath
+            ? await validateLocalImagePath({ filePath: fallbackPath })
+            : { valid: false };
+          if (fallbackPath && fallbackVal.valid) {
             resolvedPath = fallbackPath;
           } else {
             return {
@@ -3855,12 +4065,7 @@ export class CommentUpdateHandler implements OperationHandler<CommentUpdateInten
       if (isExternalMarkdownImagePath(link.path)) {
         continue;
       }
-      let resolvedPath: string | undefined = undefined;
-      if (path.isAbsolute(link.path)) {
-        resolvedPath = link.path;
-      } else if (intent.baseDir) {
-        resolvedPath = path.resolve(intent.baseDir, link.path);
-      }
+      let resolvedPath = await resolveLocalPath(link.path, intent.baseDir);
 
       if (!resolvedPath) {
         return {
@@ -3872,9 +4077,11 @@ export class CommentUpdateHandler implements OperationHandler<CommentUpdateInten
       const val = await validateLocalImagePath({ filePath: resolvedPath });
       if (!val.valid) {
         if (intent.baseDir) {
-          const fallbackPath = path.resolve(intent.baseDir, "images", link.path);
-          const fallbackVal = await validateLocalImagePath({ filePath: fallbackPath });
-          if (fallbackVal.valid) {
+          const fallbackPath = await resolveFallbackImagePath(link.path, intent.baseDir);
+          const fallbackVal = fallbackPath
+            ? await validateLocalImagePath({ filePath: fallbackPath })
+            : { valid: false };
+          if (fallbackPath && fallbackVal.valid) {
             resolvedPath = fallbackPath;
           } else {
             return {

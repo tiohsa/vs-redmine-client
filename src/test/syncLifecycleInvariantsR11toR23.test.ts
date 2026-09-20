@@ -202,7 +202,7 @@ suite("R11 〜 R23: Invariant & Lifecycle Recovery Tests", () => {
     fs.writeFileSync(imgPath, "image data bytes");
 
     const commentFile = path.join(tmpDir, "comment.md");
-    const rawBody = `Body with image: ![img](${imgPath})`;
+    const rawBody = "Body with image: ![img](./image.png)";
     fs.writeFileSync(commentFile, rawBody);
     const doc = await vscode.workspace.openTextDocument(vscode.Uri.file(commentFile));
 
@@ -626,7 +626,7 @@ suite("R11 〜 R23: Invariant & Lifecycle Recovery Tests", () => {
     fs.writeFileSync(imgPath, "original content A");
 
     const commentFile = path.join(tmpDir, "comment_r19.md");
-    const rawBody = `Notes: ![img](${imgPath})`;
+    const rawBody = "Notes: ![img](./upload_test.png)";
     fs.writeFileSync(commentFile, rawBody);
     const doc = await vscode.workspace.openTextDocument(vscode.Uri.file(commentFile));
 
@@ -686,7 +686,7 @@ suite("R11 〜 R23: Invariant & Lifecycle Recovery Tests", () => {
     fs.writeFileSync(imgPath, "stable content A");
 
     const commentFile = path.join(tmpDir, "comment_r20.md");
-    const rawBody = `Notes: ![img](${imgPath})`;
+    const rawBody = "Notes: ![img](./upload_test2.png)";
     fs.writeFileSync(commentFile, rawBody);
     const doc = await vscode.workspace.openTextDocument(vscode.Uri.file(commentFile));
 

@@ -106,6 +106,52 @@ suite("DashboardTicketService all-project search", () => {
     assert.strictEqual(store.getState().selectedProject, undefined);
   });
 
+  test("後続の件名検索ページに直接IDが現れたら件数が収束し、再試行成功でエラーを消す", async () => {
+    const store = new DashboardStateStore();
+    let tickets: Ticket[] = [];
+    let totalCount = 0;
+    const inputs: IssuesListInput[] = [];
+    const idTicket = makeTicket(123, "123 match");
+    const nextPage = deferred<IssuesListResult>();
+    const service = new DashboardTicketService({
+      context: makeContext(store),
+      getResolvedProject: () => undefined,
+      getTickets: () => tickets,
+      setTickets: (next) => { tickets = next; },
+      getTotalCount: () => totalCount,
+      setTotalCount: (next) => { totalCount = next; },
+      getSettings: () => DEFAULT_TICKET_LIST_SETTINGS,
+      loadComments: async () => undefined,
+      refreshUnsynced: () => undefined,
+      listIssues: async (input) => {
+        inputs.push(input);
+        if (inputs.length === 1) {
+          return { tickets: [makeTicket(20, "123 subject")], totalCount: 3, limit: 50, offset: 0 };
+        }
+        if (inputs.length === 2) { throw new Error("temporary"); }
+        return nextPage.promise;
+      },
+      getIssueDetail: async () => ({ ticket: idTicket, comments: [] }),
+    });
+
+    await service.searchAllProjects("123");
+    assert.strictEqual(totalCount, 4);
+    await service.loadMoreTickets();
+    assert.match(store.getState().errors.tickets ?? "", /temporary/);
+    const retry = service.loadMoreTickets();
+    assert.strictEqual(service.loadMoreTickets(), retry);
+    nextPage.resolve({ tickets: [idTicket, makeTicket(30, "123 last")], totalCount: 3, limit: 50, offset: 1 });
+    await retry;
+
+    assert.deepStrictEqual(inputs.map((input) => input.offset), [0, 1, 1]);
+    assert.deepStrictEqual(tickets.map((ticket) => ticket.id), [123, 20, 30]);
+    assert.strictEqual(tickets.length, totalCount);
+    assert.strictEqual(store.getState().loadedTicketCount, store.getState().totalTicketCount);
+    assert.strictEqual(store.getState().errors.tickets, undefined);
+    await service.loadMoreTickets();
+    assert.strictEqual(inputs.length, 3, "全件取得後は追加のHTTP要求を行わない");
+  });
+
   test("古いプロジェクトのレスポンスが最新プロジェクトを上書きしない", async () => {
     const store = new DashboardStateStore();
     let tickets: Ticket[] = [];
@@ -230,11 +276,12 @@ suite("DashboardTicketService all-project search", () => {
     });
 
     await service.loadMoreTickets();
+    assert.match(store.getState().errors.tickets ?? "", /temporary/);
     await service.loadMoreTickets();
 
     assert.strictEqual(calls, 2);
     assert.deepStrictEqual(tickets.map((ticket) => ticket.id), [1, 2]);
-    assert.match(store.getState().errors.tickets ?? "", /temporary/);
+    assert.strictEqual(store.getState().errors.tickets, undefined);
   });
 
   test("接続世代の変更後に返った旧ページは反映しない", async () => {
