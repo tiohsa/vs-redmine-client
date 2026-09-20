@@ -74,7 +74,7 @@ const resolveCommitUnknownInteractive = async (
   operationScope: string,
 ): Promise<TicketSyncOutcome | undefined> => {
   const syncContext = { connectionScope: operationScope };
-  const items = engine.getRecoveryItems(key as any, syncContext);
+  const items = engine.getRecoveryItems(key, syncContext);
   if (showManualRepairRequired(items)) {
     return undefined;
   }
@@ -184,7 +184,7 @@ const resolveCommentCommitUnknownInteractive = async (
   key: Extract<UnsyncedFileSyncKey, { kind: "comment" }>,
   operationScope: string,
 ): Promise<Awaited<ReturnType<typeof engine.syncOne>> | undefined> => {
-  const recoveryItems = engine.getRecoveryItems(key as any, { connectionScope: operationScope });
+  const recoveryItems = engine.getRecoveryItems(key, { connectionScope: operationScope });
   if (showManualRepairRequired(recoveryItems)) {
     return undefined;
   }
@@ -227,7 +227,7 @@ const resolveSecondaryEffectsInteractive = async (
   operationScope: string,
 ): Promise<Awaited<ReturnType<typeof engine.syncOne>> | undefined> => {
   const syncContext = { connectionScope: operationScope };
-  const items = engine.getRecoveryItems(key as any, syncContext);
+  const items = engine.getRecoveryItems(key, syncContext);
   if (showManualRepairRequired(items)) {
     return undefined;
   }
@@ -265,7 +265,7 @@ const resolveSecondaryEffectsInteractive = async (
       );
       if (choice === compLabel) {
         const outcome = await engine.resolveEffect({
-          key: key as any,
+          key,
           operationId: item.operationId,
           operationRevision: item.operationRevision,
           attemptGeneration: item.attemptGeneration,
@@ -299,7 +299,7 @@ const resolveSecondaryEffectsInteractive = async (
         });
         if (rawId) {
           const outcome = await engine.resolveEffect({
-            key: key as any,
+            key,
             operationId: item.operationId,
             operationRevision: item.operationRevision,
             attemptGeneration: item.attemptGeneration,
@@ -318,7 +318,7 @@ const resolveSecondaryEffectsInteractive = async (
         }
       } else if (choice === retryLabel) {
         const outcome = await engine.resolveEffect({
-          key: key as any,
+          key,
           operationId: item.operationId,
           operationRevision: item.operationRevision,
           attemptGeneration: item.attemptGeneration,
@@ -345,7 +345,7 @@ const resolveSecondaryEffectsInteractive = async (
       );
       if (choice === retryLabel) {
         const outcome = await engine.resolveEffect({
-          key: key as any,
+          key,
           operationId: item.operationId,
           operationRevision: item.operationRevision,
           attemptGeneration: item.attemptGeneration,
@@ -366,7 +366,7 @@ const resolveSecondaryEffectsInteractive = async (
   }
 
   if (resolvedAny) {
-    return engine.syncOne(key as any, syncContext);
+    return engine.syncOne(key, syncContext);
   }
   return undefined;
 };

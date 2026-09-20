@@ -1,62 +1,155 @@
 import * as assert from "assert";
 import * as http from "http";
+import https = require("https");
 import * as vscode from "vscode";
-import { initializeApiKeyStore, setApiKey } from "../config/apiKeyStore";
+import { initializeApiKeyStore, setApiKeyForScope } from "../config/apiKeyStore";
 import { requestJson, requestText, runWithConnectionScope } from "../redmine/client";
+import { withConfiguration } from "./helpers/configuration";
+import { MemorySecretStorage } from "./helpers/secretStorage";
 
 suite("Redmine connection context", () => {
-  test("APIキーを非同期処理開始時に固定する", async () => {
-    let currentKey = "key-a";
-    const secrets = {
-      get: async () => currentKey,
-      store: async (_key: string, value: string) => { currentKey = value; },
-      delete: async () => { currentKey = ""; },
-      onDidChange: () => ({ dispose: () => undefined }),
-    } as unknown as vscode.SecretStorage;
-    await initializeApiKeyStore(secrets, []);
-    await setApiKey("key-a");
-
-    const receivedKeys: string[] = [];
+  test("接続切替・nested/parallel scope でも接続先固有の認証情報を送る", async () => {
+    const secrets = new MemorySecretStorage();
+    const subscriptions: vscode.Disposable[] = [];
+    await initializeApiKeyStore(secrets, subscriptions);
+    const received: Array<[string | undefined, string | string[] | undefined]> = [];
     const server = http.createServer((request, response) => {
-      receivedKeys.push(request.headers["x-redmine-api-key"] as string);
-      response.writeHead(200, { "content-type": "application/json" });
+      received.push([request.url, request.headers["x-redmine-api-key"]]);
       response.end("{}");
     });
     await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
-    const address = server.address() as { port: number };
-
+    const address = server.address();
+    assert.ok(address && typeof address !== "string");
+    const a = `http://127.0.0.1:${address.port}/a/`;
+    const b = `http://127.0.0.1:${address.port}/b/`;
     try {
-      await runWithConnectionScope(`http://127.0.0.1:${address.port}`, async () => {
-        await requestJson({ method: "GET", path: "/first" });
-        await setApiKey("key-b");
-        await requestJson({ method: "GET", path: "/second" });
+      await setApiKeyForScope(a, "key-a");
+      await setApiKeyForScope(b, "key-b");
+      await runWithConnectionScope(a, async () => {
+        await requestJson({ method: "GET", path: "first" });
+        await runWithConnectionScope(b, () => requestText({ method: "GET", path: "nested" }));
+        await requestJson({ method: "GET", path: "restored" });
       });
+      await runWithConnectionScope(b, () => requestJson({ method: "GET", path: "switched" }));
+      await Promise.all([
+        runWithConnectionScope(a, () => requestText({ method: "GET", path: "parallel" })),
+        runWithConnectionScope(b, () => requestJson({ method: "GET", path: "parallel" })),
+      ]);
+      await runWithConnectionScope(a, () => runWithConnectionScope(`${a}missing/`, () =>
+        assert.rejects(requestJson({ method: "GET", path: "missing" }), /Missing Redmine API key/)));
+      await withConfiguration("baseUrl", a, () => requestJson({ method: "GET", path: "configured" }));
+      await withConfiguration("baseUrl", b, () => requestText({ method: "GET", path: "configured" }));
+      assert.deepStrictEqual(received.sort(), [
+        ["/a/configured", "key-a"], ["/b/configured", "key-b"],
+        ["/a/first", "key-a"], ["/b/nested", "key-b"], ["/a/restored", "key-a"],
+        ["/b/switched", "key-b"], ["/a/parallel", "key-a"], ["/b/parallel", "key-b"],
+      ].sort());
     } finally {
-      await setApiKey("key-a");
+      subscriptions.forEach((subscription) => subscription.dispose());
+      secrets.dispose();
       await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
     }
+  });
 
-    assert.deepStrictEqual(receivedKeys, ["key-a", "key-a"]);
+  for (const baseUrl of ["http://localhost", "http://127.0.0.1", "http://[::1]", "https://remote.example.com"]) {
+    test(`${baseUrl} は transport policy を通過する`, async () => {
+      const secrets = new MemorySecretStorage();
+      const subscriptions: vscode.Disposable[] = [];
+      await initializeApiKeyStore(secrets, subscriptions);
+      try {
+        await runWithConnectionScope(baseUrl, () =>
+          assert.rejects(requestJson({ method: "GET", path: "issues.json" }), /Missing Redmine API key/));
+      } finally {
+        subscriptions.forEach((subscription) => subscription.dispose());
+        secrets.dispose();
+      }
+    });
+  }
+
+  test("HTTPS request は対象 scope の key を transport へ渡す", async () => {
+    const secrets = new MemorySecretStorage();
+    const subscriptions: vscode.Disposable[] = [];
+    await initializeApiKeyStore(secrets, subscriptions);
+    const baseUrl = "https://remote.example.com/redmine/";
+    await setApiKeyForScope(baseUrl, "test-https-key");
+    const originalRequest = https.request;
+    const reachedTransport = new Error("transport reached");
+    const calls: unknown[][] = [];
+    https.request = (...args: unknown[]) => { calls.push(args); throw reachedTransport; };
+    try {
+      for (const request of [requestJson, requestText]) {
+        await runWithConnectionScope(baseUrl, () => assert.rejects(
+          request({ method: "GET", path: "issues.json" }), (error) => error === reachedTransport,
+        ));
+      }
+      assert.strictEqual(calls.length, 2);
+      for (const [url, options] of calls) {
+        assert.ok(url instanceof URL);
+        assert.strictEqual(url.href, `${baseUrl}issues.json`);
+        assert.ok(options && typeof options === "object" && "headers" in options);
+        assert.deepStrictEqual(options.headers, { "X-Redmine-API-Key": "test-https-key" });
+      }
+    } finally {
+      https.request = originalRequest;
+      subscriptions.forEach((subscription) => subscription.dispose());
+      secrets.dispose();
+    }
+  });
+
+  test("path が別 origin を指定しても API key を送らない", async () => {
+    const secrets = new MemorySecretStorage();
+    const subscriptions: vscode.Disposable[] = [];
+    await initializeApiKeyStore(secrets, subscriptions);
+    await setApiKeyForScope("https://a.example", "test-origin-key");
+    try {
+      for (const request of [requestJson, requestText]) {
+        await runWithConnectionScope("https://a.example", () => assert.rejects(
+          request({ method: "GET", path: "https://b.example/issues.json" }),
+          { message: vscode.l10n.t("Redmine request URL must belong to the configured connection.") },
+        ));
+      }
+    } finally {
+      subscriptions.forEach((subscription) => subscription.dispose());
+      secrets.dispose();
+    }
+  });
+
+  test("非loopback HTTP は認証情報の読み出し・HTTP request より前に拒否する", async () => {
+    const secrets = new MemorySecretStorage();
+    const subscriptions: vscode.Disposable[] = [];
+    await initializeApiKeyStore(secrets, subscriptions);
+    await setApiKeyForScope("http://remote.example.com", "private-key");
+    secrets.get = async () => { throw new Error("must not read credentials"); };
+    try {
+      for (const request of [requestJson, requestText]) {
+        await runWithConnectionScope("http://remote.example.com", () => assert.rejects(
+          request({ method: "GET", path: "issues.json" }),
+          { message: vscode.l10n.t("Redmine must use HTTPS because the API key is sent with every request.") },
+        ));
+      }
+    } finally {
+      subscriptions.forEach((subscription) => subscription.dispose());
+      secrets.dispose();
+    }
   });
 });
 
 suite("Redmine HTTP response limits", () => {
   const limit = 10 * 1024 * 1024;
   const withServer = async (handler: http.RequestListener, check: () => Promise<void>): Promise<void> => {
-    const secrets = {
-      get: async () => "test-response-key",
-      store: async () => undefined,
-      delete: async () => undefined,
-      onDidChange: () => ({ dispose: () => undefined }),
-    } as unknown as vscode.SecretStorage;
-    await initializeApiKeyStore(secrets, []);
+    const secrets = new MemorySecretStorage();
+    const subscriptions: vscode.Disposable[] = [];
+    await initializeApiKeyStore(secrets, subscriptions);
     const server = http.createServer(handler);
     await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
     const address = server.address();
     assert.ok(address && typeof address !== "string");
+    await setApiKeyForScope(`http://127.0.0.1:${address.port}`, "test-response-key");
     try {
       await runWithConnectionScope(`http://127.0.0.1:${address.port}`, check);
     } finally {
+      subscriptions.forEach((subscription) => subscription.dispose());
+      secrets.dispose();
       server.closeAllConnections();
       await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
     }

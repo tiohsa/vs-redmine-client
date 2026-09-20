@@ -347,5 +347,7 @@
     "Reset display settings": "表示設定をリセット",
     "Synchronization": "同期",
     "Change API Key": "API キーを変更",
-    "Request timeout must be greater than zero.": "リクエストタイムアウトは 0 より大きくしてください。"
+    "Request timeout must be greater than zero.": "リクエストタイムアウトは 0 より大きくしてください。",
+  "Redmine must use HTTPS because the API key is sent with every request.": "API キーをすべてのリクエストで送信するため、Redmine には HTTPS 接続が必要です。",
+  "Redmine request URL must belong to the configured connection.": "Redmine のリクエスト URL は設定された接続先に属している必要があります。"
 }

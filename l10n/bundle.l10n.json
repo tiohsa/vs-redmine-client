@@ -347,5 +347,7 @@
     "Reset display settings": "Reset display settings",
     "Synchronization": "Synchronization",
     "Change API Key": "Change API Key",
-    "Request timeout must be greater than zero.": "Request timeout must be greater than zero."
+    "Request timeout must be greater than zero.": "Request timeout must be greater than zero.",
+  "Redmine must use HTTPS because the API key is sent with every request.": "Redmine must use HTTPS because the API key is sent with every request.",
+  "Redmine request URL must belong to the configured connection.": "Redmine request URL must belong to the configured connection."
 }

@@ -1,3 +1,7 @@
+import { clearCommentEdits, initializeCommentEdit } from "../views/commentEditStore";
+import { initializeOfflineSyncStore, getOfflineSyncQueue } from "../views/offlineSyncStore";
+import { createTestMemento } from "./helpers/vscodeMemento";
+import { withConfiguration } from "./helpers/configuration";
 import * as assert from "assert";
 import * as fs from "fs";
 import * as os from "os";
@@ -30,6 +34,7 @@ suite("syncEditorToRedmine — draft status management", () => {
   teardown(() => {
     clearRegistry();
     clearTicketDrafts();
+    clearCommentEdits();
   });
 
   test("no_change: ドラフトステータスが Synced になる（ローディングアイコン永続化バグの回帰テスト）", async () => {
@@ -184,11 +189,7 @@ suite("syncEditorToRedmine — draft status management", () => {
     registerTicketEditor(ticketId, editor, "primary", "ticket");
     initializeTicketDraft(ticketId, "Title", "Original body", metadata, "t1");
     let sharedEditorSyncCalls = 0;
-    const settings = vscode.workspace.getConfiguration("redmine-client");
-    const previousOfflineSyncMode = settings.get<string>("offlineSyncMode");
-    await settings.update("offlineSyncMode", "manual", vscode.ConfigurationTarget.Global);
-
-    try {
+    await withConfiguration("offlineSyncMode", "manual", async () => {
       const result = await syncEditorToRedmine(editor, {
         trigger: "explicit",
         syncEngine: {
@@ -206,8 +207,42 @@ suite("syncEditorToRedmine — draft status management", () => {
       assert.strictEqual(sharedEditorSyncCalls, 1);
       assert.strictEqual(result?.kind, "ticket");
       assert.strictEqual(result?.result.status, "success");
-    } finally {
-      await settings.update("offlineSyncMode", previousOfflineSyncMode, vscode.ConfigurationTarget.Global);
-    }
+    });
   });
+  for (const contentType of ["ticket", "comment", "commentDraft"] as const) {
+    test(`manual ${contentType}: save は queue-only、explicit は remote sync`, async () => {
+      await withConfiguration("offlineSyncMode", "manual", async () => {
+        const ticketId = 106;
+        initializeOfflineSyncStore(createTestMemento(), getCurrentConnectionScope());
+        const editor = createMutableEditorStub(vscode.Uri.parse(`test://manual/${contentType}`), "Updated body");
+        const record = registerTicketEditor(ticketId, editor, "primary", contentType);
+        if (contentType === "comment") {
+          record.commentId = 10;
+          initializeCommentEdit(10, ticketId, "Base body");
+        }
+        if (contentType === "ticket") {
+          initializeTicketDraft(ticketId, "Title", "Original body", buildIssueMetadataFixture(), "t1");
+        }
+        let remoteSyncCalls = 0;
+        const syncEngine = {
+          syncOne: async () => { remoteSyncCalls++; return { kind: "completed" as const, ticketId, commentId: 10 }; },
+          syncTicketEditor: async (input: { manual?: boolean }) => {
+            if (input.manual) { return { kind: "queued" as const }; }
+            remoteSyncCalls++;
+            return { kind: "completed" as const, ticketId };
+          },
+        };
+        const saved = await syncEditorToRedmine(editor, { trigger: "save", syncEngine });
+        assert.strictEqual(saved?.result.status, "queued");
+        assert.strictEqual(remoteSyncCalls, 0);
+        if (contentType !== "ticket") {
+          assert.strictEqual(getOfflineSyncQueue().comments.length, 1);
+        }
+        const synced = await syncEditorToRedmine(editor, { trigger: "explicit", syncEngine });
+        assert.strictEqual(synced?.result.status, contentType === "commentDraft" ? "created" : "success");
+        assert.strictEqual(remoteSyncCalls, 1);
+      });
+    });
+  }
+
 });
