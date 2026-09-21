@@ -221,7 +221,7 @@ export class DashboardController {
   }
 
   notifyTicketChanged(): void {
-    this.pushTickets();
+    this.refreshTicketPresentation();
   }
 
   async resetForConnectionChange(): Promise<void> {

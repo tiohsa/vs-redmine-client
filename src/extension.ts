@@ -73,7 +73,12 @@ export async function activate(context: vscode.ExtensionContext) {
   const updateTicketStatus = buildUpdateTicketStatus(statusBarItem);
 
   // ── エディタイベント登録 ─────────────────────────────────────────────────
-  registerEditorEvents(context, { registerEditorDocument, updateTicketStatus, sync });
+  registerEditorEvents(context, {
+    registerEditorDocument,
+    updateTicketStatus,
+    notifyTicketChanged: () => views.ticketsPresentation.notifyChange(),
+    sync,
+  });
 
   // ── コマンド登録 ─────────────────────────────────────────────────────────
   registerCommands(context, {

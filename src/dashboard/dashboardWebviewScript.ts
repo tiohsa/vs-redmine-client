@@ -97,7 +97,8 @@ function updateSyncButtonStates(){
   }
   const detailState=document.getElementById('detail-sync-state');
   if(detailState && state?.selectedTicket){
-    const value=selectedSyncing ? 'Syncing' : state.selectedTicket.syncState;
+    const metadataDirty=metadataEdit?.ticketId === state.selectedTicket.id && Object.keys(metadataPatch()).length > 0;
+    const value=selectedSyncing ? 'Syncing' : metadataDirty ? 'Dirty' : state.selectedTicket.syncState;
     detailState.className='detail-sync-state '+syncBadgeClass(value);
     detailState.textContent=syncLabel(value);
   }
@@ -444,6 +445,7 @@ function renderTicketDetailPanel(ticket){
       if(!metadataEdit || metadataEdit.requestId) return;
       metadataEdit.values[input.dataset.metadataField]=input.value;
       document.getElementById('metadata-apply-btn').disabled=!canEdit || !Object.keys(metadataPatch()).length;
+      updateSyncButtonStates();
     };
     input.addEventListener('input',stage); input.addEventListener('change',stage);
   });
