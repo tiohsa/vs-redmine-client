@@ -175,6 +175,147 @@ async function main() {
   assert.equal(await evaluate('document.activeElement.dataset.ticketActionMenu'), '10');
   assert.equal(await evaluate('window.messages.filter(m=>m.type==="ticket.select").length'), 0);
 
+  // Detail の主要操作は既存 request のまま。Markdown preview は安全な読み取り専用。
+  state.selectedProject = { id: 1, name: '検証プロジェクト' };
+  state.selectedTicketId = 10;
+  state.selectedTicket = { id: 10, subject: '詳細操作の検証', projectName: '検証プロジェクト', trackerName: 'Bug', priorityName: 'Normal', statusName: 'Open', assigneeName: 'Taro', startDate: '2026-09-21', dueDate: '2026-09-30', syncState: 'Synced', description: '<img src=x onerror=alert(1)>\nRedmine の説明\n3行目\n4行目' };
+  state.editOptions = { ticketId: 10, projectId: 1, loading: false, statusFallback: false, trackers: [{ id: 1, name: 'Bug' }, { id: 2, name: 'Task' }], priorities: [{ id: 1, name: 'Normal' }, { id: 2, name: 'High' }], statuses: [{ id: 1, name: 'Open' }, { id: 2, name: 'Closed' }], assignees: [{ id: 1, name: 'Taro' }] };
+  await push();
+  assert.equal(await evaluate(`document.querySelector('.ticket-row[data-id="10"]').getAttribute('aria-current')`), 'true');
+  assert.equal(await evaluate(`document.querySelector('.detail-description').textContent`), state.selectedTicket.description);
+  assert.equal(await evaluate(`document.querySelectorAll('#ticket-detail-card textarea, .detail-description img, .detail-description [contenteditable]').length`), 0);
+  for (const [id, type] of [['detail-open-btn', 'ticket.openEditor'], ['detail-comment-btn', 'comment.add'], ['detail-browser-btn', 'ticket.openBrowser']]) {
+    await evaluate(`document.getElementById('${id}').click()`);
+    assert.deepEqual(await evaluate(`({type:window.messages.at(-1).type,ticketId:window.messages.at(-1).ticketId})`), { type, ticketId: 10 });
+  }
+  await evaluate(`document.querySelector('[data-ticket-action-menu="detail-10"]').click()`);
+  assert.equal(await evaluate(`document.activeElement.dataset.ticketAction`), 'child');
+  await key('Enter');
+  assert.equal(await evaluate('window.messages.at(-1).type'), 'ticket.createChild');
+  assert.equal(await evaluate('window.messages.at(-1).parentTicketId'), 10);
+  await evaluate(`document.querySelector('[data-ticket-action-menu="detail-10"]').click()`);
+  await key('ArrowDown');
+  await key('Enter');
+  assert.equal(await evaluate('window.messages.at(-1).type'), 'dashboard.refresh');
+
+  // 既存の折りたたみ・展開を保持し、Metadata の一時値をまとめて適用する。
+  await evaluate(`if(document.getElementById('ticket-detail-toggle').getAttribute('aria-expanded')==='true') document.getElementById('ticket-detail-toggle').click()`);
+  assert.equal(await evaluate(`document.querySelectorAll('.detail-expanded').length`), 0);
+  assert.equal(await evaluate(`document.querySelector('.detail-description').classList.contains('detail-description-collapsed')`), true);
+  await push();
+  assert.equal(await evaluate(`document.getElementById('ticket-detail-toggle').getAttribute('aria-expanded')`), 'false');
+  await evaluate(`document.getElementById('ticket-detail-toggle').click()`);
+  assert.equal(await evaluate(`document.querySelectorAll('[data-metadata-field]').length`), 0);
+  const beforeMetadata = await evaluate('window.messages.length');
+  await evaluate(`document.getElementById('metadata-edit-btn').click()`);
+  assert.equal(await evaluate(`document.querySelectorAll('[data-metadata-field]').length`), 6);
+  assert.equal(await evaluate(`document.getElementById('metadata-apply-btn').disabled`), true);
+  async function stageMetadata(field, value) {
+    await evaluate(`(()=>{const input=document.querySelector('[data-metadata-field="${field}"]');input.value=${JSON.stringify(value)};input.dispatchEvent(new Event('input'));input.dispatchEvent(new Event('change'));})()`);
+  }
+  await stageMetadata('priority', 'High');
+  await stageMetadata('due_date', '');
+  await evaluate(`document.querySelector('[data-metadata-field="due_date"]').focus()`);
+  await push();
+  assert.equal(await evaluate(`document.querySelector('[data-metadata-field="priority"]').value`), 'High');
+  assert.equal(await evaluate(`document.activeElement.dataset.metadataField`), 'due_date');
+  await evaluate(`document.getElementById('metadata-cancel-btn').click()`);
+  assert.equal(await evaluate('window.messages.length'), beforeMetadata, 'cancel must not send any request');
+  assert.equal(await evaluate(`document.activeElement.id`), 'metadata-edit-btn');
+  await evaluate(`document.getElementById('metadata-edit-btn').click()`);
+  assert.equal(await evaluate(`document.querySelector('[data-metadata-field="priority"]').value`), 'Normal');
+  await stageMetadata('tracker', 'Task');
+  await stageMetadata('priority', 'High');
+  await stageMetadata('status', 'Closed');
+  await stageMetadata('assignee', '');
+  await stageMetadata('start_date', '2026-09-22');
+  await stageMetadata('due_date', '');
+  await evaluate(`document.getElementById('metadata-apply-btn').click();document.getElementById('metadata-apply-btn').click()`);
+  assert.equal(await evaluate('window.messages.length'), beforeMetadata + 1);
+  const metadataRequest = await evaluate('window.messages.at(-1)');
+  assert.equal(metadataRequest.type, 'ticket.metadata.update');
+  assert.equal(metadataRequest.ticketId, 10);
+  assert.deepEqual(metadataRequest.patch, { tracker: 'Task', priority: 'High', status: 'Closed', assignee: '', start_date: '2026-09-22', due_date: '' });
+  assert.equal(await evaluate(`document.getElementById('metadata-cancel-btn').disabled`), true);
+  assert.equal(await evaluate(`document.getElementById('detail-sync-btn').disabled`), true);
+  await evaluate(`window.dispatchEvent(new MessageEvent('message',{data:{type:'operation.error',requestId:'${metadataRequest.requestId}',message:'適用に失敗しました'}}))`);
+  assert.equal(await evaluate(`document.querySelector('[data-metadata-field="priority"]').value`), 'High');
+  assert.equal(await evaluate(`document.getElementById('metadata-apply-btn').disabled`), false);
+  await evaluate(`document.getElementById('metadata-apply-btn').click()`);
+  const appliedRequest = await evaluate('window.messages.at(-1).requestId');
+  state.selectedTicket.priorityName = 'High';
+  state.selectedTicket.syncState = 'Dirty';
+  await push();
+  await evaluate(`window.dispatchEvent(new MessageEvent('message',{data:{type:'operation.success',requestId:'${appliedRequest}',message:'ローカルへ適用しました'}}))`);
+  assert.equal(await evaluate(`document.querySelectorAll('[data-metadata-field]').length`), 0);
+  assert.equal(await evaluate(`document.getElementById('detail-sync-state').textContent`), strings.syncDirty);
+
+  // 同期は送信直後から無効化し、state 更新・started・成功・失敗でも二重送信しない。
+  const beforeSync = await evaluate('window.messages.length');
+  await evaluate(`document.getElementById('detail-sync-btn').click();document.getElementById('detail-sync-btn').click()`);
+  assert.equal(await evaluate('window.messages.length'), beforeSync + 1);
+  const syncRequest = await evaluate('window.messages.at(-1)');
+  assert.equal(syncRequest.type, 'ticket.syncSelected');
+  assert.equal(syncRequest.ticketId, 10);
+  assert.equal(await evaluate(`document.getElementById('detail-sync-btn').textContent`), strings.syncSyncing);
+  await push();
+  assert.equal(await evaluate(`document.getElementById('detail-sync-btn').disabled`), true);
+  await evaluate(`window.dispatchEvent(new MessageEvent('message',{data:{type:'operation.started',requestId:'${syncRequest.requestId}',label:'同期中…'}}))`);
+  assert.equal(await evaluate(`document.getElementById('detail-sync-state').textContent`), strings.syncSyncing);
+  state.selectedTicket.syncState = 'Synced';
+  await push();
+  await evaluate(`window.dispatchEvent(new MessageEvent('message',{data:{type:'operation.success',requestId:'${syncRequest.requestId}',message:'同期が完了しました'}}))`);
+  assert.equal(await evaluate(`document.getElementById('detail-sync-btn').disabled`), false);
+  assert.equal(await evaluate(`document.querySelector('.toast-success:last-child').textContent`), '同期が完了しました');
+  await evaluate(`document.getElementById('detail-sync-btn').click()`);
+  const failedSync = await evaluate('window.messages.at(-1).requestId');
+  state.selectedTicket.syncState = 'Failed';
+  await push();
+  await evaluate(`window.dispatchEvent(new MessageEvent('message',{data:{type:'operation.error',requestId:'${failedSync}',message:'同期に失敗しました'}}))`);
+  assert.equal(await evaluate(`document.getElementById('detail-sync-btn').disabled`), false);
+  assert.equal(await evaluate(`document.querySelector('.toast-error:last-child').textContent`), '同期に失敗しました');
+  for (const [syncState, label] of [['Synced', strings.synced], ['Draft', strings.draft], ['Dirty', strings.syncDirty], ['Queued', strings.syncQueued], ['Syncing', strings.syncSyncing], ['Failed', strings.syncFailed], ['Conflict', strings.syncConflict]]) {
+    state.selectedTicket.syncState = syncState;
+    await push();
+    assert.equal(await evaluate(`document.getElementById('detail-sync-state').textContent`), label);
+    assert.equal(await evaluate(`document.querySelectorAll('.detail-description-warning').length`), syncState === 'Synced' ? 0 : 1);
+    assert.equal(await evaluate(`document.getElementById('detail-sync-btn').disabled`), syncState === 'Syncing');
+  }
+
+  // チケット/接続先切替に一時値を持ち越さない。古い応答も新しい編集を閉じない。
+  await evaluate(`document.getElementById('metadata-edit-btn').click()`);
+  await stageMetadata('priority', 'Normal');
+  await evaluate(`document.getElementById('metadata-apply-btn').click()`);
+  const staleRequest = await evaluate('window.messages.at(-1).requestId');
+  state.selectedTicketId = state.selectedTicket.id = state.editOptions.ticketId = 11;
+  await push();
+  assert.equal(await evaluate(`document.querySelectorAll('[data-metadata-field]').length`), 0);
+  await evaluate(`document.getElementById('metadata-edit-btn').click()`);
+  await stageMetadata('priority', 'Normal');
+  await evaluate(`window.dispatchEvent(new MessageEvent('message',{data:{type:'operation.success',requestId:'${staleRequest}',message:'以前の操作'}}))`);
+  assert.equal(await evaluate(`document.querySelector('[data-metadata-field="priority"]').value`), 'Normal');
+  const originalBaseUrl = state.settings.baseUrl;
+  state.settings.baseUrl = 'https://another.example.com';
+  await push();
+  assert.equal(await evaluate(`document.querySelectorAll('[data-metadata-field]').length`), 0);
+  state.settings.baseUrl = originalBaseUrl;
+  state.selectedTicketId = state.selectedTicket.id = state.editOptions.ticketId = 10;
+  await push();
+
+  // 狭幅でも詳細・Metadata 入力がはみ出さず、テーマの境界とフォーカスが残る。
+  for (const [theme, width] of [['vscode-light', 280], ['vscode-dark', 320], ['vscode-dark', 440], ['vscode-light', 768], ['vscode-high-contrast', 320]]) {
+    await call('Emulation.setDeviceMetricsOverride', { width, height: 1000, deviceScaleFactor: 1, mobile: false });
+    await evaluate(`document.body.className=${JSON.stringify(theme)}`);
+    await push();
+    await evaluate(`document.getElementById('metadata-edit-btn').click()`);
+    assert.equal(await evaluate(`document.getElementById('ticket-detail-card').scrollWidth <= document.getElementById('ticket-detail-card').clientWidth`), true, `metadata overflow: ${theme} ${width}`);
+    assert.equal(await evaluate(`(()=>{const card=document.getElementById('ticket-detail-card').getBoundingClientRect();return [...document.querySelectorAll('.detail-actions button,[data-metadata-field]')].every(el=>{const r=el.getBoundingClientRect();return r.left>=card.left && r.right<=card.right;});})()`), true, `control overflow: ${theme} ${width}`);
+    await evaluate(`document.querySelector('.ticket-row[data-id="10"]').focus()`);
+    assert.notEqual(await evaluate(`getComputedStyle(document.querySelector('.ticket-row[data-id="10"]')).outlineStyle`), 'none');
+    assert.notEqual(await evaluate(`getComputedStyle(document.querySelector('.ticket-row[data-id="10"]'),'::before').backgroundColor`), 'rgba(0, 0, 0, 0)');
+    await evaluate(`document.getElementById('metadata-cancel-btn').click()`);
+  }
+
   // 全タブから新規作成でき、更新中も入力値と選択範囲を保持する。
   await evaluate(`document.getElementById('tab-settings').click(); document.getElementById('new-ticket-btn').click()`);
   assert.equal(await evaluate(`document.getElementById('tab-tickets').getAttribute('aria-selected')`), 'true');
@@ -262,11 +403,13 @@ async function main() {
     fs.writeFileSync(path.join(directory, `${theme}-${width}.png`), Buffer.from(data, 'base64'));
   }
 
+  // 操作結果は上で検証済み。プレビューには通常の表示を保存する。
+  await evaluate(`document.getElementById('toast-area').replaceChildren()`);
   // 参考図と同じ程度の情報量でサイドバーの成果物を保存する。
   state.tickets = ['検索条件を保存できるようにする', 'チケット一覧の表示を調整', 'コメント編集を確認', '同期結果を確認', '設定画面の文言を改善'].map((subject, index) => ({ id: 2816 - index, subject, level: 0, trackerName: ['Bug', 'Task', 'Feature'][index % 3], priorityName: ['Normal', 'High', 'Low'][index % 3], syncState: 'Synced', children: [] }));
   state.loadedTicketCount = state.totalTicketCount = state.tickets.length;
   state.selectedTicketId = 2816;
-  state.selectedTicket = { ...state.tickets[0], projectName: 'eCookbook' };
+  state.selectedTicket = { ...state.tickets[0], projectName: 'eCookbook', statusName: '進行中', assigneeName: '山田 太郎', startDate: '2026-09-21', dueDate: '2026-09-30', syncState: 'Dirty', description: '## 背景\nチケット一覧の視認性と操作フローを改善します。\n\n## 対応内容\nVS Codeで編集し、Redmineへ同期します。' };
   state.selectedProject = { id: 1, name: 'eCookbook' };
   state.projects = [{ id: 1, name: 'eCookbook', level: 0 }];
   state.editOptions = { ticketId: 2816, projectId: 1, trackers: [{ id: 1, name: 'Bug' }], priorities: [{ id: 1, name: 'Normal' }], statuses: [], assignees: [], statusFallback: false, loading: false };
@@ -277,9 +420,13 @@ async function main() {
   await evaluate('new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)))');
   const preview = await call('Page.captureScreenshot', { format: 'png' });
   fs.writeFileSync(path.join(directory, 'dashboard-preview.png'), Buffer.from(preview.data, 'base64'));
+  await evaluate(`document.getElementById('ticket-detail-card').scrollIntoView();document.getElementById('metadata-edit-btn').click()`);
+  await evaluate('new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)))');
+  const metadataPreview = await call('Page.captureScreenshot', { format: 'png' });
+  fs.writeFileSync(path.join(directory, 'dashboard-metadata-preview.png'), Buffer.from(metadataPreview.data, 'base64'));
   assert.deepEqual(errors, []);
   assert.deepEqual(await evaluate('window.cspViolations'), [], 'Dashboard は CSP 違反を発生させない');
-  console.log('PASS: 日本語、属性バッジ/エスケープ/表示件数、Settings セクション/編集/キーボード操作、折りたたみ維持、子チケット検索、メニューのキーボード操作/表示領域、タブ横断の新規作成、入力/フォーカス維持、下書き前の同期抑止、ローディング/エラー再試行、7画面幅、4テーマ');
+  console.log('PASS: Detail操作/状態7種/読み取り専用preview、Metadata一括適用/キャンセル/失敗/接続切替、同期二重送信防止/成功/失敗、日本語、属性バッジ/エスケープ/表示件数、Settings セクション/編集/キーボード操作、折りたたみ維持、子チケット検索、メニューのキーボード操作/表示領域、タブ横断の新規作成、入力/フォーカス維持、下書き前の同期抑止、ローディング/エラー再試行、7画面幅、4テーマ');
   console.log('検証用 HTML: ' + fixture);
 }
 main().catch(error => { console.error(error); process.exitCode = 1; }).finally(() => {
