@@ -19,6 +19,7 @@ import {
   parseNewCommentDraftFilename,
 } from "../views/editorFilename";
 import {
+  hasCommentUpdateMetadataMarkers,
   parseCommentUpdateFilename,
   parseCommentUpdateFile,
 } from "../views/commentUpdateFile";
@@ -55,12 +56,13 @@ export const classifyDocumentSave = (
   }
   const newCommentDraftTicketId = parseNewCommentDraftFilename(filename);
   if (newCommentDraftTicketId) {
-    const finalizedDraft = parseCommentUpdateFile(document.getText());
+    const content = document.getText();
+    const finalizedDraft = parseCommentUpdateFile(content);
+    const expectedCommentId =
+      getCommentIdForDocument(document) ??
+      getCommentIdForUri(document.uri) ??
+      getCommentIdForDraftUri(newCommentDraftTicketId, document.uri.toString());
     if (finalizedDraft) {
-      const expectedCommentId =
-        getCommentIdForDocument(document) ??
-        getCommentIdForUri(document.uri) ??
-        getCommentIdForDraftUri(newCommentDraftTicketId, document.uri.toString());
       if (
         finalizedDraft.fields.issueId !== newCommentDraftTicketId ||
         (expectedCommentId !== undefined &&
@@ -69,6 +71,12 @@ export const classifyDocumentSave = (
         return { kind: "invalidCommentUpdateFile" };
       }
       return { kind: "commentUpdateFile", parsed: finalizedDraft };
+    }
+    if (
+      expectedCommentId !== undefined ||
+      hasCommentUpdateMetadataMarkers(content)
+    ) {
+      return { kind: "invalidCommentUpdateFile" };
     }
   }
 

@@ -48,17 +48,25 @@ export const parseCommentUpdateFilename = (
 export const isCommentUpdateFilename = (filename: string): boolean =>
   parseCommentUpdateFilename(filename) !== undefined;
 
-export const isCommentUpdateDocument = (content: string, documentPath?: string): boolean => {
-  if (documentPath && DOCUMENT_PATH_PATTERN.test(documentPath)) {
-    return true;
-  }
+export const hasCommentUpdateMetadataMarkers = (content: string): boolean => {
   const lines = content.split(/\r?\n/);
   if (lines[0]?.trim() !== "---") {
     return false;
   }
   const closeIdx = lines.findIndex((line, idx) => idx > 0 && line.trim() === "---");
   const frontmatter = lines.slice(1, closeIdx === -1 ? undefined : closeIdx);
-  return frontmatter.some((line) => /^mode:\s*comment-update\s*$/.test(line.trim()));
+  return frontmatter.some((line) =>
+    /^(?:mode:\s*comment-update\s*$|(?:journal_id|source_notes_hash|last_synced_at):)/.test(
+      line.trim(),
+    )
+  );
+};
+
+export const isCommentUpdateDocument = (content: string, documentPath?: string): boolean => {
+  if (documentPath && DOCUMENT_PATH_PATTERN.test(documentPath)) {
+    return true;
+  }
+  return hasCommentUpdateMetadataMarkers(content);
 };
 
 export const invalidCommentUpdateMetadataMessage = (): string =>
