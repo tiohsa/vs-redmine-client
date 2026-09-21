@@ -1,5 +1,5 @@
 import {
-  getOfflineSyncLifecycle,
+  evaluateOfflineSyncPolicy,
   getOfflineSyncQueue,
 } from "../../views/offlineSyncStore";
 import { getTicketSummary } from "../../views/ticketSummaryStore";
@@ -13,14 +13,14 @@ export const buildUnsyncedDashboardItems = (): DashboardUnsyncedItem[] => {
 
   queue.tickets.forEach((update, ticketId) => {
     const subject = getTicketSummary(ticketId);
-    const lifecycle = getOfflineSyncLifecycle(update);
+    const { lifecycle, canDiscard } = evaluateOfflineSyncPolicy(update);
     items.push({
       key: { kind: "ticket", ticketId },
       label: `${formatTicketLabel(ticketId)} Ticket update`,
       detail: subject,
       documentUri: undefined,
       lifecycle,
-      canDiscard: true,
+      canDiscard,
       canSync: true,
     });
   });
@@ -40,11 +40,13 @@ export const buildUnsyncedDashboardItems = (): DashboardUnsyncedItem[] => {
       },
       label,
       documentUri: comment.documentUri,
+      ...evaluateOfflineSyncPolicy(comment),
+      canSync: true,
     });
   }
 
   for (const newTicket of queue.newTickets) {
-    const lifecycle = getOfflineSyncLifecycle(newTicket);
+    const { lifecycle, canDiscard } = evaluateOfflineSyncPolicy(newTicket);
     const details = [
       newTicket.projectId ? `Project ID: ${newTicket.projectId}` : undefined,
       lifecycle === "recovery_pending" ? "Remote commit recovery pending" : undefined,
@@ -56,7 +58,7 @@ export const buildUnsyncedDashboardItems = (): DashboardUnsyncedItem[] => {
       detail: details.length > 0 ? details.join(" · ") : undefined,
       documentUri: newTicket.documentUri,
       lifecycle,
-      canDiscard: lifecycle === "queued" || newTicket.nextIntent !== undefined,
+      canDiscard,
       canSync: true,
     });
   }

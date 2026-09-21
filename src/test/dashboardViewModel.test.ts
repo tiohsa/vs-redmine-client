@@ -262,7 +262,7 @@ suite("Dashboard ViewModel — 未同期アイテム変換", () => {
     );
   });
 
-  test("remote checkpoint を持つitemも確認済みの破棄を許可する", async () => {
+  test("remote checkpoint を持つitemの破棄を拒否する", async () => {
     await replaceOfflineSyncQueueAsync({
       tickets: new Map([[6, {
         ticketId: 6,
@@ -275,7 +275,7 @@ suite("Dashboard ViewModel — 未同期アイテム変換", () => {
     const item = buildUnsyncedDashboardItems()[0];
 
     assert.strictEqual(item.lifecycle, "recovery_pending");
-    assert.strictEqual(item.canDiscard, true);
+    assert.strictEqual(item.canDiscard, false);
     assert.strictEqual(item.canSync, true);
   });
 

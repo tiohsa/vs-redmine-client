@@ -98,6 +98,29 @@ async function main() {
   assert.equal(await evaluate('document.documentElement.lang'), 'ja');
   await push();
   assert.equal(await evaluate(`document.getElementById('search-input').type`), 'text');
+
+  // queued でも Store が remote evidence を検出した項目は破棄不可。
+  state.unsynced = { totalCount: 3, items: [
+    { key: { kind: 'ticket', ticketId: 10 }, label: 'Ticket', lifecycle: 'queued', canDiscard: false, canSync: true },
+    { key: { kind: 'comment', ticketId: 10, commentId: 20 }, label: 'Comment', lifecycle: 'queued', canDiscard: false, canSync: true },
+    { key: { kind: 'newTicket', queueId: 'queued-unsafe' }, label: 'New ticket', lifecycle: 'queued', canDiscard: false, canSync: true },
+  ] };
+  await push();
+  await evaluate(`document.getElementById('tab-unsynced').click()`);
+  assert.equal(await evaluate(`document.querySelectorAll('#unsynced-list .unsynced-actions button:disabled').length`), 3);
+  assert.equal(await evaluate(`document.querySelectorAll('#unsynced-list [data-discard-key]').length`), 0);
+  const discardCount = await evaluate(`window.messages.filter(m=>m.type==='unsynced.discardOne').length`);
+  await evaluate(`document.querySelectorAll('#unsynced-list button:disabled').forEach(button=>button.click())`);
+  assert.equal(await evaluate(`window.messages.filter(m=>m.type==='unsynced.discardOne').length`), discardCount);
+  // nextIntent のみ破棄可能なら同じ queued 表示でも操作が有効になる。
+  state.unsynced.items.forEach(item => { item.canDiscard = true; });
+  await push();
+  assert.equal(await evaluate(`document.querySelectorAll('#unsynced-list [data-discard-key]').length`), 3);
+  await evaluate(`document.querySelector('#unsynced-list [data-discard-key]').click()`);
+  assert.equal(await evaluate(`window.messages.at(-1).type`), 'unsynced.discardOne');
+  state.unsynced = { totalCount: 0, items: [] };
+  await push();
+  await evaluate(`document.getElementById('tab-tickets').click()`);
   assert.equal(await evaluate(`document.querySelectorAll('#search-clear-btn').length`), 1);
   assert.equal(await evaluate(`getComputedStyle(document.querySelector('.ticket-row[data-id="10"]')).paddingLeft`), '12px');
   assert.equal(await evaluate(`getComputedStyle(document.querySelector('.ticket-row[data-id="11"]')).paddingLeft`), '26px');
@@ -276,12 +299,18 @@ async function main() {
   await evaluate(`window.dispatchEvent(new MessageEvent('message',{data:{type:'operation.error',requestId:'${failedSync}',message:'同期に失敗しました'}}))`);
   assert.equal(await evaluate(`document.getElementById('detail-sync-btn').disabled`), false);
   assert.equal(await evaluate(`document.querySelector('.toast-error:last-child').textContent`), '同期に失敗しました');
-  for (const [syncState, label] of [['Synced', strings.synced], ['Draft', strings.draft], ['Dirty', strings.syncDirty], ['Queued', strings.syncQueued], ['Syncing', strings.syncSyncing], ['Failed', strings.syncFailed], ['Conflict', strings.syncConflict]]) {
+  for (const [syncState, label] of [['Synced', strings.synced], ['Draft', strings.draft], ['Dirty', strings.syncDirty], ['Queued', strings.syncQueued], ['Syncing', strings.syncSyncing], ['Failed', strings.syncFailed], ['Conflict', strings.syncConflict], ['RecoveryPending', strings.syncReviewRequired], ['CommitUnknown', strings.syncReviewRequired]]) {
     state.selectedTicket.syncState = syncState;
     await push();
     assert.equal(await evaluate(`document.getElementById('detail-sync-state').textContent`), label);
     assert.equal(await evaluate(`document.querySelectorAll('.detail-description-warning').length`), syncState === 'Synced' ? 0 : 1);
     assert.equal(await evaluate(`document.getElementById('detail-sync-btn').disabled`), syncState === 'Syncing');
+    if (syncState === 'RecoveryPending' || syncState === 'CommitUnknown') {
+      await evaluate(`document.getElementById('metadata-edit-btn').click()`);
+      await stageMetadata('priority', 'Normal');
+      assert.equal(await evaluate(`document.getElementById('detail-sync-state').textContent`), label);
+      await evaluate(`document.getElementById('metadata-cancel-btn').click()`);
+    }
   }
 
   // チケット/接続先切替に一時値を持ち越さない。古い応答も新しい編集を閉じない。
@@ -428,7 +457,7 @@ async function main() {
   fs.writeFileSync(path.join(directory, 'dashboard-metadata-preview.png'), Buffer.from(metadataPreview.data, 'base64'));
   assert.deepEqual(errors, []);
   assert.deepEqual(await evaluate('window.cspViolations'), [], 'Dashboard は CSP 違反を発生させない');
-  console.log('PASS: Detail操作/状態7種/読み取り専用preview、Metadata一括適用/キャンセル/失敗/接続切替、同期二重送信防止/成功/失敗、日本語、属性バッジ/エスケープ/表示件数、Settings セクション/編集/キーボード操作、折りたたみ維持、子チケット検索、メニューのキーボード操作/表示領域、タブ横断の新規作成、入力/フォーカス維持、下書き前の同期抑止、ローディング/エラー再試行、7画面幅、4テーマ');
+  console.log('PASS: Detail操作/状態9種/読み取り専用preview、Metadata一括適用/キャンセル/失敗/接続切替、同期二重送信防止/成功/失敗、日本語、属性バッジ/エスケープ/表示件数、Settings セクション/編集/キーボード操作、折りたたみ維持、子チケット検索、メニューのキーボード操作/表示領域、タブ横断の新規作成、入力/フォーカス維持、下書き前の同期抑止、ローディング/エラー再試行、7画面幅、4テーマ');
   console.log('検証用 HTML: ' + fixture);
 }
 main().catch(error => { console.error(error); process.exitCode = 1; }).finally(() => {

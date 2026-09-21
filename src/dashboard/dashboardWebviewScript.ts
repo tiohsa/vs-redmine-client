@@ -98,7 +98,8 @@ function updateSyncButtonStates(){
   const detailState=document.getElementById('detail-sync-state');
   if(detailState && state?.selectedTicket){
     const metadataDirty=metadataEdit?.ticketId === state.selectedTicket.id && Object.keys(metadataPatch()).length > 0;
-    const value=selectedSyncing ? 'Syncing' : metadataDirty ? 'Dirty' : state.selectedTicket.syncState;
+    const recoveryPending=['CommitUnknown','RecoveryPending'].includes(state.selectedTicket.syncState);
+    const value=selectedSyncing ? 'Syncing' : metadataDirty && !recoveryPending ? 'Dirty' : state.selectedTicket.syncState;
     detailState.className='detail-sync-state '+syncBadgeClass(value);
     detailState.textContent=syncLabel(value);
   }
@@ -177,6 +178,8 @@ searchInput.addEventListener('keydown', function(event){ if(event.key === 'Escap
 const SYNC_META = {
   Dirty: {label:STRINGS.syncDirty, badge:'sync-dirty', icon:'•'},
   Queued: {label:STRINGS.syncQueued, badge:'sync-queued', icon:'→'},
+  RecoveryPending: {label:STRINGS.syncReviewRequired, badge:'sync-conflict', icon:'△'},
+  CommitUnknown: {label:STRINGS.syncReviewRequired, badge:'sync-conflict', icon:'△'},
   Conflict: {label:STRINGS.syncConflict, badge:'sync-conflict', icon:'△'},
   Failed: {label:STRINGS.syncFailed, badge:'sync-failed', icon:'×'},
   Syncing: {label:STRINGS.syncSyncing, badge:'sync-syncing', icon:'↻'},
@@ -404,7 +407,7 @@ function renderTicketDetailPanel(ticket){
   const fields=[['tracker',STRINGS.sortTracker],['priority',STRINGS.sortPriority],['status',STRINGS.sortStatus],['assignee',STRINGS.sortAssignee],['start_date',STRINGS.startDate],['due_date',STRINGS.dueDateLabel]];
   clearNewTicketComposerPosition(card); card.classList.remove('hidden'); card.removeAttribute('aria-busy');
   const description=ticket.description ? '<div class="detail-description'+(ticketDetailExpanded ? '' : ' detail-description-collapsed')+'">'+esc(ticket.description)+'</div>' : '<p class="detail-hint">'+esc(STRINGS.noDescription)+'</p>';
-  const warning=['Draft','Dirty','Queued','Syncing','Conflict','Failed'].includes(ticket.syncState) ? '<p class="detail-description-warning" role="note">'+esc(STRINGS.descriptionUnsyncedWarning)+'</p>' : '';
+  const warning=['Draft','Dirty','Queued','Syncing','Conflict','Failed','RecoveryPending','CommitUnknown'].includes(ticket.syncState) ? '<p class="detail-description-warning" role="note">'+esc(STRINGS.descriptionUnsyncedWarning)+'</p>' : '';
   const parent=ticket.parentId ? '<div class="detail-parent">#'+ticket.parentId+(ticket.parentSubject ? ' '+esc(ticket.parentSubject) : '')+'</div>' : '';
   const statusHint=options?.statusFallback ? '<p class="detail-hint">'+esc(STRINGS.statusFallbackHint)+'</p>' : '';
   const loadingHint=options?.loading ? '<p class="detail-hint">'+esc(STRINGS.loadingEditOptions)+'</p>' : '';

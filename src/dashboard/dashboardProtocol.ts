@@ -21,6 +21,8 @@ export type DashboardSyncState =
   | "Dirty"
   | "Queued"
   | "Syncing"
+  | "RecoveryPending"
+  | "CommitUnknown"
   | "Failed"
   | "Conflict";
 

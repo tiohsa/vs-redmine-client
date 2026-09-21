@@ -235,7 +235,7 @@ export type LifecycleTransitionExpectation<Phase extends string> = {
 };
 
 export const getOfflineSyncLifecycle = (
-  operation: Pick<OfflineNewTicket | OfflineTicketUpdate, "phase">,
+  operation: Pick<OfflineNewTicket | OfflineTicketUpdate | OfflineCommentUpdate, "phase">,
 ): OfflineSyncLifecycle => {
   if (operation.phase === "commit_unknown" || operation.phase === "remote_write_started") {
     return "commit_unknown";
@@ -244,6 +244,36 @@ export const getOfflineSyncLifecycle = (
     return "recovery_pending";
   }
   return "queued";
+};
+
+type OfflineDiscardPolicyInput =
+  Pick<OfflineNewTicket | OfflineTicketUpdate | OfflineCommentUpdate, "phase" | "nextIntent" | "effects"> &
+  Pick<OfflineNewTicket, "remoteUpdatedAt" | "createdChildIds" | "createdIssueId" | "status"> &
+  Pick<OfflineCommentUpdate, "remoteProjectId" | "commentId" | "finalizeDraft"> &
+  { createdRemoteId?: number };
+
+const canDiscardActiveOperation = (operation: OfflineDiscardPolicyInput): boolean => {
+  // 全削除では現在の revision / attempt だけでなく、保持された過去の証拠も保護する。
+  // attempt の完了・補償判定とは異なり、planned 以外の台帳はここでは削除しない。
+  const hasRemoteEvidence = operation.remoteUpdatedAt !== undefined ||
+    (operation.createdChildIds?.length ?? 0) > 0 ||
+    operation.createdIssueId !== undefined ||
+    operation.createdRemoteId !== undefined ||
+    operation.status === "created_rewrite_failed" ||
+    operation.remoteProjectId !== undefined ||
+    (operation.finalizeDraft === true && operation.commentId !== undefined) ||
+    (operation.effects ?? []).some((effect) =>
+      effect.state !== "planned" || effect.remoteId !== undefined ||
+      effect.token !== undefined || effect.target.token !== undefined,
+    );
+  return getOfflineSyncLifecycle(operation) === "queued" && !hasRemoteEvidence;
+};
+
+export const evaluateOfflineSyncPolicy = (
+  operation: OfflineDiscardPolicyInput,
+): { lifecycle: OfflineSyncLifecycle; canDiscard: boolean } => {
+  const lifecycle = getOfflineSyncLifecycle(operation);
+  return { lifecycle, canDiscard: canDiscardActiveOperation(operation) || operation.nextIntent !== undefined };
 };
 
 const STORAGE_KEY = "redmine.offlineSyncQueue";
@@ -1230,6 +1260,28 @@ export const addOfflineTicketUpdateAsync = (
   return commitQueueMutation(undefined);
 });
 
+/** 最新の編集意図と Markdown snapshot を同じ scope transaction 内で更新する。 */
+export const updateQueuedTicketIntentAsync = (
+  ticketId: number,
+  scope: string,
+  update: (current: TicketEditorContent) => TicketEditorContent,
+): Promise<TicketEditorContent | undefined> => mutateQueueAsync(scope, (queue) => {
+  const existing = queue.tickets.get(ticketId);
+  if (!existing) {
+    return skipQueueMutation(undefined);
+  }
+  const current = existing.nextIntent ?? existing;
+  const next = update(current);
+  queue.tickets.set(ticketId, mergeOfflineTicketUpdate(ticketId, existing, {
+    ...existing,
+    ...next,
+    content: buildTicketEditorContent(next),
+    baseDir: current.baseDir,
+    documentUri: current.documentUri,
+  }));
+  return commitQueueMutation(next);
+});
+
 export type OfflineTicketConflictExpectation = Pick<
   OfflineTicketUpdate,
   "operationId" | "revision" | "intentRevision" | "connectionScope" | "content"
@@ -1756,15 +1808,22 @@ export const discardOfflineNewTicketAsync = async (
 ): Promise<OfflineDiscardResult> => {
   try {
     return await mutateQueueAsync(scope, (queue) => {
-      const index = findNewTicketIndex(queue, key);
+      if (key.queueId === undefined && key.documentUri === undefined) {
+        return skipQueueMutation("not_found");
+      }
+      const index = queue.newTickets.findIndex((ticket) =>
+        (key.queueId === undefined || ticket.queueId === key.queueId) &&
+        (key.documentUri === undefined || sameDocumentIdentity(ticket.documentUri, key.documentUri)),
+      );
       if (index === -1) {
         return skipQueueMutation("not_found");
       }
       const operation = queue.newTickets[index];
-      if (operation.phase && operation.phase !== "queued" && operation.phase !== "completed") {
-        if (!operation.nextIntent) {
-          return skipQueueMutation("recovery_required");
-        }
+      const policy = evaluateOfflineSyncPolicy(operation);
+      if (!policy.canDiscard) {
+        return skipQueueMutation("recovery_required");
+      }
+      if (!canDiscardActiveOperation(operation)) {
         queue.newTickets[index] = { ...operation, nextIntent: undefined };
         return commitQueueMutation("discarded_next");
       }
@@ -2074,9 +2133,19 @@ export const discardOfflineTicketUpdateAsync = async (
 ): Promise<OfflineDiscardResult> => {
   try {
     return await mutateQueueAsync(scope, (queue) => {
-      if (!queue.tickets.delete(ticketId)) {
+      const operation = queue.tickets.get(ticketId);
+      if (!operation) {
         return skipQueueMutation("not_found");
       }
+      const policy = evaluateOfflineSyncPolicy(operation);
+      if (!policy.canDiscard) {
+        return skipQueueMutation("recovery_required");
+      }
+      if (!canDiscardActiveOperation(operation)) {
+        queue.tickets.set(ticketId, { ...operation, nextIntent: undefined });
+        return commitQueueMutation("discarded_next");
+      }
+      queue.tickets.delete(ticketId);
       return commitQueueMutation("discarded");
     });
   } catch {
@@ -2315,6 +2384,40 @@ export const completeOfflineCommentAsync = async (
     });
   } catch {
     return false;
+  }
+};
+
+export const discardOfflineCommentUpdateAsync = async (
+  key: CommentQueueKey,
+  scope: string,
+): Promise<OfflineDiscardResult> => {
+  try {
+    return await mutateQueueAsync(scope, (queue) => {
+      if (key.commentId === undefined && key.documentUri === undefined) {
+        return skipQueueMutation("not_found");
+      }
+      const index = queue.comments.findIndex((comment) =>
+        comment.ticketId === key.ticketId &&
+        (key.commentId === undefined || comment.commentId === key.commentId) &&
+        (key.documentUri === undefined || comment.documentUri === key.documentUri),
+      );
+      if (index === -1) {
+        return skipQueueMutation("not_found");
+      }
+      const operation = queue.comments[index];
+      const policy = evaluateOfflineSyncPolicy(operation);
+      if (!policy.canDiscard) {
+        return skipQueueMutation("recovery_required");
+      }
+      if (!canDiscardActiveOperation(operation)) {
+        queue.comments[index] = { ...operation, nextIntent: undefined };
+        return commitQueueMutation("discarded_next");
+      }
+      queue.comments.splice(index, 1);
+      return commitQueueMutation("discarded");
+    });
+  } catch {
+    return "recovery_required";
   }
 };
 
