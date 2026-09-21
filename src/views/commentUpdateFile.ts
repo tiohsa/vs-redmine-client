@@ -17,23 +17,56 @@ export interface CommentUpdateFileFields {
 const FILENAME_PATTERN = /^redmine-client-comment-update-(\d+)-(\d+)(?:-\d+)?\.md$/;
 const DOCUMENT_PATH_PATTERN = /(?:^|[/\\])redmine-client-comment-update-\d+-\d+(?:-\d+)?\.md$/;
 
+export interface CommentUpdateIdentity {
+  issueId: number;
+  journalId: number;
+}
+
 export const buildCommentUpdateFilename = (issueId: number, journalId: number): string =>
   `redmine-client-comment-update-${issueId}-${journalId}.md`;
 
-export const isCommentUpdateFilename = (filename: string): boolean =>
-  FILENAME_PATTERN.test(filename);
+export const parseCommentUpdateFilename = (
+  filename: string,
+): CommentUpdateIdentity | undefined => {
+  const match = filename.match(FILENAME_PATTERN);
+  if (!match) { return undefined; }
 
-export const isCommentUpdateDocument = (content: string, documentPath?: string): boolean => {
-  if (documentPath && DOCUMENT_PATH_PATTERN.test(documentPath)) {
-    return true;
+  const issueId = Number(match[1]);
+  const journalId = Number(match[2]);
+  if (
+    !Number.isInteger(issueId) ||
+    issueId <= 0 ||
+    !Number.isInteger(journalId) ||
+    journalId <= 0
+  ) {
+    return undefined;
   }
+
+  return { issueId, journalId };
+};
+
+export const isCommentUpdateFilename = (filename: string): boolean =>
+  parseCommentUpdateFilename(filename) !== undefined;
+
+export const hasCommentUpdateMetadataMarkers = (content: string): boolean => {
   const lines = content.split(/\r?\n/);
   if (lines[0]?.trim() !== "---") {
     return false;
   }
   const closeIdx = lines.findIndex((line, idx) => idx > 0 && line.trim() === "---");
   const frontmatter = lines.slice(1, closeIdx === -1 ? undefined : closeIdx);
-  return frontmatter.some((line) => /^mode:\s*comment-update\s*$/.test(line.trim()));
+  return frontmatter.some((line) =>
+    /^(?:mode:\s*comment-update\s*$|(?:journal_id|source_notes_hash|last_synced_at):)/.test(
+      line.trim(),
+    )
+  );
+};
+
+export const isCommentUpdateDocument = (content: string, documentPath?: string): boolean => {
+  if (documentPath && DOCUMENT_PATH_PATTERN.test(documentPath)) {
+    return true;
+  }
+  return hasCommentUpdateMetadataMarkers(content);
 };
 
 export const invalidCommentUpdateMetadataMessage = (): string =>
@@ -88,7 +121,13 @@ export const parseCommentUpdateFile = (content: string): ParsedCommentUpdateFile
   const journalId = fm["journal_id"] ? Number(fm["journal_id"]) : NaN;
   const sourceNotesHash = fm["source_notes_hash"];
 
-  if (Number.isNaN(issueId) || Number.isNaN(journalId) || !sourceNotesHash) { return undefined; }
+  if (
+    !Number.isInteger(issueId) ||
+    issueId <= 0 ||
+    !Number.isInteger(journalId) ||
+    journalId <= 0 ||
+    !sourceNotesHash
+  ) { return undefined; }
 
   const fields: CommentUpdateFileFields = { issueId, journalId, sourceNotesHash };
   if (fm["project_id"]) { fields.projectId = Number(fm["project_id"]); }

@@ -538,12 +538,17 @@ export const saveCommentDraftLocally = async (
   if (!ticketId) { return undefined; }
   const documentContent = editor.document.getText();
   const parsedCommentUpdate = parseCommentUpdateFile(documentContent);
-  if (!parsedCommentUpdate && isCommentUpdateDocument(documentContent, editor.document.uri.path)) {
+  const commentId = getCommentIdForEditor(editor);
+  if (
+    (!parsedCommentUpdate && isCommentUpdateDocument(documentContent, editor.document.uri.path)) ||
+    (parsedCommentUpdate &&
+      (parsedCommentUpdate.fields.issueId !== ticketId ||
+        (commentId !== undefined && parsedCommentUpdate.fields.journalId !== commentId)))
+  ) {
     return buildResult("failed", invalidCommentUpdateMetadataMessage());
   }
   const body = parsedCommentUpdate?.body ?? documentContent;
   setCommentDraft(ticketId, body, operationScope);
-  const commentId = getCommentIdForEditor(editor);
   const edit = commentId === undefined
     ? undefined
     : getCommentEdit(commentId, operationScope);
@@ -569,7 +574,13 @@ export const saveCommentDocumentLocally = async (input: {
   documentUri: vscode.Uri;
 }): Promise<CommentSaveResult> => {
   const parsedCommentUpdate = parseCommentUpdateFile(input.content);
-  if (!parsedCommentUpdate && isCommentUpdateDocument(input.content, input.documentUri.path)) {
+  if (
+    (!parsedCommentUpdate && isCommentUpdateDocument(input.content, input.documentUri.path)) ||
+    (parsedCommentUpdate &&
+      (parsedCommentUpdate.fields.issueId !== input.ticketId ||
+        (input.commentId !== undefined &&
+          parsedCommentUpdate.fields.journalId !== input.commentId)))
+  ) {
     return buildResult("failed", invalidCommentUpdateMetadataMessage());
   }
   const body = parsedCommentUpdate?.body ?? input.content;

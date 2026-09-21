@@ -135,15 +135,24 @@ suite("sync conflict residuals", () => {
   test("auto Comment Update conflict は comment context を resolver へ渡す", async () => {
     const ticketId = 302;
     const commentId = 401;
+    const baseBody = "Base comment body";
+    const localBody = "Local comment body";
     const editor = createMutableEditorStub(
       vscode.Uri.parse("file:///tmp/redmine-client-comment-update-302-401.md"),
-      "Local comment body",
+      buildCommentUpdateFileContent(
+        {
+          issueId: ticketId,
+          journalId: commentId,
+          sourceNotesHash: computeNotesHash(baseBody),
+        },
+        localBody,
+      ),
     );
     registerCommentDocument(ticketId, commentId, editor.document, 1, scope);
     initializeCommentEdit(
       commentId,
       ticketId,
-      "Base comment body",
+      baseBody,
       "2026-08-26T00:00:00Z",
       scope,
     );
@@ -181,8 +190,8 @@ suite("sync conflict residuals", () => {
           commentConflictContext: {
             ticketId,
             commentId,
-            baseBody: "Base comment body",
-            localBody: "Local comment body",
+            baseBody,
+            localBody,
             remoteBody: "Remote comment body",
             remoteUpdatedAt: "2026-08-26T01:00:00Z",
           },
@@ -199,6 +208,52 @@ suite("sync conflict residuals", () => {
     assert.strictEqual(resolverCalls, 1);
     assert.strictEqual(commentNotifications.at(-1), "merged");
     assert.ok(refreshCalls >= 1);
+  });
+
+  test("comment-update filenameとfrontmatter identity不一致は同期しない", async () => {
+    const ticketId = 302;
+    const commentId = 401;
+    const editor = createMutableEditorStub(
+      vscode.Uri.parse("file:///tmp/redmine-client-comment-update-302-401.md"),
+      buildCommentUpdateFileContent(
+        {
+          issueId: ticketId,
+          journalId: 999,
+          sourceNotesHash: computeNotesHash("Base comment body"),
+        },
+        "Local comment body",
+      ),
+    );
+    registerCommentDocument(ticketId, commentId, editor.document, 1, scope);
+
+    let syncCalls = 0;
+    const commentNotifications: string[] = [];
+    const presentation = makeNoopPresentation();
+    await performSyncOnSave(editor.document, editor, {
+      ticketsPresentation: presentation,
+      commentsPresentation: presentation,
+      unsyncedPresentation: presentation,
+      notifications: {
+        notifyTicketSaveResult: () => undefined,
+        notifyCommentSaveResult: (result) => {
+          if (result) {
+            commentNotifications.push(result.status);
+          }
+        },
+      } as NotificationController,
+      updateTicketListSubject: () => undefined,
+      offlineSyncMode: "auto",
+      syncEngine: {
+        syncOne: async () => {
+          syncCalls += 1;
+          return { kind: "no_change" as const, ticketId, commentId };
+        },
+      },
+    });
+
+    assert.strictEqual(syncCalls, 0);
+    assert.strictEqual(getOfflineSyncQueue(scope).comments.length, 0);
+    assert.strictEqual(commentNotifications.at(-1), "failed");
   });
 
   test("Ticket local priority は atomic rebase 後に共有 SyncEngine を直接使う", async () => {

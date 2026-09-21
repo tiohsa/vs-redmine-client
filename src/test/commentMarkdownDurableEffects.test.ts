@@ -522,7 +522,13 @@ suite("Comment markdown durable image effects", () => {
           savedEffects.some((effect) => effect.effectId === `image:markdown:${imagePath}`),
           false,
         );
-        assert.strictEqual(savedEffects.length, 2);
+        const imageEffects = savedEffects.filter((effect) => effect.kind === "image_upload");
+        assert.strictEqual(imageEffects.length, 2);
+        if (operationKind === "update" && testCase.expectedOk) {
+          const attachmentLink = savedEffects.find((effect) => effect.kind === "attachment_link");
+          assert.ok(attachmentLink);
+          assert.strictEqual(attachmentLink.state, "committed");
+        }
       });
     }
   }

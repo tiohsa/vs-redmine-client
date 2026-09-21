@@ -9,6 +9,7 @@ import {
   extractCommentBody,
   finalizeNewCommentDraftFileAfterSync,
   isCommentUpdateFilename,
+  parseCommentUpdateFilename,
   parseCommentUpdateFile,
   updateCommentUpdateFileAfterSync,
 } from "../views/commentUpdateFile";
@@ -37,6 +38,21 @@ suite("commentUpdateFile", () => {
     assert.ok(!isCommentUpdateFilename("project-1_ticket-2.md"));
     assert.ok(!isCommentUpdateFilename("redmine-client-new-ticket.md"));
     assert.ok(!isCommentUpdateFilename("comment-update-39-123.md"));
+  });
+
+  test("parseCommentUpdateFilename: filename identityを返す", () => {
+    assert.deepStrictEqual(
+      parseCommentUpdateFilename("redmine-client-comment-update-39-123.md"),
+      { issueId: 39, journalId: 123 },
+    );
+    assert.deepStrictEqual(
+      parseCommentUpdateFilename("redmine-client-comment-update-39-123-2.md"),
+      { issueId: 39, journalId: 123 },
+    );
+    assert.strictEqual(
+      parseCommentUpdateFilename("redmine-client-comment-update-0-123.md"),
+      undefined,
+    );
   });
 
   test("buildCommentUpdateFileContent: フロントマターと本文が正しく生成される", () => {
@@ -125,6 +141,26 @@ suite("commentUpdateFile", () => {
     ].join("\n");
     assert.strictEqual(parseCommentUpdateFile(raw), undefined);
   });
+
+  for (const invalidIdentity of [
+    { issueId: 0, journalId: 123 },
+    { issueId: -1, journalId: 123 },
+    { issueId: 39.5, journalId: 123 },
+    { issueId: 39, journalId: 0 },
+    { issueId: 39, journalId: -1 },
+    { issueId: 39, journalId: 123.5 },
+  ]) {
+    test(`parseCommentUpdateFile: identity ${invalidIdentity.issueId}/${invalidIdentity.journalId} は undefined`, () => {
+      const raw = buildCommentUpdateFileContent(
+        {
+          ...invalidIdentity,
+          sourceNotesHash: computeNotesHash("body"),
+        },
+        "body",
+      );
+      assert.strictEqual(parseCommentUpdateFile(raw), undefined);
+    });
+  }
 
   test("computeNotesHash: 同じ内容は同一ハッシュ", () => {
     const h1 = computeNotesHash("some text");

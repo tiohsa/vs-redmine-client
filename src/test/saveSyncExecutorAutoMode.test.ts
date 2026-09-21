@@ -4,7 +4,13 @@ import { performSyncOnSave } from "../app/saveSyncExecutor";
 import { clearTicketDrafts, initializeTicketDraft } from "../views/ticketDraftStore";
 import { clearNewTicketDrafts } from "../views/newTicketDraftStore";
 import { clearOfflineSyncQueueAsync, getOfflineSyncQueue, initializeOfflineSyncStore } from "../views/offlineSyncStore";
-import { clearRegistry, registerTicketEditor, registerNewTicketDraft } from "../views/ticketEditorRegistry";
+import {
+  clearRegistry,
+  registerNewCommentDraft,
+  registerNewTicketDraft,
+  registerTicketEditor,
+  setEditorCommentId,
+} from "../views/ticketEditorRegistry";
 import { createMutableEditorStub, createTicketContentFixture } from "./helpers/editorStubs";
 import { createTestMemento } from "./helpers/vscodeMemento";
 import { buildIssueMetadataFixture } from "./helpers/ticketMetadataFixtures";
@@ -26,6 +32,26 @@ const makeNoopProvider = (): {
   updateTicketSubject: () => undefined,
   setSelectedProjectId: async () => undefined,
 });
+
+const createObservedCommentSyncEngine = () => {
+  const calls = { syncOne: 0, addComment: 0, updateComment: 0, uploadFile: 0 };
+  const syncEngine = createSyncEngine({
+    comments: {
+      addComment: async () => { calls.addComment++; },
+      updateComment: async () => { calls.updateComment++; },
+      uploadFile: async () => {
+        calls.uploadFile++;
+        return { token: "unused", filename: "unused", contentType: "application/octet-stream" };
+      },
+    },
+  });
+  const syncOne = syncEngine.syncOne.bind(syncEngine);
+  syncEngine.syncOne = async (key, context) => {
+    calls.syncOne++;
+    return syncOne(key, context);
+  };
+  return { calls, syncEngine };
+};
 
 suite("saveSyncExecutor auto/manual mode policy (RT-01, RT-02)", () => {
   setup(async () => {
@@ -158,6 +184,93 @@ suite("saveSyncExecutor auto/manual mode policy (RT-01, RT-02)", () => {
     assert.strictEqual(queue.newTickets.length, 1, "新規チケットキューに追加されていること");
   });
 
+  test("finalized new-comment の metadata 破損時は registry identity があっても queue / sync しない", async () => {
+    const uri = vscode.Uri.parse("file:///tmp/redmine-client-new-comment-39.md");
+    const content = [
+      "---",
+      "mode: broken",
+      "issue_id: 39",
+      "journal_id: 777",
+      "source_notes_hash: sha256:broken",
+      "---",
+      "",
+      "本文",
+    ].join("\n");
+    const editor = createMutableEditorStub(uri, content);
+    registerNewCommentDraft(39, editor, scope);
+    setEditorCommentId(editor, 777);
+
+    const notifications: { status: string; message: string }[] = [];
+    const { calls, syncEngine } = createObservedCommentSyncEngine();
+
+    await performSyncOnSave(editor.document, editor, {
+      ticketsPresentation: makeNoopProvider(),
+      commentsPresentation: makeNoopProvider(),
+      unsyncedPresentation: makeNoopProvider(),
+      notifications: {
+        notifyTicketSaveResult: () => undefined,
+        notifyCommentSaveResult: (result: { status: string; message: string }) =>
+          notifications.push(result),
+      } as unknown as import("../app/notificationController").NotificationController,
+      updateTicketListSubject: () => undefined,
+      offlineSyncMode: "auto",
+      syncEngine,
+    });
+
+    assert.deepStrictEqual(
+      calls,
+      { syncOne: 0, addComment: 0, updateComment: 0, uploadFile: 0 },
+      "remote mutation を呼ばないこと",
+    );
+    assert.strictEqual(getOfflineSyncQueue(scope).comments.length, 0, "comment queue を作らないこと");
+    assert.strictEqual(notifications.length, 1);
+    assert.strictEqual(notifications[0].status, "failed");
+    assert.strictEqual(
+      notifications[0].message,
+      "Comment update metadata is invalid. Reopen the comment editor.",
+    );
+  });
+
+  test("restart 相当で registry がなくても finalized marker の破損時は queue / sync しない", async () => {
+    const uri = vscode.Uri.parse("file:///tmp/redmine-client-new-comment-39.md");
+    const document = createMutableEditorStub(uri, [
+      "---",
+      "mode: broken",
+      "issue_id: 39",
+      "journal_id: 777",
+      "last_synced_at: 2026-09-21T00:00:00.000Z",
+      "---",
+      "",
+      "本文",
+    ].join("\n")).document;
+
+    const notifications: { status: string; message: string }[] = [];
+    const { calls, syncEngine } = createObservedCommentSyncEngine();
+
+    await performSyncOnSave(document, undefined, {
+      ticketsPresentation: makeNoopProvider(),
+      commentsPresentation: makeNoopProvider(),
+      unsyncedPresentation: makeNoopProvider(),
+      notifications: {
+        notifyTicketSaveResult: () => undefined,
+        notifyCommentSaveResult: (result: { status: string; message: string }) =>
+          notifications.push(result),
+      } as unknown as import("../app/notificationController").NotificationController,
+      updateTicketListSubject: () => undefined,
+      offlineSyncMode: "auto",
+      syncEngine,
+    });
+
+    assert.deepStrictEqual(
+      calls,
+      { syncOne: 0, addComment: 0, updateComment: 0, uploadFile: 0 },
+      "restart 後も remote mutation を呼ばないこと",
+    );
+    assert.strictEqual(getOfflineSyncQueue(scope).comments.length, 0, "restart 後も comment queue を作らないこと");
+    assert.strictEqual(notifications.length, 1);
+    assert.strictEqual(notifications[0].status, "failed");
+  });
+
   test("RT-03: auto モードでの同期失敗 (commit_unknown / recovery_required) が presentation される", async () => {
     const uri = vscode.Uri.parse("file:///tmp/project-1_ticket-103.md");
     const initialMetadata = buildIssueMetadataFixture({ status: "New" });
@@ -235,4 +348,3 @@ suite("saveSyncExecutor auto/manual mode policy (RT-01, RT-02)", () => {
     assert.strictEqual(hasConflictNotification, true, "conflict Outcome が Presentation / 通知されたこと");
   });
 });
-

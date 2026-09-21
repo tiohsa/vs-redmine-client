@@ -85,8 +85,14 @@ export const editComment = async (
   }
 
   const documentContent = editor.document.getText();
-  if (!parseCommentUpdateFile(documentContent) &&
-      isCommentUpdateDocument(documentContent, editor.document.uri.path)) {
+  const parsedCommentUpdate = parseCommentUpdateFile(documentContent);
+  if (
+    (!parsedCommentUpdate &&
+      isCommentUpdateDocument(documentContent, editor.document.uri.path)) ||
+    (parsedCommentUpdate &&
+      (parsedCommentUpdate.fields.issueId !== comment.ticketId ||
+        parsedCommentUpdate.fields.journalId !== comment.id))
+  ) {
     deps.showError(invalidCommentUpdateMetadataMessage());
     return;
   }
