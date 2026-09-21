@@ -1049,7 +1049,7 @@ suite("offlineSyncStore — workspaceState 永続化", () => {
     assert.strictEqual(getOfflineSyncQueue().newTickets[0].createdIssueId, 910);
   });
 
-  test("remote checkpoint を持つticketも確認済みの破棄でキューから削除する", async () => {
+  test("remote checkpoint を持つticketは後続編集だけを破棄する", async () => {
     await addOfflineTicketUpdateAsync(911, {
       ...ticketUpdate(911),
       phase: "reconciliation_pending",
@@ -1061,8 +1061,9 @@ suite("offlineSyncStore — workspaceState 永続化", () => {
 
     const result = await discardOfflineTicketUpdateAsync(911, "");
 
-    assert.strictEqual(result, "discarded");
-    assert.strictEqual(getOfflineSyncQueue().tickets.has(911), false);
+    assert.strictEqual(result, "discarded_next");
+    assert.strictEqual(getOfflineSyncQueue().tickets.get(911)?.phase, "reconciliation_pending");
+    assert.strictEqual(getOfflineSyncQueue().tickets.get(911)?.nextIntent, undefined);
   });
 
   test("I-15 10,000回の後続saveをidentityあたりactive+nextの2 snapshotへcoalesceする", async () => {

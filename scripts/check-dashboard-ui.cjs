@@ -276,12 +276,18 @@ async function main() {
   await evaluate(`window.dispatchEvent(new MessageEvent('message',{data:{type:'operation.error',requestId:'${failedSync}',message:'同期に失敗しました'}}))`);
   assert.equal(await evaluate(`document.getElementById('detail-sync-btn').disabled`), false);
   assert.equal(await evaluate(`document.querySelector('.toast-error:last-child').textContent`), '同期に失敗しました');
-  for (const [syncState, label] of [['Synced', strings.synced], ['Draft', strings.draft], ['Dirty', strings.syncDirty], ['Queued', strings.syncQueued], ['Syncing', strings.syncSyncing], ['Failed', strings.syncFailed], ['Conflict', strings.syncConflict]]) {
+  for (const [syncState, label] of [['Synced', strings.synced], ['Draft', strings.draft], ['Dirty', strings.syncDirty], ['Queued', strings.syncQueued], ['Syncing', strings.syncSyncing], ['Failed', strings.syncFailed], ['Conflict', strings.syncConflict], ['RecoveryPending', strings.syncReviewRequired], ['CommitUnknown', strings.syncReviewRequired]]) {
     state.selectedTicket.syncState = syncState;
     await push();
     assert.equal(await evaluate(`document.getElementById('detail-sync-state').textContent`), label);
     assert.equal(await evaluate(`document.querySelectorAll('.detail-description-warning').length`), syncState === 'Synced' ? 0 : 1);
     assert.equal(await evaluate(`document.getElementById('detail-sync-btn').disabled`), syncState === 'Syncing');
+    if (syncState === 'RecoveryPending' || syncState === 'CommitUnknown') {
+      await evaluate(`document.getElementById('metadata-edit-btn').click()`);
+      await stageMetadata('priority', 'Normal');
+      assert.equal(await evaluate(`document.getElementById('detail-sync-state').textContent`), label);
+      await evaluate(`document.getElementById('metadata-cancel-btn').click()`);
+    }
   }
 
   // チケット/接続先切替に一時値を持ち越さない。古い応答も新しい編集を閉じない。
@@ -428,7 +434,7 @@ async function main() {
   fs.writeFileSync(path.join(directory, 'dashboard-metadata-preview.png'), Buffer.from(metadataPreview.data, 'base64'));
   assert.deepEqual(errors, []);
   assert.deepEqual(await evaluate('window.cspViolations'), [], 'Dashboard は CSP 違反を発生させない');
-  console.log('PASS: Detail操作/状態7種/読み取り専用preview、Metadata一括適用/キャンセル/失敗/接続切替、同期二重送信防止/成功/失敗、日本語、属性バッジ/エスケープ/表示件数、Settings セクション/編集/キーボード操作、折りたたみ維持、子チケット検索、メニューのキーボード操作/表示領域、タブ横断の新規作成、入力/フォーカス維持、下書き前の同期抑止、ローディング/エラー再試行、7画面幅、4テーマ');
+  console.log('PASS: Detail操作/状態9種/読み取り専用preview、Metadata一括適用/キャンセル/失敗/接続切替、同期二重送信防止/成功/失敗、日本語、属性バッジ/エスケープ/表示件数、Settings セクション/編集/キーボード操作、折りたたみ維持、子チケット検索、メニューのキーボード操作/表示領域、タブ横断の新規作成、入力/フォーカス維持、下書き前の同期抑止、ローディング/エラー再試行、7画面幅、4テーマ');
   console.log('検証用 HTML: ' + fixture);
 }
 main().catch(error => { console.error(error); process.exitCode = 1; }).finally(() => {

@@ -1,13 +1,12 @@
 import { Ticket } from "../../redmine/types";
 import { getTicketDraft, getTicketDraftContent } from "../../views/ticketDraftStore";
-import { getOfflineSyncQueue } from "../../views/offlineSyncStore";
+import { getOfflineSyncQueue, evaluateOfflineSyncPolicy } from "../../views/offlineSyncStore";
 import { getCurrentConnectionScope } from "../../config/connectionScope";
 import { buildTree } from "../../views/treeBuilder";
 import { TreeNode, TreeSource } from "../../views/treeTypes";
 import type { DashboardSyncState, DashboardTicketDetail, DashboardTicketNode } from "../dashboardProtocol";
 import {
   detectTicketIntentChanges,
-  isSafeQueuedTicketUpdate,
   parseQueuedTicketIntent,
 } from "../../views/ticketSync/ticketChangeDetector";
 
@@ -16,10 +15,20 @@ export const resolveTicketSyncState = (ticketId: number): DashboardSyncState => 
   const draft = getTicketDraft(ticketId, scope);
   const queue = getOfflineSyncQueue(scope);
   const queued = queue.tickets.get(ticketId);
+  const lifecycle = queued ? evaluateOfflineSyncPolicy(queued).lifecycle : undefined;
+  if (draft?.status === "Syncing") {
+    return "Syncing";
+  }
+  if (lifecycle === "commit_unknown") {
+    return "CommitUnknown";
+  }
+  if (lifecycle === "recovery_pending") {
+    return "RecoveryPending";
+  }
   const queuedContent = queued ? parseQueuedTicketIntent(queued) : undefined;
   const currentContent = draft ? getTicketDraftContent(ticketId, scope) : undefined;
   const queueState = (): DashboardSyncState | undefined => {
-    if (!queued || !isSafeQueuedTicketUpdate(queued)) {
+    if (!queued) {
       return undefined;
     }
     if (!currentContent || !queuedContent) {
@@ -34,7 +43,6 @@ export const resolveTicketSyncState = (ticketId: number): DashboardSyncState => 
 
   if (draft) {
     switch (draft.status) {
-      case "Syncing": return "Syncing";
       case "Failed": return "Failed";
       case "Conflict": return "Conflict";
       case "Draft": return "Draft";

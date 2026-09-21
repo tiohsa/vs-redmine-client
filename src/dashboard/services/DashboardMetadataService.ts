@@ -3,7 +3,7 @@ import * as vscode from "vscode";
 import { getProjectTrackers, listProjectMembers } from "../../redmine/projects";
 import { getIssueAllowedStatuses } from "../../redmine/issues";
 import { ensureTicketDraft, markDraftStatus, setTicketDraftContent } from "../../views/ticketDraftStore";
-import { getOfflineSyncQueue, addOfflineTicketUpdateAsync } from "../../views/offlineSyncStore";
+import { getOfflineSyncQueue, addOfflineTicketUpdateAsync, updateQueuedTicketIntentAsync } from "../../views/offlineSyncStore";
 import { buildTicketDetail } from "../viewModels/ticketDashboardViewModel";
 import { buildTicketEditorContent, parseTicketEditorContent, type TicketEditorContent } from "../../views/ticketEditorContent";
 import { isSafeQueuedTicketUpdate } from "../../views/ticketSync/ticketChangeDetector";
@@ -319,7 +319,6 @@ export class DashboardMetadataService {
         return false;
       }
     }
-    setTicketDraftContent(ticket.id, next, operationScope);
     await addOfflineTicketUpdateAsync(ticket.id, {
       ticketId: ticket.id,
       baseSubject: ticket.subject,
@@ -339,7 +338,10 @@ export class DashboardMetadataService {
       metadata: next.metadata,
       layout: next.layout,
       metadataBlock: next.metadataBlock,
+      controlFields: next.controlFields,
+      content: nextText,
     }, operationScope);
+    setTicketDraftContent(ticket.id, next, operationScope);
     const queued = getOfflineSyncQueue(operationScope).tickets.get(ticket.id);
     markDraftStatus(
       ticket.id,
@@ -354,45 +356,24 @@ export class DashboardMetadataService {
     patch: TicketMetadataPatch,
     operationScope: string,
   ): Promise<boolean> {
-    const queued = getOfflineSyncQueue(operationScope).tickets.get(ticket.id);
-    if (!queued) {
+    const next = await updateQueuedTicketIntentAsync(ticket.id, operationScope, (current) => {
+      const content = this.patchEditorContent(current, patch);
+      parseTicketEditorContent(buildTicketEditorContent(content), {
+        allowMissingMetadata: true,
+        fallbackMetadata: content.metadata,
+      });
+      return content;
+    });
+    if (!next) {
       return false;
     }
-    const nextMetadata = {
-      ...queued.metadata,
-      ...(patch.tracker !== undefined ? { tracker: patch.tracker } : {}),
-      ...(patch.priority !== undefined ? { priority: patch.priority } : {}),
-      ...(patch.status !== undefined ? { status: patch.status } : {}),
-      ...(patch.due_date !== undefined ? { due_date: patch.due_date } : {}),
-      ...(patch.start_date !== undefined ? { start_date: patch.start_date } : {}),
-      ...(patch.assignee !== undefined ? {
-        assignee: patch.assignee.length > 0 ? patch.assignee : undefined,
-        assignee_id: patch.assignee.length > 0
-          ? this.deps.context.store.getState().editOptions?.assignees.find((a) => a.name === patch.assignee)?.id
-          : undefined,
-      } : {}),
-    };
-    const nextContent: TicketEditorContent = {
-      subject: queued.subject,
-      description: queued.description,
-      metadata: nextMetadata,
-      layout: queued.layout,
-      metadataBlock: queued.metadataBlock,
-    };
-    parseTicketEditorContent(buildTicketEditorContent(nextContent), {
-      allowMissingMetadata: true,
-      fallbackMetadata: nextMetadata,
-    });
-    setTicketDraftContent(ticket.id, nextContent, operationScope);
+    setTicketDraftContent(ticket.id, next, operationScope);
+    const queued = getOfflineSyncQueue(operationScope).tickets.get(ticket.id);
     markDraftStatus(
       ticket.id,
-      isSafeQueuedTicketUpdate(queued) ? "Queued" : "Dirty",
+      queued && isSafeQueuedTicketUpdate(queued) ? "Queued" : "Dirty",
       operationScope,
     );
-    await addOfflineTicketUpdateAsync(ticket.id, {
-      ...queued,
-      metadata: nextMetadata,
-    }, operationScope);
     return true;
   }
 }
