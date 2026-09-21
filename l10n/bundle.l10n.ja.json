@@ -1,4 +1,5 @@
 {
+    "Showing {0} tickets": "表示中: {0}件",
     "Redmine response stream failed.": "Redmine の応答ストリームでエラーが発生しました。",
     "Redmine response was interrupted.": "Redmine の応答が途中で切断されました。",
     "Redmine response exceeded the maximum size of {0} MiB.": "Redmine の応答が最大サイズ {0} MiB を超えました。",

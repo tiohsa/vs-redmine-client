@@ -55,6 +55,7 @@ export interface DashboardStrings {
   errorLabel: string;
   noTicketsFound: string;
   loadMore: string;
+  ticketCountLabel: string;
   // Ticket detail panel
   closeDetail: string;
   openDetail: string;
@@ -210,6 +211,7 @@ export const buildDashboardStrings = (): DashboardStrings => ({
   errorLabel: vscode.l10n.t("Error"),
   noTicketsFound: vscode.l10n.t("No tickets match the filter."),
   loadMore: vscode.l10n.t("Load more…"),
+  ticketCountLabel: vscode.l10n.t("Showing {0} tickets"),
   // Ticket detail panel
   closeDetail: vscode.l10n.t("Close detail"),
   openDetail: vscode.l10n.t("Open detail"),

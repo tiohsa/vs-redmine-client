@@ -24,7 +24,7 @@ Module._load = originalLoad;
 
 const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'dashboard-ui-'));
 const fixture = path.join(directory, 'dashboard.html');
-const bootstrap = `<style nonce="ui-check">:root{--vscode-font-family:system-ui;--vscode-font-size:13px;--vscode-button-background:#1456f0;--vscode-button-foreground:#fff;--vscode-focusBorder:#1456f0;--vscode-sideBar-background:#f0f0f0;--vscode-editor-background:#fff;--vscode-foreground:#222;--vscode-descriptionForeground:#45515e;--vscode-panel-border:#e5e7eb;--vscode-errorForeground:#b3261e;--vscode-editorWarning-foreground:#795e00;--vscode-testing-iconPassed:#16825d}:root:has(body.vscode-dark){--vscode-sideBar-background:#252526;--vscode-editor-background:#1e1e1e;--vscode-foreground:#ddd;--vscode-descriptionForeground:#bbb;--vscode-panel-border:#666}:root:has(body.vscode-high-contrast-light){--vscode-contrastBorder:#000;--vscode-panel-border:#000}</style><script nonce="ui-check">window.messages=[];window.acquireVsCodeApi=()=>({postMessage:m=>window.messages.push(m)});const NativeDate=Date;const fixedNow=NativeDate.UTC(2026,8,14,16,0,0);window.Date=class extends NativeDate{constructor(...args){if(args.length===0)super(fixedNow);else super(...args)}static now(){return fixedNow}};</script>`;
+const bootstrap = `<style nonce="ui-check">:root{--vscode-font-family:system-ui;--vscode-font-size:13px;--vscode-button-background:#1456f0;--vscode-button-foreground:#fff;--vscode-focusBorder:#1456f0;--vscode-sideBar-background:#f0f0f0;--vscode-editor-background:#fff;--vscode-foreground:#222;--vscode-descriptionForeground:#45515e;--vscode-panel-border:#e5e7eb;--vscode-errorForeground:#b3261e;--vscode-editorWarning-foreground:#795e00;--vscode-testing-iconPassed:#16825d}:root:has(body.vscode-dark){--vscode-sideBar-background:#252526;--vscode-editor-background:#1e1e1e;--vscode-foreground:#ddd;--vscode-descriptionForeground:#bbb;--vscode-panel-border:#2b2b2b;--vscode-button-background:#007acc;--vscode-focusBorder:#007acc;--vscode-list-activeSelectionBackground:#094771;--vscode-list-activeSelectionForeground:#fff;--vscode-editorWidget-background:#252526}:root:has(body.vscode-high-contrast-light){--vscode-contrastBorder:#000;--vscode-panel-border:#000}:root:has(body.vscode-high-contrast){--vscode-sideBar-background:#000;--vscode-editor-background:#000;--vscode-foreground:#fff;--vscode-descriptionForeground:#fff;--vscode-contrastBorder:#fff;--vscode-focusBorder:#f38518;--vscode-panel-border:#fff}</style><script nonce="ui-check">window.messages=[];window.acquireVsCodeApi=()=>({postMessage:m=>window.messages.push(m)});const NativeDate=Date;const fixedNow=NativeDate.UTC(2026,8,14,16,0,0);window.Date=class extends NativeDate{constructor(...args){if(args.length===0)super(fixedNow);else super(...args)}static now(){return fixedNow}};</script>`;
 fs.writeFileSync(fixture, buildDashboardHtml('ui-check', strings).replace('<head>', '<head>' + bootstrap));
 const chrome = spawn(process.env.CHROME_BIN || 'google-chrome', [
   '--headless', '--disable-gpu', '--no-first-run', '--no-default-browser-check',
@@ -97,8 +97,23 @@ async function main() {
   await evaluate(`new Promise(resolve=>{if(document.readyState==='complete')resolve();else window.addEventListener('load',resolve,{once:true})})`);
   assert.equal(await evaluate('document.documentElement.lang'), 'ja');
   await push();
+  assert.equal(await evaluate(`document.getElementById('search-input').type`), 'text');
+  assert.equal(await evaluate(`document.querySelectorAll('#search-clear-btn').length`), 1);
   assert.equal(await evaluate(`getComputedStyle(document.querySelector('.ticket-row[data-id="10"]')).paddingLeft`), '12px');
   assert.equal(await evaluate(`getComputedStyle(document.querySelector('.ticket-row[data-id="11"]')).paddingLeft`), '26px');
+
+  // 属性は Redmine の任意の名前を安全に表示し、未設定時は空バッジを作らない。
+  state.tickets[0].trackerName = 'Bug <img src=x onerror=alert(1)>';
+  state.tickets[0].priorityName = '優先度 "最優先" & 要確認';
+  await push();
+  assert.equal(await evaluate(`document.querySelector('.ticket-tracker').textContent`), state.tickets[0].trackerName);
+  assert.equal(await evaluate(`document.querySelector('.ticket-priority').textContent`), state.tickets[0].priorityName);
+  assert.equal(await evaluate(`document.querySelector('.ticket-priority').title`), strings.sortPriority + ': ' + state.tickets[0].priorityName);
+  assert.equal(await evaluate(`document.querySelectorAll('.ticket-metadata img').length`), 0);
+  assert.equal(await evaluate(`document.querySelectorAll('[data-id="11"] .ticket-metadata').length`), 0);
+  assert.equal(await evaluate(`document.getElementById('ticket-count').textContent`), strings.ticketCountLabel.replace('{0}', '2'));
+  state.tickets[0].trackerName = 'Bug';
+  state.tickets[0].priorityName = 'Normal';
 
   // date-only はローカル暦日で判定し、固定日時で日付境界と不正値を検証する。
   async function assertDueDateBadge(dueDate, className) {
@@ -139,6 +154,7 @@ async function main() {
   await evaluate(`document.querySelector('[data-expand="10"]').focus()`);
   await key('Enter');
   assert.equal(await evaluate(`document.querySelector('[data-expand="10"]').getAttribute('aria-expanded')`), 'false');
+  assert.equal(await evaluate(`document.getElementById('ticket-count').textContent`), strings.ticketCountLabel.replace('{0}', '1'));
   assert.equal(await evaluate('window.messages.filter(m=>m.type==="ticket.select").length'), 0);
   await push();
   assert.equal(await evaluate(`document.querySelector('[data-expand="10"]').getAttribute('aria-expanded')`), 'false');
@@ -146,6 +162,7 @@ async function main() {
   await evaluate(`document.getElementById('search-input').value='検索対象'; document.getElementById('search-input').dispatchEvent(new Event('input'))`);
   assert.equal(await evaluate(`document.querySelectorAll('.ticket-row').length`), 1);
   assert.equal(await evaluate(`document.querySelector('.ticket-row').dataset.id`), '11');
+  assert.equal(await evaluate(`document.getElementById('ticket-count').textContent`), strings.ticketCountLabel.replace('{0}', '1'));
   await evaluate(`document.getElementById('search-clear-btn').click()`);
 
   // Enter でメニューを開き、矢印で移動、Escape で起点へ戻る。
@@ -185,6 +202,7 @@ async function main() {
   state.errors.tickets = '接続に失敗しました';
   await push();
   assert.equal(await evaluate(`document.querySelector('[role="alert"]').textContent.includes('接続に失敗しました')`), true);
+  assert.equal(await evaluate(`document.getElementById('ticket-count').textContent`), '');
   await evaluate(`document.getElementById('retry-tickets').click()`);
   assert.equal(await evaluate('window.messages.at(-1).type'), 'dashboard.refresh');
   state.errors = {};
@@ -219,16 +237,20 @@ async function main() {
     assert.equal(await evaluate('document.documentElement.scrollWidth <= innerWidth'), true, `page overflow at ${width}`);
   }
   state.selectedProject = { id: 1, name: '検証プロジェクト' };
-  state.tickets = Array.from({ length: 20 }, (_, index) => ({ id: 10 + index, subject: 'チケットの詳細と操作を確認するための長い件名 ' + index, level: 0, statusName: '進行中', syncState: 'Queued', dueDate: '2020-01-01', children: [] }));
+  state.tickets = Array.from({ length: 20 }, (_, index) => ({ id: 10 + index, subject: 'チケットの詳細と操作を確認するための長い件名 ' + index, level: 0, trackerName: '長い名前のカスタムトラッカー', priorityName: 'カスタム優先度・最優先', statusName: '進行中', syncState: 'Queued', dueDate: '2020-01-01', children: [] }));
   state.selectedTicketId = 10;
   state.selectedTicket = { ...state.tickets[0], projectName: '検証プロジェクト', description: '日本語の説明文と状態表示を確認します。\nキーボードと画面幅に合わせて操作できます。' };
-  for (const [theme, width] of [['vscode-light', 320], ['vscode-dark', 1200], ['vscode-high-contrast-light', 480]]) {
+  for (const [theme, width] of [['vscode-light', 280], ['vscode-light', 320], ['vscode-dark', 440], ['vscode-dark', 768], ['vscode-dark', 1200], ['vscode-high-contrast-light', 480], ['vscode-high-contrast', 320]]) {
     await call('Emulation.setDeviceMetricsOverride', { width, height: 800, deviceScaleFactor: 1, mobile: false });
     await evaluate(`document.body.className=${JSON.stringify(theme)};document.getElementById('tab-tickets').click()`);
     await push();
     if (theme === 'vscode-dark') assert.equal(await evaluate('getComputedStyle(document.body).backgroundColor'), 'rgb(37, 37, 38)');
     assert.equal(await evaluate(`getComputedStyle(document.querySelector('.due-overdue')).display !== 'none'`), true);
     assert.equal(await evaluate(`document.querySelector('.tickets-master').scrollWidth <= document.querySelector('.tickets-master').clientWidth`), true);
+    assert.equal(await evaluate(`document.getElementById('ticket-scroll').scrollWidth <= document.getElementById('ticket-scroll').clientWidth`), true, `list overflow: ${theme} ${width}`);
+    assert.equal(await evaluate(`getComputedStyle(document.querySelector('.tickets-master')).borderRightWidth`), '1px');
+    assert.equal(await evaluate(`document.querySelector('.ticket-subject').getBoundingClientRect().width >= 40`), true, `subject clipped: ${theme} ${width}`);
+    assert.equal(await evaluate(`document.querySelectorAll('.detail-actions svg[aria-hidden="true"]').length`), 4);
     if (width < 700) assert.equal(await evaluate(`document.querySelector('.tickets-master').getBoundingClientRect().height <= innerHeight * .4 + 1`), true);
     await evaluate(`document.querySelector('[data-ticket-action-menu="29"]').scrollIntoView(); document.querySelector('[data-ticket-action-menu="29"]').click()`);
     await evaluate('new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)))');
@@ -239,9 +261,25 @@ async function main() {
     const { data } = await call('Page.captureScreenshot', { format: 'png' });
     fs.writeFileSync(path.join(directory, `${theme}-${width}.png`), Buffer.from(data, 'base64'));
   }
+
+  // 参考図と同じ程度の情報量でサイドバーの成果物を保存する。
+  state.tickets = ['検索条件を保存できるようにする', 'チケット一覧の表示を調整', 'コメント編集を確認', '同期結果を確認', '設定画面の文言を改善'].map((subject, index) => ({ id: 2816 - index, subject, level: 0, trackerName: ['Bug', 'Task', 'Feature'][index % 3], priorityName: ['Normal', 'High', 'Low'][index % 3], syncState: 'Synced', children: [] }));
+  state.loadedTicketCount = state.totalTicketCount = state.tickets.length;
+  state.selectedTicketId = 2816;
+  state.selectedTicket = { ...state.tickets[0], projectName: 'eCookbook' };
+  state.selectedProject = { id: 1, name: 'eCookbook' };
+  state.projects = [{ id: 1, name: 'eCookbook', level: 0 }];
+  state.editOptions = { ticketId: 2816, projectId: 1, trackers: [{ id: 1, name: 'Bug' }], priorities: [{ id: 1, name: 'Normal' }], statuses: [], assignees: [], statusFallback: false, loading: false };
+  await call('Emulation.setDeviceMetricsOverride', { width: 440, height: 1000, deviceScaleFactor: 1, mobile: false });
+  await evaluate(`document.body.className='vscode-dark'`);
+  await push();
+  await evaluate(`if(document.getElementById('ticket-detail-toggle').getAttribute('aria-expanded')==='false') document.getElementById('ticket-detail-toggle').click(); document.querySelector('.tickets-layout').scrollTop=0; document.getElementById('ticket-scroll').scrollTop=0`);
+  await evaluate('new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)))');
+  const preview = await call('Page.captureScreenshot', { format: 'png' });
+  fs.writeFileSync(path.join(directory, 'dashboard-preview.png'), Buffer.from(preview.data, 'base64'));
   assert.deepEqual(errors, []);
   assert.deepEqual(await evaluate('window.cspViolations'), [], 'Dashboard は CSP 違反を発生させない');
-  console.log('PASS: 日本語、Settings セクション/編集/キーボード操作、折りたたみ維持、子チケット検索、メニューのキーボード操作/表示領域、タブ横断の新規作成、入力/フォーカス維持、下書き前の同期抑止、ローディング/エラー再試行、5画面幅、3テーマ');
+  console.log('PASS: 日本語、属性バッジ/エスケープ/表示件数、Settings セクション/編集/キーボード操作、折りたたみ維持、子チケット検索、メニューのキーボード操作/表示領域、タブ横断の新規作成、入力/フォーカス維持、下書き前の同期抑止、ローディング/エラー再試行、7画面幅、4テーマ');
   console.log('検証用 HTML: ' + fixture);
 }
 main().catch(error => { console.error(error); process.exitCode = 1; }).finally(() => {

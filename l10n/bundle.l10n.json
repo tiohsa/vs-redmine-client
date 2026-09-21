@@ -1,4 +1,5 @@
 {
+    "Showing {0} tickets": "Showing {0} tickets",
     "Redmine response stream failed.": "Redmine response stream failed.",
     "Redmine response was interrupted.": "Redmine response was interrupted.",
     "Redmine response exceeded the maximum size of {0} MiB.": "Redmine response exceeded the maximum size of {0} MiB.",
