@@ -32,6 +32,12 @@ import { addOfflineCommentUpdateAsync, OfflineCommentUpdate } from "./offlineSyn
 import { setCommentDraft } from "./commentDraftStore";
 import { isRemoteCommitUnknownError } from "./ticketSync/ticketSyncResult";
 import { containsConflictMarkers } from "../utils/threeWayMerge";
+import {
+  extractCommentBody,
+  invalidCommentUpdateMetadataMessage,
+  isCommentUpdateDocument,
+  parseCommentUpdateFile,
+} from "./commentUpdateFile";
 
 export interface CommentSaveDependencies {
   addComment: typeof addComment;
@@ -334,7 +340,7 @@ export const finalizeNewCommentDraftState = (input: {
   ensureCommentEdit(
     input.commentId,
     input.ticketId,
-    input.editor.document.getText(),
+    extractCommentBody(input.editor.document.getText()),
     undefined,
     input.operationScope,
   );
@@ -358,7 +364,7 @@ export const finalizeNewCommentDraftDocument = (input: {
   ensureCommentEdit(
     input.commentId,
     input.ticketId,
-    input.body ?? input.document.getText(),
+    input.body ?? extractCommentBody(input.document.getText()),
     undefined,
     input.operationScope,
   );
@@ -530,9 +536,19 @@ export const saveCommentDraftLocally = async (
   if (contentType !== "comment" && contentType !== "commentDraft") { return undefined; }
   const ticketId = getTicketIdForEditor(editor);
   if (!ticketId) { return undefined; }
-  const body = editor.document.getText();
-  setCommentDraft(ticketId, body, operationScope);
+  const documentContent = editor.document.getText();
+  const parsedCommentUpdate = parseCommentUpdateFile(documentContent);
   const commentId = getCommentIdForEditor(editor);
+  if (
+    (!parsedCommentUpdate && isCommentUpdateDocument(documentContent, editor.document.uri.path)) ||
+    (parsedCommentUpdate &&
+      (parsedCommentUpdate.fields.issueId !== ticketId ||
+        (commentId !== undefined && parsedCommentUpdate.fields.journalId !== commentId)))
+  ) {
+    return buildResult("failed", invalidCommentUpdateMetadataMessage());
+  }
+  const body = parsedCommentUpdate?.body ?? documentContent;
+  setCommentDraft(ticketId, body, operationScope);
   const edit = commentId === undefined
     ? undefined
     : getCommentEdit(commentId, operationScope);
@@ -542,6 +558,8 @@ export const saveCommentDraftLocally = async (
     baseBody: edit?.baseBody,
     lastKnownRemoteUpdatedAt: edit?.lastKnownRemoteUpdatedAt,
     body,
+    sourceNotesHash: parsedCommentUpdate?.fields.sourceNotesHash,
+    baseDir: resolveEditorBaseDir({ editor }),
     documentUri: editor.document.uri.toString(),
     finalizeDraft: contentType === "commentDraft",
   }, operationScope);
@@ -555,10 +573,23 @@ export const saveCommentDocumentLocally = async (input: {
   content: string;
   documentUri: vscode.Uri;
 }): Promise<CommentSaveResult> => {
+  const parsedCommentUpdate = parseCommentUpdateFile(input.content);
+  if (
+    (!parsedCommentUpdate && isCommentUpdateDocument(input.content, input.documentUri.path)) ||
+    (parsedCommentUpdate &&
+      (parsedCommentUpdate.fields.issueId !== input.ticketId ||
+        (input.commentId !== undefined &&
+          parsedCommentUpdate.fields.journalId !== input.commentId)))
+  ) {
+    return buildResult("failed", invalidCommentUpdateMetadataMessage());
+  }
+  const body = parsedCommentUpdate?.body ?? input.content;
   await addOfflineCommentUpdateAsync({
     ticketId: input.ticketId,
     commentId: input.commentId,
-    body: input.content,
+    body,
+    sourceNotesHash: parsedCommentUpdate?.fields.sourceNotesHash,
+    baseDir: resolveEditorBaseDir({ documentUri: input.documentUri }),
     documentUri: input.documentUri.toString(),
   }, input.operationScope);
   return buildResult("queued", vscode.l10n.t("Saved locally. Run a sync command to apply changes to Redmine."));

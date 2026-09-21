@@ -38,10 +38,20 @@ suite("Dashboard Webview 改善", () => {
     assert.ok(!dashboardWebviewScript.includes("Latest comments"));
   });
 
+  test("Dashboard 全体更新であることを Refresh 表示に明示する", () => {
+    const strings = buildDashboardStrings();
+    const html = buildDashboardHtml("nonce", strings);
+    assert.ok(strings.refresh);
+    assert.ok(html.includes('id="refresh-btn"'));
+    assert.ok(html.includes(strings.refresh));
+    assert.ok(dashboardWebviewScript.includes("data-ticket-action=\"refresh\""));
+  });
+
   test("開始日と日付ピッカー視認性のスタイルを持つ", () => {
     assert.ok(dashboardWebviewScript.includes("STRINGS.startDate"));
     assert.ok(buildDashboardStrings().startDate);
-    assert.ok(dashboardWebviewScript.includes('data-metadata-field="start_date"'));
+    assert.ok(dashboardWebviewScript.includes("['start_date',STRINGS.startDate]"));
+    assert.ok(dashboardWebviewScript.includes("data-metadata-field=\"'+field[0]+'\""));
     assert.ok(dashboardStyles.includes('detail-input[type="date"]::-webkit-calendar-picker-indicator'));
     assert.ok(dashboardStyles.includes("body.vscode-high-contrast"));
   });

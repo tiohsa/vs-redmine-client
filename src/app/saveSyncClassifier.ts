@@ -19,12 +19,14 @@ import {
   parseNewCommentDraftFilename,
 } from "../views/editorFilename";
 import {
-  isCommentUpdateFilename,
+  hasCommentUpdateMetadataMarkers,
+  parseCommentUpdateFilename,
   parseCommentUpdateFile,
 } from "../views/commentUpdateFile";
 
 export type SaveSyncClassification =
   | { kind: "commentUpdateFile"; parsed: NonNullable<ReturnType<typeof parseCommentUpdateFile>> }
+  | { kind: "invalidCommentUpdateFile" }
   | { kind: "localComment"; ticketId: number; commentId: number }
   | { kind: "newTicketDraftContent"; projectId?: number }
   | { kind: "existingTicket"; ticketId: number }
@@ -43,14 +45,38 @@ export const classifyDocumentSave = (
 ): SaveSyncClassification => {
   const filename = path.basename(document.uri.path);
 
-  if (isCommentUpdateFilename(filename)) {
+  const commentUpdateIdentity = parseCommentUpdateFilename(filename);
+  if (commentUpdateIdentity) {
     const parsed = parseCommentUpdateFile(document.getText());
-    return parsed ? { kind: "commentUpdateFile", parsed } : { kind: "none" };
+    return parsed &&
+      parsed.fields.issueId === commentUpdateIdentity.issueId &&
+      parsed.fields.journalId === commentUpdateIdentity.journalId
+      ? { kind: "commentUpdateFile", parsed }
+      : { kind: "invalidCommentUpdateFile" };
   }
-  if (parseNewCommentDraftFilename(filename)) {
-    const finalizedDraft = parseCommentUpdateFile(document.getText());
+  const newCommentDraftTicketId = parseNewCommentDraftFilename(filename);
+  if (newCommentDraftTicketId) {
+    const content = document.getText();
+    const finalizedDraft = parseCommentUpdateFile(content);
+    const expectedCommentId =
+      getCommentIdForDocument(document) ??
+      getCommentIdForUri(document.uri) ??
+      getCommentIdForDraftUri(newCommentDraftTicketId, document.uri.toString());
     if (finalizedDraft) {
+      if (
+        finalizedDraft.fields.issueId !== newCommentDraftTicketId ||
+        (expectedCommentId !== undefined &&
+          finalizedDraft.fields.journalId !== expectedCommentId)
+      ) {
+        return { kind: "invalidCommentUpdateFile" };
+      }
       return { kind: "commentUpdateFile", parsed: finalizedDraft };
+    }
+    if (
+      expectedCommentId !== undefined ||
+      hasCommentUpdateMetadataMarkers(content)
+    ) {
+      return { kind: "invalidCommentUpdateFile" };
     }
   }
 
@@ -96,7 +122,7 @@ export const classifyDocumentSave = (
     };
   }
 
-  const draftTicketId = parseNewCommentDraftFilename(filename);
+  const draftTicketId = newCommentDraftTicketId;
   if (draftTicketId) {
     const existingCommentId =
       getCommentIdForDocument(document) ??

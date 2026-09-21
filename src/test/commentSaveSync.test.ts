@@ -7,15 +7,140 @@ import {
 } from "../views/commentEditStore";
 import {
   reloadCommentEditor,
+  saveCommentDocumentLocally,
+  saveCommentDraftLocally,
   syncCommentDraft,
   syncNewCommentDraft,
 } from "../views/commentSaveSync";
 import { createEditorStub } from "./helpers/editorStubs";
 import * as vscode from "vscode";
+import { getOfflineSyncQueue, initializeOfflineSyncStore } from "../views/offlineSyncStore";
+import { createTestMemento } from "./helpers/vscodeMemento";
+import { clearRegistry, registerCommentDocument, registerTicketDocument } from "../views/ticketEditorRegistry";
+import { buildCommentUpdateFileContent } from "../views/commentUpdateFile";
+import { computeNotesHash } from "../utils/notesHash";
 
 suite("Comment save sync", () => {
+  const scope = "https://comment-save.example.org/";
+
+  setup(() => {
+    initializeOfflineSyncStore(createTestMemento(), scope);
+  });
+
   teardown(() => {
     clearCommentEdits();
+    clearRegistry();
+  });
+
+  test("ローカルコメント保存時に画像解決用のbaseDirをキューへ保持する", async () => {
+    const documentUri = vscode.Uri.file("/workspace/comments/comment.md");
+    const editor = createEditorStub(documentUri, "![image](image-1.png)");
+    registerTicketDocument(10, editor.document, "commentDraft", undefined, scope);
+
+    const result = await saveCommentDraftLocally(editor, scope);
+
+    assert.strictEqual(result?.status, "queued");
+    assert.strictEqual(getOfflineSyncQueue(scope).comments[0]?.baseDir, "/workspace/comments");
+  });
+
+  test("コメント更新ファイルの保存ではフロントマターをキュー本文に含めない", async () => {
+    const documentUri = vscode.Uri.file("/workspace/comments/redmine-client-comment-update-10-20.md");
+    const editor = createEditorStub(
+      documentUri,
+      buildCommentUpdateFileContent(
+        { issueId: 10, journalId: 20, sourceNotesHash: computeNotesHash("本文") },
+        "本文",
+      ),
+    );
+    registerCommentDocument(10, 20, editor.document, undefined, scope);
+
+    const result = await saveCommentDraftLocally(editor, scope);
+
+    assert.strictEqual(result?.status, "queued");
+    assert.strictEqual(getOfflineSyncQueue(scope).comments[0]?.body, "本文");
+    assert.strictEqual(
+      getOfflineSyncQueue(scope).comments[0]?.sourceNotesHash,
+      computeNotesHash("本文"),
+    );
+  });
+
+  test("ドキュメント経由のローカルコメント保存でもbaseDirを保持する", async () => {
+    const documentUri = vscode.Uri.file("/workspace/comments/comment.md");
+
+    await saveCommentDocumentLocally({
+      operationScope: scope,
+      ticketId: 11,
+      content: "![image](image-1.png)",
+      documentUri,
+    });
+
+    assert.strictEqual(getOfflineSyncQueue(scope).comments[0]?.baseDir, "/workspace/comments");
+  });
+
+  test("壊れたcomment-update metadataはキューへ登録しない", async () => {
+    const documentUri = vscode.Uri.file("/workspace/comments/redmine-client-comment-update-10-20.md");
+    const result = await saveCommentDocumentLocally({
+      operationScope: scope,
+      ticketId: 10,
+      commentId: 20,
+      content: "---\nmode: comment-update\nissue_id: 10\njournal_id: 20\n---\n\n修正本文",
+      documentUri,
+    });
+
+    assert.strictEqual(result.status, "failed");
+    assert.match(result.message, /metadata is invalid/i);
+    assert.strictEqual(getOfflineSyncQueue(scope).comments.length, 0);
+  });
+
+  test("registryとcomment-update identityが不一致ならキューへ登録しない", async () => {
+    const documentUri = vscode.Uri.file("/workspace/comments/redmine-client-comment-update-10-20.md");
+    const editor = createEditorStub(
+      documentUri,
+      buildCommentUpdateFileContent(
+        { issueId: 10, journalId: 21, sourceNotesHash: computeNotesHash("修正本文") },
+        "修正本文",
+      ),
+    );
+    registerCommentDocument(10, 20, editor.document, undefined, scope);
+
+    const result = await saveCommentDraftLocally(editor, scope);
+
+    assert.strictEqual(result?.status, "failed");
+    assert.strictEqual(getOfflineSyncQueue(scope).comments.length, 0);
+  });
+
+  test("expected ticketIdとcomment-update issue_idが不一致ならキューへ登録しない", async () => {
+    const documentUri = vscode.Uri.file("/workspace/comments/comment.md");
+    const result = await saveCommentDocumentLocally({
+      operationScope: scope,
+      ticketId: 10,
+      commentId: 20,
+      content: buildCommentUpdateFileContent(
+        { issueId: 99, journalId: 20, sourceNotesHash: computeNotesHash("修正本文") },
+        "修正本文",
+      ),
+      documentUri,
+    });
+
+    assert.strictEqual(result.status, "failed");
+    assert.strictEqual(getOfflineSyncQueue(scope).comments.length, 0);
+  });
+
+  test("expected commentIdとcomment-update journal_idが不一致ならキューへ登録しない", async () => {
+    const documentUri = vscode.Uri.file("/workspace/comments/comment.md");
+    const result = await saveCommentDocumentLocally({
+      operationScope: scope,
+      ticketId: 10,
+      commentId: 20,
+      content: buildCommentUpdateFileContent(
+        { issueId: 10, journalId: 21, sourceNotesHash: computeNotesHash("修正本文") },
+        "修正本文",
+      ),
+      documentUri,
+    });
+
+    assert.strictEqual(result.status, "failed");
+    assert.strictEqual(getOfflineSyncQueue(scope).comments.length, 0);
   });
 
   test("returns no_change when content matches base", async () => {

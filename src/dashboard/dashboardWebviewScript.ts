@@ -15,6 +15,8 @@ let activeTicketActionAnchorTop = null;
 let newTicketPopoverAnchor = null;
 let composerDraftKey = null;
 let composerDraftValues = null;
+let metadataEdit = null;
+const ticketSyncRequests = new Map();
 const expandedTicketIds = new Set();
 const collapsedTicketIds = new Set();
 const activeSyncRequests = new Set();
@@ -23,7 +25,18 @@ const COMPOSER_POPOVER_MARGIN = 8;
 
 function esc(value){ return String(value ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
 function send(message){ vscode.postMessage(message); }
-function req(type, extra){ const requestId='req-'+(++requestCounter); if(type === 'unsynced.syncOne' || type === 'unsynced.syncAll') unsyncedFeedbackRequests.add(requestId); send(Object.assign({type:type,requestId:requestId}, extra || {})); }
+function req(type, extra){
+  const requestId='req-'+(++requestCounter);
+  if(type === 'unsynced.syncOne' || type === 'unsynced.syncAll') unsyncedFeedbackRequests.add(requestId);
+  if(type === 'ticket.syncSelected'){
+    if(activeSyncRequests.size || state?.selectedTicket?.syncState === 'Syncing' || metadataEdit?.requestId) return;
+    ticketSyncRequests.set(requestId,extra.ticketId);
+    activeSyncRequests.add(requestId);
+    updateSyncButtonStates();
+  }
+  send(Object.assign({type:type,requestId:requestId}, extra || {}));
+  return requestId;
+}
 function isElement(value){ return !!value && typeof value.closest === 'function'; }
 function clamp(value, min, max){ return Math.min(Math.max(value, min), max); }
 function safeJson(value){ try { return esc(JSON.stringify(value)); } catch { return ''; } }
@@ -75,6 +88,19 @@ function showToast(level, message){
 function updateSyncButtonStates(){
   const busy = activeSyncRequests.size > 0;
   document.querySelectorAll('[data-sync-key],[data-discard-key],[data-sync-comment-key]').forEach(function(button){ button.disabled = busy; });
+  const detailSync = document.getElementById('detail-sync-btn');
+  const selectedSyncing = state?.selectedTicket?.syncState === 'Syncing' || Array.from(ticketSyncRequests.values()).includes(state?.selectedTicket?.id);
+  if(detailSync){
+    detailSync.disabled = busy || selectedSyncing || !!metadataEdit?.requestId;
+    detailSync.setAttribute('aria-busy',String(selectedSyncing));
+    detailSync.querySelector('span').textContent = selectedSyncing ? STRINGS.syncSyncing : STRINGS.syncToRedmine;
+  }
+  const detailState=document.getElementById('detail-sync-state');
+  if(detailState && state?.selectedTicket){
+    const value=selectedSyncing ? 'Syncing' : state.selectedTicket.syncState;
+    detailState.className='detail-sync-state '+syncBadgeClass(value);
+    detailState.textContent=syncLabel(value);
+  }
   const syncAll = document.getElementById('sync-all-btn');
   if(syncAll){ syncAll.disabled = busy; syncAll.setAttribute('aria-busy', String(busy)); }
 }
@@ -83,7 +109,13 @@ function startOperation(requestId, label){
   if(unsyncedFeedbackRequests.has(requestId)) setOperationFeedback('info', label || STRINGS.syncSyncing);
   updateSyncButtonStates();
 }
-function endOperation(requestId){ activeSyncRequests.delete(requestId); updateSyncButtonStates(); }
+function endOperation(requestId){ ticketSyncRequests.delete(requestId); activeSyncRequests.delete(requestId); updateSyncButtonStates(); }
+function finishMetadataOperation(requestId, succeeded){
+  if(metadataEdit?.requestId !== requestId) return;
+  if(succeeded) metadataEdit=null; else metadataEdit.requestId=null;
+  renderTicketDetail();
+  document.getElementById(succeeded ? 'metadata-edit-btn' : 'metadata-apply-btn')?.focus();
+}
 function finishOperation(level, requestId, message){ if(unsyncedFeedbackRequests.delete(requestId)) setOperationFeedback(level, message); }
 
 // ── Tabs ───────────────────────────────────────────────────────────────────
@@ -152,6 +184,13 @@ function syncLabel(value){ return SYNC_META[value] ? SYNC_META[value].label : va
 function syncBadgeClass(value){ return SYNC_META[value] ? SYNC_META[value].badge : ''; }
 function badge(label, className, icon){
   return '<span class="badge '+(className || '')+'"><span class="badge-icon" aria-hidden="true">'+esc(icon || '•')+'</span><span>'+esc(label)+'</span></span>';
+}
+function metadataBadge(label, className, category){
+  return label ? '<span class="badge ticket-metadata '+className+'" title="'+esc(category+': '+label)+'" aria-label="'+esc(category+': '+label)+'">'+esc(label)+'</span>' : '';
+}
+function actionIcon(name){
+  const paths={browser:'M14 3h7v7M21 3 10 14M10 3H3v18h18v-7',cancel:'M6 6l12 12M18 6 6 18',open:'M3 7V5h6l2 3h10v12H3V7Z',comment:'M4 4h16v13H9l-5 4V4Z',sync:'M20 8a8 8 0 0 0-14-2L3 9m0-6v6h6M4 16a8 8 0 0 0 14 2l3-3m0 6v-6h-6'};
+  return '<svg class="action-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="'+paths[name]+'"/></svg>';
 }
 function syncBadge(value){
   const meta = SYNC_META[value];
@@ -246,6 +285,7 @@ function runTicketAction(action,ticketId){
   else if(action === 'comment') req('comment.add',{ticketId:ticketId});
   else if(action === 'browser') req('ticket.openBrowser',{ticketId:ticketId});
   else if(action === 'child') req('ticket.createChild',{parentTicketId:ticketId});
+  else if(action === 'refresh') req('dashboard.refresh');
 }
 document.addEventListener('click', function(event){ if(!isElement(event.target) || !event.target.closest('.ticket-action-menu,.ticket-action-btn')) closeTicketActionMenus(); });
 document.addEventListener('keydown', function(event){
@@ -278,11 +318,12 @@ function renderTicketRow(ticket){
   const sync = ticket.syncState && ticket.syncState !== 'Synced' && ticket.syncState !== 'Draft' ? syncBadge(ticket.syncState) : '';
   const status = state.settings && state.settings.showStatus !== false && ticket.statusName ? badge(ticket.statusName,'ticket-status','•') : '';
   const due = dueBadge(ticket);
-  const actionItems = [['open',STRINGS.openInEditor],['comment',STRINGS.addCommentAction],['browser',STRINGS.openInBrowser],['child',STRINGS.createChildTicket]].map(function(item){ return '<button type="button" role="menuitem" data-ticket-action="'+item[0]+'" data-ticket="'+ticket.id+'">'+esc(item[1])+'</button>'; }).join('');
+  const metadata = metadataBadge(ticket.trackerName,'ticket-tracker',STRINGS.sortTracker)+metadataBadge(ticket.priorityName,'ticket-priority',STRINGS.sortPriority);
+  const actionItems = [['open',STRINGS.openInEditor],['comment',STRINGS.addCommentAction],['browser',STRINGS.openInBrowser],['child',STRINGS.createChildTicket],['refresh',STRINGS.refresh]].map(function(item){ return '<button type="button" role="menuitem" data-ticket-action="'+item[0]+'" data-ticket="'+ticket.id+'">'+esc(item[1])+'</button>'; }).join('');
   const actionMenu = '<span class="ticket-actions"><button class="ticket-action-btn" type="button" data-ticket-action-menu="'+ticket.id+'" aria-haspopup="menu" aria-expanded="false" aria-controls="ticket-action-menu-'+ticket.id+'" aria-label="'+esc(STRINGS.ticketActionMenu)+'" title="'+esc(STRINGS.ticketActionMenu)+'"><span class="icon-more" aria-hidden="true">•••</span></button><span class="ticket-action-menu hidden" id="ticket-action-menu-'+ticket.id+'" role="menu">'+actionItems+'</span></span>';
   const expand = hasChildren ? '<button class="expand-btn" type="button" data-expand="'+ticket.id+'" aria-expanded="'+expanded+'" aria-label="'+esc(expanded ? STRINGS.collapseTitle : STRINGS.expandTitle)+'" title="'+esc(expanded ? STRINGS.collapseTitle : STRINGS.expandTitle)+'"><span class="expand-icon '+(expanded?'expanded':'collapsed')+'" aria-hidden="true"></span></button>' : '<span class="expand-placeholder" aria-hidden="true"></span>';
   const assignee = hasAssignee(ticket.assigneeName) ? avatar(ticket.assigneeName,'ticket-avatar') : '';
-  return '<div class="ticket-row'+(ticket.level > 0 ? ' child-row' : '')+(selected ? ' selected' : '')+'" data-id="'+ticket.id+'" role="listitem" aria-current="'+selected+'" tabindex="0" data-level="'+esc(ticket.level || 0)+'">'+expand+'<span class="ticket-id">#'+ticket.id+'</span><span class="ticket-subject" title="'+esc(ticket.subject)+'">'+esc(ticket.subject)+'</span><span class="badges">'+status+due+sync+'</span>'+assignee+actionMenu+'</div>';
+  return '<div class="ticket-row'+(ticket.level > 0 ? ' child-row' : '')+(selected ? ' selected' : '')+'" data-id="'+ticket.id+'" role="listitem" aria-current="'+selected+'" tabindex="0" data-level="'+esc(ticket.level || 0)+'">'+expand+'<span class="ticket-id">#'+ticket.id+'</span><span class="ticket-subject" title="'+esc(ticket.subject)+'">'+esc(ticket.subject)+'</span><span class="badges">'+metadata+status+due+sync+'</span>'+assignee+actionMenu+'</div>';
 }
 function isTicketActionTarget(target){ return isElement(target) && !!target.closest('.ticket-action-btn,.ticket-action-menu,.expand-btn'); }
 function renderTickets(){
@@ -291,6 +332,8 @@ function renderTickets(){
   const focus=captureFocus(list);
   list.setAttribute('aria-busy',String(state.loading.tickets));
   const more = document.getElementById('load-more-row');
+  const count = document.getElementById('ticket-count');
+  count.textContent = '';
   if(state.errors.tickets && !state.loading.tickets){
     list.innerHTML='<div class="state-msg error-msg" role="alert"><strong>'+esc(STRINGS.errorLabel)+'</strong><p>'+esc(state.errors.tickets)+'</p><button id="retry-tickets" class="btn btn-secondary" type="button">'+esc(STRINGS.retry)+'</button></div>';
     list.querySelector('#retry-tickets').addEventListener('click',function(){ if(!state.selectedProject && searchQuery) req('tickets.searchAllProjects',{query:searchInput.value}); else req('dashboard.refresh'); });
@@ -299,6 +342,7 @@ function renderTickets(){
   if(!state.selectedProject && !state.tickets.length && !state.loading.tickets && !searchQuery){ list.innerHTML='<div class="state-msg">'+STRINGS.noProjectSelected+'</div>'; more.classList.add('hidden'); updateSyncButtonStates(); return; }
   if(state.loading.tickets){ list.innerHTML='<div class="state-msg loading-state" role="status">'+esc(STRINGS.loadingTickets)+'</div>'; more.classList.add('hidden'); updateSyncButtonStates(); return; }
   const tickets = (searchQuery ? flattenAll(state.tickets) : flattenVisible(state.tickets)).filter(matchesSearch);
+  count.textContent = STRINGS.ticketCountLabel.replace('{0}', String(tickets.length));
   list.innerHTML = tickets.length ? tickets.map(renderTicketRow).join('') : '<div class="state-msg" role="status"><strong>'+esc(STRINGS.noTicketsFound)+'</strong><p>'+esc(STRINGS.searchEmptyHint)+'</p></div>';
   if(state.loadedTicketCount < state.totalTicketCount){ more.classList.remove('hidden'); more.textContent=STRINGS.loadMore+' ('+state.loadedTicketCount+' / '+state.totalTicketCount+')'; } else more.classList.add('hidden');
   list.querySelectorAll('.ticket-row').forEach(function(row){
@@ -331,23 +375,79 @@ function clearNewTicketComposerPosition(card){ card.classList.remove('composer-p
 function renderSelect(name,value,options,label,disabled,allowBlank){
   const current=value || ''; const list=options || []; const disabledAttribute=disabled ? ' disabled' : '';
   const blank=allowBlank ? '<option value=""'+(!current?' selected':'')+'>'+esc(STRINGS.assigneeUnassigned)+'</option>' : '';
+  const currentOption=current && !list.some(function(option){ return option.name === current; }) ? '<option value="'+esc(current)+'" selected>'+esc(current)+'</option>' : '';
   const optionsHtml=list.map(function(option){ return '<option value="'+esc(option.name)+'"'+(option.name===current?' selected':'')+'>'+esc(option.name)+'</option>'; }).join('');
-  return '<label class="detail-field"><span>'+esc(label)+'</span><select class="detail-select" data-metadata-field="'+name+'"'+disabledAttribute+'>'+blank+optionsHtml+'</select></label>';
+  return '<label class="detail-field"><span>'+esc(label)+'</span><select class="detail-select" data-metadata-field="'+name+'"'+disabledAttribute+'>'+blank+currentOption+optionsHtml+'</select></label>';
 }
 function editOptionsFor(ticketId){ const options=state && state.editOptions; return options && options.ticketId === ticketId ? options : null; }
 function metadataOptionsReady(){ return !!(state && state.metadataOptions && state.metadataOptions.trackers.length && state.metadataOptions.priorities.length && state.metadataOptions.statuses.length); }
+function ticketMetadataValues(ticket){
+  return {tracker:ticket.trackerName || '',priority:ticket.priorityName || '',status:ticket.statusName || '',assignee:ticket.assigneeName || '',start_date:ticket.startDate || '',due_date:ticket.dueDate || ''};
+}
+function metadataPatch(){
+  const patch={};
+  if(metadataEdit) Object.keys(metadataEdit.values).forEach(function(field){ if(metadataEdit.values[field] !== metadataEdit.original[field]) patch[field]=metadataEdit.values[field]; });
+  return patch;
+}
 function renderTicketDetailPanel(ticket){
-  const card=document.getElementById('ticket-detail-card'); const node=findTicket(state.tickets,ticket.id) || {}; const options=editOptionsFor(ticket.id); const ready=!!options && !options.loading; const trackerOptions=options ? options.trackers : (state.metadataOptions.trackers || []); const priorityOptions=options ? options.priorities : (state.metadataOptions.priorities || []); const statusOptions=options ? options.statuses : (state.metadataOptions.statuses || []); const assigneeOptions=options ? options.assignees : []; const syncIsPrimary=ticket.syncState !== 'Synced';
+  const card=document.getElementById('ticket-detail-card');
+  const options=editOptionsFor(ticket.id);
+  const ready=!!options && !options.loading && !options.error;
+  const editing=metadataEdit?.ticketId === ticket.id;
+  const pending=editing && !!metadataEdit.requestId;
+  const values=editing ? metadataEdit.values : ticketMetadataValues(ticket);
+  const canEdit=ready || (!options && metadataOptionsReady());
+  const lists=options || state.metadataOptions;
+  const fields=[['tracker',STRINGS.sortTracker],['priority',STRINGS.sortPriority],['status',STRINGS.sortStatus],['assignee',STRINGS.sortAssignee],['start_date',STRINGS.startDate],['due_date',STRINGS.dueDateLabel]];
   clearNewTicketComposerPosition(card); card.classList.remove('hidden'); card.removeAttribute('aria-busy');
-  const description=ticket.description ? '<div class="detail-description'+(ticketDetailExpanded ? '' : ' detail-description-collapsed')+'">'+esc(ticket.description)+'</div>' : '';
+  const description=ticket.description ? '<div class="detail-description'+(ticketDetailExpanded ? '' : ' detail-description-collapsed')+'">'+esc(ticket.description)+'</div>' : '<p class="detail-hint">'+esc(STRINGS.noDescription)+'</p>';
+  const warning=['Draft','Dirty','Queued','Syncing','Conflict','Failed'].includes(ticket.syncState) ? '<p class="detail-description-warning" role="note">'+esc(STRINGS.descriptionUnsyncedWarning)+'</p>' : '';
   const parent=ticket.parentId ? '<div class="detail-parent">#'+ticket.parentId+(ticket.parentSubject ? ' '+esc(ticket.parentSubject) : '')+'</div>' : '';
-  const statusHint=options && options.statusFallback ? '<div class="detail-readonly">'+STRINGS.statusFallbackHint+'</div>' : ''; const loadingHint=options && options.loading ? '<div class="detail-readonly">'+STRINGS.loadingEditOptions+'</div>' : ''; const errorHint=options && options.error ? '<div class="detail-readonly">'+esc(options.error)+'</div>' : '';
-  const expanded=ticketDetailExpanded ? '<div class="detail-expanded">'+renderSelect('tracker',ticket.trackerName || node.trackerName,trackerOptions,STRINGS.sortTracker,!ready && !metadataOptionsReady(),false)+renderSelect('priority',ticket.priorityName || node.priorityName,priorityOptions,STRINGS.sortPriority,!ready && !metadataOptionsReady(),false)+renderSelect('assignee',ticket.assigneeName || node.assigneeName,assigneeOptions,STRINGS.sortAssignee,!ready,true)+renderSelect('status',ticket.statusName || node.statusName,statusOptions,STRINGS.sortStatus,!ready && !metadataOptionsReady(),false)+'<label class="detail-field"><span>'+esc(STRINGS.startDate)+'</span><input class="detail-input" type="date" data-metadata-field="start_date" value="'+esc(ticket.startDate || node.startDate || '')+'"></label><label class="detail-field"><span>'+esc(STRINGS.dueDateLabel)+'</span><input class="detail-input" type="date" data-metadata-field="due_date" value="'+esc(ticket.dueDate || node.dueDate || '')+'"></label><div class="detail-meta"><span>'+esc(STRINGS.sectionSync)+'</span><strong>'+esc(syncLabel(ticket.syncState))+'</strong></div>'+loadingHint+errorHint+statusHint+'</div>' : '';
+  const statusHint=options?.statusFallback ? '<p class="detail-hint">'+esc(STRINGS.statusFallbackHint)+'</p>' : '';
+  const loadingHint=options?.loading ? '<p class="detail-hint">'+esc(STRINGS.loadingEditOptions)+'</p>' : '';
+  const errorHint=options?.error ? '<p class="detail-hint" role="alert">'+esc(options.error)+'</p>' : '';
+  const metadataFields=editing
+    ? renderSelect('tracker',values.tracker,lists.trackers,STRINGS.sortTracker,pending || !canEdit,false)
+      +renderSelect('priority',values.priority,lists.priorities,STRINGS.sortPriority,pending || !canEdit,false)
+      +renderSelect('status',values.status,lists.statuses,STRINGS.sortStatus,pending || !canEdit,false)
+      +renderSelect('assignee',values.assignee,options?.assignees || [],STRINGS.sortAssignee,pending || !ready,true)
+      +fields.slice(4).map(function(field){ return '<label class="detail-field"><span>'+esc(field[1])+'</span><input class="detail-input" type="date" data-metadata-field="'+field[0]+'" value="'+esc(values[field[0]])+'"'+(pending?' disabled':'')+'></label>'; }).join('')
+    : fields.map(function(field){ const value=values[field[0]] || (field[0] === 'assignee' ? STRINGS.assigneeUnassigned : STRINGS.notSet); return '<div class="detail-meta"><span>'+esc(field[1])+'</span><strong>'+esc(value)+'</strong></div>'; }).join('');
+  const metadata=ticketDetailExpanded ? '<section class="detail-section detail-expanded" aria-labelledby="metadata-heading"><div class="detail-section-head"><h3 id="metadata-heading">'+esc(STRINGS.ticketMetadata)+'</h3>'+(editing ? '' : '<button id="metadata-edit-btn" class="btn btn-secondary" type="button"'+(!canEdit?' disabled':'')+'>'+esc(STRINGS.editMetadata)+'</button>')+'</div><div class="detail-metadata-grid">'+metadataFields+'</div>'+loadingHint+errorHint+statusHint+(editing ? '<p class="detail-hint">'+esc(STRINGS.metadataApplyHint)+'</p><div class="metadata-actions"><button id="metadata-apply-btn" class="btn btn-primary" type="button"'+(pending || !canEdit || !Object.keys(metadataPatch()).length?' disabled':'')+'>'+esc(pending ? STRINGS.applyingMetadata : STRINGS.applyMetadata)+'</button><button id="metadata-cancel-btn" class="btn btn-secondary" type="button"'+(pending?' disabled':'')+'>'+esc(STRINGS.cancelAction)+'</button></div>' : '')+'</section>' : '';
   const assigneeAvatar=hasAssignee(ticket.assigneeName) ? avatar(ticket.assigneeName,'detail-avatar') : '';
-  card.innerHTML='<div class="detail-head"><div class="detail-title"><span class="ticket-id">#'+ticket.id+'</span><span>'+esc(ticket.subject)+'</span></div><button class="btn btn-secondary detail-toggle" id="ticket-detail-toggle" type="button" title="'+esc(ticketDetailExpanded?STRINGS.closeDetail:STRINGS.openDetail)+'" aria-label="'+esc(ticketDetailExpanded?STRINGS.closeDetail:STRINGS.openDetail)+'" aria-expanded="'+ticketDetailExpanded+'">'+(ticketDetailExpanded?'⌃':'⌄')+'</button></div><div class="detail-project">'+(ticket.projectName ? esc(ticket.projectName) : esc(STRINGS.projectNone))+'</div>'+parent+assigneeAvatar+description+'<div class="detail-actions"><button class="btn btn-secondary" id="detail-cancel-btn" type="button">'+STRINGS.cancelAction+'</button><button class="btn btn-secondary" id="detail-open-btn" type="button">'+STRINGS.openTicketAction+'</button><button class="btn btn-secondary" id="detail-comment-btn" type="button">'+STRINGS.commentAction+'</button><button class="btn '+(syncIsPrimary?'btn-primary':'btn-secondary')+'" id="detail-sync-btn" type="button">'+STRINGS.syncAction+'</button></div>'+expanded;
-  card.querySelector('#ticket-detail-toggle').addEventListener('click',function(){ ticketDetailExpanded=!ticketDetailExpanded; renderTicketDetail(); });
-  card.querySelector('#detail-cancel-btn').addEventListener('click',function(){ req('ticket.cancelDetail'); }); card.querySelector('#detail-open-btn').addEventListener('click',function(){ req('ticket.openEditor',{ticketId:ticket.id}); }); card.querySelector('#detail-comment-btn').addEventListener('click',function(){ req('comment.add',{ticketId:ticket.id}); }); card.querySelector('#detail-sync-btn').addEventListener('click',function(){ req('ticket.syncSelected',{ticketId:ticket.id}); });
-  card.querySelectorAll('[data-metadata-field]').forEach(function(input){ input.addEventListener('change',function(){ const field=input.dataset.metadataField; const patch={}; patch[field]=input.value; req('ticket.metadata.update',{ticketId:ticket.id,patch:patch}); }); });
+  const menuId='detail-'+ticket.id;
+  const menu='<span class="ticket-actions"><button class="ticket-action-btn" type="button" data-ticket-action-menu="'+menuId+'" aria-haspopup="menu" aria-expanded="false" aria-controls="ticket-action-menu-'+menuId+'" aria-label="'+esc(STRINGS.ticketActionMenu)+'" title="'+esc(STRINGS.ticketActionMenu)+'">•••</button><span class="ticket-action-menu hidden" id="ticket-action-menu-'+menuId+'" role="menu"><button type="button" role="menuitem" data-ticket-action="child">'+esc(STRINGS.createChildTicket)+'</button><button type="button" role="menuitem" data-ticket-action="refresh">'+esc(STRINGS.refresh)+'</button></span></span>';
+  card.innerHTML='<div class="detail-head"><div class="detail-title"><span class="ticket-id">#'+ticket.id+'</span><span>'+esc(ticket.subject)+'</span></div><div class="detail-header-actions">'+menu+'<button class="btn btn-secondary detail-toggle" id="ticket-detail-toggle" type="button" title="'+esc(ticketDetailExpanded?STRINGS.closeDetail:STRINGS.openDetail)+'" aria-label="'+esc(ticketDetailExpanded?STRINGS.closeDetail:STRINGS.openDetail)+'" aria-expanded="'+ticketDetailExpanded+'">'+(ticketDetailExpanded?'⌃':'⌄')+'</button><button class="btn btn-secondary detail-toggle" id="detail-cancel-btn" type="button" title="'+esc(STRINGS.dismissDetail)+'" aria-label="'+esc(STRINGS.dismissDetail)+'">'+actionIcon('cancel')+'</button></div></div>'
+    +'<div class="detail-project">'+esc(ticket.projectName || STRINGS.projectNone)+assigneeAvatar+'</div>'+parent
+    +'<div class="detail-actions"><button class="btn btn-primary" id="detail-open-btn" type="button" title="'+esc(STRINGS.openTicketTooltip)+'" aria-label="'+esc(STRINGS.openTicketTooltip)+'">'+actionIcon('open')+'<span>'+esc(STRINGS.openTicketAction)+'</span></button><button class="btn btn-secondary detail-sync-button" id="detail-sync-btn" type="button" title="'+esc(STRINGS.syncTicketTooltip)+'" aria-label="'+esc(STRINGS.syncTicketTooltip)+'">'+actionIcon('sync')+'<span>'+esc(STRINGS.syncToRedmine)+'</span></button><button class="btn btn-secondary" id="detail-comment-btn" type="button">'+actionIcon('comment')+'<span>'+esc(STRINGS.commentAction)+'</span></button><button class="btn btn-secondary" id="detail-browser-btn" type="button">'+actionIcon('browser')+'<span>'+esc(STRINGS.openInBrowser)+'</span></button></div>'
+    +'<section class="detail-section" aria-labelledby="editor-state-heading"><h3 id="editor-state-heading">'+esc(STRINGS.editingState)+'</h3><div id="detail-sync-state" role="status" aria-live="polite"></div><p class="detail-hint">'+esc(STRINGS.editorSyncHint)+'</p></section>'
+    +metadata+'<section class="detail-section" aria-labelledby="description-heading"><h3 id="description-heading">'+esc(STRINGS.remoteDescription)+'</h3>'+warning+description+'</section>';
+  card.querySelector('#ticket-detail-toggle').addEventListener('click',function(){ ticketDetailExpanded=!ticketDetailExpanded; renderTicketDetail(); document.getElementById('ticket-detail-toggle').focus(); });
+  card.querySelector('#detail-cancel-btn').addEventListener('click',function(){ req('ticket.cancelDetail'); });
+  card.querySelector('#detail-open-btn').addEventListener('click',function(){ req('ticket.openEditor',{ticketId:ticket.id}); });
+  card.querySelector('#detail-comment-btn').addEventListener('click',function(){ req('comment.add',{ticketId:ticket.id}); });
+  card.querySelector('#detail-browser-btn').addEventListener('click',function(){ req('ticket.openBrowser',{ticketId:ticket.id}); });
+  card.querySelector('#detail-sync-btn').addEventListener('click',function(){ req('ticket.syncSelected',{ticketId:ticket.id}); });
+  card.querySelector('[data-ticket-action-menu]').addEventListener('click',function(){ toggleTicketActionMenu(menuId); });
+  card.querySelectorAll('[data-ticket-action]').forEach(function(button){ button.addEventListener('click',function(){ runTicketAction(button.dataset.ticketAction,ticket.id); }); });
+  card.querySelector('#metadata-edit-btn')?.addEventListener('click',function(){ const original=ticketMetadataValues(ticket); metadataEdit={ticketId:ticket.id,original:original,values:Object.assign({},original),requestId:null}; renderTicketDetail(); card.querySelector('[data-metadata-field]')?.focus(); });
+  card.querySelector('#metadata-cancel-btn')?.addEventListener('click',function(){ metadataEdit=null; renderTicketDetail(); document.getElementById('metadata-edit-btn')?.focus(); });
+  card.querySelector('#metadata-apply-btn')?.addEventListener('click',function(){
+    if(!metadataEdit || metadataEdit.requestId) return;
+    const patch=metadataPatch();
+    if(!Object.keys(patch).length) return;
+    metadataEdit.requestId=req('ticket.metadata.update',{ticketId:ticket.id,patch:patch});
+    renderTicketDetail();
+  });
+  card.querySelectorAll('[data-metadata-field]').forEach(function(input){
+    const stage=function(){
+      if(!metadataEdit || metadataEdit.requestId) return;
+      metadataEdit.values[input.dataset.metadataField]=input.value;
+      document.getElementById('metadata-apply-btn').disabled=!canEdit || !Object.keys(metadataPatch()).length;
+    };
+    input.addEventListener('input',stage); input.addEventListener('change',stage);
+  });
+  updateSyncButtonStates();
 }
 function renderComposerPanel(panel){
   const nextComposerDraftKey=[panel.mode,panel.projectId,panel.mode === 'childTicket' ? panel.parentTicketId : ''].join(':'); if(composerDraftKey !== nextComposerDraftKey){ composerDraftKey=nextComposerDraftKey; composerDraftValues=null; }
@@ -483,6 +583,10 @@ window.addEventListener('message',function(event){ const message=event.data || {
     const previous=state;
     const projectChanged=previous?.selectedProject?.id !== message.state.selectedProject?.id;
     if(projectChanged){ expandedTicketIds.clear(); collapsedTicketIds.clear(); }
+    const connectionChanged=previous?.settings?.baseUrl !== message.state.settings?.baseUrl;
+    const ticketChanged=previous?.selectedTicketId !== message.state.selectedTicketId;
+    const leavingDetail=message.state.workPanel && message.state.workPanel.mode !== 'detail';
+    if(projectChanged || connectionChanged || ticketChanged || leavingDetail || !message.state.selectedTicket) metadataEdit=null;
     const previousComposer=previous?.workPanel;
     state=message.state;
     const panel=state.workPanel;
@@ -491,6 +595,6 @@ window.addEventListener('message',function(event){ const message=event.data || {
     render();
     if(panel && panel.mode !== 'detail' && !panel.loading && (openingComposer || previousComposer?.loading)) document.getElementById('work-tracker')?.focus();
     if(previousComposer?.mode === 'newTicket' && (!panel || panel.mode === 'detail')) document.getElementById('new-ticket-btn').focus();
-  } else if(message.type === 'operation.started'){ startOperation(message.requestId,message.label); } else if(message.type === 'operation.success'){ endOperation(message.requestId); finishOperation('success',message.requestId,message.message); showToast('success',message.message); } else if(message.type === 'operation.error'){ endOperation(message.requestId); finishOperation('error',message.requestId,message.message); showToast('error',message.message); } else if(message.type === 'toast'){ showToast(message.level,message.message); } });
+  } else if(message.type === 'operation.started'){ startOperation(message.requestId,message.label); } else if(message.type === 'operation.success'){ endOperation(message.requestId); finishMetadataOperation(message.requestId,true); finishOperation('success',message.requestId,message.message); showToast('success',message.message); } else if(message.type === 'operation.error'){ endOperation(message.requestId); finishMetadataOperation(message.requestId,false); finishOperation('error',message.requestId,message.message); showToast('error',message.message); } else if(message.type === 'toast'){ showToast(message.level,message.message); } });
 req('dashboard.ready');
 `;

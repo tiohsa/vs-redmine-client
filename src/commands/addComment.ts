@@ -16,6 +16,12 @@ import {
 } from "../config/connectionScope";
 import type { CommentSaveDependencies } from "../views/commentSaveSync";
 import { commentSyncOutcomeMessage, queueAndSyncComment } from "../app/commentSyncService";
+import {
+  extractCommentBody,
+  invalidCommentUpdateMetadataMessage,
+  isCommentUpdateDocument,
+  parseCommentUpdateFile,
+} from "../views/commentUpdateFile";
 
 export interface AddCommentInput {
   issueId: number;
@@ -77,7 +83,13 @@ export const addCommentForIssue = async (
     return;
   }
 
-  const text = editor.document.getText();
+  const documentContent = editor.document.getText();
+  if (!parseCommentUpdateFile(documentContent) &&
+      isCommentUpdateDocument(documentContent, editor.document.uri.path)) {
+    deps.showError(invalidCommentUpdateMetadataMessage());
+    return;
+  }
+  const text = extractCommentBody(documentContent);
   deps.setCommentDraft(ticketId, text, operationScope);
   const validation = deps.validateComment(text);
   if (!validation.valid) {

@@ -55,7 +55,23 @@ export interface DashboardStrings {
   errorLabel: string;
   noTicketsFound: string;
   loadMore: string;
+  ticketCountLabel: string;
   // Ticket detail panel
+  openTicketTooltip: string;
+  syncToRedmine: string;
+  syncTicketTooltip: string;
+  editingState: string;
+  editorSyncHint: string;
+  remoteDescription: string;
+  descriptionUnsyncedWarning: string;
+  noDescription: string;
+  dismissDetail: string;
+  ticketMetadata: string;
+  editMetadata: string;
+  applyMetadata: string;
+  applyingMetadata: string;
+  metadataApplyHint: string;
+  notSet: string;
   closeDetail: string;
   openDetail: string;
   openTicketAction: string;
@@ -174,7 +190,7 @@ export const buildDashboardStrings = (): DashboardStrings => ({
   selectProjectPlaceholder: vscode.l10n.t("— Select project —"),
   selectProjectTitle: vscode.l10n.t("Select project"),
   includeChildren: vscode.l10n.t("Include children"),
-  refresh: vscode.l10n.t("Refresh"),
+  refresh: vscode.l10n.t("Refresh dashboard"),
   newTicket: vscode.l10n.t("New ticket"),
   // Tabs
   tabTickets: vscode.l10n.t("Tickets"),
@@ -185,11 +201,11 @@ export const buildDashboardStrings = (): DashboardStrings => ({
   searchPlaceholder: vscode.l10n.t("Search tickets…"),
   clearSearch: vscode.l10n.t("Clear search"),
   // Sync states
-  syncDirty: vscode.l10n.t("Unsynced"),
-  syncQueued: vscode.l10n.t("Queued"),
-  syncConflict: vscode.l10n.t("Conflict"),
-  syncFailed: vscode.l10n.t("Failed"),
-  syncSyncing: vscode.l10n.t("Syncing"),
+  syncDirty: vscode.l10n.t("Unsynced changes"),
+  syncQueued: vscode.l10n.t("Waiting to sync"),
+  syncConflict: vscode.l10n.t("Conflicting changes"),
+  syncFailed: vscode.l10n.t("Sync failed"),
+  syncSyncing: vscode.l10n.t("Syncing…"),
   syncReviewRequired: vscode.l10n.t("Review required"),
   // Due date badges
   dueOverdue: vscode.l10n.t("Overdue"),
@@ -200,7 +216,7 @@ export const buildDashboardStrings = (): DashboardStrings => ({
   expandTitle: vscode.l10n.t("Expand"),
   collapseTitle: vscode.l10n.t("Collapse"),
   ticketActionMenu: vscode.l10n.t("Ticket actions"),
-  openInEditor: vscode.l10n.t("Open in editor"),
+  openInEditor: vscode.l10n.t("Edit in VS Code"),
   addCommentAction: vscode.l10n.t("Add comment"),
   openInBrowser: vscode.l10n.t("Open in browser"),
   createChildTicket: vscode.l10n.t("Create child ticket"),
@@ -210,10 +226,26 @@ export const buildDashboardStrings = (): DashboardStrings => ({
   errorLabel: vscode.l10n.t("Error"),
   noTicketsFound: vscode.l10n.t("No tickets match the filter."),
   loadMore: vscode.l10n.t("Load more…"),
+  ticketCountLabel: vscode.l10n.t("Showing {0} tickets"),
   // Ticket detail panel
+  openTicketTooltip: vscode.l10n.t("Edit ticket Markdown in VS Code"),
+  syncToRedmine: vscode.l10n.t("Sync to Redmine"),
+  syncTicketTooltip: vscode.l10n.t("Sync VS Code editor changes to Redmine"),
+  editingState: vscode.l10n.t("Editing state"),
+  editorSyncHint: vscode.l10n.t("Edit Markdown in VS Code, then use “Sync to Redmine” to apply your changes."),
+  remoteDescription: vscode.l10n.t("Description (on Redmine)"),
+  descriptionUnsyncedWarning: vscode.l10n.t("Changes may not yet be reflected in the Redmine description below."),
+  noDescription: vscode.l10n.t("No description."),
+  dismissDetail: vscode.l10n.t("Dismiss ticket detail"),
+  ticketMetadata: vscode.l10n.t("Ticket information"),
+  editMetadata: vscode.l10n.t("Edit"),
+  applyMetadata: vscode.l10n.t("Apply changes"),
+  applyingMetadata: vscode.l10n.t("Applying…"),
+  metadataApplyHint: vscode.l10n.t("Apply changes to the local editor or draft, then sync to Redmine."),
+  notSet: vscode.l10n.t("Not set"),
   closeDetail: vscode.l10n.t("Close detail"),
   openDetail: vscode.l10n.t("Open detail"),
-  openTicketAction: vscode.l10n.t("Open"),
+  openTicketAction: vscode.l10n.t("Edit in VS Code"),
   commentAction: vscode.l10n.t("Comment"),
   syncAction: vscode.l10n.t("Sync"),
   statusFallbackHint: vscode.l10n.t("Status options using global fallback."),

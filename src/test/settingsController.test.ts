@@ -157,14 +157,15 @@ suite("SettingsController", () => {
     await ctrl.resetDisplaySettings();
 
     assert.deepStrictEqual(ctrl.getSettings(), DEFAULT_TICKET_LIST_SETTINGS);
+    const resetConfig = vscode.workspace.getConfiguration("redmine-client");
     for (const key of [
       "includeChildProjects",
       "ticketListLimit",
       "ticketList.showStatus",
       "ticketList.showDueDate",
     ]) {
-      const inspected = config.inspect<unknown>(key);
-      assert.strictEqual(config.get<unknown>(key), inspected?.defaultValue);
+      const inspected = resetConfig.inspect<unknown>(key);
+      assert.strictEqual(resetConfig.get<unknown>(key), inspected?.defaultValue);
     }
     for (const key of untouchedKeys) {
       assert.strictEqual(config.get<unknown>(key), untouchedValues.get(key));

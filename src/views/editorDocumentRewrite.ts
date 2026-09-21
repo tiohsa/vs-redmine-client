@@ -111,21 +111,26 @@ export const compareAndRewriteDocumentWithRegisteredFields = async (input: {
   const document = textDocuments.find((doc) => doc.uri.toString() === input.documentUri);
 
   if (document) {
+    // VS Code は挿入した本文を文書の改行形式へ変換する。保存済みの
+    // LF snapshot も同じ形式へ揃え、改行以外の変更は従来どおり拒否する。
+    const eol = document.eol === vscode.EndOfLine.CRLF ? "\r\n" : "\n";
+    const toDocumentEol = (content: string): string => content.replace(/\r?\n/g, eol);
+    const expectedContent = toDocumentEol(input.expected.content);
     let targetFromExpected: string;
     let targetFromCurrent: string;
     try {
-      targetFromExpected = buildRegisteredDocumentContent(
-        input.expected.content,
+      targetFromExpected = toDocumentEol(buildRegisteredDocumentContent(
+        expectedContent,
         input.ticketId,
         input.projectId,
         input.replacement,
-      );
-      targetFromCurrent = buildRegisteredDocumentContent(
+      ));
+      targetFromCurrent = toDocumentEol(buildRegisteredDocumentContent(
         document.getText(),
         input.ticketId,
         input.projectId,
         input.replacement,
-      );
+      ));
     } catch {
       return { kind: "write_failed" };
     }
@@ -139,10 +144,10 @@ export const compareAndRewriteDocumentWithRegisteredFields = async (input: {
       return { kind: "applied" };
     }
 
-    if (document.getText() !== input.expected.content) {
+    if (document.getText() !== expectedContent) {
       return { kind: "stale_source" };
     }
-    if (targetFromExpected === input.expected.content) {
+    if (targetFromExpected === expectedContent) {
       return { kind: "applied" };
     }
 
@@ -150,7 +155,7 @@ export const compareAndRewriteDocumentWithRegisteredFields = async (input: {
 
     suppressSaveSync(input.documentUri);
     try {
-      if (document.getText() !== input.expected.content) {
+      if (document.getText() !== expectedContent) {
         return { kind: "stale_source" };
       }
       const editor = textEditors.find(
@@ -163,7 +168,7 @@ export const compareAndRewriteDocumentWithRegisteredFields = async (input: {
       try {
         await applyEditorContent(editor, newContent);
       } catch {
-        return document.getText() === input.expected.content
+        return document.getText() === expectedContent
           ? { kind: "write_failed" }
           : { kind: "stale_source" };
       }

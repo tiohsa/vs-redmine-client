@@ -619,8 +619,8 @@ suite("R11 〜 R23: Invariant & Lifecycle Recovery Tests", () => {
     assert.strictEqual(outcome.kind, "failed_before_commit", "Scope mismatch で拒絶");
   });
 
-  // R19: Upload content changed (snapshot hash=A, file now hash=B -> upload call=0)
-  test("R19: Upload の retry 前にファイル内容が変更されていた場合 (hash不一致)、upload は呼ばれず拒絶される", async () => {
+  // R19: Frozen upload spool remains authoritative after the source file changes.
+  test("R19: Upload retry は変更後のsourceではなくfreeze済みspoolを再利用する", async () => {
     const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "r19-test-"));
     const imgPath = path.join(tmpDir, "upload_test.png");
     fs.writeFileSync(imgPath, "original content A");
@@ -640,11 +640,13 @@ suite("R11 〜 R23: Invariant & Lifecycle Recovery Tests", () => {
     }, SCOPE);
 
     let uploadCalls = 0;
+    let lastUploadPath: string | undefined;
     const engine = createSyncEngine({
       comments: {
         getCurrentUserId: async () => 1,
-        uploadFile: async () => {
+        uploadFile: async (filePath) => {
           uploadCalls++;
+          lastUploadPath = filePath;
           throw new Error("ETIMEDOUT");
         },
       },
@@ -675,8 +677,10 @@ suite("R11 〜 R23: Invariant & Lifecycle Recovery Tests", () => {
       resolution: { kind: "retry_effect" },
     });
 
-    assert.strictEqual(uploadCalls, callsBefore, "Upload call = 0 (hash不一致のためアップロードを実行しない)");
-    assert.strictEqual(retryOutcome.kind, "failed_before_commit", "hash mismatch により拒絶");
+    assert.strictEqual(uploadCalls, callsBefore + 1, "明示的retryではfreeze済みspoolを1回だけ再送すること");
+    assert.strictEqual(retryOutcome.kind, "commit_unknown", "spool uploadの結果不明はcommit_unknownになること");
+    assert.ok(lastUploadPath);
+    assert.strictEqual(fs.readFileSync(lastUploadPath!, "utf8"), "original content A", "source変更後もsnapshot bytesを送ること");
   });
 
   // R20: Upload content unchanged (snapshot hash=A, file hash=A -> allowed explicit retry, upload call=1)

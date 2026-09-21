@@ -17,6 +17,12 @@ import {
 } from "../config/connectionScope";
 import type { CommentSaveDependencies } from "../views/commentSaveSync";
 import { commentSyncOutcomeMessage, queueAndSyncComment } from "../app/commentSyncService";
+import {
+  extractCommentBody,
+  invalidCommentUpdateMetadataMessage,
+  isCommentUpdateDocument,
+  parseCommentUpdateFile,
+} from "../views/commentUpdateFile";
 
 export interface EditCommentDependencies {
   getActiveEditor: () => vscode.TextEditor | undefined;
@@ -78,7 +84,19 @@ export const editComment = async (
     return;
   }
 
-  const updated = editor.document.getText();
+  const documentContent = editor.document.getText();
+  const parsedCommentUpdate = parseCommentUpdateFile(documentContent);
+  if (
+    (!parsedCommentUpdate &&
+      isCommentUpdateDocument(documentContent, editor.document.uri.path)) ||
+    (parsedCommentUpdate &&
+      (parsedCommentUpdate.fields.issueId !== comment.ticketId ||
+        parsedCommentUpdate.fields.journalId !== comment.id))
+  ) {
+    deps.showError(invalidCommentUpdateMetadataMessage());
+    return;
+  }
+  const updated = extractCommentBody(documentContent);
   deps.setCommentDraft(ticketId, updated, operationScope);
   const validation = deps.validateComment(updated);
   if (!validation.valid) {

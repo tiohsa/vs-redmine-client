@@ -7,7 +7,10 @@ import {
   getOfflineSyncQueue,
   initializeOfflineSyncStore,
 } from "../views/offlineSyncStore";
-import { buildTicketEditorContent } from "../views/ticketEditorContent";
+import {
+  buildTicketEditorContent,
+  parseTicketEditorContent,
+} from "../views/ticketEditorContent";
 import { buildIssueMetadataFixture } from "./helpers/ticketMetadataFixtures";
 import { createTestMemento } from "./helpers/vscodeMemento";
 import { syncUnsyncedFile } from "../commands/syncUnsyncedFile";
@@ -617,6 +620,54 @@ suite("TicketSyncService durable lifecycle", () => {
       assert.strictEqual(pending.phase, "local_finalize_pending");
     });
   }
+
+  test("direct editor の新規チケット同期は元の本文を freshness source として保持する", async () => {
+    initializeOfflineSyncStore(createTestMemento(), SCOPE);
+    let currentContent = content;
+    const document = {
+      uri: vscode.Uri.parse(DOCUMENT_URI),
+      getText: () => currentContent,
+      isDirty: true,
+    } as unknown as vscode.TextDocument;
+    const editor = {
+      document,
+      edit: async (callback: (builder: vscode.TextEditorEdit) => void) => {
+        callback({
+          replace: (_range: vscode.Range, replacement: string) => {
+            currentContent = replacement;
+          },
+        } as vscode.TextEditorEdit);
+        return true;
+      },
+    } as unknown as vscode.TextEditor;
+
+    const service = new TicketSyncService({
+      create: {
+        ...metadataDeps,
+        createIssue: async () => 176,
+        getIssueDetail: async () => issueDetail(176),
+      },
+      rewrite: {
+        textDocuments: [document],
+        textEditors: [editor],
+        saveDocument: async () => true,
+      },
+    });
+
+    const outcome = await service.syncEditor({
+      context: { connectionScope: SCOPE },
+      editor,
+      ticketId: 0,
+      newTicket: true,
+      manual: false,
+      projectId: 12,
+    });
+
+    assert.strictEqual(outcome.kind, "completed");
+    const finalized = parseTicketEditorContent(currentContent);
+    assert.strictEqual(finalized.controlFields?.issue_id, 176);
+    assert.strictEqual(finalized.controlFields?.mode, "ticket-update");
+  });
 
   test("I-14 process restart 後も createdIssueId を復元し POST せず finalize する", async () => {
     const memento = createTestMemento();
