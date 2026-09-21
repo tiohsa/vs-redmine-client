@@ -224,14 +224,15 @@ const uploadMarkdownImageEffects = async (
 
   const uniquePaths = Array.from(new Set(filePaths));
   for (const filePath of uniquePaths) {
-    const effectId = `image:markdown:${filePath}`;
+    const canonicalEffectId = `image:markdown:${filePath}`;
     const operationSnapshot = repo.getOperation(opKey, context.connectionScope) ?? operation;
     if (getAttemptGeneration(operationSnapshot) !== attemptGeneration ||
         (operationSnapshot.intentRevision ?? operationSnapshot.revision ?? 1) !== revision) {
       return { ok: false, error: new Error(vscode.l10n.t("Markdown image operation is stale.")) };
     }
     const existingEffect = getEffectsForRevision(operationSnapshot, revision, attemptGeneration)
-      .find((effect) => effect.effectId === effectId || (effect.kind === "image_upload" && effect.target.filePath === filePath));
+      .find((effect) => effect.effectId === canonicalEffectId || (effect.kind === "image_upload" && effect.target.filePath === filePath));
+    const effectId = existingEffect?.effectId ?? canonicalEffectId;
 
     if (existingEffect?.state === "committed" && existingEffect.token) {
       const upload = getCommittedMarkdownImageUpload(existingEffect, filePath);
@@ -3698,10 +3699,11 @@ export class CommentCreateHandler implements OperationHandler<CommentCreateInten
     );
 
     for (const filePath of uniquePaths) {
-      const effectId = `image:markdown:${filePath}`;
+      const canonicalEffectId = `image:markdown:${filePath}`;
       const currentOp = repo.getOperation(opKey, context.connectionScope) ?? operation;
       const existingEffect = getEffectsForRevision(currentOp, revision)
-        .find((e) => e.effectId === effectId || (e.kind === "image_upload" && e.target.filePath === filePath));
+        .find((e) => e.effectId === canonicalEffectId || (e.kind === "image_upload" && e.target.filePath === filePath));
+      const effectId = existingEffect?.effectId ?? canonicalEffectId;
 
       if (existingEffect?.state === "committed" && existingEffect.token) {
         const upload = getCommittedMarkdownImageUpload(existingEffect, filePath);
@@ -3709,6 +3711,14 @@ export class CommentCreateHandler implements OperationHandler<CommentCreateInten
           resolvedMap.set(filePath, upload);
         }
         continue;
+      }
+
+      if (existingEffect && existingEffect.state !== "planned") {
+        return {
+          ok: false,
+          error: new Error(`Markdown image effect ${effectId} requires explicit recovery.`),
+          commitUnknown: existingEffect.state === "commit_unknown" || existingEffect.state === "started",
+        };
       }
 
       let uploadFilePath: string;
@@ -4292,10 +4302,11 @@ export class CommentUpdateHandler implements OperationHandler<CommentUpdateInten
     );
 
     for (const filePath of uniquePaths) {
-      const effectId = `image:markdown:${filePath}`;
+      const canonicalEffectId = `image:markdown:${filePath}`;
       const currentOp = repo.getOperation(opKey, context.connectionScope) ?? operation;
       const existingEffect = getEffectsForRevision(currentOp, revision)
-        .find((e) => e.effectId === effectId || (e.kind === "image_upload" && e.target.filePath === filePath));
+        .find((e) => e.effectId === canonicalEffectId || (e.kind === "image_upload" && e.target.filePath === filePath));
+      const effectId = existingEffect?.effectId ?? canonicalEffectId;
 
       if (existingEffect?.state === "committed" && existingEffect.token) {
         const upload = getCommittedMarkdownImageUpload(existingEffect, filePath);
@@ -4303,6 +4314,14 @@ export class CommentUpdateHandler implements OperationHandler<CommentUpdateInten
           resolvedMap.set(filePath, upload);
         }
         continue;
+      }
+
+      if (existingEffect && existingEffect.state !== "planned") {
+        return {
+          ok: false,
+          error: new Error(`Markdown image effect ${effectId} requires explicit recovery.`),
+          commitUnknown: existingEffect.state === "commit_unknown" || existingEffect.state === "started",
+        };
       }
 
       let uploadFilePath: string;

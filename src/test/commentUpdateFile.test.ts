@@ -6,6 +6,7 @@ import * as vscode from "vscode";
 import {
   buildCommentUpdateFilename,
   buildCommentUpdateFileContent,
+  extractCommentBody,
   finalizeNewCommentDraftFileAfterSync,
   isCommentUpdateFilename,
   parseCommentUpdateFile,
@@ -79,6 +80,20 @@ suite("commentUpdateFile", () => {
     assert.strictEqual(result.fields.journalId, 123);
     assert.strictEqual(result.fields.sourceNotesHash, hash);
     assert.strictEqual(result.body, "hello");
+  });
+
+  test("extractCommentBody: 同期メタデータを本文から除外する", () => {
+    const content = buildCommentUpdateFileContent(
+      {
+        issueId: 39,
+        journalId: 123,
+        sourceNotesHash: computeNotesHash("hello"),
+      },
+      "hello",
+    );
+
+    assert.strictEqual(extractCommentBody(content), "hello");
+    assert.strictEqual(extractCommentBody("plain comment"), "plain comment");
   });
 
   test("parseCommentUpdateFile: mode が異なると undefined", () => {

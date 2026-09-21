@@ -5,6 +5,8 @@ import { validateComment, getCommentLimitGuidance } from "../utils/commentValida
 import { createTempImage } from "./helpers/markdownImageTestUtils";
 import { initializeOfflineSyncStore } from "../views/offlineSyncStore";
 import { createTestMemento } from "./helpers/vscodeMemento";
+import { buildCommentUpdateFileContent } from "../views/commentUpdateFile";
+import { computeNotesHash } from "../utils/notesHash";
 
 suite("Edit comment command", () => {
   setup(() => initializeOfflineSyncStore(createTestMemento()));
@@ -13,7 +15,10 @@ suite("Edit comment command", () => {
     const editor = {
       document: {
         uri: temp.documentUri,
-        getText: () => "![img](./image.png)",
+        getText: () => buildCommentUpdateFileContent(
+          { issueId: 10, journalId: 5, sourceNotesHash: computeNotesHash("![img](./image.png)") },
+          "![img](./image.png)",
+        ),
       },
     } as unknown as vscode.TextEditor;
 

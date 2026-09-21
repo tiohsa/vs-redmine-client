@@ -17,6 +17,7 @@ import {
 } from "../config/connectionScope";
 import type { CommentSaveDependencies } from "../views/commentSaveSync";
 import { commentSyncOutcomeMessage, queueAndSyncComment } from "../app/commentSyncService";
+import { extractCommentBody } from "../views/commentUpdateFile";
 
 export interface EditCommentDependencies {
   getActiveEditor: () => vscode.TextEditor | undefined;
@@ -78,7 +79,7 @@ export const editComment = async (
     return;
   }
 
-  const updated = editor.document.getText();
+  const updated = extractCommentBody(editor.document.getText());
   deps.setCommentDraft(ticketId, updated, operationScope);
   const validation = deps.validateComment(updated);
   if (!validation.valid) {

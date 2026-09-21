@@ -190,7 +190,7 @@ export const buildDashboardStrings = (): DashboardStrings => ({
   selectProjectPlaceholder: vscode.l10n.t("— Select project —"),
   selectProjectTitle: vscode.l10n.t("Select project"),
   includeChildren: vscode.l10n.t("Include children"),
-  refresh: vscode.l10n.t("Refresh"),
+  refresh: vscode.l10n.t("Refresh dashboard"),
   newTicket: vscode.l10n.t("New ticket"),
   // Tabs
   tabTickets: vscode.l10n.t("Tickets"),

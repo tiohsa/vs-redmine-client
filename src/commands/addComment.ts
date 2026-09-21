@@ -16,6 +16,7 @@ import {
 } from "../config/connectionScope";
 import type { CommentSaveDependencies } from "../views/commentSaveSync";
 import { commentSyncOutcomeMessage, queueAndSyncComment } from "../app/commentSyncService";
+import { extractCommentBody } from "../views/commentUpdateFile";
 
 export interface AddCommentInput {
   issueId: number;
@@ -77,7 +78,7 @@ export const addCommentForIssue = async (
     return;
   }
 
-  const text = editor.document.getText();
+  const text = extractCommentBody(editor.document.getText());
   deps.setCommentDraft(ticketId, text, operationScope);
   const validation = deps.validateComment(text);
   if (!validation.valid) {

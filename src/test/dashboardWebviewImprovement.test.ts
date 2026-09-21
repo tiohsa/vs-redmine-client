@@ -38,6 +38,15 @@ suite("Dashboard Webview 改善", () => {
     assert.ok(!dashboardWebviewScript.includes("Latest comments"));
   });
 
+  test("Dashboard 全体更新であることを Refresh 表示に明示する", () => {
+    const strings = buildDashboardStrings();
+    const html = buildDashboardHtml("nonce", strings);
+    assert.ok(strings.refresh);
+    assert.ok(html.includes('id="refresh-btn"'));
+    assert.ok(html.includes(strings.refresh));
+    assert.ok(dashboardWebviewScript.includes("data-ticket-action=\"refresh\""));
+  });
+
   test("開始日と日付ピッカー視認性のスタイルを持つ", () => {
     assert.ok(dashboardWebviewScript.includes("STRINGS.startDate"));
     assert.ok(buildDashboardStrings().startDate);

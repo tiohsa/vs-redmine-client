@@ -4,7 +4,7 @@ import * as os from "os";
 import * as path from "path";
 import { CommentCreateHandler, CommentUpdateHandler } from "../app/ticketSync/operationHandlers";
 import { createSyncOperationRepository, DefaultSyncOperationRepository } from "../app/ticketSync/syncRepository";
-import type { DurableSyncEffectAction, DurableSyncEffectState } from "../app/syncEffects";
+import type { DurableSyncEffect, DurableSyncEffectAction, DurableSyncEffectState } from "../app/syncEffects";
 import type { CommentCreateIntent, CommentUpdateIntent, UnifiedSyncOperation } from "../app/ticketSync/syncOperationTypes";
 import { initializeOfflineSyncStore } from "../views/offlineSyncStore";
 import { createTestMemento } from "./helpers/vscodeMemento";
@@ -45,6 +45,31 @@ const createCommentOperation = (
   key: { kind: "comment", ticketId: 10, documentUri: "file:///comment.md" },
   commentId: undefined,
   intent: { ticketId: 10, body, baseDir },
+});
+
+const legacyEffectStates = ["planned", "committed", "commit_unknown", "failed"] as const;
+type LegacyEffectState = (typeof legacyEffectStates)[number];
+
+const createLegacyMarkdownImageEffect = (
+  filePath: string,
+  state: LegacyEffectState,
+): DurableSyncEffect => ({
+  effectId: `image:markdown:0:${filePath}`,
+  kind: "image_upload",
+  operationRevision: 1,
+  attemptGeneration: 1,
+  state,
+  target: { filePath, filename: path.basename(filePath) },
+  ...(state === "committed" ? { token: "legacy-token" } : {}),
+  ...(state === "failed" ? { failure: { disposition: "non_retriable", detail: "legacy failure" } } : {}),
+});
+
+const withLegacyMarkdownImageEffect = <T extends CommentCreateIntent | CommentUpdateIntent>(
+  operation: UnifiedSyncOperation<T>,
+  effect: DurableSyncEffect,
+): UnifiedSyncOperation<T> => ({
+  ...operation,
+  effects: [effect],
 });
 
 suite("Comment markdown durable image effects", () => {
@@ -128,6 +153,10 @@ suite("Comment markdown durable image effects", () => {
     const secondary = await handler.executeSecondaryEffects!(operation, preparedResult.prepared, context, deps);
     assert.strictEqual(secondary.ok, true);
     assert.strictEqual(uploadCalls, 1);
+    const imageEffects = (repo.getOperation(operation.key!, scope)?.effects ?? [])
+      .filter((effect) => effect.kind === "image_upload");
+    assert.strictEqual(imageEffects.length, 1);
+    assert.strictEqual(imageEffects[0].effectId, `image:markdown:${path.join(dir, "screen.png")}`);
     const remote = await handler.executeRemoteWrite(operation, preparedResult.prepared, context, deps);
     assert.strictEqual(remote.ok, true);
     assert.strictEqual(addCommentCalls, 1);
@@ -284,4 +313,107 @@ suite("Comment markdown durable image effects", () => {
     assert.strictEqual(updateIssueCalls, 1, "commit_unknownを通常syncで盲目的に再送しないこと");
     assert.strictEqual(updateCommentCalls, 0);
   });
+
+  for (const state of legacyEffectStates) {
+    test(`Comment Create の legacy ${state} Effect ID を継続利用する`, async () => {
+      const scope = `${SCOPE}legacy-create-${state}`;
+      initializeOfflineSyncStore(createTestMemento(), scope);
+      const dir = fs.mkdtempSync(path.join(os.tmpdir(), `comment-legacy-create-${state}-`));
+      const imagePath = path.join(dir, "screen.png");
+      fs.writeFileSync(imagePath, "image");
+      const body = "![image](./screen.png)";
+      const operation = withLegacyMarkdownImageEffect(
+        { ...createCommentOperation(dir, body), connectionScope: scope, operationId: `${scope}:comment-create:10` },
+        createLegacyMarkdownImageEffect(imagePath, state),
+      );
+      const repo = createSyncOperationRepository();
+      await repo.saveOperation(operation, scope);
+
+      let uploadCalls = 0;
+      const handler = new CommentCreateHandler();
+      const context = { connectionScope: scope };
+      const preparedResult = await handler.prepare(operation, context, { repository: repo });
+      assert.strictEqual(preparedResult.ok, true);
+      if (!preparedResult.ok) {
+        return;
+      }
+      const secondary = await handler.executeSecondaryEffects!(operation, preparedResult.prepared, context, {
+        repository: repo,
+        comment: {
+          uploadFile: async () => {
+            uploadCalls++;
+            return { token: "new-token", filename: "screen.png", contentType: "image/png" };
+          },
+        },
+      });
+
+      const savedEffects = repo.getOperation(operation.key!, scope)?.effects ?? [];
+      assert.strictEqual(savedEffects.some((effect) => effect.effectId === `image:markdown:${imagePath}`), false);
+      const savedLegacyEffect = savedEffects.find((effect) => effect.effectId === `image:markdown:0:${imagePath}`);
+      assert.ok(savedLegacyEffect);
+      if (state === "planned") {
+        assert.strictEqual(secondary.ok, true);
+        assert.strictEqual(uploadCalls, 1);
+      } else if (state === "committed") {
+        assert.strictEqual(secondary.ok, true);
+        assert.strictEqual(uploadCalls, 0);
+        assert.strictEqual(savedLegacyEffect?.token, "legacy-token");
+      } else {
+        assert.strictEqual(secondary.ok, false);
+        assert.strictEqual(uploadCalls, 0);
+        assert.strictEqual(secondary.commitUnknown, state === "commit_unknown");
+      }
+    });
+
+    test(`Comment Update の legacy ${state} Effect ID を継続利用する`, async () => {
+      const scope = `${SCOPE}legacy-update-${state}`;
+      initializeOfflineSyncStore(createTestMemento(), scope);
+      const dir = fs.mkdtempSync(path.join(os.tmpdir(), `comment-legacy-update-${state}-`));
+      const imagePath = path.join(dir, "screen.png");
+      fs.writeFileSync(imagePath, "image");
+      const body = "![image](./screen.png)";
+      const operation = withLegacyMarkdownImageEffect(
+        { ...createOperation(dir, body), connectionScope: scope, operationId: `${scope}:comment:10:20` },
+        createLegacyMarkdownImageEffect(imagePath, state),
+      );
+      const repo = createSyncOperationRepository();
+      await repo.saveOperation(operation, scope);
+
+      let uploadCalls = 0;
+      const handler = new CommentUpdateHandler();
+      const context = { connectionScope: scope };
+      const preparedResult = await handler.prepare(operation, context, { repository: repo });
+      assert.strictEqual(preparedResult.ok, true);
+      if (!preparedResult.ok) {
+        return;
+      }
+      const secondary = await handler.executeSecondaryEffects!(operation, preparedResult.prepared, context, {
+        repository: repo,
+        comment: {
+          uploadFile: async () => {
+            uploadCalls++;
+            return { token: "new-token", filename: "screen.png", contentType: "image/png" };
+          },
+          updateIssue: async () => {},
+        },
+      });
+
+      const savedEffects = repo.getOperation(operation.key!, scope)?.effects ?? [];
+      assert.strictEqual(savedEffects.some((effect) => effect.effectId === `image:markdown:${imagePath}`), false);
+      const savedLegacyEffect = savedEffects.find((effect) => effect.effectId === `image:markdown:0:${imagePath}`);
+      assert.ok(savedLegacyEffect);
+      if (state === "planned") {
+        assert.strictEqual(secondary.ok, true);
+        assert.strictEqual(uploadCalls, 1);
+      } else if (state === "committed") {
+        assert.strictEqual(secondary.ok, true);
+        assert.strictEqual(uploadCalls, 0);
+        assert.strictEqual(savedLegacyEffect?.token, "legacy-token");
+      } else {
+        assert.strictEqual(secondary.ok, false);
+        assert.strictEqual(uploadCalls, 0);
+        assert.strictEqual(secondary.commitUnknown, state === "commit_unknown");
+      }
+    });
+  }
 });

@@ -32,6 +32,7 @@ import { addOfflineCommentUpdateAsync, OfflineCommentUpdate } from "./offlineSyn
 import { setCommentDraft } from "./commentDraftStore";
 import { isRemoteCommitUnknownError } from "./ticketSync/ticketSyncResult";
 import { containsConflictMarkers } from "../utils/threeWayMerge";
+import { extractCommentBody, parseCommentUpdateFile } from "./commentUpdateFile";
 
 export interface CommentSaveDependencies {
   addComment: typeof addComment;
@@ -334,7 +335,7 @@ export const finalizeNewCommentDraftState = (input: {
   ensureCommentEdit(
     input.commentId,
     input.ticketId,
-    input.editor.document.getText(),
+    extractCommentBody(input.editor.document.getText()),
     undefined,
     input.operationScope,
   );
@@ -358,7 +359,7 @@ export const finalizeNewCommentDraftDocument = (input: {
   ensureCommentEdit(
     input.commentId,
     input.ticketId,
-    input.body ?? input.document.getText(),
+    input.body ?? extractCommentBody(input.document.getText()),
     undefined,
     input.operationScope,
   );
@@ -530,7 +531,9 @@ export const saveCommentDraftLocally = async (
   if (contentType !== "comment" && contentType !== "commentDraft") { return undefined; }
   const ticketId = getTicketIdForEditor(editor);
   if (!ticketId) { return undefined; }
-  const body = editor.document.getText();
+  const documentContent = editor.document.getText();
+  const parsedCommentUpdate = parseCommentUpdateFile(documentContent);
+  const body = parsedCommentUpdate?.body ?? documentContent;
   setCommentDraft(ticketId, body, operationScope);
   const commentId = getCommentIdForEditor(editor);
   const edit = commentId === undefined
@@ -542,6 +545,7 @@ export const saveCommentDraftLocally = async (
     baseBody: edit?.baseBody,
     lastKnownRemoteUpdatedAt: edit?.lastKnownRemoteUpdatedAt,
     body,
+    sourceNotesHash: parsedCommentUpdate?.fields.sourceNotesHash,
     baseDir: resolveEditorBaseDir({ editor }),
     documentUri: editor.document.uri.toString(),
     finalizeDraft: contentType === "commentDraft",
@@ -556,10 +560,13 @@ export const saveCommentDocumentLocally = async (input: {
   content: string;
   documentUri: vscode.Uri;
 }): Promise<CommentSaveResult> => {
+  const parsedCommentUpdate = parseCommentUpdateFile(input.content);
+  const body = parsedCommentUpdate?.body ?? input.content;
   await addOfflineCommentUpdateAsync({
     ticketId: input.ticketId,
     commentId: input.commentId,
-    body: input.content,
+    body,
+    sourceNotesHash: parsedCommentUpdate?.fields.sourceNotesHash,
     baseDir: resolveEditorBaseDir({ documentUri: input.documentUri }),
     documentUri: input.documentUri.toString(),
   }, input.operationScope);

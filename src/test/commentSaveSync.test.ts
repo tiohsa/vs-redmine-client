@@ -16,7 +16,9 @@ import { createEditorStub } from "./helpers/editorStubs";
 import * as vscode from "vscode";
 import { getOfflineSyncQueue, initializeOfflineSyncStore } from "../views/offlineSyncStore";
 import { createTestMemento } from "./helpers/vscodeMemento";
-import { clearRegistry, registerTicketDocument } from "../views/ticketEditorRegistry";
+import { clearRegistry, registerCommentDocument, registerTicketDocument } from "../views/ticketEditorRegistry";
+import { buildCommentUpdateFileContent } from "../views/commentUpdateFile";
+import { computeNotesHash } from "../utils/notesHash";
 
 suite("Comment save sync", () => {
   const scope = "https://comment-save.example.org/";
@@ -39,6 +41,27 @@ suite("Comment save sync", () => {
 
     assert.strictEqual(result?.status, "queued");
     assert.strictEqual(getOfflineSyncQueue(scope).comments[0]?.baseDir, "/workspace/comments");
+  });
+
+  test("コメント更新ファイルの保存ではフロントマターをキュー本文に含めない", async () => {
+    const documentUri = vscode.Uri.file("/workspace/comments/redmine-client-comment-update-10-20.md");
+    const editor = createEditorStub(
+      documentUri,
+      buildCommentUpdateFileContent(
+        { issueId: 10, journalId: 20, sourceNotesHash: computeNotesHash("本文") },
+        "本文",
+      ),
+    );
+    registerCommentDocument(10, 20, editor.document, undefined, scope);
+
+    const result = await saveCommentDraftLocally(editor, scope);
+
+    assert.strictEqual(result?.status, "queued");
+    assert.strictEqual(getOfflineSyncQueue(scope).comments[0]?.body, "本文");
+    assert.strictEqual(
+      getOfflineSyncQueue(scope).comments[0]?.sourceNotesHash,
+      computeNotesHash("本文"),
+    );
   });
 
   test("ドキュメント経由のローカルコメント保存でもbaseDirを保持する", async () => {

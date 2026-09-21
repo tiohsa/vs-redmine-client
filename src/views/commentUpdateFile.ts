@@ -85,6 +85,9 @@ export const parseCommentUpdateFile = (content: string): ParsedCommentUpdateFile
   return { fields, body };
 };
 
+export const extractCommentBody = (content: string): string =>
+  parseCommentUpdateFile(content)?.body ?? content;
+
 export interface UpdateCommentUpdateFileInput {
   documentUri: string;
   syncedBody: string;
