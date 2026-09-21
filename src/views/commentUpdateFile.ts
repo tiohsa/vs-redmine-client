@@ -15,12 +15,29 @@ export interface CommentUpdateFileFields {
 }
 
 const FILENAME_PATTERN = /^redmine-client-comment-update-(\d+)-(\d+)(?:-\d+)?\.md$/;
+const DOCUMENT_PATH_PATTERN = /(?:^|[/\\])redmine-client-comment-update-\d+-\d+(?:-\d+)?\.md$/;
 
 export const buildCommentUpdateFilename = (issueId: number, journalId: number): string =>
   `redmine-client-comment-update-${issueId}-${journalId}.md`;
 
 export const isCommentUpdateFilename = (filename: string): boolean =>
   FILENAME_PATTERN.test(filename);
+
+export const isCommentUpdateDocument = (content: string, documentPath?: string): boolean => {
+  if (documentPath && DOCUMENT_PATH_PATTERN.test(documentPath)) {
+    return true;
+  }
+  const lines = content.split(/\r?\n/);
+  if (lines[0]?.trim() !== "---") {
+    return false;
+  }
+  const closeIdx = lines.findIndex((line, idx) => idx > 0 && line.trim() === "---");
+  const frontmatter = lines.slice(1, closeIdx === -1 ? undefined : closeIdx);
+  return frontmatter.some((line) => /^mode:\s*comment-update\s*$/.test(line.trim()));
+};
+
+export const invalidCommentUpdateMetadataMessage = (): string =>
+  vscode.l10n.t("Comment update metadata is invalid. Reopen the comment editor.");
 
 export const buildCommentUpdateFileContent = (
   fields: CommentUpdateFileFields,

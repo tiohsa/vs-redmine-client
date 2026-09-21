@@ -25,6 +25,7 @@ import {
 
 export type SaveSyncClassification =
   | { kind: "commentUpdateFile"; parsed: NonNullable<ReturnType<typeof parseCommentUpdateFile>> }
+  | { kind: "invalidCommentUpdateFile" }
   | { kind: "localComment"; ticketId: number; commentId: number }
   | { kind: "newTicketDraftContent"; projectId?: number }
   | { kind: "existingTicket"; ticketId: number }
@@ -45,7 +46,7 @@ export const classifyDocumentSave = (
 
   if (isCommentUpdateFilename(filename)) {
     const parsed = parseCommentUpdateFile(document.getText());
-    return parsed ? { kind: "commentUpdateFile", parsed } : { kind: "none" };
+    return parsed ? { kind: "commentUpdateFile", parsed } : { kind: "invalidCommentUpdateFile" };
   }
   if (parseNewCommentDraftFilename(filename)) {
     const finalizedDraft = parseCommentUpdateFile(document.getText());

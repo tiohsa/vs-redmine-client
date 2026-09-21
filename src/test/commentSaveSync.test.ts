@@ -77,6 +77,21 @@ suite("Comment save sync", () => {
     assert.strictEqual(getOfflineSyncQueue(scope).comments[0]?.baseDir, "/workspace/comments");
   });
 
+  test("壊れたcomment-update metadataはキューへ登録しない", async () => {
+    const documentUri = vscode.Uri.file("/workspace/comments/redmine-client-comment-update-10-20.md");
+    const result = await saveCommentDocumentLocally({
+      operationScope: scope,
+      ticketId: 10,
+      commentId: 20,
+      content: "---\nmode: comment-update\nissue_id: 10\njournal_id: 20\n---\n\n修正本文",
+      documentUri,
+    });
+
+    assert.strictEqual(result.status, "failed");
+    assert.match(result.message, /metadata is invalid/i);
+    assert.strictEqual(getOfflineSyncQueue(scope).comments.length, 0);
+  });
+
   test("returns no_change when content matches base", async () => {
     initializeCommentEdit(1, 10, "Body");
 

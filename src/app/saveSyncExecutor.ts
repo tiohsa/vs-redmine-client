@@ -39,6 +39,7 @@ import type { SyncEngine, SyncEngineKey, SyncEngineOutcome } from "./syncEngine"
 import { createOutcomePresenter } from "./outcomePresenter";
 import type { TicketSaveResult } from "../views/ticketSaveTypes";
 import type { CommentSaveResult } from "../views/commentSaveTypes";
+import { invalidCommentUpdateMetadataMessage } from "../views/commentUpdateFile";
 
 export interface SaveSyncExecutorDeps {
   ticketsPresentation: TicketPresentationPort;
@@ -273,6 +274,14 @@ export const performSyncOnSave = async (
       }
       return;
     }
+
+    case "invalidCommentUpdateFile":
+      notifications.notifyCommentSaveResult({
+        status: "failed",
+        message: invalidCommentUpdateMetadataMessage(),
+      });
+      unsyncedPresentation.refresh();
+      return;
 
     case "localComment": {
       const commentResult = await saveCommentDocumentLocally({

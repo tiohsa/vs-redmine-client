@@ -65,4 +65,35 @@ suite("Add comment command", () => {
       { token: "token", filename: "image.png", content_type: "image/png" },
     ]);
   });
+
+  test("壊れたcomment-update metadataを新規コメントとして送信しない", async () => {
+    const editor = {
+      document: {
+        uri: vscode.Uri.file("/workspace/redmine-client-comment-update-10-20.md"),
+        getText: () => "---\nmode: comment-update\nissue_id: 10\njournal_id: 20\n---\n\n修正本文",
+      },
+    } as unknown as vscode.TextEditor;
+    let addCalls = 0;
+    let errorMessage: string | undefined;
+
+    await addCommentForIssue(
+      { issueId: 10 },
+      {
+        getActiveEditor: () => editor,
+        addComment: async () => { addCalls++; },
+        uploadFile: async () => ({ token: "token", filename: "image.png", contentType: "image/png" }),
+        showError: (message) => { errorMessage = message; },
+        showInfo: () => undefined,
+        validateComment,
+        getCommentLimitGuidance,
+        setCommentDraft: () => undefined,
+        clearCommentDraft: () => undefined,
+        getTicketIdForEditor: () => 10,
+        getEditorContentType: () => "comment",
+      },
+    );
+
+    assert.strictEqual(addCalls, 0);
+    assert.match(errorMessage ?? "", /metadata is invalid/i);
+  });
 });

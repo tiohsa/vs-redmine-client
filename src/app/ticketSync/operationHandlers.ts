@@ -3701,8 +3701,24 @@ export class CommentCreateHandler implements OperationHandler<CommentCreateInten
     for (const filePath of uniquePaths) {
       const canonicalEffectId = `image:markdown:${filePath}`;
       const currentOp = repo.getOperation(opKey, context.connectionScope) ?? operation;
-      const existingEffect = getEffectsForRevision(currentOp, revision)
-        .find((e) => e.effectId === canonicalEffectId || (e.kind === "image_upload" && e.target.filePath === filePath));
+      const matchingEffects = getEffectsForRevision(currentOp, revision)
+        .filter((e) => e.effectId === canonicalEffectId || (e.kind === "image_upload" && e.target.filePath === filePath));
+      const blockingEffect = matchingEffects.find((e) =>
+        e.state === "started" ||
+        e.state === "commit_unknown" ||
+        e.state === "failed" ||
+        e.state === "compensation_started" ||
+        e.state === "compensation_unknown");
+      if (blockingEffect) {
+        return {
+          ok: false,
+          error: new Error(`Markdown image effect ${blockingEffect.effectId} requires explicit recovery.`),
+          commitUnknown: blockingEffect.state === "commit_unknown" || blockingEffect.state === "started",
+        };
+      }
+      const existingEffect = matchingEffects.find((e) => e.effectId === canonicalEffectId)
+        ?? matchingEffects.find((e) => e.state === "committed")
+        ?? matchingEffects.find((e) => e.state === "planned");
       const effectId = existingEffect?.effectId ?? canonicalEffectId;
 
       if (existingEffect?.state === "committed" && existingEffect.token) {
@@ -4304,8 +4320,24 @@ export class CommentUpdateHandler implements OperationHandler<CommentUpdateInten
     for (const filePath of uniquePaths) {
       const canonicalEffectId = `image:markdown:${filePath}`;
       const currentOp = repo.getOperation(opKey, context.connectionScope) ?? operation;
-      const existingEffect = getEffectsForRevision(currentOp, revision)
-        .find((e) => e.effectId === canonicalEffectId || (e.kind === "image_upload" && e.target.filePath === filePath));
+      const matchingEffects = getEffectsForRevision(currentOp, revision)
+        .filter((e) => e.effectId === canonicalEffectId || (e.kind === "image_upload" && e.target.filePath === filePath));
+      const blockingEffect = matchingEffects.find((e) =>
+        e.state === "started" ||
+        e.state === "commit_unknown" ||
+        e.state === "failed" ||
+        e.state === "compensation_started" ||
+        e.state === "compensation_unknown");
+      if (blockingEffect) {
+        return {
+          ok: false,
+          error: new Error(`Markdown image effect ${blockingEffect.effectId} requires explicit recovery.`),
+          commitUnknown: blockingEffect.state === "commit_unknown" || blockingEffect.state === "started",
+        };
+      }
+      const existingEffect = matchingEffects.find((e) => e.effectId === canonicalEffectId)
+        ?? matchingEffects.find((e) => e.state === "committed")
+        ?? matchingEffects.find((e) => e.state === "planned");
       const effectId = existingEffect?.effectId ?? canonicalEffectId;
 
       if (existingEffect?.state === "committed" && existingEffect.token) {
