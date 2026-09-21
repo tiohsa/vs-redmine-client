@@ -15,7 +15,13 @@ import {
   setTicketDraftContent,
 } from "../views/ticketDraftStore";
 import { isSaveSyncSuppressed } from "../views/saveSyncSuppression";
-import { detectTicketChanges } from "../views/ticketSync/ticketChangeDetector";
+import {
+  detectTicketChanges,
+  detectTicketIntentChanges,
+  isSafeQueuedTicketUpdate,
+  parseQueuedTicketIntent,
+} from "../views/ticketSync/ticketChangeDetector";
+import { getOfflineSyncQueue } from "../views/offlineSyncStore";
 import {
   getCommentIdForEditor,
   getConnectionScopeForDocument,
@@ -160,22 +166,33 @@ export const updateTicketDraftStatusFromDocument = (
   if (!draft) {
     return false;
   }
-  if (draft.status !== "Synced" && draft.status !== "Dirty") {
+  if (draft.status !== "Synced" && draft.status !== "Dirty" && draft.status !== "Queued") {
     return false;
   }
 
-  let hasChanges = true;
+  let nextStatus: "Synced" | "Dirty" | "Queued" = "Dirty";
   try {
     const content = parseTicketEditorContent(document.getText(), {
       allowMissingMetadata: true,
       fallbackMetadata: draft.baseMetadata,
     });
-    hasChanges = detectTicketChanges(draft, content).hasChanges;
+    const queued = getOfflineSyncQueue(connectionScope).tickets.get(ticketId);
+    if (queued && isSafeQueuedTicketUpdate(queued)) {
+      const queuedContent = parseQueuedTicketIntent(queued);
+      nextStatus = queuedContent && !detectTicketIntentChanges({
+        subject: queuedContent.subject,
+        description: queuedContent.description,
+        metadata: queuedContent.metadata,
+      }, content).hasChanges
+        ? "Queued"
+        : "Dirty";
+    } else {
+      nextStatus = detectTicketChanges(draft, content).hasChanges ? "Dirty" : "Synced";
+    }
   } catch {
     // Parse errors are still unsynced editor changes.
   }
 
-  const nextStatus = hasChanges ? "Dirty" : "Synced";
   if (draft.status === nextStatus) {
     return false;
   }

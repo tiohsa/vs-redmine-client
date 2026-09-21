@@ -21,6 +21,7 @@ import {
   getActiveScope,
   removeOfflineCommentEntryAsync,
 } from "../views/offlineSyncStore";
+import { markDraftStatus } from "../views/ticketDraftStore";
 import { computeNotesHash } from "../utils/notesHash";
 import type { NotificationController } from "./notificationController";
 import { classifyDocumentSave } from "./saveSyncClassifier";
@@ -158,16 +159,42 @@ export const performSyncOnSave = async (
 
   const syncIfAuto = async (key: SyncEngineKey): Promise<void> => {
     if (syncMode === "auto" && deps.syncEngine && key.kind !== "newTicket") {
+      if (key.kind === "ticket") {
+        markDraftStatus(key.ticketId, "Syncing", operationScope);
+      }
       try {
         const outcome = await deps.syncEngine.syncOne(key, { connectionScope: operationScope });
-        if (!(await resolveAutoConflict(key, outcome))) {
+        const conflictHandled = await resolveAutoConflict(key, outcome);
+        if (!conflictHandled) {
           presenter.present(outcome, {
             ticketId: key.kind === "ticket" ? key.ticketId : (key.kind === "comment" ? key.ticketId : undefined),
             commentId: key.kind === "comment" ? key.commentId : undefined,
             isAuto: true,
           });
+          if (key.kind === "ticket") {
+            switch (outcome.kind) {
+              case "completed":
+              case "no_change":
+                markDraftStatus(key.ticketId, "Synced", operationScope);
+                break;
+              case "conflict":
+                markDraftStatus(key.ticketId, "Conflict", operationScope);
+                break;
+              case "commit_unknown":
+              case "remote_committed":
+              case "failed_before_commit":
+                markDraftStatus(key.ticketId, "Failed", operationScope);
+                break;
+              case "queued":
+                markDraftStatus(key.ticketId, "Queued", operationScope);
+                break;
+            }
+          }
         }
       } catch (error) {
+        if (key.kind === "ticket") {
+          markDraftStatus(key.ticketId, "Failed", operationScope);
+        }
         presenter.present(
           { kind: "failed_before_commit", error: error as Error },
           {

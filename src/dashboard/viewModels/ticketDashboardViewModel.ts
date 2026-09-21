@@ -1,28 +1,62 @@
 import { Ticket } from "../../redmine/types";
-import { getTicketDraft } from "../../views/ticketDraftStore";
+import { getTicketDraft, getTicketDraftContent } from "../../views/ticketDraftStore";
 import { getOfflineSyncQueue } from "../../views/offlineSyncStore";
 import { getCurrentConnectionScope } from "../../config/connectionScope";
 import { buildTree } from "../../views/treeBuilder";
 import { TreeNode, TreeSource } from "../../views/treeTypes";
 import type { DashboardSyncState, DashboardTicketDetail, DashboardTicketNode } from "../dashboardProtocol";
+import {
+  detectTicketIntentChanges,
+  isSafeQueuedTicketUpdate,
+  parseQueuedTicketIntent,
+} from "../../views/ticketSync/ticketChangeDetector";
 
 export const resolveTicketSyncState = (ticketId: number): DashboardSyncState => {
-  const draft = getTicketDraft(ticketId);
+  const scope = getCurrentConnectionScope();
+  const draft = getTicketDraft(ticketId, scope);
+  const queue = getOfflineSyncQueue(scope);
+  const queued = queue.tickets.get(ticketId);
+  const queuedContent = queued ? parseQueuedTicketIntent(queued) : undefined;
+  const currentContent = draft ? getTicketDraftContent(ticketId, scope) : undefined;
+  const queueState = (): DashboardSyncState | undefined => {
+    if (!queued || !isSafeQueuedTicketUpdate(queued)) {
+      return undefined;
+    }
+    if (!currentContent || !queuedContent) {
+      return draft?.status === "Dirty" ? "Dirty" : "Queued";
+    }
+    return !detectTicketIntentChanges({
+      subject: queuedContent.subject,
+      description: queuedContent.description,
+      metadata: queuedContent.metadata,
+    }, currentContent).hasChanges ? "Queued" : "Dirty";
+  };
+
   if (draft) {
     switch (draft.status) {
-      case "Dirty": return "Dirty";
       case "Syncing": return "Syncing";
       case "Failed": return "Failed";
       case "Conflict": return "Conflict";
-      case "Synced": return "Synced";
       case "Draft": return "Draft";
+      case "Dirty": {
+        const state = queueState();
+        return state ?? "Dirty";
+      }
+      case "Queued": {
+        const state = queueState();
+        if (state) {
+          return state;
+        }
+        return currentContent && detectTicketIntentChanges({
+          subject: draft.baseSubject,
+          description: draft.baseDescription,
+          metadata: draft.baseMetadata,
+        }, currentContent).hasChanges ? "Dirty" : "Synced";
+      }
+      case "Synced": return queueState() ?? "Synced";
     }
   }
-  const queue = getOfflineSyncQueue(getCurrentConnectionScope());
-  if (queue.tickets.has(ticketId)) {
-    return "Queued";
-  }
-  return "Synced";
+  return queueState() ?? "Synced";
 };
 
 const buildDashboardNode = (

@@ -6,6 +6,7 @@ import { ensureTicketDraft, markDraftStatus, setTicketDraftContent } from "../..
 import { getOfflineSyncQueue, addOfflineTicketUpdateAsync } from "../../views/offlineSyncStore";
 import { buildTicketDetail } from "../viewModels/ticketDashboardViewModel";
 import { buildTicketEditorContent, parseTicketEditorContent, type TicketEditorContent } from "../../views/ticketEditorContent";
+import { isSafeQueuedTicketUpdate } from "../../views/ticketSync/ticketChangeDetector";
 import { getTicketEditors, registerTicketDocument } from "../../views/ticketEditorRegistry";
 import { applyEditorContent } from "../../views/ticketPreview";
 import type { Ticket } from "../../redmine/types";
@@ -319,7 +320,6 @@ export class DashboardMetadataService {
       }
     }
     setTicketDraftContent(ticket.id, next, operationScope);
-    markDraftStatus(ticket.id, "Dirty", operationScope);
     await addOfflineTicketUpdateAsync(ticket.id, {
       ticketId: ticket.id,
       baseSubject: ticket.subject,
@@ -340,6 +340,12 @@ export class DashboardMetadataService {
       layout: next.layout,
       metadataBlock: next.metadataBlock,
     }, operationScope);
+    const queued = getOfflineSyncQueue(operationScope).tickets.get(ticket.id);
+    markDraftStatus(
+      ticket.id,
+      queued && isSafeQueuedTicketUpdate(queued) ? "Queued" : "Dirty",
+      operationScope,
+    );
     return true;
   }
 
@@ -378,7 +384,11 @@ export class DashboardMetadataService {
       fallbackMetadata: nextMetadata,
     });
     setTicketDraftContent(ticket.id, nextContent, operationScope);
-    markDraftStatus(ticket.id, "Dirty", operationScope);
+    markDraftStatus(
+      ticket.id,
+      isSafeQueuedTicketUpdate(queued) ? "Queued" : "Dirty",
+      operationScope,
+    );
     await addOfflineTicketUpdateAsync(ticket.id, {
       ...queued,
       metadata: nextMetadata,
