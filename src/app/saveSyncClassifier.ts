@@ -19,7 +19,7 @@ import {
   parseNewCommentDraftFilename,
 } from "../views/editorFilename";
 import {
-  isCommentUpdateFilename,
+  parseCommentUpdateFilename,
   parseCommentUpdateFile,
 } from "../views/commentUpdateFile";
 
@@ -44,13 +44,30 @@ export const classifyDocumentSave = (
 ): SaveSyncClassification => {
   const filename = path.basename(document.uri.path);
 
-  if (isCommentUpdateFilename(filename)) {
+  const commentUpdateIdentity = parseCommentUpdateFilename(filename);
+  if (commentUpdateIdentity) {
     const parsed = parseCommentUpdateFile(document.getText());
-    return parsed ? { kind: "commentUpdateFile", parsed } : { kind: "invalidCommentUpdateFile" };
+    return parsed &&
+      parsed.fields.issueId === commentUpdateIdentity.issueId &&
+      parsed.fields.journalId === commentUpdateIdentity.journalId
+      ? { kind: "commentUpdateFile", parsed }
+      : { kind: "invalidCommentUpdateFile" };
   }
-  if (parseNewCommentDraftFilename(filename)) {
+  const newCommentDraftTicketId = parseNewCommentDraftFilename(filename);
+  if (newCommentDraftTicketId) {
     const finalizedDraft = parseCommentUpdateFile(document.getText());
     if (finalizedDraft) {
+      const expectedCommentId =
+        getCommentIdForDocument(document) ??
+        getCommentIdForUri(document.uri) ??
+        getCommentIdForDraftUri(newCommentDraftTicketId, document.uri.toString());
+      if (
+        finalizedDraft.fields.issueId !== newCommentDraftTicketId ||
+        (expectedCommentId !== undefined &&
+          finalizedDraft.fields.journalId !== expectedCommentId)
+      ) {
+        return { kind: "invalidCommentUpdateFile" };
+      }
       return { kind: "commentUpdateFile", parsed: finalizedDraft };
     }
   }
@@ -97,7 +114,7 @@ export const classifyDocumentSave = (
     };
   }
 
-  const draftTicketId = parseNewCommentDraftFilename(filename);
+  const draftTicketId = newCommentDraftTicketId;
   if (draftTicketId) {
     const existingCommentId =
       getCommentIdForDocument(document) ??

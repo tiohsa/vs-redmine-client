@@ -13,6 +13,7 @@
     "Merge conflicts were inserted. Resolve all markers before syncing.": "Merge conflicts were inserted. Resolve all markers before syncing.",
     "Merge result is ready. Review and save to sync.": "Merge result is ready. Review and save to sync.",
     "Resolve all merge conflict markers before syncing.": "Resolve all merge conflict markers before syncing.",
+    "Comment update metadata is invalid. Reopen the comment editor.": "Comment update metadata is invalid. Reopen the comment editor.",
     "Cancel": "Cancel",
     "Diff editor opened. Please save again after editing.": "Diff editor opened. Please save again after editing.",
     "Conflict resolution was cancelled.": "Conflict resolution was cancelled.",

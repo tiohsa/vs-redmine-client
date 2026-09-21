@@ -13,6 +13,7 @@
     "Merge conflicts were inserted. Resolve all markers before syncing.": "競合マーカーを挿入しました。すべて解消してから同期してください。",
     "Merge result is ready. Review and save to sync.": "マージ結果をエディターに反映しました。確認して保存すると同期します。",
     "Resolve all merge conflict markers before syncing.": "すべてのマージ競合マーカーを解消してから同期してください。",
+    "Comment update metadata is invalid. Reopen the comment editor.": "コメント更新用のメタデータが壊れています。コメントを開き直してください。",
     "Cancel": "キャンセル",
     "Diff editor opened. Please save again after editing.": "差分エディタを開きました。編集後に再度保存してください。",
     "Conflict resolution was cancelled.": "競合解決がキャンセルされました。",

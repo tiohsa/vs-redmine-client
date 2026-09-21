@@ -17,11 +17,36 @@ export interface CommentUpdateFileFields {
 const FILENAME_PATTERN = /^redmine-client-comment-update-(\d+)-(\d+)(?:-\d+)?\.md$/;
 const DOCUMENT_PATH_PATTERN = /(?:^|[/\\])redmine-client-comment-update-\d+-\d+(?:-\d+)?\.md$/;
 
+export interface CommentUpdateIdentity {
+  issueId: number;
+  journalId: number;
+}
+
 export const buildCommentUpdateFilename = (issueId: number, journalId: number): string =>
   `redmine-client-comment-update-${issueId}-${journalId}.md`;
 
+export const parseCommentUpdateFilename = (
+  filename: string,
+): CommentUpdateIdentity | undefined => {
+  const match = filename.match(FILENAME_PATTERN);
+  if (!match) { return undefined; }
+
+  const issueId = Number(match[1]);
+  const journalId = Number(match[2]);
+  if (
+    !Number.isInteger(issueId) ||
+    issueId <= 0 ||
+    !Number.isInteger(journalId) ||
+    journalId <= 0
+  ) {
+    return undefined;
+  }
+
+  return { issueId, journalId };
+};
+
 export const isCommentUpdateFilename = (filename: string): boolean =>
-  FILENAME_PATTERN.test(filename);
+  parseCommentUpdateFilename(filename) !== undefined;
 
 export const isCommentUpdateDocument = (content: string, documentPath?: string): boolean => {
   if (documentPath && DOCUMENT_PATH_PATTERN.test(documentPath)) {
@@ -88,7 +113,13 @@ export const parseCommentUpdateFile = (content: string): ParsedCommentUpdateFile
   const journalId = fm["journal_id"] ? Number(fm["journal_id"]) : NaN;
   const sourceNotesHash = fm["source_notes_hash"];
 
-  if (Number.isNaN(issueId) || Number.isNaN(journalId) || !sourceNotesHash) { return undefined; }
+  if (
+    !Number.isInteger(issueId) ||
+    issueId <= 0 ||
+    !Number.isInteger(journalId) ||
+    journalId <= 0 ||
+    !sourceNotesHash
+  ) { return undefined; }
 
   const fields: CommentUpdateFileFields = { issueId, journalId, sourceNotesHash };
   if (fm["project_id"]) { fields.projectId = Number(fm["project_id"]); }

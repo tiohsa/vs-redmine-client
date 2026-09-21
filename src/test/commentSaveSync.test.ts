@@ -92,6 +92,57 @@ suite("Comment save sync", () => {
     assert.strictEqual(getOfflineSyncQueue(scope).comments.length, 0);
   });
 
+  test("registryとcomment-update identityが不一致ならキューへ登録しない", async () => {
+    const documentUri = vscode.Uri.file("/workspace/comments/redmine-client-comment-update-10-20.md");
+    const editor = createEditorStub(
+      documentUri,
+      buildCommentUpdateFileContent(
+        { issueId: 10, journalId: 21, sourceNotesHash: computeNotesHash("修正本文") },
+        "修正本文",
+      ),
+    );
+    registerCommentDocument(10, 20, editor.document, undefined, scope);
+
+    const result = await saveCommentDraftLocally(editor, scope);
+
+    assert.strictEqual(result?.status, "failed");
+    assert.strictEqual(getOfflineSyncQueue(scope).comments.length, 0);
+  });
+
+  test("expected ticketIdとcomment-update issue_idが不一致ならキューへ登録しない", async () => {
+    const documentUri = vscode.Uri.file("/workspace/comments/comment.md");
+    const result = await saveCommentDocumentLocally({
+      operationScope: scope,
+      ticketId: 10,
+      commentId: 20,
+      content: buildCommentUpdateFileContent(
+        { issueId: 99, journalId: 20, sourceNotesHash: computeNotesHash("修正本文") },
+        "修正本文",
+      ),
+      documentUri,
+    });
+
+    assert.strictEqual(result.status, "failed");
+    assert.strictEqual(getOfflineSyncQueue(scope).comments.length, 0);
+  });
+
+  test("expected commentIdとcomment-update journal_idが不一致ならキューへ登録しない", async () => {
+    const documentUri = vscode.Uri.file("/workspace/comments/comment.md");
+    const result = await saveCommentDocumentLocally({
+      operationScope: scope,
+      ticketId: 10,
+      commentId: 20,
+      content: buildCommentUpdateFileContent(
+        { issueId: 10, journalId: 21, sourceNotesHash: computeNotesHash("修正本文") },
+        "修正本文",
+      ),
+      documentUri,
+    });
+
+    assert.strictEqual(result.status, "failed");
+    assert.strictEqual(getOfflineSyncQueue(scope).comments.length, 0);
+  });
+
   test("returns no_change when content matches base", async () => {
     initializeCommentEdit(1, 10, "Body");
 
