@@ -38,6 +38,7 @@ import { getProjectSelection, parseConfiguredProjectId } from "../../config/proj
 import { editorContentFromTicket, metadataFromTicket } from "./ticketRemoteContent";
 import { rewriteDocumentWithRegisteredFields } from "../editorDocumentRewrite";
 import { containsConflictMarkers } from "../../utils/threeWayMerge";
+import { detectTicketChanges } from "./ticketChangeDetector";
 
 export interface QueueTicketDraftInput {
   operationScope?: string;
@@ -72,17 +73,8 @@ export const queueTicketDraft = async (
   }
 
   const subject = parsed.subject || draft.baseSubject;
-  const contentChanges = computeChanges(
-    draft.baseSubject,
-    draft.baseDescription,
-    subject,
-    parsed.description,
-  );
-  const metadataChanges = computeMetadataChanges(draft.baseMetadata, parsed.metadata);
-  const hasChanges =
-    Object.keys(contentChanges).length > 0 || Object.keys(metadataChanges).length > 0;
-  const children = parsed.metadata.children ?? [];
-  if (!hasChanges && children.length === 0 && !input.queueUnchanged) {
+  const changeState = detectTicketChanges(draft, parsed);
+  if (!changeState.hasChanges && !input.queueUnchanged) {
     return buildResult("no_change", "No changes to save.");
   }
 
@@ -120,7 +112,7 @@ export const queueTicketDraft = async (
     operationId: `${input.operationScope ?? "legacy"}:ticket:${input.ticketId}`,
     phase: "queued",
   }, input.operationScope);
-  if (!hasChanges && children.length === 0) {
+  if (!changeState.hasChanges) {
     return buildResult("no_change", "No changes to save.");
   }
   markDraftStatus(input.ticketId, "Dirty", input.operationScope);
@@ -128,7 +120,12 @@ export const queueTicketDraft = async (
     await applyEditorContent(input.editor, normalizedContent);
     setEditorDisplaySource(input.editor, "saved");
   }
-  if (hasChanges && input.onSubjectUpdated) {
+  if (
+    (changeState.subjectChanged ||
+      changeState.descriptionChanged ||
+      changeState.metadataChanged) &&
+    input.onSubjectUpdated
+  ) {
     input.onSubjectUpdated(input.ticketId, subject);
   }
 

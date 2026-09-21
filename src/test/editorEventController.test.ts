@@ -19,6 +19,7 @@ import {
   getTicketDraft,
   initializeDraftStore,
   initializeTicketDraft,
+  markDraftStatus,
 } from "../views/ticketDraftStore";
 import { createInMemoryDraftStorage } from "../views/draftPersistence";
 import { releaseSaveSync, suppressSaveSync } from "../views/saveSyncSuppression";
@@ -34,6 +35,23 @@ const buildSyncedNewTicketDraftText = (issueId: number, projectId?: number): str
       ...(projectId !== undefined ? { project_id: projectId } : {}),
     },
   });
+
+const createRegisteredTicketDocument = (ticketId: number, scope: string) => {
+  const metadata = buildIssueMetadataFixture();
+  const original = buildTicketEditorContent({
+    subject: "Original",
+    description: "Body",
+    metadata,
+  });
+  const document = createMutableDocumentStub(
+    vscode.Uri.parse(`untitled:redmine-client-ticket-${ticketId}.md`),
+    original,
+  );
+  initializeDraftStore(createInMemoryDraftStorage(), scope);
+  initializeTicketDraft(ticketId, "Original", "Body", metadata, undefined, scope);
+  registerTicketDocument(ticketId, document, "ticket", undefined, scope);
+  return { document, metadata, original };
+};
 
 suite("editorEventController registerEditorDocument", () => {
   teardown(() => {
@@ -103,6 +121,85 @@ suite("editorEventController registerEditorDocument", () => {
     document.setText(original);
     assert.strictEqual(updateTicketDraftStatusFromDocument(document), true);
     assert.strictEqual(getTicketDraft(ticketId, scope)?.status, "Synced");
+  });
+
+  test("description の末尾改行を Dirty として扱う", () => {
+    const ticketId = 125;
+    const scope = "test:trailing-newline";
+    const { document, original } = createRegisteredTicketDocument(ticketId, scope);
+
+    document.setText(`${original}\n`);
+
+    assert.strictEqual(updateTicketDraftStatusFromDocument(document), true);
+    assert.strictEqual(getTicketDraft(ticketId, scope)?.status, "Dirty");
+  });
+
+  test("description の末尾空白を Dirty として扱う", () => {
+    const ticketId = 126;
+    const scope = "test:trailing-space";
+    const { document, metadata } = createRegisteredTicketDocument(ticketId, scope);
+
+    document.setText(buildTicketEditorContent({
+      subject: "Original",
+      description: "Body ",
+      metadata,
+    }));
+
+    assert.strictEqual(updateTicketDraftStatusFromDocument(document), true);
+    assert.strictEqual(getTicketDraft(ticketId, scope)?.status, "Dirty");
+  });
+
+  test("Conflict 中に編集しても Conflict を維持する", () => {
+    const ticketId = 127;
+    const scope = "test:conflict-edit";
+    const { document, metadata } = createRegisteredTicketDocument(ticketId, scope);
+    markDraftStatus(ticketId, "Conflict", scope);
+    document.setText(buildTicketEditorContent({
+      subject: "Changed",
+      description: "Body",
+      metadata,
+    }));
+
+    assert.strictEqual(updateTicketDraftStatusFromDocument(document), false);
+    assert.strictEqual(getTicketDraft(ticketId, scope)?.status, "Conflict");
+  });
+
+  test("Conflict 中にbaseへ戻しても Conflict を維持する", () => {
+    const ticketId = 128;
+    const scope = "test:conflict-revert";
+    const { document, original } = createRegisteredTicketDocument(ticketId, scope);
+    markDraftStatus(ticketId, "Conflict", scope);
+    document.setText(original);
+
+    assert.strictEqual(updateTicketDraftStatusFromDocument(document), false);
+    assert.strictEqual(getTicketDraft(ticketId, scope)?.status, "Conflict");
+  });
+
+  for (const status of ["Syncing", "Failed"] as const) {
+    test(`${status} 中に編集しても状態を維持する`, () => {
+      const ticketId = status === "Syncing" ? 129 : 130;
+      const scope = `test:${status.toLowerCase()}-edit`;
+      const { document, metadata } = createRegisteredTicketDocument(ticketId, scope);
+      markDraftStatus(ticketId, status, scope);
+      document.setText(buildTicketEditorContent({
+        subject: "Changed",
+        description: "Body",
+        metadata,
+      }));
+
+      assert.strictEqual(updateTicketDraftStatusFromDocument(document), false);
+      assert.strictEqual(getTicketDraft(ticketId, scope)?.status, status);
+    });
+  }
+
+  test("parse error は Synced から Dirty に変更する", () => {
+    const ticketId = 131;
+    const scope = "test:parse-error";
+    const { document } = createRegisteredTicketDocument(ticketId, scope);
+    document.setText("---\nissue:");
+
+    assert.strictEqual(updateTicketDraftStatusFromDocument(document), true);
+    assert.strictEqual(getTicketDraft(ticketId, scope)?.status, "Dirty");
   });
 
   test("同期処理によるドキュメント書き換えでは Synced を Dirty に戻さない", () => {
