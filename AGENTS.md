@@ -67,7 +67,11 @@ Do not bypass validation by routing raw Webview messages directly into applicati
 
 Use `vscode.l10n.t` for user-facing strings and keep the corresponding localization resources in sync.
 
-API keys must remain in VS Code SecretStorage. Never write real credentials to settings, logs, fixtures, tests, or documentation.
+API keys must remain in VS Code SecretStorage, keyed by the existing normalized connection scope hash. Never inherit credentials from another connection scope, including nested asynchronous contexts. Never write real credentials to settings, logs, fixtures, tests, or documentation.
+
+Legacy API key migration is limited to the valid configured connection at initialization. Persist its migration owner in SecretStorage before copying, preserve existing scoped keys, and never copy the legacy key to another scope after a partial failure.
+
+Requests require HTTPS except for HTTP loopback hosts (`localhost`, `127.0.0.1`, `::1`). Reject insecure remote URLs before sending credentials.
 
 Keep `ignoreSSLErrors` limited to development/verification scenarios.
 

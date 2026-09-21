@@ -246,7 +246,7 @@ suite("T-01 〜 T-24: Sync Lifecycle Integration, Remote Certainty & Completion 
         ticketId: 70,
         commentId: 200,
         baseBody: "Old",
-        body: `New with ![img](${imgPath})`,
+        body: "New with ![img](./img.png)",
         baseDir: tmpDir,
       },
     }, SCOPE);

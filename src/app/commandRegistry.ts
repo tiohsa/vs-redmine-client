@@ -16,7 +16,8 @@ import {
 } from "../commands/openInBrowser";
 import { reloadCommentFromEditor } from "../commands/reloadComment";
 import { reloadTicketFromEditor } from "../commands/reloadTicket";
-import { setApiKey, clearApiKey, getApiKeyStatus } from "../config/apiKeyStore";
+import { getCurrentConnectionScope } from "../config/connectionScope";
+import { setApiKeyForScope, clearApiKey, getApiKeyStatus } from "../config/apiKeyStore";
 import { showError, showSuccess } from "../utils/notifications";
 import {
   configureEditorDefaultField,
@@ -502,6 +503,7 @@ export const registerCommands = (
       showSuccess(vscode.l10n.t("Editor assigned to the current Redmine connection."));
     }),
     vscode.commands.registerCommand("redmine-client.setApiKey", async () => {
+      const connectionScope = getCurrentConnectionScope();
       const key = await vscode.window.showInputBox({
         prompt: vscode.l10n.t("Enter Redmine API key"),
         password: true,
@@ -510,7 +512,7 @@ export const registerCommands = (
       if (key === undefined) {
         return;
       }
-      await setApiKey(key);
+      await setApiKeyForScope(connectionScope, key);
       settingsPresentation.refresh();
       showSuccess(vscode.l10n.t("API key saved to secure storage."));
     }),

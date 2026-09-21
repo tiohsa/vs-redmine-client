@@ -329,10 +329,22 @@ export class DashboardUnsyncedService {
     if (key.kind !== "ticket" && key.kind !== "comment") {
       return undefined;
     }
+    const commentContext = result.kind === "comment" ? result.commentConflictContext : undefined;
+    if (key.kind === "comment" && (
+      (key.commentId === undefined && key.documentUri === undefined) ||
+      !commentContext || commentContext.ticketId !== key.ticketId ||
+      (key.commentId !== undefined && commentContext.commentId !== key.commentId) ||
+      (commentContext.connectionScope !== undefined &&
+        commentContext.connectionScope !== getCurrentConnectionScope())
+    )) {
+      return undefined;
+    }
     const editor = getTicketEditors(key.ticketId)
       .filter((record) => key.kind === "ticket"
         ? record.contentType === "ticket"
         : (record.contentType === "comment" || record.contentType === "commentDraft") &&
+          (key.commentId === undefined || record.commentId === key.commentId) &&
+          record.commentId === commentContext?.commentId &&
           (key.documentUri === undefined || record.uri === key.documentUri))
       .sort((a, b) => b.lastActiveAt - a.lastActiveAt)[0];
     if (!editor) {

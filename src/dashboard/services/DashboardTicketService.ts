@@ -14,6 +14,8 @@ export class DashboardTicketService {
   private allProjectsSearchQuery = "";
   private allProjectsSearchIssueOffset = 0;
   private allProjectsSearchExtraCount = 0;
+  // 件名検索のページにまだ現れていない、合成追加した直接IDのチケット。
+  private allProjectsSearchDirectId?: number;
   private loadMoreFlight?: { key: string; promise: Promise<void> };
 
   constructor(private readonly deps: {
@@ -35,6 +37,7 @@ export class DashboardTicketService {
     this.allProjectsSearchQuery = "";
     this.allProjectsSearchIssueOffset = 0;
     this.allProjectsSearchExtraCount = 0;
+    this.allProjectsSearchDirectId = undefined;
     const { store } = this.deps.context;
     const project = this.deps.getResolvedProject();
 
@@ -114,6 +117,7 @@ export class DashboardTicketService {
     this.allProjectsSearchQuery = "";
     this.allProjectsSearchIssueOffset = 0;
     this.allProjectsSearchExtraCount = 0;
+    this.allProjectsSearchDirectId = undefined;
   }
 
   private async loadMoreTicketsNow(
@@ -134,9 +138,14 @@ export class DashboardTicketService {
           return;
         }
         this.allProjectsSearchIssueOffset += result.tickets.length;
+        if (result.tickets.some((ticket) => ticket.id === this.allProjectsSearchDirectId)) {
+          this.allProjectsSearchExtraCount = 0;
+          this.allProjectsSearchDirectId = undefined;
+        }
         this.deps.setTickets(mergeTicketsById(tickets, result.tickets));
         this.deps.setTotalCount(result.totalCount + this.allProjectsSearchExtraCount);
         rememberTicketSummaries(result.tickets);
+        store.updateNested("errors", { tickets: undefined });
         this.pushTickets();
       } catch (err) {
         if (generation !== this.ticketLoadGeneration) {
@@ -163,6 +172,7 @@ export class DashboardTicketService {
       this.deps.setTickets([...tickets, ...result.tickets]);
       this.deps.setTotalCount(result.totalCount);
       rememberTicketSummaries(result.tickets);
+      store.updateNested("errors", { tickets: undefined });
       this.pushTickets();
     } catch (err) {
       if (generation !== this.ticketLoadGeneration) {
@@ -180,6 +190,7 @@ export class DashboardTicketService {
     this.allProjectsSearchQuery = query;
     this.allProjectsSearchIssueOffset = 0;
     this.allProjectsSearchExtraCount = 0;
+    this.allProjectsSearchDirectId = undefined;
 
     store.update({
       selectedProject: undefined,
@@ -215,6 +226,7 @@ export class DashboardTicketService {
       }
       const tickets = idTicket ? mergeTicketsById([idTicket], result.tickets) : result.tickets;
       this.allProjectsSearchExtraCount = idTicket && !result.tickets.some((ticket) => ticket.id === idTicket.id) ? 1 : 0;
+      this.allProjectsSearchDirectId = this.allProjectsSearchExtraCount ? idTicket?.id : undefined;
       this.deps.setTickets(tickets);
       this.deps.setTotalCount(result.totalCount + this.allProjectsSearchExtraCount);
       rememberTicketSummaries(tickets);

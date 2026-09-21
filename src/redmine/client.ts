@@ -1,19 +1,21 @@
 import * as https from "https";
 import * as http from "http";
 import { getBaseUrl, getIgnoreSSLErrors, getRequestTimeoutMs } from "../config/settings";
-import { resolveApiKey } from "../config/apiKeyStore";
+import { resolveApiKeyForScope } from "../config/apiKeyStore";
 import { AsyncLocalStorage } from "async_hooks";
+import * as vscode from "vscode";
 
 type HttpMethod = "GET" | "POST" | "PUT" | "DELETE";
 type FetchBody = string | Uint8Array;
 
 type ConnectionContext = {
   baseUrl: string;
-  apiKey: string;
 };
 
 export type QueryParams = Record<string, string | number | boolean | undefined>;
 const connectionScopeContext = new AsyncLocalStorage<ConnectionContext>();
+// JSON/text API の応答を制限する。添付ファイルの送信サイズには適用しない。
+const MAX_RESPONSE_BYTES = 10 * 1024 * 1024;
 
 export const runWithConnectionScope = <T>(
   connectionScope: string,
@@ -21,7 +23,6 @@ export const runWithConnectionScope = <T>(
 ): Promise<T> => connectionScopeContext.run(
   {
     baseUrl: connectionScope,
-    apiKey: connectionScopeContext.getStore()?.apiKey ?? resolveApiKey(),
   },
   operation,
 );
@@ -57,17 +58,27 @@ export const normalizeBaseUrl = (rawBaseUrl: string): string => {
   }
 };
 
-const ensureConfig = (): { baseUrl: string; apiKey: string } => {
+const ensureConfig = async (): Promise<{ baseUrl: string; apiKey: string }> => {
   const context = connectionScopeContext.getStore();
   const baseUrl = context?.baseUrl ?? getBaseUrl();
-  const apiKey = context?.apiKey ?? resolveApiKey();
   if (!baseUrl) {
     throw new Error("Missing Redmine base URL configuration.");
   }
+  const normalizedBaseUrl = normalizeBaseUrl(baseUrl);
+  assertSecureUrl(normalizedBaseUrl);
+  const apiKey = await resolveApiKeyForScope(normalizedBaseUrl);
   if (!apiKey) {
     throw new Error("Missing Redmine API key configuration.");
   }
-  return { baseUrl: normalizeBaseUrl(baseUrl), apiKey };
+  return { baseUrl: normalizedBaseUrl, apiKey };
+};
+
+const assertSecureUrl = (urlString: string): void => {
+  const url = new URL(urlString);
+  if (url.protocol !== "https:" && !(url.protocol === "http:" &&
+    ["localhost", "127.0.0.1", "[::1]"].includes(url.hostname))) {
+    throw new Error(vscode.l10n.t("Redmine must use HTTPS because the API key is sent with every request."));
+  }
 };
 
 export const buildUrl = (baseUrl: string, path: string, query?: QueryParams): string => {
@@ -120,8 +131,29 @@ const performRequest = (
 
     const req = requestModule.request(url, reqOptions, (res) => {
       const chunks: Buffer[] = [];
-      res.on("data", (chunk) => chunks.push(chunk));
+      let responseBytes = 0;
+      let responseFailed = false;
+      const failResponse = (error: Error): void => {
+        if (responseFailed) { return; }
+        responseFailed = true;
+        chunks.length = 0;
+        reject(error);
+        res.destroy();
+        req.destroy();
+      };
+      res.on("error", () => failResponse(new Error(vscode.l10n.t("Redmine response stream failed."))));
+      res.on("aborted", () => failResponse(new Error(vscode.l10n.t("Redmine response was interrupted."))));
+      res.on("data", (chunk: Buffer) => {
+        if (responseFailed) { return; }
+        responseBytes += chunk.length;
+        if (responseBytes > MAX_RESPONSE_BYTES) {
+          failResponse(new Error(vscode.l10n.t("Redmine response exceeded the maximum size of {0} MiB.", 10)));
+          return;
+        }
+        chunks.push(chunk);
+      });
       res.on("end", () => {
+        if (responseFailed) { return; }
         const buffer = Buffer.concat(chunks);
         resolve({
           statusCode: res.statusCode || 0,
@@ -152,8 +184,12 @@ const performRequest = (
 };
 
 export const requestJson = async <T>(options: RequestOptions): Promise<T> => {
-  const { baseUrl, apiKey } = ensureConfig();
+  const { baseUrl, apiKey } = await ensureConfig();
   const url = buildUrl(baseUrl, options.path, options.query);
+  assertSecureUrl(url);
+  if (new URL(url).origin !== new URL(baseUrl).origin) {
+    throw new Error(vscode.l10n.t("Redmine request URL must belong to the configured connection."));
+  }
   const headers = buildHeaders(apiKey, options.headers);
 
   const response = await performRequest(url, options, headers);
@@ -178,8 +214,12 @@ export const requestJson = async <T>(options: RequestOptions): Promise<T> => {
 };
 
 export const requestText = async (options: RequestOptions): Promise<string> => {
-  const { baseUrl, apiKey } = ensureConfig();
+  const { baseUrl, apiKey } = await ensureConfig();
   const url = buildUrl(baseUrl, options.path, options.query);
+  assertSecureUrl(url);
+  if (new URL(url).origin !== new URL(baseUrl).origin) {
+    throw new Error(vscode.l10n.t("Redmine request URL must belong to the configured connection."));
+  }
   const headers = buildHeaders(apiKey, options.headers);
   const contentType = options.contentType ?? "text/plain";
 

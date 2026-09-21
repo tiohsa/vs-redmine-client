@@ -299,7 +299,7 @@ suite("RT-A 〜 RT-J: Remote Certainty & Secondary Effect Invariant Tests", () =
         ticketId: 50,
         commentId: 100,
         baseBody: "Old body",
-        body: `New comment with ![alt](${imgPath})`,
+        body: "New comment with ![alt](./test.png)",
         baseDir: tmpDir,
       },
     }, SCOPE);

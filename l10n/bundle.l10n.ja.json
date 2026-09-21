@@ -1,4 +1,7 @@
 {
+    "Redmine response stream failed.": "Redmine の応答ストリームでエラーが発生しました。",
+    "Redmine response was interrupted.": "Redmine の応答が途中で切断されました。",
+    "Redmine response exceeded the maximum size of {0} MiB.": "Redmine の応答が最大サイズ {0} MiB を超えました。",
     "Conflict detected in ticket #{0}. Remote has been updated.": "チケット #{0} に競合が検出されました。リモートで更新があります。",
     "Conflict detected in comment #{0}. Remote has been updated.": "コメント #{0} に競合が検出されました。リモートで更新があります。",
     "Local Priority": "ローカル優先",
@@ -344,5 +347,7 @@
     "Reset display settings": "表示設定をリセット",
     "Synchronization": "同期",
     "Change API Key": "API キーを変更",
-    "Request timeout must be greater than zero.": "リクエストタイムアウトは 0 より大きくしてください。"
+    "Request timeout must be greater than zero.": "リクエストタイムアウトは 0 より大きくしてください。",
+  "Redmine must use HTTPS because the API key is sent with every request.": "API キーをすべてのリクエストで送信するため、Redmine には HTTPS 接続が必要です。",
+  "Redmine request URL must belong to the configured connection.": "Redmine のリクエスト URL は設定された接続先に属している必要があります。"
 }

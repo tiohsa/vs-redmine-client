@@ -34,7 +34,7 @@ suite("R01 〜 R10: Invariant & Lifecycle Recovery Tests", () => {
     fs.writeFileSync(imgPath, "fake png content");
 
     const commentFile = path.join(tmpDir, "new_comment.md");
-    const rawBody = `Review notes with image: ![screenshot](${imgPath})`;
+    const rawBody = "Review notes with image: ![screenshot](./screen.png)";
     fs.writeFileSync(commentFile, rawBody);
 
     const doc = await vscode.workspace.openTextDocument(vscode.Uri.file(commentFile));
@@ -136,7 +136,7 @@ suite("R01 〜 R10: Invariant & Lifecycle Recovery Tests", () => {
     fs.writeFileSync(imgA, "data A");
     fs.writeFileSync(imgB, "data B");
 
-    const rawBody = `Images: ![A](${imgA}) and ![B](${imgB})`;
+    const rawBody = "Images: ![A](./a.png) and ![B](./b.png)";
 
     await addOfflineCommentUpdateAsync({
       ticketId: 303,

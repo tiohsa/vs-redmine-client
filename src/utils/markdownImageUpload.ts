@@ -1,3 +1,4 @@
+import * as fs from "fs";
 import * as path from "path";
 import { UploadToken } from "../redmine/types";
 import {
@@ -56,14 +57,93 @@ const isPermissionDeniedError = (error: unknown): boolean => {
   return message.includes("(403)") || message.toLowerCase().includes("forbidden");
 };
 
-const resolveLocalPath = (value: string, baseDir?: string): string | undefined => {
-  if (path.isAbsolute(value)) {
-    return value;
-  }
-  if (!baseDir) {
+const isWithinDirectory = (baseDir: string, candidate: string): boolean => {
+  const relative = path.relative(baseDir, candidate);
+  return relative === "" || (
+    relative !== ".." &&
+    !relative.startsWith(`..${path.sep}`) &&
+    !path.isAbsolute(relative)
+  );
+};
+
+const isMissingPathError = (error: unknown): boolean => {
+  const code = (error as NodeJS.ErrnoException | undefined)?.code;
+  return code === "ENOENT" || code === "ENOTDIR";
+};
+
+const realpathOrLexicalPath = async (
+  baseDir: string,
+  candidate: string,
+): Promise<string | undefined> => {
+  const lexicalBaseDir = path.resolve(baseDir);
+  const lexicalCandidate = path.resolve(candidate);
+  if (!isWithinDirectory(lexicalBaseDir, lexicalCandidate)) {
     return undefined;
   }
-  return path.resolve(baseDir, value);
+
+  let realBaseDir: string;
+  try {
+    realBaseDir = await fs.promises.realpath(lexicalBaseDir);
+  } catch (error) {
+    if (!isMissingPathError(error)) {
+      return undefined;
+    }
+    return lexicalCandidate;
+  }
+
+  let realCandidate: string | undefined;
+  try {
+    realCandidate = await fs.promises.realpath(lexicalCandidate);
+  } catch (error) {
+    if (!isMissingPathError(error)) {
+      return undefined;
+    }
+
+    // The file may not exist yet. Resolve its nearest existing parent so a
+    // symlinked directory cannot escape the sandbox before validation runs.
+    let existingParent = path.dirname(lexicalCandidate);
+    while (existingParent !== path.dirname(existingParent)) {
+      try {
+        const realParent = await fs.promises.realpath(existingParent);
+        const suffix = path.relative(existingParent, lexicalCandidate);
+        realCandidate = path.resolve(realParent, suffix);
+        break;
+      } catch (parentError) {
+        if (!isMissingPathError(parentError)) {
+          return undefined;
+        }
+        existingParent = path.dirname(existingParent);
+      }
+    }
+
+    if (!realCandidate) {
+      return lexicalCandidate;
+    }
+  }
+
+  return realCandidate && isWithinDirectory(realBaseDir, realCandidate)
+    ? lexicalCandidate
+    : undefined;
+};
+
+export const resolveLocalPath = async (
+  value: string,
+  baseDir?: string,
+): Promise<string | undefined> => {
+  if (
+    !baseDir ||
+    value.includes("\0") ||
+    path.isAbsolute(value) ||
+    path.posix.isAbsolute(value.replace(/\\/g, "/")) ||
+    path.win32.isAbsolute(value) ||
+    /^[A-Za-z]:/.test(value)
+  ) {
+    return undefined;
+  }
+
+  const normalizedValue = value.replace(/\\/g, "/");
+  const candidate = path.resolve(baseDir, normalizedValue);
+  return realpathOrLexicalPath(baseDir, candidate);
 };
 
 const isPlainRelativePath = (value: string): boolean => {
@@ -75,17 +155,17 @@ const isPlainRelativePath = (value: string): boolean => {
   return dir === "." || dir === "";
 };
 
-const resolveFallbackImagePath = (
+export const resolveFallbackImagePath = async (
   value: string,
   baseDir?: string,
-): string | undefined => {
+): Promise<string | undefined> => {
   if (!baseDir) {
     return undefined;
   }
   if (!isPlainRelativePath(value)) {
     return undefined;
   }
-  return path.resolve(baseDir, "images", value);
+  return resolveLocalPath(path.posix.join("images", value), baseDir);
 };
 
 const isMissingPathReason = (reason?: string): boolean => {
@@ -112,6 +192,7 @@ export const processMarkdownImageUploads = async (input: {
 
   const failures: MarkdownImageUploadFailure[] = [];
   const resolvedMap = new Map<string, { upload?: UploadToken; failure?: string }>();
+  const resolvedPathMap = new Map<string, string | undefined>();
   let permissionDenied = false;
 
   for (const link of links) {
@@ -119,7 +200,7 @@ export const processMarkdownImageUploads = async (input: {
       continue;
     }
 
-    const resolvedPath = resolveLocalPath(link.path, input.baseDir);
+    const resolvedPath = await resolveLocalPath(link.path, input.baseDir);
     if (!resolvedPath) {
       failures.push({ path: link.path, reason: "Relative path cannot be resolved." });
       continue;
@@ -130,7 +211,7 @@ export const processMarkdownImageUploads = async (input: {
     let validation = await validatePath(resolvedPath);
     let finalPath = resolvedPath;
     if (!validation.valid && isMissingPathReason(validation.reason)) {
-      const fallbackPath = resolveFallbackImagePath(link.path, input.baseDir);
+      const fallbackPath = await resolveFallbackImagePath(link.path, input.baseDir);
       if (fallbackPath && fallbackPath !== resolvedPath) {
         const fallbackValidation = await validatePath(fallbackPath);
         if (fallbackValidation.valid) {
@@ -146,6 +227,7 @@ export const processMarkdownImageUploads = async (input: {
         reason: validation.reason ?? "Invalid image path.",
       });
       resolvedMap.set(finalPath, { failure: validation.reason });
+      resolvedPathMap.set(link.path, finalPath);
       continue;
     }
 
@@ -154,6 +236,7 @@ export const processMarkdownImageUploads = async (input: {
     }
 
     try {
+      resolvedPathMap.set(link.path, finalPath);
       const upload = await input.uploadFile(finalPath);
       resolvedMap.set(finalPath, {
         upload: {
@@ -186,12 +269,10 @@ export const processMarkdownImageUploads = async (input: {
       return [];
     }
 
-    const resolvedPath = resolveLocalPath(link.path, input.baseDir);
-    const fallbackPath = resolveFallbackImagePath(link.path, input.baseDir);
+    const resolvedPath = resolvedPathMap.get(link.path);
     const entry =
-      (resolvedPath ? resolvedMap.get(resolvedPath) : undefined) ??
-      (fallbackPath ? resolvedMap.get(fallbackPath) : undefined);
-    if (!resolvedPath && !fallbackPath) {
+      (resolvedPath ? resolvedMap.get(resolvedPath) : undefined);
+    if (!resolvedPath) {
       return [];
     }
     if (!entry?.upload) {
