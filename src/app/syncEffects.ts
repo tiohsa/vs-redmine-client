@@ -19,6 +19,7 @@ export type DurableSyncEffectKind =
   | "comment_create"
   | "comment_update"
   | "attachment_upload"
+  | "attachment_link"
   | "image_upload"
   | "ticket_delete"
   | "local_finalize";
@@ -78,6 +79,14 @@ export type CommentUpdateRequestSnapshot = {
   submittedUploads?: Array<{ token: string; filename?: string; contentType?: string }>;
 };
 
+export type AttachmentLinkRequestSnapshot = {
+  kind: "attachment_link";
+  request: {
+    issueId: number;
+    fields: { uploads: UploadToken[] };
+  };
+};
+
 export type TicketCreateRequestSnapshot = {
   kind: "ticket_create";
   request: IssueCreateInput;
@@ -112,6 +121,7 @@ export type UploadRequestSnapshot = {
 export type SyncEffectRequestSnapshot =
   | CommentCreateRequestSnapshot
   | CommentUpdateRequestSnapshot
+  | AttachmentLinkRequestSnapshot
   | TicketCreateRequestSnapshot
   | TicketUpdateRequestSnapshot
   | ChildTicketCreateRequestSnapshot

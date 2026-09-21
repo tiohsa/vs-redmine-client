@@ -254,7 +254,7 @@ suite("T-01 〜 T-24: Sync Lifecycle Integration, Remote Certainty & Completion 
     const handler = new CommentUpdateHandler();
     const context = { connectionScope: SCOPE };
     const deps = {
-      comment: { uploadFile: mockUpload as any },
+      comment: { uploadFile: mockUpload as any, updateIssue: async () => {} },
       repository: repo,
     };
 

@@ -7,15 +7,51 @@ import {
 } from "../views/commentEditStore";
 import {
   reloadCommentEditor,
+  saveCommentDocumentLocally,
+  saveCommentDraftLocally,
   syncCommentDraft,
   syncNewCommentDraft,
 } from "../views/commentSaveSync";
 import { createEditorStub } from "./helpers/editorStubs";
 import * as vscode from "vscode";
+import { getOfflineSyncQueue, initializeOfflineSyncStore } from "../views/offlineSyncStore";
+import { createTestMemento } from "./helpers/vscodeMemento";
+import { clearRegistry, registerTicketDocument } from "../views/ticketEditorRegistry";
 
 suite("Comment save sync", () => {
+  const scope = "https://comment-save.example.org/";
+
+  setup(() => {
+    initializeOfflineSyncStore(createTestMemento(), scope);
+  });
+
   teardown(() => {
     clearCommentEdits();
+    clearRegistry();
+  });
+
+  test("ローカルコメント保存時に画像解決用のbaseDirをキューへ保持する", async () => {
+    const documentUri = vscode.Uri.file("/workspace/comments/comment.md");
+    const editor = createEditorStub(documentUri, "![image](image-1.png)");
+    registerTicketDocument(10, editor.document, "commentDraft", undefined, scope);
+
+    const result = await saveCommentDraftLocally(editor, scope);
+
+    assert.strictEqual(result?.status, "queued");
+    assert.strictEqual(getOfflineSyncQueue(scope).comments[0]?.baseDir, "/workspace/comments");
+  });
+
+  test("ドキュメント経由のローカルコメント保存でもbaseDirを保持する", async () => {
+    const documentUri = vscode.Uri.file("/workspace/comments/comment.md");
+
+    await saveCommentDocumentLocally({
+      operationScope: scope,
+      ticketId: 11,
+      content: "![image](image-1.png)",
+      documentUri,
+    });
+
+    assert.strictEqual(getOfflineSyncQueue(scope).comments[0]?.baseDir, "/workspace/comments");
   });
 
   test("returns no_change when content matches base", async () => {

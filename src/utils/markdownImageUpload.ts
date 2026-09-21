@@ -168,7 +168,7 @@ export const resolveFallbackImagePath = async (
   return resolveLocalPath(path.posix.join("images", value), baseDir);
 };
 
-const isMissingPathReason = (reason?: string): boolean => {
+export const isMissingPathReason = (reason?: string): boolean => {
   if (!reason) {
     return false;
   }

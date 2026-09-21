@@ -738,7 +738,7 @@ export class SyncCoordinator {
         const activeEffects = getEffectsForRevision(freshOp, freshRevision);
         const hasUnresolvedPrereq = activeEffects.some(
           (e) =>
-            (e.kind === "attachment_upload" || e.kind === "image_upload" || (typeof e.effectId === "string" && (e.effectId.startsWith("attachment") || e.effectId.startsWith("image")))) &&
+            (e.kind === "attachment_upload" || e.kind === "attachment_link" || e.kind === "image_upload" || (typeof e.effectId === "string" && (e.effectId.startsWith("attachment") || e.effectId.startsWith("image")))) &&
             (e.state === "started" || e.state === "commit_unknown" || e.state === "compensation_started" || e.state === "compensation_unknown" || e.state === "planned"),
         );
         if (hasUnresolvedPrereq) {

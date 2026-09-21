@@ -316,7 +316,7 @@ suite("RT-A 〜 RT-J: Remote Certainty & Secondary Effect Invariant Tests", () =
     assert.strictEqual(prep1.ok, true);
 
     const sec1 = await handler.executeSecondaryEffects!(op1, (prep1 as any).prepared, context, {
-      comment: { uploadFile: mockUpload as any },
+      comment: { uploadFile: mockUpload as any, updateIssue: async () => {} },
       repository: repo,
     } as any);
     assert.strictEqual(sec1.ok, true);
@@ -325,13 +325,13 @@ suite("RT-A 〜 RT-J: Remote Certainty & Secondary Effect Invariant Tests", () =
     // 2. クラッシュ再起動をシミュレート
     const op2 = repo.getOperation<CommentUpdateIntent>({ kind: "comment", ticketId: 50, commentId: 100 }, SCOPE)!;
     const prep2 = await handler.prepare(op2, context, {
-      comment: { uploadFile: mockUpload as any },
+      comment: { uploadFile: mockUpload as any, updateIssue: async () => {} },
       repository: repo,
     } as any);
     assert.strictEqual(prep2.ok, true);
 
     const sec2 = await handler.executeSecondaryEffects!(op2, (prep2 as any).prepared, context, {
-      comment: { uploadFile: mockUpload as any },
+      comment: { uploadFile: mockUpload as any, updateIssue: async () => {} },
       repository: repo,
     } as any);
     assert.strictEqual(sec2.ok, true);

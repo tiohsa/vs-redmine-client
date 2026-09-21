@@ -273,6 +273,10 @@ export class TicketSyncService {
         projectId,
         subject: parsed.subject,
         description: parsed.description,
+        // Keep the exact editor snapshot for the compare-and-rewrite fence.
+        // The parsed fields alone cannot reproduce formatting or metadata
+        // layout, and omitting this makes finalization compare against "".
+        content: input.editor.document.getText(),
         metadata: parsed.metadata,
         layout: parsed.layout,
         metadataBlock: parsed.metadataBlock,

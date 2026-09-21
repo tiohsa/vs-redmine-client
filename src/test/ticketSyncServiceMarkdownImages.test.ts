@@ -32,6 +32,98 @@ const createEditor = (filePath: string, initialContent: string): vscode.TextEdit
 };
 
 suite("TicketSyncService Markdown image uploads", () => {
+  for (const { eol, resume, userEdit } of [
+    { eol: "\n", resume: false, userEdit: false },
+    { eol: "\r\n", resume: false, userEdit: false },
+    { eol: "\r\n", resume: true, userEdit: false },
+    { eol: "\r\n", resume: false, userEdit: true },
+  ]) {
+    test(`画像同期の実エディタ反映 (${eol === "\n" ? "LF" : "CRLF"}, 再開=${resume}, 途中編集=${userEdit})`, async () => {
+      const scope = `https://redmine.example.org/image-editor-${eol.length}`;
+      const memento = createTestMemento();
+      initializeOfflineSyncStore(memento, scope);
+      clearTicketDrafts(scope);
+      const directory = fs.mkdtempSync(path.join(os.tmpdir(), "ticket-image-editor-"));
+      const uri = vscode.Uri.file(path.join(directory, "ticket.md"));
+      const metadata = buildIssueMetadataFixture();
+      const content = buildTicketEditorContent({
+        subject: "Ticket",
+        description: "![image](./screen.png)",
+        metadata,
+      }).replace(/\n/g, eol);
+      fs.writeFileSync(path.join(directory, "screen.png"), "screen");
+      fs.writeFileSync(uri.fsPath, content);
+      const document = await vscode.workspace.openTextDocument(uri);
+      const editor = await vscode.window.showTextDocument(document);
+      initializeTicketDraft(903, "Ticket", "Old description", metadata, "t1", scope);
+      let description = "Old description";
+      let uploadCalls = 0;
+      let updateCalls = 0;
+      const textEditors = resume ? [] : [editor];
+      const service = new TicketSyncService({
+        rewrite: { textDocuments: [document], textEditors },
+        update: {
+          getIssueDetail: async () => ({
+            ticket: {
+              id: 903, projectId: 1, subject: "Ticket", description,
+              trackerName: metadata.tracker, priorityName: metadata.priority,
+              statusName: metadata.status, updatedAt: updateCalls ? "t2" : "t1",
+            },
+            comments: [],
+          }),
+          uploadFile: async () => {
+            uploadCalls++;
+            return { token: "image-token", filename: "remote.png", contentType: "image/png" };
+          },
+          updateIssue: async ({ fields }) => {
+            updateCalls++;
+            description = fields.description ?? description;
+            if (userEdit) {
+              await editor.edit((builder) => builder.insert(
+                document.positionAt(document.getText().length), `${eol}同期中の追記`,
+              ));
+            }
+          },
+        },
+      });
+      try {
+        let outcome = await service.syncEditor({
+          context: { connectionScope: scope }, editor, ticketId: 903,
+          newTicket: false, manual: false,
+        });
+        if (userEdit) {
+          assert.strictEqual(outcome.kind, "remote_committed");
+          assert.strictEqual(outcome.kind === "remote_committed" && outcome.pending, "local_finalize");
+          assert.strictEqual(outcome.kind === "remote_committed" && outcome.message, "Editor rewrite pending: stale_source");
+          assert.ok(document.getText().includes("![image](./screen.png)"));
+          assert.ok(document.getText().endsWith("同期中の追記"));
+          assert.strictEqual(uploadCalls, 1);
+          assert.strictEqual(updateCalls, 1);
+          assert.strictEqual(getOfflineSyncQueue(scope).tickets.get(903)?.phase, "local_finalize_pending");
+          return;
+        }
+        if (resume) {
+          assert.strictEqual(outcome.kind, "remote_committed");
+          assert.strictEqual(getOfflineSyncQueue(scope).tickets.get(903)?.phase, "local_finalize_pending");
+          initializeOfflineSyncStore(memento, scope);
+          textEditors.push(editor);
+          outcome = await service.syncQueueItem({ kind: "ticket", ticketId: 903 }, { connectionScope: scope });
+        }
+        assert.strictEqual(outcome.kind, "completed", JSON.stringify(outcome));
+        assert.strictEqual(uploadCalls, 1);
+        assert.strictEqual(updateCalls, 1);
+        assert.ok(document.getText().includes("![image](remote.png)"));
+        assert.strictEqual(document.eol, eol === "\n" ? vscode.EndOfLine.LF : vscode.EndOfLine.CRLF);
+        assert.strictEqual(getOfflineSyncQueue(scope).tickets.size, 0);
+        assert.strictEqual(fs.readFileSync(uri.fsPath, "utf8"), document.getText());
+      } finally {
+        await vscode.commands.executeCommand("workbench.action.revertAndCloseActiveEditor");
+        fs.rmSync(directory, { recursive: true, force: true });
+        clearTicketDrafts(scope);
+      }
+    });
+  }
+
   test("production entry point uploads one unique image and sends the rewritten update", async () => {
     const scope = "https://redmine.example.org/ticket-sync-markdown-images";
     initializeOfflineSyncStore(createTestMemento(), scope);

@@ -349,5 +349,8 @@
     "Change API Key": "API キーを変更",
     "Request timeout must be greater than zero.": "リクエストタイムアウトは 0 より大きくしてください。",
   "Redmine must use HTTPS because the API key is sent with every request.": "API キーをすべてのリクエストで送信するため、Redmine には HTTPS 接続が必要です。",
-  "Redmine request URL must belong to the configured connection.": "Redmine のリクエスト URL は設定された接続先に属している必要があります。"
+  "Redmine request URL must belong to the configured connection.": "Redmine のリクエスト URL は設定された接続先に属している必要があります。",
+  "Markdown image operation is stale.": "画像の同期処理が古いため停止しました。",
+  "Relative image path cannot be resolved: {0}": "画像の相対パスを解決できません: {0}",
+  "Invalid image path: {0}. {1}": "画像のパスが無効です: {0}。{1}"
 }

@@ -542,6 +542,7 @@ export const saveCommentDraftLocally = async (
     baseBody: edit?.baseBody,
     lastKnownRemoteUpdatedAt: edit?.lastKnownRemoteUpdatedAt,
     body,
+    baseDir: resolveEditorBaseDir({ editor }),
     documentUri: editor.document.uri.toString(),
     finalizeDraft: contentType === "commentDraft",
   }, operationScope);
@@ -559,6 +560,7 @@ export const saveCommentDocumentLocally = async (input: {
     ticketId: input.ticketId,
     commentId: input.commentId,
     body: input.content,
+    baseDir: resolveEditorBaseDir({ documentUri: input.documentUri }),
     documentUri: input.documentUri.toString(),
   }, input.operationScope);
   return buildResult("queued", vscode.l10n.t("Saved locally. Run a sync command to apply changes to Redmine."));
