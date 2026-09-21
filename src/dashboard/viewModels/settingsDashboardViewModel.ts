@@ -9,7 +9,9 @@ import {
   getRequestTimeoutMs,
   getTicketListLimit,
   getTicketListShowDueDate,
+  getTicketListShowPriority,
   getTicketListShowStatus,
+  getTicketListShowTracker,
 } from "../../config/settings";
 import { isApiKeyConfigured } from "../../config/apiKeyStore";
 import { getTicketEditorDefaults } from "../../views/ticketEditorDefaultsStore";
@@ -30,6 +32,8 @@ export const buildSettingsDashboardViewModel = (
   ticketListLimit: getTicketListLimit(),
   showStatus: getTicketListShowStatus(),
   showDueDate: getTicketListShowDueDate(),
+  showTracker: getTicketListShowTracker(),
+  showPriority: getTicketListShowPriority(),
   editorStorageDirectory: getEditorStorageDirectory(),
   editorDefaults: (() => {
     const defaults = getTicketEditorDefaults();

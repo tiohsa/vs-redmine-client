@@ -214,6 +214,7 @@ async function main() {
     await evaluate(`(()=>{const input=document.querySelector('[data-metadata-field="${field}"]');input.value=${JSON.stringify(value)};input.dispatchEvent(new Event('input'));input.dispatchEvent(new Event('change'));})()`);
   }
   await stageMetadata('priority', 'High');
+  assert.equal(await evaluate(`document.getElementById('detail-sync-state').textContent`), strings.syncDirty);
   await stageMetadata('due_date', '');
   await evaluate(`document.querySelector('[data-metadata-field="due_date"]').focus()`);
   await push();
@@ -221,6 +222,7 @@ async function main() {
   assert.equal(await evaluate(`document.activeElement.dataset.metadataField`), 'due_date');
   await evaluate(`document.getElementById('metadata-cancel-btn').click()`);
   assert.equal(await evaluate('window.messages.length'), beforeMetadata, 'cancel must not send any request');
+  assert.equal(await evaluate(`document.getElementById('detail-sync-state').textContent`), strings.synced);
   assert.equal(await evaluate(`document.activeElement.id`), 'metadata-edit-btn');
   await evaluate(`document.getElementById('metadata-edit-btn').click()`);
   assert.equal(await evaluate(`document.querySelector('[data-metadata-field="priority"]').value`), 'Normal');

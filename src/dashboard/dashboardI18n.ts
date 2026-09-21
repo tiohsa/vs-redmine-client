@@ -164,6 +164,8 @@ export interface DashboardStrings {
   sectionDisplay: string;
   showStatusLabel: string;
   showDueDateLabel: string;
+  showTrackerLabel: string;
+  showPriorityLabel: string;
   sectionGeneral: string;
   ticketLimitLabel: string;
   resetSettings: string;
@@ -335,6 +337,8 @@ export const buildDashboardStrings = (): DashboardStrings => ({
   sectionDisplay: vscode.l10n.t("Display"),
   showStatusLabel: vscode.l10n.t("Show status"),
   showDueDateLabel: vscode.l10n.t("Show due date"),
+  showTrackerLabel: vscode.l10n.t("Show tracker"),
+  showPriorityLabel: vscode.l10n.t("Show priority"),
   sectionGeneral: vscode.l10n.t("General"),
   ticketLimitLabel: vscode.l10n.t("Tickets per load"),
   resetSettings: vscode.l10n.t("Reset display settings"),

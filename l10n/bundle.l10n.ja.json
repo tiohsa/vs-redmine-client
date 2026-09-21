@@ -176,6 +176,8 @@
     "Display": "表示",
     "Show status": "ステータスを表示",
     "Show due date": "期日を表示",
+    "Show tracker": "トラッカーを表示",
+    "Show priority": "優先度を表示",
     "General": "一般",
     "Tickets per load": "チケット取得件数",
     "Reset settings": "設定をリセット",

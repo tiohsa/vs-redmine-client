@@ -47,6 +47,12 @@ export const getTicketListShowStatus = (): boolean =>
 export const getTicketListShowDueDate = (): boolean =>
   getSettings().get<boolean>("ticketList.showDueDate", true);
 
+export const getTicketListShowTracker = (): boolean =>
+  getSettings().get<boolean>("ticketList.showTracker", true);
+
+export const getTicketListShowPriority = (): boolean =>
+  getSettings().get<boolean>("ticketList.showPriority", true);
+
 export const EDITOR_DEFAULT_FIELDS = [
   "subject",
   "description",

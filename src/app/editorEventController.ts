@@ -9,10 +9,18 @@ import {
 } from "../views/editorFilename";
 import { formatTicketLabel } from "../views/ticketLabel";
 import { parseTicketEditorContent } from "../views/ticketEditorContent";
-import { setTicketDraftContent } from "../views/ticketDraftStore";
+import {
+  getTicketDraft,
+  markDraftStatus,
+  setTicketDraftContent,
+} from "../views/ticketDraftStore";
+import { isIssueMetadataEqual } from "../views/ticketMetadataTypes";
+import { isSaveSyncSuppressed } from "../views/saveSyncSuppression";
 import {
   getCommentIdForEditor,
+  getConnectionScopeForDocument,
   getConnectionScopeForEditor,
+  getEditorContentTypeForDocument,
   resolveEditorConnectionScope,
   getEditorContentType,
   getTicketIdForDocument,
@@ -127,14 +135,63 @@ export const buildUpdateTicketStatus = (
 export interface EditorEventDeps {
   registerEditorDocument: (document: vscode.TextDocument) => void;
   updateTicketStatus: (editor?: vscode.TextEditor) => void;
+  notifyTicketChanged: () => void;
   sync: Pick<SyncController, "syncOnSave">;
 }
+
+export const updateTicketDraftStatusFromDocument = (
+  document: vscode.TextDocument,
+): boolean => {
+  if (isSaveSyncSuppressed(document.uri.toString())) {
+    return false;
+  }
+
+  const ticketId = getTicketIdForDocument(document);
+  if (
+    ticketId === undefined ||
+    ticketId === NEW_TICKET_DRAFT_ID ||
+    getEditorContentTypeForDocument(document) !== "ticket"
+  ) {
+    return false;
+  }
+
+  const connectionScope = getConnectionScopeForDocument(document);
+  const draft = getTicketDraft(ticketId, connectionScope);
+  if (!draft) {
+    return false;
+  }
+
+  let hasChanges = true;
+  try {
+    const content = parseTicketEditorContent(document.getText(), {
+      allowMissingMetadata: true,
+      fallbackMetadata: draft.baseMetadata,
+    });
+    hasChanges =
+      content.subject.trim() !== draft.baseSubject.trim() ||
+      content.description.trim() !== draft.baseDescription.trim() ||
+      !isIssueMetadataEqual(content.metadata, draft.baseMetadata);
+  } catch {
+    // Parse errors are still unsynced editor changes.
+  }
+
+  const nextStatus = hasChanges ? "Dirty" : "Synced";
+  if (draft.status === nextStatus) {
+    return false;
+  }
+  if (!hasChanges && draft.status !== "Dirty" && draft.status !== "Synced") {
+    return false;
+  }
+
+  markDraftStatus(ticketId, nextStatus, connectionScope);
+  return true;
+};
 
 export const registerEditorEvents = (
   context: vscode.ExtensionContext,
   deps: EditorEventDeps,
 ): void => {
-  const { registerEditorDocument, updateTicketStatus, sync } = deps;
+  const { registerEditorDocument, updateTicketStatus, notifyTicketChanged, sync } = deps;
 
   let previousActiveEditor = vscode.window.activeTextEditor;
 
@@ -153,6 +210,9 @@ export const registerEditorEvents = (
               parsed,
               getConnectionScopeForEditor(previousActiveEditor),
             );
+            if (updateTicketDraftStatusFromDocument(previousActiveEditor.document)) {
+              notifyTicketChanged();
+            }
           } catch {
             // Ignore parse errors when swapping focus.
           }
@@ -182,6 +242,14 @@ export const registerEditorEvents = (
       previousActiveEditor = editor;
       void setViewContext(TICKET_EDITOR_CONTEXT_KEY, !!editor && isTicketEditor(editor));
       updateTicketStatus(editor);
+    }),
+  );
+
+  context.subscriptions.push(
+    vscode.workspace.onDidChangeTextDocument((event) => {
+      if (updateTicketDraftStatusFromDocument(event.document)) {
+        notifyTicketChanged();
+      }
     }),
   );
 

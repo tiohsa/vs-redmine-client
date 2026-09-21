@@ -145,6 +145,8 @@ suite("SettingsController", () => {
     await config.update("ticketListLimit", 100, vscode.ConfigurationTarget.Global);
     await config.update("ticketList.showStatus", false, vscode.ConfigurationTarget.Global);
     await config.update("ticketList.showDueDate", false, vscode.ConfigurationTarget.Global);
+    await config.update("ticketList.showTracker", false, vscode.ConfigurationTarget.Global);
+    await config.update("ticketList.showPriority", false, vscode.ConfigurationTarget.Global);
 
     const ctrl = new SettingsController(makeStore());
     ctrl.updateTicketList({
@@ -163,6 +165,8 @@ suite("SettingsController", () => {
       "ticketListLimit",
       "ticketList.showStatus",
       "ticketList.showDueDate",
+      "ticketList.showTracker",
+      "ticketList.showPriority",
     ]) {
       const inspected = resetConfig.inspect<unknown>(key);
       assert.strictEqual(resetConfig.get<unknown>(key), inspected?.defaultValue);
@@ -282,13 +286,36 @@ suite("SettingsController", () => {
     assert.strictEqual(storeSettings.filters.subjectQuery, "hello");
   });
 
-  test("pushSettings: showStatus と showDueDate が store の settings に含まれる", () => {
+  test("pushSettings: 表示設定が store の settings に含まれる", () => {
     const store = makeStore();
     const ctrl = new SettingsController(store);
     ctrl.pushSettings();
     const s = store.getState().settings;
     assert.ok(Object.prototype.hasOwnProperty.call(s, "showStatus"));
     assert.ok(Object.prototype.hasOwnProperty.call(s, "showDueDate"));
+    assert.ok(Object.prototype.hasOwnProperty.call(s, "showTracker"));
+    assert.ok(Object.prototype.hasOwnProperty.call(s, "showPriority"));
+  });
+
+  test("updateGeneral: トラッカーと優先度の表示設定を更新できる", async () => {
+    const config = vscode.workspace.getConfiguration("redmine-client");
+    const keys = ["ticketList.showTracker", "ticketList.showPriority"] as const;
+    const previous = new Map(
+      keys.map((key) => [key, config.inspect<unknown>(key)?.globalValue] as const),
+    );
+
+    try {
+      await new SettingsController(makeStore()).updateGeneral({
+        showTracker: false,
+        showPriority: false,
+      });
+      assert.strictEqual(config.inspect<boolean>(keys[0])?.globalValue, false);
+      assert.strictEqual(config.inspect<boolean>(keys[1])?.globalValue, false);
+    } finally {
+      for (const key of keys) {
+        await config.update(key, previous.get(key), vscode.ConfigurationTarget.Global);
+      }
+    }
   });
 
   test("updateTicketList: 設定が永続化され次回起動時に復元される", () => {

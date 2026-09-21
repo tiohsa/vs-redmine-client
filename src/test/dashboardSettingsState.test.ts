@@ -63,19 +63,25 @@ suite("dashboardSettingsState — 初期設定状態", () => {
     assert.strictEqual(typeof dueDate.showOverdue, "boolean");
   });
 
-  test("DEFAULT_STATE の settings に showStatus と showDueDate が含まれる", () => {
+  test("DEFAULT_STATE の settings に表示設定が含まれる", () => {
     const fresh = new DashboardStateStore();
     const s = fresh.getState().settings;
     assert.ok(Object.prototype.hasOwnProperty.call(s, "showStatus"));
     assert.ok(Object.prototype.hasOwnProperty.call(s, "showDueDate"));
+    assert.ok(Object.prototype.hasOwnProperty.call(s, "showTracker"));
+    assert.ok(Object.prototype.hasOwnProperty.call(s, "showPriority"));
     assert.strictEqual(s.showStatus, true);
     assert.strictEqual(s.showDueDate, true);
+    assert.strictEqual(s.showTracker, true);
+    assert.strictEqual(s.showPriority, true);
   });
 
-  test("buildSettingsDashboardViewModel に showStatus と showDueDate が含まれる", () => {
+  test("buildSettingsDashboardViewModel に表示設定が含まれる", () => {
     const vm = buildSettingsDashboardViewModel(DEFAULT_TICKET_LIST_SETTINGS);
     assert.strictEqual(typeof vm.showStatus, "boolean");
     assert.strictEqual(typeof vm.showDueDate, "boolean");
+    assert.strictEqual(typeof vm.showTracker, "boolean");
+    assert.strictEqual(typeof vm.showPriority, "boolean");
   });
 
   test("buildSettingsDashboardViewModel に apiKeyStatus が含まれる", () => {

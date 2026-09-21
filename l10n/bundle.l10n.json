@@ -176,6 +176,8 @@
     "Display": "Display",
     "Show status": "Show status",
     "Show due date": "Show due date",
+    "Show tracker": "Show tracker",
+    "Show priority": "Show priority",
     "General": "General",
     "Tickets per load": "Tickets per load",
     "Reset settings": "Reset settings",

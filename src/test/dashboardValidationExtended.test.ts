@@ -330,7 +330,7 @@ suite("Dashboard バリデーション拡張", () => {
   test("settings.updateGeneral: Display 設定の boolean patch を受け入れる", () => {
     const r = validateDashboardMessage({
       type: "settings.updateGeneral", requestId: "r",
-      patch: { showStatus: false, showDueDate: true },
+      patch: { showStatus: false, showDueDate: true, showTracker: false, showPriority: true },
     });
     assert.strictEqual(r.ok, true);
   });
@@ -338,7 +338,7 @@ suite("Dashboard バリデーション拡張", () => {
   test("settings.updateGeneral: Display 設定に boolean 以外を拒否する", () => {
     const r = validateDashboardMessage({
       type: "settings.updateGeneral", requestId: "r",
-      patch: { showStatus: "yes" },
+      patch: { showTracker: "yes" },
     });
     assert.strictEqual(r.ok, false);
   });
