@@ -174,6 +174,20 @@ export type OfflineDiscardResult =
   | "recovery_required"
   | "not_found";
 
+export type QueuedTicketCancellationExpectation = {
+  operationId?: string;
+  revision: number;
+  intentRevision: number;
+  content?: string;
+  connectionScope?: string;
+};
+
+export type QueuedTicketCancelResult =
+  | "cancelled"
+  | "not_found"
+  | "stale"
+  | "recovery_required";
+
 export type OfflineSyncLifecycle = "queued" | "recovery_pending" | "commit_unknown";
 
 export type NewTicketLifecycleAction =
@@ -2011,6 +2025,48 @@ export const removeOfflineTicketUpdateIfMatchesAsync = (
   queue.tickets.delete(ticketId);
   return commitQueueMutation(true);
 });
+
+/** 保存済み snapshot と一致し、remote 副作用のない queued intent のみ取り消す。 */
+export const cancelQueuedTicketUpdateIfMatchesAsync = async (
+  ticketId: number,
+  expected: QueuedTicketCancellationExpectation,
+  scope: string,
+): Promise<QueuedTicketCancelResult> => {
+  const expectation = { ...expected };
+  try {
+    return await mutateQueueAsync<QueuedTicketCancelResult>(scope, (queue) => {
+      const current = queue.tickets.get(ticketId);
+      if (!current) {
+        return skipQueueMutation("not_found");
+      }
+      if (
+        (current.connectionScope !== undefined && current.connectionScope !== scope) ||
+        current.connectionScope !== expectation.connectionScope ||
+        current.operationId !== expectation.operationId ||
+        (current.revision ?? 1) !== expectation.revision ||
+        (current.intentRevision ?? current.revision ?? 1) !== expectation.intentRevision ||
+        current.content !== expectation.content ||
+        current.nextIntent !== undefined
+      ) {
+        return skipQueueMutation("stale");
+      }
+      if (
+        current.phase !== "queued" ||
+        current.remoteUpdatedAt !== undefined ||
+        (current.createdChildIds?.length ?? 0) > 0 ||
+        (current.effects ?? []).some((effect) =>
+          effect.state !== "planned" || effect.remoteId !== undefined || effect.token !== undefined
+        )
+      ) {
+        return skipQueueMutation("recovery_required");
+      }
+      queue.tickets.delete(ticketId);
+      return commitQueueMutation("cancelled");
+    });
+  } catch {
+    return "recovery_required";
+  }
+};
 
 export const discardOfflineTicketUpdateAsync = async (
   ticketId: number,

@@ -43,6 +43,7 @@ export type TicketDraftStatus =
   | LegacyTicketDraftStatus
   | "Draft"
   | "Dirty"
+  | "Queued"
   | "Syncing"
   | "Synced"
   | "Failed"

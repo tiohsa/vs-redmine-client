@@ -2,6 +2,9 @@ import * as vscode from "vscode";
 import {
   addOfflineNewTicketAsync,
   addOfflineTicketUpdateAsync,
+  cancelQueuedTicketUpdateIfMatchesAsync,
+  getActiveScope,
+  getOfflineSyncQueue,
 } from "../offlineSyncStore";
 import { buildTicketEditorContent, parseTicketEditorContent } from "../ticketEditorContent";
 import { getTicketDraft, markDraftStatus, setTicketDraftContent, updateDraftAfterSave } from "../ticketDraftStore";
@@ -75,7 +78,33 @@ export const queueTicketDraft = async (
   const subject = parsed.subject || draft.baseSubject;
   const changeState = detectTicketChanges(draft, parsed);
   if (!changeState.hasChanges && !input.queueUnchanged) {
-    return buildResult("no_change", "No changes to save.");
+    const scope = input.operationScope ?? getActiveScope();
+    const queued = getOfflineSyncQueue(scope).tickets.get(input.ticketId);
+    if (!queued) {
+      markDraftStatus(input.ticketId, "Synced", input.operationScope);
+      return buildResult("no_change", "No changes to save.");
+    }
+
+    const cancellation = await cancelQueuedTicketUpdateIfMatchesAsync(
+      input.ticketId,
+      {
+        operationId: queued.operationId,
+        revision: queued.revision ?? 1,
+        intentRevision: queued.intentRevision ?? queued.revision ?? 1,
+        content: queued.content,
+        connectionScope: queued.connectionScope,
+      },
+      scope,
+    );
+    if (cancellation === "cancelled" || cancellation === "not_found") {
+      setTicketDraftContent(input.ticketId, parsed, input.operationScope);
+      markDraftStatus(input.ticketId, "Synced", input.operationScope);
+      return buildResult("no_change", "No changes to save.");
+    }
+    if (cancellation === "stale") {
+      return buildResult("failed", vscode.l10n.t("The queued update changed while it was being cancelled. Save again."));
+    }
+    return buildResult("failed", vscode.l10n.t("The queued update needs recovery before it can be cancelled."));
   }
 
   const baseDir = resolveEditorBaseDir({
@@ -115,7 +144,9 @@ export const queueTicketDraft = async (
   if (!changeState.hasChanges) {
     return buildResult("no_change", "No changes to save.");
   }
-  markDraftStatus(input.ticketId, "Dirty", input.operationScope);
+  if (!input.queueUnchanged) {
+    markDraftStatus(input.ticketId, "Queued", input.operationScope);
+  }
   if (input.editor) {
     await applyEditorContent(input.editor, normalizedContent);
     setEditorDisplaySource(input.editor, "saved");
@@ -563,44 +594,12 @@ export const saveTicketDraftLocally = async (
     return buildResult("queued", vscode.l10n.t("New ticket draft saved locally."));
   }
 
-  const content = editor.document.getText();
-  try {
-    const parsed = parseTicketEditorContent(content, {
-      allowMissingMetadata: true,
-      fallbackMetadata: {
-        tracker: "",
-        priority: "",
-        status: "",
-        due_date: "",
-        children: [],
-      },
-    });
-    setTicketDraftContent(ticketId, parsed, operationScope);
-    markDraftStatus(ticketId, "Dirty", operationScope);
-    const draft = getTicketDraft(ticketId, operationScope);
-    if (draft) {
-      await addOfflineTicketUpdateAsync(ticketId, {
-        ticketId,
-        baseSubject: draft.baseSubject,
-        baseDescription: draft.baseDescription,
-        baseMetadata: draft.baseMetadata,
-        lastKnownRemoteUpdatedAt: draft.lastKnownRemoteUpdatedAt,
-        subject: parsed.subject ?? draft.baseSubject,
-        description: parsed.description ?? draft.baseDescription,
-        metadata: parsed.metadata ?? draft.baseMetadata,
-        layout: parsed.layout,
-        metadataBlock: parsed.metadataBlock,
-        controlFields: parsed.controlFields,
-        documentUri: editor.document.uri.toString(),
-        connectionScope: operationScope,
-        operationId: `${operationScope ?? "legacy"}:ticket:${ticketId}`,
-        phase: "queued",
-      }, operationScope);
-    }
-    return buildResult("queued", vscode.l10n.t("Saved locally. Run a sync command to apply changes to Redmine."));
-  } catch {
-    return buildResult("failed", vscode.l10n.t("Failed to parse draft."));
-  }
+  return queueTicketDraft({
+    ticketId,
+    content: editor.document.getText(),
+    editor,
+    operationScope,
+  });
 };
 
 export const handleTicketEditorSave = async (
