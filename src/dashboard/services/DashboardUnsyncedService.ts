@@ -9,6 +9,7 @@ import {
   discardOfflineCommentUpdateAsync,
   discardOfflineNewTicketAsync,
   discardOfflineTicketUpdateAsync,
+  type OfflineDiscardResult,
 } from "../../views/offlineSyncStore";
 import { buildUnsyncedDashboardItems } from "../viewModels/unsyncedDashboardViewModel";
 import type { DashboardUnsyncedKey } from "../dashboardProtocol";
@@ -149,39 +150,46 @@ export class DashboardUnsyncedService {
       return;
     }
 
-    let recoveryRequired = false;
+    let result: OfflineDiscardResult;
     if (key.kind === "ticket") {
-      const result = await discardOfflineTicketUpdateAsync(key.ticketId, operationScope);
-      recoveryRequired = result === "recovery_required";
+      result = await discardOfflineTicketUpdateAsync(key.ticketId, operationScope);
     } else if (key.kind === "newTicket") {
       if (!key.queueId && !key.documentUri) {
         this.deps.context.notifyError(requestId, vscode.l10n.t("Cannot identify the target new ticket draft."));
         return;
       }
-      const result = await discardOfflineNewTicketAsync(
+      result = await discardOfflineNewTicketAsync(
         { queueId: key.queueId, documentUri: key.documentUri },
         operationScope,
       );
-      recoveryRequired = result === "recovery_required";
-    } else if (key.kind === "comment") {
-      const result = await discardOfflineCommentUpdateAsync(
+    } else {
+      result = await discardOfflineCommentUpdateAsync(
         { ticketId: key.ticketId, commentId: key.commentId, documentUri: key.documentUri },
         operationScope,
       );
-      recoveryRequired = result === "recovery_required";
     }
 
-    if (recoveryRequired) {
-      this.deps.context.notifyError(
-        requestId,
-        vscode.l10n.t("This item has a remote sync checkpoint and must be resumed before it can be discarded."),
-      );
-      return;
+    switch (result) {
+      case "recovery_required":
+        this.deps.context.notifyError(
+          requestId,
+          vscode.l10n.t("This item has a remote sync checkpoint and must be resumed before it can be discarded."),
+        );
+        return;
+      case "not_found":
+        this.refreshUnsynced();
+        this.deps.refreshTicketPresentation();
+        this.deps.context.notifyError(requestId, vscode.l10n.t("The unsynced item changed. Refresh and try again."));
+        return;
+      case "discarded":
+      case "discarded_next":
+        this.refreshUnsynced();
+        this.deps.refreshTicketPresentation();
+        this.deps.context.notifySuccess(requestId, result === "discarded_next"
+          ? vscode.l10n.t("Later local changes discarded. The remote sync checkpoint was preserved.")
+          : vscode.l10n.t("Unsynced local changes discarded."));
+        return;
     }
-
-    this.refreshUnsynced();
-    this.deps.refreshTicketPresentation();
-    this.deps.context.notifySuccess(requestId, vscode.l10n.t("Unsynced local changes discarded."));
   }
 
   async handleSyncAll(requestId: string): Promise<void> {

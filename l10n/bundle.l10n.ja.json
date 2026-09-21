@@ -193,6 +193,8 @@
     "Partial sync failure. Succeeded: {0} / Failed: {1}.": "一部の同期に失敗しました。成功: {0}件 / 失敗: {1}件",
     "Cannot identify the target new ticket draft.": "対象の新規チケット下書きを特定できません。",
     "Unsynced local changes discarded.": "未同期のローカル変更を破棄しました。",
+    "The unsynced item changed. Refresh and try again.": "未同期の項目が変更されました。更新してからもう一度お試しください。",
+    "Later local changes discarded. The remote sync checkpoint was preserved.": "後続のローカル変更を破棄しました。リモート同期の復旧情報は保持されています。",
     "Syncing all…": "全件同期中…",
     "Sync completed.": "同期が完了しました。",
     "Sync failed. Check the VS Code notifications.": "同期に失敗しました。VS Code の通知をご確認ください。",

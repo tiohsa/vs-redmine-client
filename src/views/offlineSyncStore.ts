@@ -246,11 +246,34 @@ export const getOfflineSyncLifecycle = (
   return "queued";
 };
 
+type OfflineDiscardPolicyInput =
+  Pick<OfflineNewTicket | OfflineTicketUpdate | OfflineCommentUpdate, "phase" | "nextIntent" | "effects"> &
+  Pick<OfflineNewTicket, "remoteUpdatedAt" | "createdChildIds" | "createdIssueId" | "status"> &
+  Pick<OfflineCommentUpdate, "remoteProjectId" | "commentId" | "finalizeDraft"> &
+  { createdRemoteId?: number };
+
+const canDiscardActiveOperation = (operation: OfflineDiscardPolicyInput): boolean => {
+  // 全削除では現在の revision / attempt だけでなく、保持された過去の証拠も保護する。
+  // attempt の完了・補償判定とは異なり、planned 以外の台帳はここでは削除しない。
+  const hasRemoteEvidence = operation.remoteUpdatedAt !== undefined ||
+    (operation.createdChildIds?.length ?? 0) > 0 ||
+    operation.createdIssueId !== undefined ||
+    operation.createdRemoteId !== undefined ||
+    operation.status === "created_rewrite_failed" ||
+    operation.remoteProjectId !== undefined ||
+    (operation.finalizeDraft === true && operation.commentId !== undefined) ||
+    (operation.effects ?? []).some((effect) =>
+      effect.state !== "planned" || effect.remoteId !== undefined ||
+      effect.token !== undefined || effect.target.token !== undefined,
+    );
+  return getOfflineSyncLifecycle(operation) === "queued" && !hasRemoteEvidence;
+};
+
 export const evaluateOfflineSyncPolicy = (
-  operation: Pick<OfflineNewTicket | OfflineTicketUpdate | OfflineCommentUpdate, "phase" | "nextIntent">,
+  operation: OfflineDiscardPolicyInput,
 ): { lifecycle: OfflineSyncLifecycle; canDiscard: boolean } => {
   const lifecycle = getOfflineSyncLifecycle(operation);
-  return { lifecycle, canDiscard: lifecycle === "queued" || operation.nextIntent !== undefined };
+  return { lifecycle, canDiscard: canDiscardActiveOperation(operation) || operation.nextIntent !== undefined };
 };
 
 const STORAGE_KEY = "redmine.offlineSyncQueue";
@@ -1785,7 +1808,13 @@ export const discardOfflineNewTicketAsync = async (
 ): Promise<OfflineDiscardResult> => {
   try {
     return await mutateQueueAsync(scope, (queue) => {
-      const index = findNewTicketIndex(queue, key);
+      if (key.queueId === undefined && key.documentUri === undefined) {
+        return skipQueueMutation("not_found");
+      }
+      const index = queue.newTickets.findIndex((ticket) =>
+        (key.queueId === undefined || ticket.queueId === key.queueId) &&
+        (key.documentUri === undefined || sameDocumentIdentity(ticket.documentUri, key.documentUri)),
+      );
       if (index === -1) {
         return skipQueueMutation("not_found");
       }
@@ -1794,7 +1823,7 @@ export const discardOfflineNewTicketAsync = async (
       if (!policy.canDiscard) {
         return skipQueueMutation("recovery_required");
       }
-      if (policy.lifecycle !== "queued") {
+      if (!canDiscardActiveOperation(operation)) {
         queue.newTickets[index] = { ...operation, nextIntent: undefined };
         return commitQueueMutation("discarded_next");
       }
@@ -2112,7 +2141,7 @@ export const discardOfflineTicketUpdateAsync = async (
       if (!policy.canDiscard) {
         return skipQueueMutation("recovery_required");
       }
-      if (policy.lifecycle !== "queued") {
+      if (!canDiscardActiveOperation(operation)) {
         queue.tickets.set(ticketId, { ...operation, nextIntent: undefined });
         return commitQueueMutation("discarded_next");
       }
@@ -2368,10 +2397,9 @@ export const discardOfflineCommentUpdateAsync = async (
         return skipQueueMutation("not_found");
       }
       const index = queue.comments.findIndex((comment) =>
-        comment.ticketId === key.ticketId && (
-          (key.commentId !== undefined && comment.commentId === key.commentId) ||
-          (key.documentUri !== undefined && comment.documentUri === key.documentUri)
-        ),
+        comment.ticketId === key.ticketId &&
+        (key.commentId === undefined || comment.commentId === key.commentId) &&
+        (key.documentUri === undefined || comment.documentUri === key.documentUri),
       );
       if (index === -1) {
         return skipQueueMutation("not_found");
@@ -2381,7 +2409,7 @@ export const discardOfflineCommentUpdateAsync = async (
       if (!policy.canDiscard) {
         return skipQueueMutation("recovery_required");
       }
-      if (policy.lifecycle !== "queued") {
+      if (!canDiscardActiveOperation(operation)) {
         queue.comments[index] = { ...operation, nextIntent: undefined };
         return commitQueueMutation("discarded_next");
       }

@@ -2,6 +2,8 @@ import * as assert from "assert";
 import * as vscode from "vscode";
 import { DashboardUnsyncedService } from "../dashboard/services/DashboardUnsyncedService";
 import { DashboardStateStore } from "../dashboard/DashboardStateStore";
+import { DashboardController } from "../dashboard/DashboardController";
+import { DashboardMessageRouter } from "../dashboard/DashboardMessageRouter";
 import {
   addOfflineCommentUpdateAsync,
   addOfflineTicketUpdateAsync,
@@ -12,7 +14,12 @@ import {
   initializeOfflineSyncStore,
   replaceOfflineSyncQueueAsync,
   type OfflineTicketUpdate,
+  type OfflineCommentUpdate,
+  type OfflineNewTicket,
+  type OfflineSyncQueue,
 } from "../views/offlineSyncStore";
+import type { DurableSyncEffect, DurableSyncEffectState } from "../app/syncEffects";
+import type { DashboardUnsyncedKey } from "../dashboard/dashboardProtocol";
 import { buildUnsyncedDashboardItems } from "../dashboard/viewModels/unsyncedDashboardViewModel";
 import { resolveTicketSyncState } from "../dashboard/viewModels/ticketDashboardViewModel";
 import { getCurrentConnectionScope } from "../config/connectionScope";
@@ -46,6 +53,226 @@ suite("Dashboard recovery policy — lifecycle matrix", () => {
     clearTicketDrafts(scope);
     initializeOfflineSyncStore(createTestMemento(), scope);
   });
+
+  const effect = (overrides: Partial<DurableSyncEffect> = {}): DurableSyncEffect => ({
+    effectId: "attachment", kind: "attachment_upload", operationRevision: 4,
+    attemptGeneration: 2, state: "planned", target: {}, ...overrides,
+  });
+  const queuedOperations = (effects: DurableSyncEffect[] = [], hasNext = false): OfflineSyncQueue => ({
+    tickets: new Map([[ticketId, {
+      ...update, phase: "queued", revision: 4, intentRevision: 4, attemptGeneration: 2, effects,
+      nextIntent: hasNext ? { ...update, revision: 5, subject: "Later" } : undefined,
+    }]]),
+    comments: [{
+      ticketId, commentId: 10, documentUri, body: "Comment", phase: "queued",
+      revision: 4, intentRevision: 4, attemptGeneration: 2, effects,
+      nextIntent: hasNext ? { revision: 5, body: "Later comment" } : undefined,
+    }],
+    newTickets: [{
+      queueId: "new-recovery", documentUri, content: "New", phase: "queued",
+      revision: 4, attemptGeneration: 2, effects,
+      nextIntent: hasNext ? { revision: 5, content: "Later new" } : undefined,
+    }],
+  });
+  const keys: DashboardUnsyncedKey[] = [
+    { kind: "ticket", ticketId },
+    { kind: "comment", ticketId, commentId: 10, documentUri },
+    { kind: "newTicket", queueId: "new-recovery", documentUri },
+  ];
+  const discardAllKinds = async (): Promise<string[]> => [
+    await discardOfflineTicketUpdateAsync(ticketId, scope),
+    await discardOfflineCommentUpdateAsync({ ticketId, commentId: 10, documentUri }, scope),
+    await discardOfflineNewTicketAsync({ queueId: "new-recovery", documentUri }, scope),
+  ];
+  const withoutNextIntents = (queue: OfflineSyncQueue): OfflineSyncQueue => ({
+    tickets: new Map(Array.from(queue.tickets, ([id, item]) => [id, { ...item, nextIntent: undefined }])),
+    comments: queue.comments.map((item) => ({ ...item, nextIntent: undefined })),
+    newTickets: queue.newTickets.map((item) => ({ ...item, nextIntent: undefined })),
+  });
+  const unsafeStates: DurableSyncEffectState[] = [
+    "started", "committed", "commit_unknown", "failed", "compensation_started", "compensation_unknown", "compensated",
+  ];
+  const effectCases = [
+    { label: "none", effects: [], unsafe: false },
+    { label: "planned", effects: [effect()], unsafe: false },
+    ...unsafeStates.map((state) => ({ label: state, effects: [effect({ state })], unsafe: true })),
+    { label: "token", effects: [effect({ token: "uploaded" })], unsafe: true },
+    { label: "remoteId", effects: [effect({ remoteId: 42 })], unsafe: true },
+    { label: "target.token", effects: [effect({ target: { token: "uploaded" } })], unsafe: true },
+    { label: "previous revision", effects: [effect({ state: "committed", operationRevision: 3 })], unsafe: true },
+    { label: "previous attempt", effects: [effect({ state: "committed", attemptGeneration: 1 })], unsafe: true },
+  ];
+  for (const entry of effectCases) {
+    for (const hasNext of [false, true]) {
+      test(`queued Effect=${entry.label}, nextIntent=${hasNext}: 全種別の破棄・scope分離・再起動`, async () => {
+        await replaceOfflineSyncQueueAsync(queuedOperations(entry.effects, hasNext), scope);
+        await replaceOfflineSyncQueueAsync(queuedOperations(entry.effects, hasNext), "other-scope");
+        const before = getOfflineSyncQueue(scope);
+        const otherScope = getOfflineSyncQueue("other-scope");
+        assert.deepStrictEqual(buildUnsyncedDashboardItems().map((item) => item.canDiscard),
+          Array(3).fill(!entry.unsafe || hasNext));
+        const writeCount = writes;
+        const expected = !entry.unsafe ? "discarded" : hasNext ? "discarded_next" : "recovery_required";
+        assert.deepStrictEqual(await discardAllKinds(), Array(3).fill(expected));
+        if (entry.unsafe) {
+          assert.deepStrictEqual(getOfflineSyncQueue(scope), hasNext ? withoutNextIntents(before) : before);
+          assert.strictEqual(writes, writeCount + (hasNext ? 3 : 0));
+        } else {
+          assert.deepStrictEqual(getOfflineSyncQueue(scope), { tickets: new Map(), comments: [], newTickets: [] });
+        }
+        assert.deepStrictEqual(getOfflineSyncQueue("other-scope"), otherScope);
+        initializeOfflineSyncStore(storage, scope);
+        const restored = buildUnsyncedDashboardItems();
+        assert.strictEqual(restored.length, entry.unsafe ? 3 : 0);
+        if (entry.unsafe) {
+          assert.ok(restored.every((item) => !item.canDiscard));
+          const checkpoint = getOfflineSyncQueue(scope);
+          // 再起動時は既存仕様に従い、実行中だったEffectを結果不明として復元する。
+          const restoredEffects = entry.effects.map((item) => ({
+            ...item,
+            state: item.state === "started" ? "commit_unknown"
+              : item.state === "compensation_started" ? "compensation_unknown" : item.state,
+          }));
+          assert.deepStrictEqual(checkpoint.tickets.get(ticketId)?.effects, restoredEffects);
+          assert.deepStrictEqual(checkpoint.comments[0].effects, restoredEffects);
+          assert.deepStrictEqual(checkpoint.newTickets[0].effects, restoredEffects);
+          assert.deepStrictEqual(await discardAllKinds(), Array(3).fill("recovery_required"));
+          assert.deepStrictEqual(getOfflineSyncQueue(scope), checkpoint);
+        }
+      });
+    }
+  }
+
+  const checkpointCases: Array<{
+    label: string;
+    ticket: Partial<OfflineTicketUpdate>;
+    comment: Partial<OfflineCommentUpdate> & { createdRemoteId?: number };
+    newTicket: Partial<OfflineNewTicket>;
+  }> = [
+    { label: "remote identity", ticket: { remoteUpdatedAt: "2026-09-22" }, comment: { remoteProjectId: 1 }, newTicket: { createdIssueId: 42 } },
+    { label: "child / draft finalize", ticket: { createdChildIds: [42] }, comment: { finalizeDraft: true }, newTicket: { createdChildIds: [42] } },
+    { label: "legacy checkpoint", ticket: { remoteUpdatedAt: "2026-09-22" }, comment: { createdRemoteId: 10 }, newTicket: { status: "created_rewrite_failed" } },
+    { label: "new ticket updatedAt", ticket: { createdChildIds: [42] }, comment: { remoteProjectId: 1 }, newTicket: { remoteUpdatedAt: "2026-09-22" } },
+  ];
+  for (const entry of checkpointCases) {
+    for (const hasNext of [false, true]) {
+      test(`queued ${entry.label}, nextIntent=${hasNext}: remote checkpointを保持する`, async () => {
+        const queue = queuedOperations([], hasNext);
+        Object.assign(queue.tickets.get(ticketId)!, entry.ticket);
+        Object.assign(queue.comments[0], entry.comment);
+        Object.assign(queue.newTickets[0], entry.newTicket);
+        await replaceOfflineSyncQueueAsync(queue, scope);
+        const before = getOfflineSyncQueue(scope);
+        assert.deepStrictEqual(buildUnsyncedDashboardItems().map((item) => item.canDiscard), Array(3).fill(hasNext));
+        assert.deepStrictEqual(await discardAllKinds(), Array(3).fill(hasNext ? "discarded_next" : "recovery_required"));
+        assert.deepStrictEqual(getOfflineSyncQueue(scope), hasNext ? withoutNextIntents(before) : before);
+        initializeOfflineSyncStore(storage, scope);
+        assert.ok(buildUnsyncedDashboardItems().every((item) => !item.canDiscard));
+      });
+    }
+  }
+
+  for (const hasNext of [false, true]) {
+    test(`queued破棄の永続化失敗、nextIntent=${hasNext}: memory・永続化済みsnapshotを保持する`, async () => {
+      await replaceOfflineSyncQueueAsync(queuedOperations(hasNext ? [effect({ state: "committed" })] : [], hasNext), scope);
+      const before = getOfflineSyncQueue(scope);
+      const persisted = storage.keys().map((key) => storage.get(key));
+      storage.update = async () => { throw new Error("injected persistence failure"); };
+      assert.deepStrictEqual(await discardAllKinds(), Array(3).fill("recovery_required"));
+      assert.deepStrictEqual(getOfflineSyncQueue(scope), before);
+      assert.deepStrictEqual(storage.keys().map((key) => storage.get(key)), persisted);
+    });
+  }
+
+  test("comment/newTicketの複合identity不一致は永続化せず、単一identityの互換性を維持する", async () => {
+    await replaceOfflineSyncQueueAsync(queuedOperations(), scope);
+    const before = getOfflineSyncQueue(scope);
+    const writeCount = writes;
+    for (const key of [
+      { ticketId, commentId: 20, documentUri },
+      { ticketId, commentId: 10, documentUri: "file:///tmp/other.md" },
+      { ticketId: ticketId + 1, commentId: 10, documentUri },
+    ]) {
+      assert.strictEqual(await discardOfflineCommentUpdateAsync(key, scope), "not_found");
+    }
+    for (const key of [
+      {}, { queueId: "wrong", documentUri },
+      { queueId: "new-recovery", documentUri: "file:///tmp/other.md" },
+    ]) {
+      assert.strictEqual(await discardOfflineNewTicketAsync(key, scope), "not_found");
+    }
+    assert.strictEqual(await discardOfflineCommentUpdateAsync({ ticketId, commentId: 10, documentUri }, "missing-scope"), "not_found");
+    assert.strictEqual(await discardOfflineNewTicketAsync({ queueId: "new-recovery", documentUri }, "missing-scope"), "not_found");
+    assert.deepStrictEqual(getOfflineSyncQueue(scope), before);
+    assert.strictEqual(writes, writeCount);
+    for (const key of [{ ticketId, commentId: 10 }, { ticketId, documentUri }]) {
+      await replaceOfflineSyncQueueAsync(queuedOperations(), scope);
+      assert.strictEqual(await discardOfflineCommentUpdateAsync(key, scope), "discarded");
+    }
+    for (const key of [
+      { queueId: "new-recovery" }, { documentUri },
+      { queueId: "new-recovery", documentUri: "file:///tmp/recovery%2Dcomment.md" },
+    ]) {
+      await replaceOfflineSyncQueueAsync(queuedOperations(), scope);
+      assert.strictEqual(await discardOfflineNewTicketAsync(key, scope), "discarded");
+    }
+  });
+
+  for (const key of keys) {
+    for (const outcome of ["recovery_required", "discarded_next", "not_found", "discarded"] as const) {
+      test(`Dashboard ${key.kind} 直接要求: ${outcome}を正しく通知する`, async () => {
+        const unsafe = outcome === "recovery_required" || outcome === "discarded_next";
+        await replaceOfflineSyncQueueAsync(queuedOperations(unsafe ? [effect({ state: "committed" })] : [], outcome === "discarded_next"), scope);
+        const before = getOfflineSyncQueue(scope);
+        const errors: string[] = [];
+        const successes: string[] = [];
+        const store = new DashboardStateStore();
+        const controller = new DashboardController({
+          store, notifyOperationStarted: () => {},
+          notifySuccess: (_id, message) => { successes.push(message); },
+          notifyError: (_id, message) => { errors.push(message); },
+          notifyToast: () => {}, onTicketsRefreshed: () => {},
+        });
+        controller.refreshUnsyncedPresentation();
+        const original = vscode.window.showWarningMessage;
+        Object.defineProperty(vscode.window, "showWarningMessage", {
+          configurable: true, writable: true, value: async () => {
+            if (outcome === "not_found") {
+              // Dashboard表示後、確認ダイアログ中に同期などで対象がなくなる。
+              await replaceOfflineSyncQueueAsync({ tickets: new Map(), comments: [], newTickets: [] }, scope);
+            }
+            return vscode.l10n.t("Discard");
+          },
+        });
+        try {
+          await new DashboardMessageRouter(controller).route({ type: "unsynced.discardOne", requestId: "discard", key });
+        } finally {
+          vscode.window.showWarningMessage = original;
+          controller.dispose();
+        }
+        if (outcome === "recovery_required") {
+          assert.strictEqual(errors.length, 1);
+          assert.deepStrictEqual(successes, []);
+          assert.deepStrictEqual(getOfflineSyncQueue(scope), before);
+        } else if (outcome === "not_found") {
+          assert.deepStrictEqual(errors, [vscode.l10n.t("The unsynced item changed. Refresh and try again.")]);
+          assert.deepStrictEqual(successes, []);
+          assert.deepStrictEqual(store.getState().unsynced, { items: [], totalCount: 0 });
+        } else {
+          assert.deepStrictEqual(errors, []);
+          assert.deepStrictEqual(successes, [vscode.l10n.t(outcome === "discarded_next"
+            ? "Later local changes discarded. The remote sync checkpoint was preserved."
+            : "Unsynced local changes discarded.")]);
+          if (outcome === "discarded_next") {
+            const after = getOfflineSyncQueue(scope);
+            assert.deepStrictEqual(withoutNextIntents(after), withoutNextIntents(before));
+            const active = key.kind === "ticket" ? after.tickets.get(ticketId)! : key.kind === "comment" ? after.comments[0] : after.newTickets[0];
+            assert.strictEqual(active.nextIntent, undefined);
+          }
+        }
+      });
+    }
+  }
 
   for (const entry of syncLifecycleCases) {
     for (const hasNext of [false, true]) {

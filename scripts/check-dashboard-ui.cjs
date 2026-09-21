@@ -98,6 +98,29 @@ async function main() {
   assert.equal(await evaluate('document.documentElement.lang'), 'ja');
   await push();
   assert.equal(await evaluate(`document.getElementById('search-input').type`), 'text');
+
+  // queued でも Store が remote evidence を検出した項目は破棄不可。
+  state.unsynced = { totalCount: 3, items: [
+    { key: { kind: 'ticket', ticketId: 10 }, label: 'Ticket', lifecycle: 'queued', canDiscard: false, canSync: true },
+    { key: { kind: 'comment', ticketId: 10, commentId: 20 }, label: 'Comment', lifecycle: 'queued', canDiscard: false, canSync: true },
+    { key: { kind: 'newTicket', queueId: 'queued-unsafe' }, label: 'New ticket', lifecycle: 'queued', canDiscard: false, canSync: true },
+  ] };
+  await push();
+  await evaluate(`document.getElementById('tab-unsynced').click()`);
+  assert.equal(await evaluate(`document.querySelectorAll('#unsynced-list .unsynced-actions button:disabled').length`), 3);
+  assert.equal(await evaluate(`document.querySelectorAll('#unsynced-list [data-discard-key]').length`), 0);
+  const discardCount = await evaluate(`window.messages.filter(m=>m.type==='unsynced.discardOne').length`);
+  await evaluate(`document.querySelectorAll('#unsynced-list button:disabled').forEach(button=>button.click())`);
+  assert.equal(await evaluate(`window.messages.filter(m=>m.type==='unsynced.discardOne').length`), discardCount);
+  // nextIntent のみ破棄可能なら同じ queued 表示でも操作が有効になる。
+  state.unsynced.items.forEach(item => { item.canDiscard = true; });
+  await push();
+  assert.equal(await evaluate(`document.querySelectorAll('#unsynced-list [data-discard-key]').length`), 3);
+  await evaluate(`document.querySelector('#unsynced-list [data-discard-key]').click()`);
+  assert.equal(await evaluate(`window.messages.at(-1).type`), 'unsynced.discardOne');
+  state.unsynced = { totalCount: 0, items: [] };
+  await push();
+  await evaluate(`document.getElementById('tab-tickets').click()`);
   assert.equal(await evaluate(`document.querySelectorAll('#search-clear-btn').length`), 1);
   assert.equal(await evaluate(`getComputedStyle(document.querySelector('.ticket-row[data-id="10"]')).paddingLeft`), '12px');
   assert.equal(await evaluate(`getComputedStyle(document.querySelector('.ticket-row[data-id="11"]')).paddingLeft`), '26px');

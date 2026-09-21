@@ -193,6 +193,8 @@
     "Partial sync failure. Succeeded: {0} / Failed: {1}.": "Partial sync failure. Succeeded: {0} / Failed: {1}.",
     "Cannot identify the target new ticket draft.": "Cannot identify the target new ticket draft.",
     "Unsynced local changes discarded.": "Unsynced local changes discarded.",
+    "The unsynced item changed. Refresh and try again.": "The unsynced item changed. Refresh and try again.",
+    "Later local changes discarded. The remote sync checkpoint was preserved.": "Later local changes discarded. The remote sync checkpoint was preserved.",
     "Syncing all…": "Syncing all…",
     "Sync completed.": "Sync completed.",
     "Sync failed. Check the VS Code notifications.": "Sync failed. Check the VS Code notifications.",
