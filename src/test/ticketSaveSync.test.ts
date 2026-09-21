@@ -57,6 +57,21 @@ suite("Ticket save sync", () => {
     assert.strictEqual(result.status, "no_change");
   });
 
+  test("merge conflict markerを含む内容はRedmineへ送信しない", async () => {
+    initializeTicketDraft(2, "Title", "Body", buildIssueMetadataFixture(), "t1");
+
+    const result = await syncTicketDraft({
+      ticketId: 2,
+      content: buildTicketEditorContent({
+        subject: "Title",
+        description: "<<<<<<< LOCAL\nlocal\n=======\nremote\n>>>>>>> REMOTE",
+        metadata: buildIssueMetadataFixture(),
+      }),
+    });
+
+    assert.strictEqual(result.status, "failed");
+  });
+
   test("refreshes remote fields when there is no local change", async () => {
     const metadata = {
       tracker: "Task",
@@ -241,6 +256,7 @@ suite("Ticket save sync", () => {
     assert.ok(editor.document.getText().includes("Local description"));
     assert.ok(editor.document.getText().includes("status:    Closed"));
     assert.strictEqual(getTicketDraft(102)?.baseMetadata.status, "Closed");
+    assert.strictEqual(getTicketDraft(102)?.status, "Dirty");
     assert.strictEqual(getOfflineSyncQueue().tickets.has(102), false);
   });
 

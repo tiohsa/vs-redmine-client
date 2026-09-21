@@ -14,8 +14,8 @@ import {
   markDraftStatus,
   setTicketDraftContent,
 } from "../views/ticketDraftStore";
-import { isIssueMetadataEqual } from "../views/ticketMetadataTypes";
 import { isSaveSyncSuppressed } from "../views/saveSyncSuppression";
+import { detectTicketChanges } from "../views/ticketSync/ticketChangeDetector";
 import {
   getCommentIdForEditor,
   getConnectionScopeForDocument,
@@ -160,6 +160,9 @@ export const updateTicketDraftStatusFromDocument = (
   if (!draft) {
     return false;
   }
+  if (draft.status !== "Synced" && draft.status !== "Dirty") {
+    return false;
+  }
 
   let hasChanges = true;
   try {
@@ -167,10 +170,7 @@ export const updateTicketDraftStatusFromDocument = (
       allowMissingMetadata: true,
       fallbackMetadata: draft.baseMetadata,
     });
-    hasChanges =
-      content.subject.trim() !== draft.baseSubject.trim() ||
-      content.description.trim() !== draft.baseDescription.trim() ||
-      !isIssueMetadataEqual(content.metadata, draft.baseMetadata);
+    hasChanges = detectTicketChanges(draft, content).hasChanges;
   } catch {
     // Parse errors are still unsynced editor changes.
   }
@@ -179,10 +179,6 @@ export const updateTicketDraftStatusFromDocument = (
   if (draft.status === nextStatus) {
     return false;
   }
-  if (!hasChanges && draft.status !== "Dirty" && draft.status !== "Synced") {
-    return false;
-  }
-
   markDraftStatus(ticketId, nextStatus, connectionScope);
   return true;
 };

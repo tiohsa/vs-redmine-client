@@ -1,9 +1,10 @@
 import { TicketDraftState, TicketDraftStatus } from "./ticketSaveTypes";
 import { applyTicketEditorDefaults, TicketEditorContent } from "./ticketEditorContent";
 import { getTicketEditorDefaults } from "./ticketEditorDefaultsStore";
-import { IssueMetadata, isIssueMetadataEqual } from "./ticketMetadataTypes";
+import { IssueMetadata } from "./ticketMetadataTypes";
 import { Ticket } from "../redmine/types";
 import { createInMemoryDraftStorage, DraftStorage } from "./draftPersistence";
+import { detectTicketChanges } from "./ticketSync/ticketChangeDetector";
 
 let activeScope = "";
 const cachesByScope = new Map<string, Map<number, TicketDraftState>>();
@@ -204,11 +205,7 @@ export const setTicketDraftContent = (
     return;
   }
 
-  if (
-    content.subject.trim() === draft.baseSubject.trim() &&
-    content.description.trim() === draft.baseDescription.trim() &&
-    isIssueMetadataEqual(content.metadata, draft.baseMetadata)
-  ) {
+  if (!detectTicketChanges(draft, content).hasChanges) {
     draft.draftSubject = undefined;
     draft.draftDescription = undefined;
     draft.draftMetadata = undefined;

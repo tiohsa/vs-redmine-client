@@ -5,6 +5,7 @@ import {
   initializeTicketDraft,
   initializeDraftStore,
   markDraftStatus,
+  setTicketDraftContent,
   updateDraftAfterSave,
 } from "../views/ticketDraftStore";
 import { createInMemoryDraftStorage } from "../views/draftPersistence";
@@ -65,5 +66,31 @@ suite("Ticket draft store", () => {
     assert.strictEqual(getTicketDraft(10, scopeB)?.status, "Synced");
     clearTicketDrafts(scopeA);
     clearTicketDrafts(scopeB);
+  });
+
+  test("Syncと同じ差分意味論でEditor snapshotを保持またはclearする", () => {
+    const metadata = buildIssueMetadataFixture();
+    initializeTicketDraft(11, "Subject", "Body", metadata);
+
+    setTicketDraftContent(11, {
+      subject: "Subject",
+      description: "Body",
+      metadata: buildIssueMetadataFixture({ parent: 99 }),
+    });
+    assert.strictEqual(getTicketDraft(11)?.draftMetadata, undefined);
+
+    setTicketDraftContent(11, {
+      subject: "Subject",
+      description: "Body\n",
+      metadata,
+    });
+    assert.strictEqual(getTicketDraft(11)?.draftDescription, "Body\n");
+
+    setTicketDraftContent(11, {
+      subject: "Subject",
+      description: "Body",
+      metadata: buildIssueMetadataFixture({ children: ["Child"] }),
+    });
+    assert.deepStrictEqual(getTicketDraft(11)?.draftMetadata?.children, ["Child"]);
   });
 });
