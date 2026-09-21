@@ -126,6 +126,8 @@ After Redmine accepts a ticket, child-ticket, or comment mutation, the item rema
 | `redmine-client.requestTimeoutMs` | `30000` | HTTP request timeout in milliseconds |
 | `redmine-client.ticketList.showStatus` | `true` | Show the status badge on each ticket row in the Dashboard |
 | `redmine-client.ticketList.showDueDate` | `true` | Show due date badges on ticket rows |
+| `redmine-client.ticketList.showTracker` | `true` | Show the tracker badge on each ticket row in the Dashboard |
+| `redmine-client.ticketList.showPriority` | `true` | Show the priority badge on each ticket row in the Dashboard |
 
 ## Commands
 

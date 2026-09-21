@@ -91,6 +91,8 @@ const validateGeneralPatch = (v: unknown): boolean => {
   if ("includeChildProjects" in v && !isBoolean(v["includeChildProjects"])) { return false; }
   if ("showStatus" in v && !isBoolean(v["showStatus"])) { return false; }
   if ("showDueDate" in v && !isBoolean(v["showDueDate"])) { return false; }
+  if ("showTracker" in v && !isBoolean(v["showTracker"])) { return false; }
+  if ("showPriority" in v && !isBoolean(v["showPriority"])) { return false; }
   if ("ticketListLimit" in v) {
     const limit = v["ticketListLimit"];
     if (!isNumber(limit) || !Number.isInteger(limit) || (limit as number) < 1 || (limit as number) > 500) {

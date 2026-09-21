@@ -134,6 +134,8 @@ export interface DashboardTicketSettingsViewModel {
   ticketListLimit: number;
   showStatus: boolean;
   showDueDate: boolean;
+  showTracker: boolean;
+  showPriority: boolean;
   editorStorageDirectory: string;
   editorDefaults: {
     subject: string;
@@ -262,6 +264,8 @@ export interface DashboardGeneralSettingsPatch {
   ticketListLimit?: number;
   showStatus?: boolean;
   showDueDate?: boolean;
+  showTracker?: boolean;
+  showPriority?: boolean;
 }
 
 export type DashboardRequest =

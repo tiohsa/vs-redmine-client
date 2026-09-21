@@ -301,6 +301,16 @@
           "type": "boolean",
           "default": true,
           "description": "%config.ticketList.showDueDate.description%"
+        },
+        "redmine-client.ticketList.showTracker": {
+          "type": "boolean",
+          "default": true,
+          "description": "%config.ticketList.showTracker.description%"
+        },
+        "redmine-client.ticketList.showPriority": {
+          "type": "boolean",
+          "default": true,
+          "description": "%config.ticketList.showPriority.description%"
         }
       }
     }

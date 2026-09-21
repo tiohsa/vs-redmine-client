@@ -119,7 +119,9 @@ export async function activate(context: vscode.ExtensionContext) {
         event.affectsConfiguration("redmine-client.ticketListLimit") ||
         event.affectsConfiguration("redmine-client.editorStorageDirectory") ||
         event.affectsConfiguration("redmine-client.ticketList.showStatus") ||
-        event.affectsConfiguration("redmine-client.ticketList.showDueDate");
+        event.affectsConfiguration("redmine-client.ticketList.showDueDate") ||
+        event.affectsConfiguration("redmine-client.ticketList.showTracker") ||
+        event.affectsConfiguration("redmine-client.ticketList.showPriority");
       if (affectsDashboardSettings) {
         views.dashboardProvider.refreshSettings();
       }
@@ -132,7 +134,9 @@ export async function activate(context: vscode.ExtensionContext) {
       }
       if (
         event.affectsConfiguration("redmine-client.ticketList.showStatus") ||
-        event.affectsConfiguration("redmine-client.ticketList.showDueDate")
+        event.affectsConfiguration("redmine-client.ticketList.showDueDate") ||
+        event.affectsConfiguration("redmine-client.ticketList.showTracker") ||
+        event.affectsConfiguration("redmine-client.ticketList.showPriority")
       ) {
         views.ticketsPresentation.notifyChange();
       }
