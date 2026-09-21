@@ -45,6 +45,19 @@ suite("Ticket change detector", () => {
     );
   });
 
+  test("descriptionのCRLFとLFの違いだけでは変更と判定しない", () => {
+    for (const [baseDescription, description] of [
+      ["First\r\nSecond\r\n", "First\nSecond\n"],
+      ["First\nSecond\n", "First\r\nSecond\r\n"],
+    ]) {
+      const draft = { ...createDraft(), baseDescription };
+      assert.strictEqual(detectTicketChanges(draft, createContent({ description })).hasChanges, false);
+      for (const changed of [description + "\n", description + " ", description.replace("Second", "Changed")]) {
+        assert.strictEqual(detectTicketChanges(draft, createContent({ description: changed })).descriptionChanged, true);
+      }
+    }
+  });
+
   test("Sync対象metadataだけをmetadata変更と判定する", () => {
     const draft = createDraft();
 

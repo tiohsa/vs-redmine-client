@@ -12,7 +12,7 @@ import {
   registerTicketDocument,
 } from "../views/ticketEditorRegistry";
 import { createDocumentStub, createMutableDocumentStub } from "./helpers/editorStubs";
-import { buildTicketEditorContent } from "../views/ticketEditorContent";
+import { buildTicketEditorContent, parseTicketEditorContent } from "../views/ticketEditorContent";
 import { buildIssueMetadataFixture } from "./helpers/ticketMetadataFixtures";
 import {
   clearTicketDrafts,
@@ -20,6 +20,8 @@ import {
   initializeDraftStore,
   initializeTicketDraft,
   markDraftStatus,
+  setTicketDraftContent,
+  updateDraftAfterSave,
 } from "../views/ticketDraftStore";
 import { createInMemoryDraftStorage } from "../views/draftPersistence";
 import { releaseSaveSync, suppressSaveSync } from "../views/saveSyncSuppression";
@@ -130,6 +132,37 @@ suite("editorEventController registerEditorDocument", () => {
 
     document.setText(`${original}\n`);
 
+    assert.strictEqual(updateTicketDraftStatusFromDocument(document), true);
+    assert.strictEqual(getTicketDraft(ticketId, scope)?.status, "Dirty");
+  });
+
+  test("CRLF本文を同期した後に別チケットを編集しても同期済み状態を維持する", () => {
+    const ticketId = 132;
+    const scope = "test:synced-ticket-focus-change";
+    const { document, metadata } = createRegisteredTicketDocument(ticketId, scope);
+    const syncedContent = { subject: "Changed", description: "First\r\nSecond\r\n", metadata };
+    document.setText(buildTicketEditorContent(syncedContent));
+    assert.strictEqual(updateTicketDraftStatusFromDocument(document), true);
+    assert.strictEqual(getTicketDraft(ticketId, scope)?.status, "Dirty");
+
+    updateDraftAfterSave(ticketId, syncedContent.subject, syncedContent.description, metadata, "t2", scope);
+
+    // フォーカス移動時と同じ順序で、同期後のエディター内容を再評価する。
+    setTicketDraftContent(ticketId, parseTicketEditorContent(document.getText()), scope);
+    assert.strictEqual(updateTicketDraftStatusFromDocument(document), false);
+    assert.strictEqual(getTicketDraft(ticketId, scope)?.draftDescription, undefined);
+
+    const other = createMutableDocumentStub(
+      vscode.Uri.parse("untitled:redmine-client-ticket-133.md"),
+      buildTicketEditorContent({ subject: "Other", description: "Edited", metadata }),
+    );
+    initializeTicketDraft(133, "Other", "Body", metadata, undefined, scope);
+    registerTicketDocument(133, other, "ticket", undefined, scope);
+    assert.strictEqual(updateTicketDraftStatusFromDocument(other), true);
+    assert.strictEqual(getTicketDraft(133, scope)?.status, "Dirty");
+    assert.strictEqual(getTicketDraft(ticketId, scope)?.status, "Synced");
+
+    document.setText(buildTicketEditorContent({ ...syncedContent, description: "First\nChanged\n" }));
     assert.strictEqual(updateTicketDraftStatusFromDocument(document), true);
     assert.strictEqual(getTicketDraft(ticketId, scope)?.status, "Dirty");
   });
