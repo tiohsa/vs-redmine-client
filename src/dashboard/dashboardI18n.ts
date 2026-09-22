@@ -29,6 +29,10 @@ export interface DashboardStrings {
   // Search
   searchPlaceholder: string;
   clearSearch: string;
+  layoutModeLabel: string;
+  layoutAuto: string;
+  layoutSingle: string;
+  layoutSplit: string;
   // Sync states
   syncDirty: string;
   syncQueued: string;
@@ -196,6 +200,10 @@ export const buildDashboardStrings = (): DashboardStrings => ({
   // Search
   searchPlaceholder: vscode.l10n.t("Search tickets…"),
   clearSearch: vscode.l10n.t("Clear search"),
+  layoutModeLabel: vscode.l10n.t("Ticket layout"),
+  layoutAuto: vscode.l10n.t("Automatic layout"),
+  layoutSingle: vscode.l10n.t("One column"),
+  layoutSplit: vscode.l10n.t("Two columns"),
   // Sync states
   syncDirty: vscode.l10n.t("Unsynced changes"),
   syncQueued: vscode.l10n.t("Waiting to sync"),

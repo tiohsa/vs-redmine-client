@@ -24,7 +24,7 @@ Module._load = originalLoad;
 
 const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'dashboard-ui-'));
 const fixture = path.join(directory, 'dashboard.html');
-const bootstrap = `<style nonce="ui-check">:root{--vscode-font-family:system-ui;--vscode-font-size:13px;--vscode-button-background:#1456f0;--vscode-button-foreground:#fff;--vscode-focusBorder:#1456f0;--vscode-sideBar-background:#f0f0f0;--vscode-editor-background:#fff;--vscode-foreground:#222;--vscode-descriptionForeground:#45515e;--vscode-panel-border:#e5e7eb;--vscode-errorForeground:#b3261e;--vscode-editorWarning-foreground:#795e00;--vscode-testing-iconPassed:#16825d}:root:has(body.vscode-dark){--vscode-sideBar-background:#252526;--vscode-editor-background:#1e1e1e;--vscode-foreground:#ddd;--vscode-descriptionForeground:#bbb;--vscode-panel-border:#2b2b2b;--vscode-button-background:#007acc;--vscode-focusBorder:#007acc;--vscode-list-activeSelectionBackground:#094771;--vscode-list-activeSelectionForeground:#fff;--vscode-editorWidget-background:#252526}:root:has(body.vscode-high-contrast-light){--vscode-contrastBorder:#000;--vscode-panel-border:#000}:root:has(body.vscode-high-contrast){--vscode-sideBar-background:#000;--vscode-editor-background:#000;--vscode-foreground:#fff;--vscode-descriptionForeground:#fff;--vscode-contrastBorder:#fff;--vscode-focusBorder:#f38518;--vscode-panel-border:#fff}</style><script nonce="ui-check">window.messages=[];window.acquireVsCodeApi=()=>({postMessage:m=>window.messages.push(m)});const NativeDate=Date;const fixedNow=NativeDate.UTC(2026,8,14,16,0,0);window.Date=class extends NativeDate{constructor(...args){if(args.length===0)super(fixedNow);else super(...args)}static now(){return fixedNow}};</script>`;
+const bootstrap = `<style nonce="ui-check">:root{--vscode-font-family:system-ui;--vscode-font-size:13px;--vscode-button-background:#1456f0;--vscode-button-foreground:#fff;--vscode-focusBorder:#1456f0;--vscode-sideBar-background:#f0f0f0;--vscode-editor-background:#fff;--vscode-foreground:#222;--vscode-descriptionForeground:#45515e;--vscode-panel-border:#e5e7eb;--vscode-errorForeground:#b3261e;--vscode-editorWarning-foreground:#795e00;--vscode-testing-iconPassed:#16825d}:root:has(body.vscode-dark){--vscode-sideBar-background:#252526;--vscode-editor-background:#1e1e1e;--vscode-foreground:#ddd;--vscode-descriptionForeground:#bbb;--vscode-panel-border:#2b2b2b;--vscode-button-background:#007acc;--vscode-focusBorder:#007acc;--vscode-list-activeSelectionBackground:#094771;--vscode-list-activeSelectionForeground:#fff;--vscode-editorWidget-background:#252526}:root:has(body.vscode-high-contrast-light){--vscode-contrastBorder:#000;--vscode-panel-border:#000}:root:has(body.vscode-high-contrast){--vscode-sideBar-background:#000;--vscode-editor-background:#000;--vscode-foreground:#fff;--vscode-descriptionForeground:#fff;--vscode-contrastBorder:#fff;--vscode-focusBorder:#f38518;--vscode-panel-border:#fff}</style><script nonce="ui-check">window.messages=[];let uiState;window.acquireVsCodeApi=()=>({postMessage:m=>window.messages.push(m),getState:()=>uiState,setState:value=>{uiState=value;return value}});const NativeDate=Date;const fixedNow=NativeDate.UTC(2026,8,14,16,0,0);window.Date=class extends NativeDate{constructor(...args){if(args.length===0)super(fixedNow);else super(...args)}static now(){return fixedNow}};</script>`;
 fs.writeFileSync(fixture, buildDashboardHtml('ui-check', strings).replace('<head>', '<head>' + bootstrap));
 const chrome = spawn(process.env.CHROME_BIN || 'google-chrome', [
   '--headless', '--disable-gpu', '--no-first-run', '--no-default-browser-check',
@@ -355,6 +355,20 @@ async function main() {
   state.selectedTicketId = state.selectedTicket.id = state.editOptions.ticketId = 10;
   await push();
 
+  // 手動レイアウトは画面幅より優先され、Webview state に保持される。
+  await call('Emulation.setDeviceMetricsOverride', { width: 320, height: 1000, deviceScaleFactor: 1, mobile: false });
+  assert.equal(await evaluate(`getComputedStyle(document.querySelector('.tickets-layout')).flexDirection`), 'column');
+  await evaluate(`document.getElementById('ticket-layout-mode').value='split';document.getElementById('ticket-layout-mode').dispatchEvent(new Event('change'))`);
+  assert.equal(await evaluate(`getComputedStyle(document.querySelector('.tickets-layout')).display`), 'grid');
+  const selectedTicketSplit = await evaluate(`(()=>{const master=document.querySelector('.tickets-master').getBoundingClientRect();const detail=document.querySelector('.tickets-detail').getBoundingClientRect();const card=document.getElementById('ticket-detail-card').getBoundingClientRect();return {masterRight:master.right,detailLeft:detail.left,detailRight:detail.right,cardLeft:card.left,cardRight:card.right};})()`);
+  assert.equal(selectedTicketSplit.masterRight <= selectedTicketSplit.detailLeft && selectedTicketSplit.cardLeft >= selectedTicketSplit.detailLeft && selectedTicketSplit.cardRight <= selectedTicketSplit.detailRight, true, JSON.stringify(selectedTicketSplit));
+  assert.equal(await evaluate(`document.querySelector('.tickets-layout').scrollWidth <= document.querySelector('.tickets-layout').clientWidth`), true);
+  assert.equal(await evaluate(`uiState.ticketLayoutMode`), 'split');
+  await call('Emulation.setDeviceMetricsOverride', { width: 768, height: 1000, deviceScaleFactor: 1, mobile: false });
+  await evaluate(`document.getElementById('ticket-layout-mode').value='single';document.getElementById('ticket-layout-mode').dispatchEvent(new Event('change'))`);
+  assert.equal(await evaluate(`getComputedStyle(document.querySelector('.tickets-layout')).flexDirection`), 'column');
+  await evaluate(`document.getElementById('ticket-layout-mode').value='auto';document.getElementById('ticket-layout-mode').dispatchEvent(new Event('change'))`);
+
   // 狭幅でも詳細・Metadata 入力がはみ出さず、テーマの境界とフォーカスが残る。
   for (const [theme, width] of [['vscode-light', 280], ['vscode-dark', 320], ['vscode-dark', 440], ['vscode-light', 768], ['vscode-high-contrast', 320]]) {
     await call('Emulation.setDeviceMetricsOverride', { width, height: 1000, deviceScaleFactor: 1, mobile: false });
@@ -374,15 +388,24 @@ async function main() {
   assert.equal(await evaluate(`document.getElementById('tab-tickets').getAttribute('aria-selected')`), 'true');
   state.workPanel = { mode: 'newTicket', projectId: 1, projectName: '検証プロジェクト', loading: false, trackers: [{ id: 1, name: 'バグ' }], priorities: [{ id: 1, name: '通常' }], assignees: [], statuses: [], values: { tracker: 'バグ', priority: '通常' } };
   await push();
+  assert.notEqual(await evaluate(`getComputedStyle(document.getElementById('ticket-detail-card')).position`), 'fixed');
   assert.equal(await evaluate('document.activeElement.id'), 'work-tracker');
   assert.equal(await evaluate(`document.getElementById('work-sync-new-ticket').disabled`), true);
   assert.equal(await evaluate(`document.getElementById('work-tracker').required`), true);
+  await call('Emulation.setDeviceMetricsOverride', { width: 560, height: 700, deviceScaleFactor: 1, mobile: false });
+  await evaluate(`document.getElementById('ticket-layout-mode').value='split';document.getElementById('ticket-layout-mode').dispatchEvent(new Event('change'))`);
+  assert.equal(await evaluate(`document.getElementById('ticket-detail-card').classList.contains('composer-popover')`), false);
+  assert.equal(await evaluate(`(()=>{const panel=document.getElementById('ticket-detail-card').getBoundingClientRect();const detail=document.querySelector('.tickets-detail').getBoundingClientRect();return panel.left>=detail.left && panel.right<=detail.right;})()`), true);
   await evaluate(`const input=document.getElementById('work-description'); input.value='入力途中の説明'; input.dispatchEvent(new Event('input')); input.focus(); input.setSelectionRange(2,4)`);
   await push();
   assert.deepEqual(await evaluate(`({id:document.activeElement.id,value:document.activeElement.value,start:document.activeElement.selectionStart,end:document.activeElement.selectionEnd})`), { id: 'work-description', value: '入力途中の説明', start: 2, end: 4 });
-  await call('Emulation.setDeviceMetricsOverride', { width: 280, height: 600, deviceScaleFactor: 1, mobile: false });
-  await evaluate('new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)))');
-  assert.equal(await evaluate(`document.getElementById('ticket-detail-card').getBoundingClientRect().right <= innerWidth`), true);
+  for (const width of [440, 320, 280]) {
+    await call('Emulation.setDeviceMetricsOverride', { width, height: 600, deviceScaleFactor: 1, mobile: false });
+    await evaluate('new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)))');
+    const narrowSplitComposer = await evaluate(`(()=>{const card=document.getElementById('ticket-detail-card');const panel=card.getBoundingClientRect();const detail=document.querySelector('.tickets-detail').getBoundingClientRect();const controls=[...card.querySelectorAll('input,select,textarea,button')].map(element=>{const rect=element.getBoundingClientRect();return {left:rect.left,right:rect.right};});return {panelLeft:panel.left,panelRight:panel.right,detailLeft:detail.left,detailRight:detail.right,scrollWidth:card.scrollWidth,clientWidth:card.clientWidth,controlsInside:controls.every(rect=>rect.left>=panel.left&&rect.right<=panel.right)};})()`);
+    assert.equal(narrowSplitComposer.panelLeft >= narrowSplitComposer.detailLeft && narrowSplitComposer.panelRight <= narrowSplitComposer.detailRight && narrowSplitComposer.scrollWidth <= narrowSplitComposer.clientWidth && narrowSplitComposer.controlsInside, true, `${width}px: ${JSON.stringify(narrowSplitComposer)}`);
+  }
+  await evaluate(`document.getElementById('ticket-layout-mode').value='auto';document.getElementById('ticket-layout-mode').dispatchEvent(new Event('change'))`);
   state.workPanel.draftUri = 'file:///tmp/dashboard-smoke-draft.md';
   await push();
   assert.equal(await evaluate(`document.getElementById('work-sync-new-ticket').disabled`), false);

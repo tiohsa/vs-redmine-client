@@ -5,8 +5,11 @@ export const dashboardWebviewScript = String.raw`
 'use strict';
 const vscode = acquireVsCodeApi();
 const STRINGS = window.STRINGS;
+const persistedUiState = vscode.getState() || {};
+let ticketLayoutMode = ['auto','single','split'].includes(persistedUiState.ticketLayoutMode) ? persistedUiState.ticketLayoutMode : 'auto';
 
-// DashboardState が唯一の永続的な UI source of truth。以下は表示用の一時状態だけを保持する。
+// 業務状態は DashboardState、Webview 固有のレイアウト選択はvscode.setStateで保持する。
+// 以下はそれ以外の表示用一時状態。
 let state = null;
 let requestCounter = 0;
 let searchQuery = '';
@@ -14,7 +17,6 @@ let searchTimer = null;
 let ticketDetailExpanded = false;
 let activeTicketActionMenuId = null;
 let activeTicketActionAnchorTop = null;
-let newTicketPopoverAnchor = null;
 let composerDraftKey = null;
 let composerDraftValues = null;
 let metadataEdit = null;
@@ -23,7 +25,6 @@ const expandedTicketIds = new Set();
 const collapsedTicketIds = new Set();
 const activeSyncRequests = new Set();
 const unsyncedFeedbackRequests = new Set();
-const COMPOSER_POPOVER_MARGIN = 8;
 
 function esc(value){ return String(value ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
 function send(message){ vscode.postMessage(message); }
@@ -151,11 +152,24 @@ document.getElementById('tabs').addEventListener('keydown', function(event){
 
 // ── Header / search ───────────────────────────────────────────────────────
 document.getElementById('refresh-btn').addEventListener('click', function(){ req('dashboard.refresh'); });
-document.getElementById('new-ticket-btn').addEventListener('click', function(){ activateTab('tickets'); measureNewTicketPopoverAnchor(); req('ticket.create'); });
+document.getElementById('new-ticket-btn').addEventListener('click', function(){ activateTab('tickets'); req('ticket.create'); });
 document.getElementById('include-children').addEventListener('change', function(){ req('project.toggleChildren',{includeChildProjects:this.checked}); });
 document.getElementById('project-select').addEventListener('change', function(){ if(this.value) req('project.select',{projectId:Number(this.value)}); });
 const searchInput = document.getElementById('search-input');
 const searchClearButton = document.getElementById('search-clear-btn');
+const ticketLayoutSelect = document.getElementById('ticket-layout-mode');
+function applyTicketLayoutMode(){
+  const layout=document.querySelector('.tickets-layout');
+  layout.classList.toggle('layout-single',ticketLayoutMode === 'single');
+  layout.classList.toggle('layout-split',ticketLayoutMode === 'split');
+  ticketLayoutSelect.value=ticketLayoutMode;
+}
+ticketLayoutSelect.addEventListener('change',function(){
+  ticketLayoutMode=this.value;
+  vscode.setState(Object.assign({},vscode.getState() || {},{ticketLayoutMode:ticketLayoutMode}));
+  applyTicketLayoutMode();
+});
+applyTicketLayoutMode();
 function updateSearchClearButton(){ searchClearButton.classList.toggle('hidden', !searchInput.value); }
 function clearSearch(){
   searchInput.value = '';
@@ -369,18 +383,6 @@ function renderTickets(){
 }
 
 // ── Ticket detail / composer ──────────────────────────────────────────────
-function measureNewTicketPopoverAnchor(){
-  const button=document.getElementById('new-ticket-btn'); if(!button) return;
-  const rect=button.getBoundingClientRect(); const width=Math.min(420,Math.max(0,(document.documentElement.clientWidth || window.innerWidth)-16));
-  const height=document.documentElement.clientHeight || window.innerHeight;
-  newTicketPopoverAnchor={left:clamp(rect.left,8,Math.max(8,(window.innerWidth || 320)-width-8)),top:clamp(rect.bottom+8,8,Math.max(8,height-248)),width:width};
-}
-function applyNewTicketComposerPosition(card){
-  if(!newTicketPopoverAnchor) measureNewTicketPopoverAnchor();
-  const anchor=newTicketPopoverAnchor || {left:8,top:8,width:Math.min(420,Math.max(0,(window.innerWidth || 320)-16))};
-  card.style.setProperty('--composer-popover-left',anchor.left+'px'); card.style.setProperty('--composer-popover-top',anchor.top+'px'); card.style.setProperty('--composer-popover-width',anchor.width+'px'); card.style.setProperty('--composer-popover-max-height',Math.max(120,(window.innerHeight || 320)-anchor.top-8)+'px');
-}
-function clearNewTicketComposerPosition(card){ card.classList.remove('composer-popover'); ['left','top','width','max-height'].forEach(function(name){ card.style.removeProperty('--composer-popover-'+name); }); }
 function renderSelect(name,value,options,label,disabled,allowBlank){
   const current=value || ''; const list=options || []; const disabledAttribute=disabled ? ' disabled' : '';
   const blank=allowBlank ? '<option value=""'+(!current?' selected':'')+'>'+esc(STRINGS.assigneeUnassigned)+'</option>' : '';
@@ -408,7 +410,7 @@ function renderTicketDetailPanel(ticket){
   const canEdit=ready || (!options && metadataOptionsReady());
   const lists=options || state.metadataOptions;
   const fields=[['tracker',STRINGS.sortTracker],['priority',STRINGS.sortPriority],['status',STRINGS.sortStatus],['assignee',STRINGS.sortAssignee],['start_date',STRINGS.startDate],['due_date',STRINGS.dueDateLabel]];
-  clearNewTicketComposerPosition(card); card.classList.remove('hidden'); card.removeAttribute('aria-busy');
+  card.classList.remove('hidden'); card.removeAttribute('aria-busy');
   const description=ticket.description ? '<div class="detail-description'+(ticketDetailExpanded ? '' : ' detail-description-collapsed')+'">'+esc(ticket.description)+'</div>' : '<p class="detail-hint">'+esc(STRINGS.noDescription)+'</p>';
   const warning=['Draft','Dirty','Queued','Syncing','Conflict','Failed','RecoveryPending','CommitUnknown'].includes(ticket.syncState) ? '<p class="detail-description-warning" role="note">'+esc(STRINGS.descriptionUnsyncedWarning)+'</p>' : '';
   const parent=ticket.parentId ? '<div class="detail-parent">#'+ticket.parentId+(ticket.parentSubject ? ' '+esc(ticket.parentSubject) : '')+'</div>' : '';
@@ -457,7 +459,7 @@ function renderTicketDetailPanel(ticket){
 }
 function renderComposerPanel(panel){
   const nextComposerDraftKey=[panel.mode,panel.projectId,panel.mode === 'childTicket' ? panel.parentTicketId : ''].join(':'); if(composerDraftKey !== nextComposerDraftKey){ composerDraftKey=nextComposerDraftKey; composerDraftValues=null; }
-  const card=document.getElementById('ticket-detail-card'); const isNewTicketComposer=panel.mode === 'newTicket'; card.classList.remove('hidden'); card.classList.toggle('composer-popover', isNewTicketComposer); if(isNewTicketComposer) applyNewTicketComposerPosition(card); else clearNewTicketComposerPosition(card);
+  const card=document.getElementById('ticket-detail-card'); card.classList.remove('hidden');
   const title=panel.mode === 'childTicket' ? STRINGS.createChildTicketTitle : STRINGS.createNewTicketTitle; const parent=panel.mode === 'childTicket' ? '<div class="work-panel-subtitle">'+esc(STRINGS.parentLabel)+': #'+panel.parentTicketId+' '+esc(panel.parentSubject || '')+'</div>' : ''; const error=panel.error ? '<div class="composer-error" role="alert">'+esc(panel.error)+'</div>' : '';
   card.setAttribute('aria-busy',String(panel.loading));
   if(panel.loading){ card.innerHTML='<div class="work-panel-head"><div class="work-panel-title">'+title+'</div>'+parent+'</div><div class="composer-loading">'+STRINGS.loadingTrackers+'</div>'; return; }
@@ -473,8 +475,8 @@ function renderComposerPanel(panel){
 function renderTicketDetail(){
   if(!state) return; const card=document.getElementById('ticket-detail-card'); const panel=state.workPanel;
   document.getElementById('ticket-detail-empty').classList.toggle('hidden',!!(state.selectedTicket || panel));
-  if(!panel){ composerDraftKey=null; composerDraftValues=null; if(!state.selectedTicket){ clearNewTicketComposerPosition(card); card.classList.add('hidden'); card.innerHTML=''; return; } renderTicketDetailPanel(state.selectedTicket); return; }
-  if(panel.mode === 'detail'){ composerDraftKey=null; composerDraftValues=null; if(state.selectedTicket && state.selectedTicket.id === panel.ticketId) renderTicketDetailPanel(state.selectedTicket); else { clearNewTicketComposerPosition(card); card.classList.add('hidden'); card.innerHTML=''; } return; }
+  if(!panel){ composerDraftKey=null; composerDraftValues=null; if(!state.selectedTicket){ card.classList.add('hidden'); card.innerHTML=''; return; } renderTicketDetailPanel(state.selectedTicket); return; }
+  if(panel.mode === 'detail'){ composerDraftKey=null; composerDraftValues=null; if(state.selectedTicket && state.selectedTicket.id === panel.ticketId) renderTicketDetailPanel(state.selectedTicket); else { card.classList.add('hidden'); card.innerHTML=''; } return; }
   renderComposerPanel(panel);
 }
 
@@ -587,7 +589,6 @@ function render(){
   (state.projects || []).forEach(function(project){ const option=document.createElement('option'); option.value=String(project.id); option.textContent='  '.repeat(project.level || 0)+(project.name || (STRINGS.projectLabel+' #'+project.id)); select.appendChild(option); }); if(state.selectedProject && state.selectedProject.id) select.value=String(state.selectedProject.id); else select.value='';
   document.getElementById('include-children').checked=!!state.includeChildProjects; renderTickets(); renderTicketDetail(); renderFilterChips(); renderUnsynced(); renderComments(); renderSettings(); updateSyncButtonStates(); restoreFocus(focus);
 }
-window.addEventListener('resize',function(){ const card=document.getElementById('ticket-detail-card'); if(state && state.workPanel && state.workPanel.mode === 'newTicket' && card.classList.contains('composer-popover')){ measureNewTicketPopoverAnchor(); applyNewTicketComposerPosition(card); } });
 window.addEventListener('message',function(event){ const message=event.data || {}; if(message.type === 'dashboard.state'){
     const previous=state;
     const projectChanged=previous?.selectedProject?.id !== message.state.selectedProject?.id;

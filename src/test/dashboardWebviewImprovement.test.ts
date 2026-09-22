@@ -38,6 +38,26 @@ suite("Dashboard Webview 改善", () => {
     assert.ok(!dashboardWebviewScript.includes("Latest comments"));
   });
 
+  test("チケットレイアウトを自動・1列・2列から手動選択して保持する", () => {
+    const html = buildDashboardHtml("nonce", buildDashboardStrings());
+    assert.ok(html.includes('id="ticket-layout-mode"'));
+    assert.ok(html.includes('<option value="auto">'));
+    assert.ok(html.includes('<option value="single">'));
+    assert.ok(html.includes('<option value="split">'));
+    assert.ok(dashboardWebviewScript.includes("vscode.getState()"));
+    assert.ok(dashboardWebviewScript.includes("vscode.setState("));
+    assert.ok(dashboardWebviewScript.includes("applyTicketLayoutMode()"));
+    assert.ok(dashboardStyles.includes(".tickets-layout.layout-single"));
+    assert.ok(dashboardStyles.includes(".tickets-layout.layout-split"));
+    assert.ok(dashboardStyles.includes("grid-template-columns: minmax(0, 1fr) minmax(0, 1fr)"));
+  });
+
+  test("2列表示で新規チケット編集パネルを詳細列に収める", () => {
+    assert.ok(!dashboardWebviewScript.includes("composer-popover"));
+    assert.ok(!dashboardWebviewScript.includes("position: fixed"));
+    assert.ok(dashboardStyles.includes("min-width: 0; width: 100%; max-width: 100%"));
+  });
+
   test("Dashboard の更新はヘッダーボタンだけに表示する", () => {
     const strings = buildDashboardStrings();
     const html = buildDashboardHtml("nonce", strings);
@@ -154,15 +174,10 @@ suite("Dashboard Webview 改善", () => {
     assert.ok(source.includes("listComments"));
   });
 
-  test("新規チケット composer は New Ticket ボタン近くにだけ popover 表示する", () => {
-    assert.ok(dashboardWebviewScript.includes("getBoundingClientRect()"));
+  test("新規チケット composer は詳細領域内に通常配置する", () => {
     assert.ok(dashboardWebviewScript.includes("panel.mode === 'newTicket'"));
-    assert.ok(dashboardWebviewScript.includes("classList.toggle('composer-popover', isNewTicketComposer)"));
     assert.ok(dashboardWebviewScript.includes("panel.mode === 'childTicket' ? STRINGS.createChildTicketTitle"));
-    assert.ok(dashboardStyles.includes(".ticket-detail-card.composer-popover"));
-    assert.ok(dashboardStyles.includes("max-width:420px"));
-    assert.ok(dashboardStyles.includes("overflow:auto"));
-    assert.ok(dashboardStyles.includes("z-index:50"));
+    assert.ok(!dashboardStyles.includes(".ticket-detail-card.composer-popover"));
   });
 
   test("監査補修でフィルター表示・説明文省略・未同期件数を維持する", () => {
