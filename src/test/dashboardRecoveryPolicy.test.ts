@@ -6,6 +6,12 @@ import { DashboardController } from "../dashboard/DashboardController";
 import { DashboardMessageRouter } from "../dashboard/DashboardMessageRouter";
 import {
   addOfflineCommentUpdateAsync,
+  addOfflineNewTicketAsync,
+  prepareOfflineDiscard,
+  commitOfflineDiscardAsync,
+  transitionOfflineTicketUpdateLifecycleAsync,
+  transitionOfflineNewTicketLifecycleAsync,
+  transitionOfflineCommentLifecycleAsync,
   addOfflineTicketUpdateAsync,
   discardOfflineCommentUpdateAsync,
   discardOfflineNewTicketAsync,
@@ -330,6 +336,162 @@ suite("Dashboard recovery policy — lifecycle matrix", () => {
             assert.strictEqual(active.nextIntent, undefined);
           }
         }
+      });
+    }
+  }
+
+  for (const key of keys) {
+    test(`Dashboard ${key.kind}: 確認中に nextIntent が昇格したら stale として全内容を保持する`, async () => {
+      const queue = queuedOperations([], true);
+      queue.tickets.get(ticketId)!.phase = "preparing";
+      queue.comments[0].phase = "preparing";
+      queue.newTickets[0].phase = "preparing";
+      for (const item of [queue.tickets.get(ticketId)!, queue.comments[0], queue.newTickets[0]]) {
+        item.operationId = "confirm-operation";
+      }
+      await replaceOfflineSyncQueueAsync(queue, scope);
+      const errors: string[] = [];
+      const successes: string[] = [];
+      const store = new DashboardStateStore();
+      const controller = new DashboardController({
+        store, notifyOperationStarted: () => {},
+        notifySuccess: (_id, message) => { successes.push(message); },
+        notifyError: (_id, message) => { errors.push(message); },
+        notifyToast: () => {}, onTicketsRefreshed: () => {},
+      });
+      let afterTransition: OfflineSyncQueue | undefined;
+      let writeCount = 0;
+      let confirmations = 0;
+      const original = vscode.window.showWarningMessage;
+      Object.defineProperty(vscode.window, "showWarningMessage", {
+        configurable: true, writable: true, value: async (...args: unknown[]) => {
+          confirmations++;
+          assert.strictEqual(args[2], vscode.l10n.t("Discard later changes"));
+          const expected = { operationId: "confirm-operation", revision: 4, attemptGeneration: 2, sourcePhase: "preparing" as const };
+          const action = { kind: "abort_before_remote_write" as const };
+          const transitioned = key.kind === "ticket"
+            ? await transitionOfflineTicketUpdateLifecycleAsync(ticketId, action, scope, expected)
+            : key.kind === "newTicket"
+              ? await transitionOfflineNewTicketLifecycleAsync(key, action, scope, expected)
+              : await transitionOfflineCommentLifecycleAsync(key, action, scope, expected);
+          assert.ok(transitioned);
+          assert.strictEqual(transitioned.phase, "queued");
+          assert.strictEqual(transitioned.nextIntent, undefined);
+          afterTransition = getOfflineSyncQueue(scope);
+          writeCount = writes;
+          return vscode.l10n.t("Discard later changes");
+        },
+      });
+      try {
+        await new DashboardMessageRouter(controller).route({ type: "unsynced.discardOne", requestId: "discard", key });
+      } finally {
+        vscode.window.showWarningMessage = original;
+        controller.dispose();
+      }
+      assert.strictEqual(confirmations, 1);
+      assert.deepStrictEqual(errors, [vscode.l10n.t("The unsynced item changed. Refresh and try again.")]);
+      assert.deepStrictEqual(successes, []);
+      assert.deepStrictEqual(getOfflineSyncQueue(scope), afterTransition);
+      assert.strictEqual(store.getState().unsynced.totalCount, 3);
+      assert.strictEqual(writes, writeCount, "stale の破棄は永続化しない");
+    });
+  }
+
+  for (const field of ["operationId", "revision", "intentRevision", "attemptGeneration", "nextIntent", "effects"] as const) {
+    test(`Store: 確認後の ${field} 変更は同じ discardMode でも stale となる`, async () => {
+      await replaceOfflineSyncQueueAsync(queuedOperations([effect({ state: "committed" })], true), scope);
+      const plans = keys.map((key) => prepareOfflineDiscard(key, scope));
+      const changed = getOfflineSyncQueue(scope);
+      for (const item of [changed.tickets.get(ticketId)!, changed.comments[0], changed.newTickets[0]]) {
+        switch (field) {
+          case "operationId": item.operationId = "replacement"; break;
+          case "revision": item.revision = 9; break;
+          case "intentRevision":
+            if ("ticketId" in item) { item.intentRevision = 9; }
+            else { item.content = "Edited without revision change"; }
+            break;
+          case "attemptGeneration": item.attemptGeneration = 9; break;
+          case "nextIntent": item.nextIntent!.revision = 9; break;
+          case "effects": item.effects![0].remoteId = 99; break;
+        }
+      }
+      await replaceOfflineSyncQueueAsync(changed, scope);
+      const before = getOfflineSyncQueue(scope);
+      const writeCount = writes;
+      for (const plan of plans) {
+        assert.strictEqual(plan.mode, "nextIntent");
+        assert.strictEqual(await commitOfflineDiscardAsync(plan), "stale");
+      }
+      assert.deepStrictEqual(getOfflineSyncQueue(scope), before);
+      assert.strictEqual(writes, writeCount);
+    });
+  }
+
+  test("Store: 同一 revision の queued 編集と削除後の対象追加を確認済みとして扱わない", async () => {
+    await replaceOfflineSyncQueueAsync(queuedOperations(), scope);
+    const plans = keys.map((key) => prepareOfflineDiscard(key, scope));
+    await addOfflineTicketUpdateAsync(ticketId, { ...update, subject: "Newer edit" }, scope);
+    await addOfflineCommentUpdateAsync({ ticketId, commentId: 10, documentUri, body: "Newer comment" }, scope);
+    await addOfflineNewTicketAsync({ queueId: "new-recovery", documentUri, content: "Newer draft" }, scope);
+    const before = getOfflineSyncQueue(scope);
+    const writeCount = writes;
+    for (const plan of plans) {
+      assert.strictEqual(await commitOfflineDiscardAsync(plan), "stale");
+    }
+    assert.deepStrictEqual(getOfflineSyncQueue(scope), before);
+    assert.strictEqual(writes, writeCount);
+    const missing = prepareOfflineDiscard({ kind: "newTicket", queueId: "later" }, scope);
+    await addOfflineNewTicketAsync({ queueId: "later", content: "Added after preparation" }, scope);
+    const afterAdd = getOfflineSyncQueue(scope);
+    const afterAddWrites = writes;
+    assert.strictEqual(await commitOfflineDiscardAsync(missing), "not_found");
+    assert.deepStrictEqual(getOfflineSyncQueue(scope), afterAdd);
+    assert.strictEqual(writes, afterAddWrites);
+  });
+
+  for (const confirm of [false, true]) {
+    for (const hasNext of [false, true]) {
+      test(`Dashboard newTicket URI alias: nextIntent=${hasNext}, confirm=${confirm} で同一対象を確認する`, async () => {
+        await replaceOfflineSyncQueueAsync(queuedOperations(hasNext ? [effect({ state: "committed" })] : [], hasNext), scope);
+        const before = getOfflineSyncQueue(scope);
+        const writeCount = writes;
+        const errors: string[] = [];
+        const successes: string[] = [];
+        const controller = new DashboardController({
+          store: new DashboardStateStore(), notifyOperationStarted: () => {},
+          notifySuccess: (_id, message) => { successes.push(message); },
+          notifyError: (_id, message) => { errors.push(message); },
+          notifyToast: () => {}, onTicketsRefreshed: () => {},
+        });
+        let confirmations = 0;
+        const label = vscode.l10n.t(hasNext ? "Discard later changes" : "Discard");
+        const original = vscode.window.showWarningMessage;
+        Object.defineProperty(vscode.window, "showWarningMessage", {
+          configurable: true, writable: true, value: async (...args: unknown[]) => {
+            confirmations++;
+            assert.strictEqual(args[2], label);
+            return confirm ? label : undefined;
+          },
+        });
+        try {
+          await new DashboardMessageRouter(controller).route({
+            type: "unsynced.discardOne", requestId: "alias",
+            key: { kind: "newTicket", documentUri: "file:///tmp/recovery%2Dcomment.md" },
+          });
+        } finally {
+          vscode.window.showWarningMessage = original;
+          controller.dispose();
+        }
+        assert.strictEqual(confirmations, 1);
+        assert.deepStrictEqual(errors, []);
+        assert.strictEqual(successes.length, confirm ? 1 : 0);
+        const expected = structuredClone(before);
+        if (confirm) {
+          if (hasNext) { expected.newTickets[0].nextIntent = undefined; }
+          else { expected.newTickets = []; }
+        }
+        assert.deepStrictEqual(getOfflineSyncQueue(scope), expected);
+        assert.strictEqual(writes, writeCount + (confirm ? 1 : 0));
       });
     }
   }

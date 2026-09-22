@@ -1,5 +1,6 @@
 import { randomUUID } from "crypto";
 import { AsyncLocalStorage } from "async_hooks";
+import { isDeepStrictEqual } from "util";
 import type { Memento } from "vscode";
 import { IssueMetadata } from "./ticketMetadataTypes";
 import {
@@ -172,7 +173,20 @@ export type OfflineDiscardResult =
   | "discarded"
   | "discarded_next"
   | "recovery_required"
-  | "not_found";
+  | "not_found"
+  | "stale";
+
+export type OfflineDiscardKey =
+  | { kind: "ticket"; ticketId: number }
+  | { kind: "newTicket"; queueId?: string; documentUri?: string }
+  | { kind: "comment"; ticketId: number; commentId?: number; documentUri?: string };
+
+export type OfflineDiscardPlan = {
+  readonly key: OfflineDiscardKey;
+  readonly scope: string;
+  readonly mode: OfflineDiscardMode;
+  readonly expectation: StoredOfflineOperation | undefined;
+};
 
 export type QueuedTicketCancellationExpectation = {
   operationId?: string;
@@ -1815,38 +1829,91 @@ export const removeOfflineNewTicketAsync = async (
   });
 };
 
-export const discardOfflineNewTicketAsync = async (
-  key: { queueId?: string; documentUri?: string },
-  scope: string,
-): Promise<OfflineDiscardResult> => {
-  try {
-    return await mutateQueueAsync(scope, (queue) => {
+/** 確認と破棄は同じ複合 identity 条件で対象を解決する。 */
+const resolveOfflineDiscardTarget = (
+  queue: OfflineSyncQueue,
+  key: OfflineDiscardKey,
+): StoredOfflineOperation | undefined => {
+  switch (key.kind) {
+    case "ticket":
+      return queue.tickets.get(key.ticketId);
+    case "newTicket":
       if (key.queueId === undefined && key.documentUri === undefined) {
-        return skipQueueMutation("not_found");
+        return undefined;
       }
-      const index = queue.newTickets.findIndex((ticket) =>
+      return queue.newTickets.find((ticket) =>
         (key.queueId === undefined || ticket.queueId === key.queueId) &&
         (key.documentUri === undefined || sameDocumentIdentity(ticket.documentUri, key.documentUri)),
       );
-      if (index === -1) {
+    case "comment":
+      if (key.commentId === undefined && key.documentUri === undefined) {
+        return undefined;
+      }
+      return queue.comments.find((comment) =>
+        comment.ticketId === key.ticketId &&
+        (key.commentId === undefined || comment.commentId === key.commentId) &&
+        (key.documentUri === undefined || comment.documentUri === key.documentUri),
+      );
+  }
+};
+
+export const prepareOfflineDiscard = (
+  key: OfflineDiscardKey,
+  scope: string,
+): OfflineDiscardPlan => {
+  const operation = resolveOfflineDiscardTarget(getQueue(scope), key);
+  return {
+    key: structuredClone(key),
+    scope,
+    mode: operation ? evaluateOfflineSyncPolicy(operation).discardMode : "none",
+    // queued の保存には revision が変わらない経路もあるため、内容も含めて固定する。
+    expectation: operation ? structuredClone(operation) : undefined,
+  };
+};
+
+export const commitOfflineDiscardAsync = async (
+  plan: OfflineDiscardPlan,
+): Promise<OfflineDiscardResult> => {
+  try {
+    return await mutateQueueAsync(plan.scope, (queue) => {
+      if (!plan.expectation) {
         return skipQueueMutation("not_found");
       }
-      const operation = queue.newTickets[index];
-      const policy = evaluateOfflineSyncPolicy(operation);
-      if (!policy.canDiscard) {
+      const operation = resolveOfflineDiscardTarget(queue, plan.key);
+      if (!operation || !isDeepStrictEqual(operation, plan.expectation) ||
+        evaluateOfflineSyncPolicy(operation).discardMode !== plan.mode) {
+        return skipQueueMutation("stale");
+      }
+      if (plan.mode === "none") {
         return skipQueueMutation("recovery_required");
       }
-      if (policy.discardMode === "nextIntent") {
-        queue.newTickets[index] = { ...operation, nextIntent: undefined };
+      if (plan.mode === "nextIntent") {
+        replaceStoredOperationInQueue(queue, operation, { ...operation, nextIntent: undefined });
         return commitQueueMutation("discarded_next");
       }
-      queue.newTickets.splice(index, 1);
+      switch (plan.key.kind) {
+        case "ticket":
+          queue.tickets.delete(plan.key.ticketId);
+          break;
+        case "newTicket":
+          queue.newTickets = queue.newTickets.filter((entry) => entry !== operation);
+          break;
+        case "comment":
+          queue.comments = queue.comments.filter((entry) => entry !== operation);
+          break;
+      }
       return commitQueueMutation("discarded");
     });
   } catch {
     return "recovery_required";
   }
 };
+
+export const discardOfflineNewTicketAsync = (
+  key: { queueId?: string; documentUri?: string },
+  scope: string,
+): Promise<OfflineDiscardResult> =>
+  commitOfflineDiscardAsync(prepareOfflineDiscard({ kind: "newTicket", ...key }, scope));
 
 export const completeOfflineNewTicketAsync = async (
   key: { queueId?: string; documentUri?: string },
@@ -2140,31 +2207,11 @@ export const cancelQueuedTicketUpdateIfMatchesAsync = async (
   }
 };
 
-export const discardOfflineTicketUpdateAsync = async (
+export const discardOfflineTicketUpdateAsync = (
   ticketId: number,
   scope: string,
-): Promise<OfflineDiscardResult> => {
-  try {
-    return await mutateQueueAsync(scope, (queue) => {
-      const operation = queue.tickets.get(ticketId);
-      if (!operation) {
-        return skipQueueMutation("not_found");
-      }
-      const policy = evaluateOfflineSyncPolicy(operation);
-      if (!policy.canDiscard) {
-        return skipQueueMutation("recovery_required");
-      }
-      if (policy.discardMode === "nextIntent") {
-        queue.tickets.set(ticketId, { ...operation, nextIntent: undefined });
-        return commitQueueMutation("discarded_next");
-      }
-      queue.tickets.delete(ticketId);
-      return commitQueueMutation("discarded");
-    });
-  } catch {
-    return "recovery_required";
-  }
-};
+): Promise<OfflineDiscardResult> =>
+  commitOfflineDiscardAsync(prepareOfflineDiscard({ kind: "ticket", ticketId }, scope));
 
 export const completeOfflineTicketUpdateAsync = async (
   ticketId: number,
@@ -2400,39 +2447,11 @@ export const completeOfflineCommentAsync = async (
   }
 };
 
-export const discardOfflineCommentUpdateAsync = async (
+export const discardOfflineCommentUpdateAsync = (
   key: CommentQueueKey,
   scope: string,
-): Promise<OfflineDiscardResult> => {
-  try {
-    return await mutateQueueAsync(scope, (queue) => {
-      if (key.commentId === undefined && key.documentUri === undefined) {
-        return skipQueueMutation("not_found");
-      }
-      const index = queue.comments.findIndex((comment) =>
-        comment.ticketId === key.ticketId &&
-        (key.commentId === undefined || comment.commentId === key.commentId) &&
-        (key.documentUri === undefined || comment.documentUri === key.documentUri),
-      );
-      if (index === -1) {
-        return skipQueueMutation("not_found");
-      }
-      const operation = queue.comments[index];
-      const policy = evaluateOfflineSyncPolicy(operation);
-      if (!policy.canDiscard) {
-        return skipQueueMutation("recovery_required");
-      }
-      if (policy.discardMode === "nextIntent") {
-        queue.comments[index] = { ...operation, nextIntent: undefined };
-        return commitQueueMutation("discarded_next");
-      }
-      queue.comments.splice(index, 1);
-      return commitQueueMutation("discarded");
-    });
-  } catch {
-    return "recovery_required";
-  }
-};
+): Promise<OfflineDiscardResult> =>
+  commitOfflineDiscardAsync(prepareOfflineDiscard({ kind: "comment", ...key }, scope));
 
 export const removeOfflineCommentEntryAsync = (
   params: { ticketId?: number; commentId?: number; documentUri?: string },
