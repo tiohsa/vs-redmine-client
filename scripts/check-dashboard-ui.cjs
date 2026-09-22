@@ -188,7 +188,6 @@ async function main() {
   await assertSameAction(['[data-ticket-action="open"]', '#detail-open-btn', '[data-edit-comment]', '[data-uri]']);
   await assertSameAction(['[data-ticket-action="comment"]', '#detail-comment-btn', '#add-comment-btn']);
   await assertSameAction(['[data-ticket-action="browser"]', '#detail-browser-btn', '[data-open-comment]']);
-  await assertSameAction(['#refresh-btn', '[data-ticket-action="refresh"]']);
   await assertSameAction(['#detail-sync-btn', '[data-sync-key]', '[data-sync-comment-key]']);
   assert.equal(await evaluate(`document.querySelector('#sync-all-btn svg').outerHTML`), await evaluate(`document.querySelector('#detail-sync-btn svg').outerHTML`));
   state.comments.items = [];
@@ -241,15 +240,8 @@ async function main() {
     await evaluate(`document.getElementById('${id}').click()`);
     assert.deepEqual(await evaluate(`({type:window.messages.at(-1).type,ticketId:window.messages.at(-1).ticketId})`), { type, ticketId: 10 });
   }
-  await evaluate(`document.querySelector('[data-ticket-action-menu="detail-10"]').click()`);
-  assert.equal(await evaluate(`document.activeElement.dataset.ticketAction`), 'child');
-  await key('Enter');
-  assert.equal(await evaluate('window.messages.at(-1).type'), 'ticket.createChild');
-  assert.equal(await evaluate('window.messages.at(-1).parentTicketId'), 10);
-  await evaluate(`document.querySelector('[data-ticket-action-menu="detail-10"]').click()`);
-  await key('ArrowDown');
-  await key('Enter');
-  assert.equal(await evaluate('window.messages.at(-1).type'), 'dashboard.refresh');
+  assert.equal(await evaluate(`document.querySelectorAll('[data-ticket-action-menu="detail-10"]').length`), 0);
+  assert.equal(await evaluate(`document.querySelectorAll('[data-ticket-action="refresh"]').length`), 0);
 
   // 既存の折りたたみ・展開を保持し、Metadata の一時値をまとめて適用する。
   await evaluate(`if(document.getElementById('ticket-detail-toggle').getAttribute('aria-expanded')==='true') document.getElementById('ticket-detail-toggle').click()`);

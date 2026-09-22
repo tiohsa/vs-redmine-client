@@ -61,7 +61,6 @@ export interface DashboardStrings {
   syncToRedmine: string;
   syncTicketTooltip: string;
   editingState: string;
-  editorSyncHint: string;
   remoteDescription: string;
   descriptionUnsyncedWarning: string;
   noDescription: string;
@@ -227,7 +226,6 @@ export const buildDashboardStrings = (): DashboardStrings => ({
   syncToRedmine: vscode.l10n.t("Sync to Redmine"),
   syncTicketTooltip: vscode.l10n.t("Sync VS Code editor changes to Redmine"),
   editingState: vscode.l10n.t("Editing state"),
-  editorSyncHint: vscode.l10n.t("Edit Markdown in VS Code, then use “Sync to Redmine” to apply your changes."),
   remoteDescription: vscode.l10n.t("Description (on Redmine)"),
   descriptionUnsyncedWarning: vscode.l10n.t("Changes may not yet be reflected in the Redmine description below."),
   noDescription: vscode.l10n.t("No description."),

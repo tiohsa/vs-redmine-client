@@ -296,7 +296,7 @@ button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-
 .comment-author { color: var(--app-text); font-size: 12px; font-weight: 700; }
 .comment-date, .comment-id { color: var(--app-text-readable-muted); font-size: 10px; }
 .comment-status { display: flex; flex: 0 0 auto; flex-wrap: wrap; justify-content: flex-end; gap: 4px; }
-.comment-body{font-size:11px;color:var(--app-text-secondary);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.comment-body{font-size:12px;color:var(--app-text-secondary);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .comment-body { grid-column: 1 / -1; }
 .comment-actions { grid-column: 2; grid-row: 1; display: flex; flex-wrap: wrap; justify-content: flex-end; align-self: start; gap: 5px; margin-top: 0; }
 .comment-actions .btn { min-height: 27px; padding-inline: 9px; }

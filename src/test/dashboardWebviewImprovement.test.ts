@@ -38,13 +38,13 @@ suite("Dashboard Webview 改善", () => {
     assert.ok(!dashboardWebviewScript.includes("Latest comments"));
   });
 
-  test("Dashboard 全体更新であることを Refresh 表示に明示する", () => {
+  test("Dashboard の更新はヘッダーボタンだけに表示する", () => {
     const strings = buildDashboardStrings();
     const html = buildDashboardHtml("nonce", strings);
     assert.ok(strings.refresh);
     assert.ok(html.includes('id="refresh-btn"'));
     assert.ok(html.includes(strings.refresh));
-    assert.ok(dashboardWebviewScript.includes("data-ticket-action=\"refresh\""));
+    assert.ok(!dashboardWebviewScript.includes("data-ticket-action=\"refresh\""));
   });
 
   test("開始日と日付ピッカー視認性のスタイルを持つ", () => {
@@ -78,7 +78,12 @@ suite("Dashboard Webview 改善", () => {
   test("コメント本文は先頭行だけを1行省略表示する", () => {
     assert.ok(dashboardWebviewScript.includes("const firstLine=s=>String(s||'').split(/\\r?\\n/)[0]"));
     assert.ok(dashboardWebviewScript.includes("esc(firstLine(cm.body))"));
-    assert.ok(dashboardStyles.includes(".comment-body{font-size:11px;color:var(--app-text-secondary);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}"));
+    assert.ok(dashboardStyles.includes(".comment-body{font-size:12px;color:var(--app-text-secondary);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}"));
+  });
+
+  test("編集パネルは補足文と三点リーダーメニューを表示しない", () => {
+    assert.ok(!dashboardWebviewScript.includes("STRINGS.editorSyncHint"));
+    assert.ok(!dashboardWebviewScript.includes("const menuId='detail-'"));
   });
 
   test("未同期コメントの同期ボタンは comment key で unsynced.syncOne を送る", () => {

@@ -365,7 +365,6 @@
     "Sync to Redmine": "Sync to Redmine",
     "Sync VS Code editor changes to Redmine": "Sync VS Code editor changes to Redmine",
     "Editing state": "Editing state",
-    "Edit Markdown in VS Code, then use “Sync to Redmine” to apply your changes.": "Edit Markdown in VS Code, then use “Sync to Redmine” to apply your changes.",
     "Description (on Redmine)": "Description (on Redmine)",
     "Changes may not yet be reflected in the Redmine description below.": "Changes may not yet be reflected in the Redmine description below.",
     "No description.": "No description.",
