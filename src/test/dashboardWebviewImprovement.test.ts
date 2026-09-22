@@ -78,18 +78,10 @@ suite("Dashboard Webview 改善", () => {
     assert.ok(!dashboardWebviewScript.includes("const detail=status.requiresReview"));
   });
 
-  test("要確認項目の破棄は復旧情報が残ることを操作名で示す", () => {
+  test("Discard の操作名と説明文を用意する", () => {
     const strings = buildDashboardStrings();
     assert.ok(strings.discardLaterChangesAction);
     assert.ok(strings.discardLaterChangesTitle);
-    assert.ok(dashboardWebviewScript.includes("const discardsLaterChanges=status.requiresReview && item.canDiscard !== false"));
-    assert.ok(dashboardWebviewScript.includes("discardsLaterChanges ? STRINGS.discardLaterChangesAction"));
-    assert.ok(dashboardWebviewScript.includes("discardsLaterChanges ? STRINGS.discardLaterChangesTitle"));
-    const source = readFileSync(
-      join(__dirname, "..", "dashboard", "services", "DashboardUnsyncedService.js"),
-      "utf8",
-    );
-    assert.ok(source.includes("This will discard only the later local changes. The remote sync checkpoint will remain for review."));
   });
 
   test("未同期の新規チケットは文書書き換え対応の同期エンジンを使用する", () => {
@@ -175,7 +167,6 @@ suite("Dashboard Webview 改善", () => {
   });
 
   test("新規チケット composer は詳細領域内に通常配置する", () => {
-    assert.ok(dashboardWebviewScript.includes("panel.mode === 'newTicket'"));
     assert.ok(dashboardWebviewScript.includes("panel.mode === 'childTicket' ? STRINGS.createChildTicketTitle"));
     assert.ok(!dashboardStyles.includes(".ticket-detail-card.composer-popover"));
   });

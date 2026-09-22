@@ -13,14 +13,15 @@ export const buildUnsyncedDashboardItems = (): DashboardUnsyncedItem[] => {
 
   queue.tickets.forEach((update, ticketId) => {
     const subject = getTicketSummary(ticketId);
-    const { lifecycle, canDiscard } = evaluateOfflineSyncPolicy(update);
+    const policy = evaluateOfflineSyncPolicy(update);
     items.push({
       key: { kind: "ticket", ticketId },
       label: `${formatTicketLabel(ticketId)} Ticket update`,
       detail: subject,
       documentUri: undefined,
-      lifecycle,
-      canDiscard,
+      lifecycle: policy.lifecycle,
+      canDiscard: policy.canDiscard,
+      discardMode: policy.discardMode,
       canSync: true,
     });
   });
@@ -46,19 +47,20 @@ export const buildUnsyncedDashboardItems = (): DashboardUnsyncedItem[] => {
   }
 
   for (const newTicket of queue.newTickets) {
-    const { lifecycle, canDiscard } = evaluateOfflineSyncPolicy(newTicket);
+    const policy = evaluateOfflineSyncPolicy(newTicket);
     const details = [
       newTicket.projectId ? `Project ID: ${newTicket.projectId}` : undefined,
-      lifecycle === "recovery_pending" ? "Remote commit recovery pending" : undefined,
-      lifecycle === "commit_unknown" ? "Remote commit status unknown" : undefined,
+      policy.lifecycle === "recovery_pending" ? "Remote commit recovery pending" : undefined,
+      policy.lifecycle === "commit_unknown" ? "Remote commit status unknown" : undefined,
     ].filter((value): value is string => value !== undefined);
     items.push({
       key: { kind: "newTicket", queueId: newTicket.queueId, documentUri: newTicket.documentUri },
       label: "New ticket",
       detail: details.length > 0 ? details.join(" · ") : undefined,
       documentUri: newTicket.documentUri,
-      lifecycle,
-      canDiscard,
+      lifecycle: policy.lifecycle,
+      canDiscard: policy.canDiscard,
+      discardMode: policy.discardMode,
       canSync: true,
     });
   }

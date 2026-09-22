@@ -10,6 +10,7 @@ import {
   discardOfflineCommentUpdateAsync,
   discardOfflineNewTicketAsync,
   discardOfflineTicketUpdateAsync,
+  evaluateOfflineSyncPolicy,
   getOfflineSyncQueue,
   initializeOfflineSyncStore,
   replaceOfflineSyncQueueAsync,
@@ -102,6 +103,38 @@ suite("Dashboard recovery policy — lifecycle matrix", () => {
     { label: "previous revision", effects: [effect({ state: "committed", operationRevision: 3 })], unsafe: true },
     { label: "previous attempt", effects: [effect({ state: "committed", attemptGeneration: 1 })], unsafe: true },
   ];
+
+  test("evaluateOfflineSyncPolicy は discardMode と canDiscard を一貫して返す", () => {
+    const policyFor = (
+      phase: OfflineTicketUpdate["phase"],
+      effects: DurableSyncEffect[],
+      hasNext: boolean,
+    ) => {
+      const operation = queuedOperations(effects, hasNext).tickets.get(ticketId)!;
+      operation.phase = phase;
+      return evaluateOfflineSyncPolicy(operation);
+    };
+
+    assert.deepStrictEqual(policyFor("queued", [], false), {
+      lifecycle: "queued", canDiscard: true, discardMode: "active",
+    });
+    assert.deepStrictEqual(policyFor("queued", [effect()], false), {
+      lifecycle: "queued", canDiscard: true, discardMode: "active",
+    });
+    assert.deepStrictEqual(policyFor("queued", [effect({ state: "committed" })], false), {
+      lifecycle: "queued", canDiscard: false, discardMode: "none",
+    });
+    assert.deepStrictEqual(policyFor("queued", [effect({ state: "committed" })], true), {
+      lifecycle: "queued", canDiscard: true, discardMode: "nextIntent",
+    });
+    assert.deepStrictEqual(policyFor("reconciliation_pending", [], true), {
+      lifecycle: "recovery_pending", canDiscard: true, discardMode: "nextIntent",
+    });
+    assert.deepStrictEqual(policyFor("commit_unknown", [effect({ state: "commit_unknown" })], true), {
+      lifecycle: "commit_unknown", canDiscard: true, discardMode: "nextIntent",
+    });
+  });
+
   for (const entry of effectCases) {
     for (const hasNext of [false, true]) {
       test(`queued Effect=${entry.label}, nextIntent=${hasNext}: 全種別の破棄・scope分離・再起動`, async () => {
@@ -109,14 +142,29 @@ suite("Dashboard recovery policy — lifecycle matrix", () => {
         await replaceOfflineSyncQueueAsync(queuedOperations(entry.effects, hasNext), "other-scope");
         const before = getOfflineSyncQueue(scope);
         const otherScope = getOfflineSyncQueue("other-scope");
-        assert.deepStrictEqual(buildUnsyncedDashboardItems().map((item) => item.canDiscard),
-          Array(3).fill(!entry.unsafe || hasNext));
+        const expectedMode = entry.unsafe ? hasNext ? "nextIntent" : "none" : "active";
+        assert.deepStrictEqual(buildUnsyncedDashboardItems().map(({ canDiscard, discardMode }) => ({ canDiscard, discardMode })),
+          Array(3).fill({ canDiscard: expectedMode !== "none", discardMode: expectedMode }));
         const writeCount = writes;
         const expected = !entry.unsafe ? "discarded" : hasNext ? "discarded_next" : "recovery_required";
         assert.deepStrictEqual(await discardAllKinds(), Array(3).fill(expected));
         if (entry.unsafe) {
           assert.deepStrictEqual(getOfflineSyncQueue(scope), hasNext ? withoutNextIntents(before) : before);
           assert.strictEqual(writes, writeCount + (hasNext ? 3 : 0));
+          if (hasNext) {
+            const after = getOfflineSyncQueue(scope);
+            const pairs = [
+              [before.tickets.get(ticketId)!, after.tickets.get(ticketId)!],
+              [before.comments[0], after.comments[0]],
+              [before.newTickets[0], after.newTickets[0]],
+            ] as const;
+            for (const [original, active] of pairs) {
+              assert.strictEqual(active.revision, original.revision);
+              assert.strictEqual(active.attemptGeneration, original.attemptGeneration);
+              assert.deepStrictEqual(active.effects, original.effects);
+              assert.strictEqual(active.nextIntent, undefined);
+            }
+          }
         } else {
           assert.deepStrictEqual(getOfflineSyncQueue(scope), { tickets: new Map(), comments: [], newTickets: [] });
         }
@@ -163,7 +211,8 @@ suite("Dashboard recovery policy — lifecycle matrix", () => {
         Object.assign(queue.newTickets[0], entry.newTicket);
         await replaceOfflineSyncQueueAsync(queue, scope);
         const before = getOfflineSyncQueue(scope);
-        assert.deepStrictEqual(buildUnsyncedDashboardItems().map((item) => item.canDiscard), Array(3).fill(hasNext));
+        assert.deepStrictEqual(buildUnsyncedDashboardItems().map(({ canDiscard, discardMode }) => ({ canDiscard, discardMode })),
+          Array(3).fill({ canDiscard: hasNext, discardMode: hasNext ? "nextIntent" : "none" }));
         assert.deepStrictEqual(await discardAllKinds(), Array(3).fill(hasNext ? "discarded_next" : "recovery_required"));
         assert.deepStrictEqual(getOfflineSyncQueue(scope), hasNext ? withoutNextIntents(before) : before);
         initializeOfflineSyncStore(storage, scope);
@@ -226,6 +275,7 @@ suite("Dashboard recovery policy — lifecycle matrix", () => {
         const before = getOfflineSyncQueue(scope);
         const errors: string[] = [];
         const successes: string[] = [];
+        const warningArguments: unknown[][] = [];
         const store = new DashboardStateStore();
         const controller = new DashboardController({
           store, notifyOperationStarted: () => {},
@@ -236,12 +286,13 @@ suite("Dashboard recovery policy — lifecycle matrix", () => {
         controller.refreshUnsyncedPresentation();
         const original = vscode.window.showWarningMessage;
         Object.defineProperty(vscode.window, "showWarningMessage", {
-          configurable: true, writable: true, value: async () => {
+          configurable: true, writable: true, value: async (...args: unknown[]) => {
+            warningArguments.push(args);
             if (outcome === "not_found") {
               // Dashboard表示後、確認ダイアログ中に同期などで対象がなくなる。
               await replaceOfflineSyncQueueAsync({ tickets: new Map(), comments: [], newTickets: [] }, scope);
             }
-            return vscode.l10n.t("Discard");
+            return vscode.l10n.t(outcome === "discarded_next" ? "Discard later changes" : "Discard");
           },
         });
         try {
@@ -251,14 +302,23 @@ suite("Dashboard recovery policy — lifecycle matrix", () => {
           controller.dispose();
         }
         if (outcome === "recovery_required") {
+          assert.strictEqual(warningArguments.length, 0, "破棄不可の項目に全体破棄の確認を表示しない");
           assert.strictEqual(errors.length, 1);
           assert.deepStrictEqual(successes, []);
           assert.deepStrictEqual(getOfflineSyncQueue(scope), before);
         } else if (outcome === "not_found") {
+          assert.strictEqual(warningArguments.length, 1);
+          assert.strictEqual(warningArguments[0][0], vscode.l10n.t("This will discard the unsynced local changes. The ticket on the Redmine server will not be deleted."));
+          assert.strictEqual(warningArguments[0][2], vscode.l10n.t("Discard"));
           assert.deepStrictEqual(errors, [vscode.l10n.t("The unsynced item changed. Refresh and try again.")]);
           assert.deepStrictEqual(successes, []);
           assert.deepStrictEqual(store.getState().unsynced, { items: [], totalCount: 0 });
         } else {
+          assert.strictEqual(warningArguments.length, 1);
+          assert.strictEqual(warningArguments[0][0], vscode.l10n.t(outcome === "discarded_next"
+            ? "This will discard only the later local changes. The remote sync checkpoint will remain for review."
+            : "This will discard the unsynced local changes. The ticket on the Redmine server will not be deleted."));
+          assert.strictEqual(warningArguments[0][2], vscode.l10n.t(outcome === "discarded_next" ? "Discard later changes" : "Discard"));
           assert.deepStrictEqual(errors, []);
           assert.deepStrictEqual(successes, [vscode.l10n.t(outcome === "discarded_next"
             ? "Later local changes discarded. The remote sync checkpoint was preserved."
@@ -298,6 +358,7 @@ suite("Dashboard recovery policy — lifecycle matrix", () => {
         for (const item of items) {
           assert.strictEqual(item.lifecycle, entry.lifecycle);
           assert.strictEqual(item.canDiscard, entry.canDiscard || hasNext);
+          assert.strictEqual(item.discardMode, entry.canDiscard ? "active" : hasNext ? "nextIntent" : "none");
           assert.strictEqual(item.canSync, true);
         }
         assert.strictEqual(resolveTicketSyncState(ticketId), entry.state);

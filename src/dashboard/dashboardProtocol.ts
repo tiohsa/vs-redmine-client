@@ -108,6 +108,7 @@ export interface DashboardUnsyncedItem {
   documentUri?: string;
   lifecycle?: "queued" | "recovery_pending" | "commit_unknown";
   canDiscard?: boolean;
+  discardMode?: "active" | "nextIntent" | "none";
   canSync?: boolean;
 }
 

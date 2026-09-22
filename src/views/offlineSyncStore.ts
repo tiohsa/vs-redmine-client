@@ -190,6 +190,14 @@ export type QueuedTicketCancelResult =
 
 export type OfflineSyncLifecycle = "queued" | "recovery_pending" | "commit_unknown";
 
+export type OfflineDiscardMode = "active" | "nextIntent" | "none";
+
+export interface OfflineSyncPolicy {
+  lifecycle: OfflineSyncLifecycle;
+  canDiscard: boolean;
+  discardMode: OfflineDiscardMode;
+}
+
 export type NewTicketLifecycleAction =
   | { kind: "begin_preparation" }
   | { kind: "abort_before_remote_write" }
@@ -271,9 +279,14 @@ const canDiscardActiveOperation = (operation: OfflineDiscardPolicyInput): boolea
 
 export const evaluateOfflineSyncPolicy = (
   operation: OfflineDiscardPolicyInput,
-): { lifecycle: OfflineSyncLifecycle; canDiscard: boolean } => {
+): OfflineSyncPolicy => {
   const lifecycle = getOfflineSyncLifecycle(operation);
-  return { lifecycle, canDiscard: canDiscardActiveOperation(operation) || operation.nextIntent !== undefined };
+  const discardMode: OfflineDiscardMode = canDiscardActiveOperation(operation)
+    ? "active"
+    : operation.nextIntent !== undefined
+      ? "nextIntent"
+      : "none";
+  return { lifecycle, canDiscard: discardMode !== "none", discardMode };
 };
 
 const STORAGE_KEY = "redmine.offlineSyncQueue";
@@ -1823,7 +1836,7 @@ export const discardOfflineNewTicketAsync = async (
       if (!policy.canDiscard) {
         return skipQueueMutation("recovery_required");
       }
-      if (!canDiscardActiveOperation(operation)) {
+      if (policy.discardMode === "nextIntent") {
         queue.newTickets[index] = { ...operation, nextIntent: undefined };
         return commitQueueMutation("discarded_next");
       }
@@ -2141,7 +2154,7 @@ export const discardOfflineTicketUpdateAsync = async (
       if (!policy.canDiscard) {
         return skipQueueMutation("recovery_required");
       }
-      if (!canDiscardActiveOperation(operation)) {
+      if (policy.discardMode === "nextIntent") {
         queue.tickets.set(ticketId, { ...operation, nextIntent: undefined });
         return commitQueueMutation("discarded_next");
       }
@@ -2409,7 +2422,7 @@ export const discardOfflineCommentUpdateAsync = async (
       if (!policy.canDiscard) {
         return skipQueueMutation("recovery_required");
       }
-      if (!canDiscardActiveOperation(operation)) {
+      if (policy.discardMode === "nextIntent") {
         queue.comments[index] = { ...operation, nextIntent: undefined };
         return commitQueueMutation("discarded_next");
       }

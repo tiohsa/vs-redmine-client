@@ -152,20 +152,22 @@ export class DashboardUnsyncedService {
           item.ticketId === key.ticketId &&
           (key.commentId === undefined || item.commentId === key.commentId) &&
           (key.documentUri === undefined || item.documentUri === key.documentUri));
-    const discardLaterChanges = operation?.nextIntent !== undefined &&
-      evaluateOfflineSyncPolicy(operation).lifecycle !== "queued";
-    const discardLabel = discardLaterChanges
-      ? vscode.l10n.t("Discard later changes")
-      : vscode.l10n.t("Discard");
-    const confirmed = await vscode.window.showWarningMessage(
-      discardLaterChanges
-        ? vscode.l10n.t("This will discard only the later local changes. The remote sync checkpoint will remain for review.")
-        : vscode.l10n.t("This will discard the unsynced local changes. The ticket on the Redmine server will not be deleted."),
-      { modal: true },
-      discardLabel,
-    );
-    if (confirmed !== discardLabel) {
-      return;
+    const policy = operation ? evaluateOfflineSyncPolicy(operation) : undefined;
+    if (policy && policy.discardMode !== "none") {
+      const discardLaterChanges = policy.discardMode === "nextIntent";
+      const discardLabel = discardLaterChanges
+        ? vscode.l10n.t("Discard later changes")
+        : vscode.l10n.t("Discard");
+      const confirmed = await vscode.window.showWarningMessage(
+        discardLaterChanges
+          ? vscode.l10n.t("This will discard only the later local changes. The remote sync checkpoint will remain for review.")
+          : vscode.l10n.t("This will discard the unsynced local changes. The ticket on the Redmine server will not be deleted."),
+        { modal: true },
+        discardLabel,
+      );
+      if (confirmed !== discardLabel) {
+        return;
+      }
     }
 
     let result: OfflineDiscardResult;

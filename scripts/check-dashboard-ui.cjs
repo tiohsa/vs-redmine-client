@@ -101,9 +101,9 @@ async function main() {
 
   // queued でも Store が remote evidence を検出した項目は破棄不可。
   state.unsynced = { totalCount: 3, items: [
-    { key: { kind: 'ticket', ticketId: 10 }, label: 'Ticket', lifecycle: 'queued', canDiscard: false, canSync: true },
-    { key: { kind: 'comment', ticketId: 10, commentId: 20 }, label: 'Comment', lifecycle: 'queued', canDiscard: false, canSync: true },
-    { key: { kind: 'newTicket', queueId: 'queued-unsafe' }, label: 'New ticket', lifecycle: 'queued', canDiscard: false, canSync: true },
+    { key: { kind: 'ticket', ticketId: 10 }, label: 'Ticket', lifecycle: 'queued', canDiscard: false, discardMode: 'none', canSync: true },
+    { key: { kind: 'comment', ticketId: 10, commentId: 20 }, label: 'Comment', lifecycle: 'queued', canDiscard: false, discardMode: 'none', canSync: true },
+    { key: { kind: 'newTicket', queueId: 'queued-unsafe' }, label: 'New ticket', lifecycle: 'queued', canDiscard: false, discardMode: 'none', canSync: true },
   ] };
   await push();
   await evaluate(`document.getElementById('tab-unsynced').click()`);
@@ -113,11 +113,19 @@ async function main() {
   await evaluate(`document.querySelectorAll('#unsynced-list button:disabled').forEach(button=>button.click())`);
   assert.equal(await evaluate(`window.messages.filter(m=>m.type==='unsynced.discardOne').length`), discardCount);
   // nextIntent のみ破棄可能なら同じ queued 表示でも操作が有効になる。
-  state.unsynced.items.forEach(item => { item.canDiscard = true; });
+  state.unsynced.items.forEach(item => { item.canDiscard = true; item.discardMode = 'nextIntent'; });
   await push();
   assert.equal(await evaluate(`document.querySelectorAll('#unsynced-list [data-discard-key]').length`), 3);
+  assert.equal(await evaluate(`document.querySelector('#unsynced-list [data-discard-key]').textContent.trim()`), strings.discardLaterChangesAction);
+  assert.equal(await evaluate(`document.querySelector('#unsynced-list [data-discard-key]').getAttribute('title')`), strings.discardLaterChangesTitle);
   await evaluate(`document.querySelector('#unsynced-list [data-discard-key]').click()`);
   assert.equal(await evaluate(`window.messages.at(-1).type`), 'unsynced.discardOne');
+  state.unsynced = { totalCount: 1, items: [
+    { key: { kind: 'ticket', ticketId: 10 }, label: 'Ticket', lifecycle: 'queued', canDiscard: true, discardMode: 'active', canSync: true },
+  ] };
+  await push();
+  assert.equal(await evaluate(`document.querySelector('#unsynced-list [data-discard-key]').textContent.trim()`), strings.discardAction);
+  assert.equal(await evaluate(`document.querySelector('#unsynced-list [data-discard-key]').getAttribute('title')`), strings.discardTitle);
   state.unsynced = { totalCount: 0, items: [] };
   await push();
   await evaluate(`document.getElementById('tab-tickets').click()`);
