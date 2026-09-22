@@ -147,6 +147,7 @@ suite("SettingsController", () => {
     await config.update("ticketList.showDueDate", false, vscode.ConfigurationTarget.Global);
     await config.update("ticketList.showTracker", false, vscode.ConfigurationTarget.Global);
     await config.update("ticketList.showPriority", false, vscode.ConfigurationTarget.Global);
+    await config.update("ticketList.showAssignee", false, vscode.ConfigurationTarget.Global);
 
     const ctrl = new SettingsController(makeStore());
     ctrl.updateTicketList({
@@ -167,6 +168,7 @@ suite("SettingsController", () => {
       "ticketList.showDueDate",
       "ticketList.showTracker",
       "ticketList.showPriority",
+      "ticketList.showAssignee",
     ]) {
       const inspected = resetConfig.inspect<unknown>(key);
       assert.strictEqual(resetConfig.get<unknown>(key), inspected?.defaultValue);
@@ -295,11 +297,12 @@ suite("SettingsController", () => {
     assert.ok(Object.prototype.hasOwnProperty.call(s, "showDueDate"));
     assert.ok(Object.prototype.hasOwnProperty.call(s, "showTracker"));
     assert.ok(Object.prototype.hasOwnProperty.call(s, "showPriority"));
+    assert.ok(Object.prototype.hasOwnProperty.call(s, "showAssignee"));
   });
 
-  test("updateGeneral: トラッカーと優先度の表示設定を更新できる", async () => {
+  test("updateGeneral: トラッカー・優先度・担当者の表示設定を更新できる", async () => {
     const config = vscode.workspace.getConfiguration("redmine-client");
-    const keys = ["ticketList.showTracker", "ticketList.showPriority"] as const;
+    const keys = ["ticketList.showTracker", "ticketList.showPriority", "ticketList.showAssignee"] as const;
     const previous = new Map(
       keys.map((key) => [key, config.inspect<unknown>(key)?.globalValue] as const),
     );
@@ -308,9 +311,14 @@ suite("SettingsController", () => {
       await new SettingsController(makeStore()).updateGeneral({
         showTracker: false,
         showPriority: false,
+        showAssignee: false,
       });
       assert.strictEqual(config.inspect<boolean>(keys[0])?.globalValue, false);
       assert.strictEqual(config.inspect<boolean>(keys[1])?.globalValue, false);
+      assert.strictEqual(config.inspect<boolean>(keys[2])?.globalValue, false);
+      const restored = makeStore();
+      new SettingsController(restored);
+      assert.strictEqual(restored.getState().settings.showAssignee, false);
     } finally {
       for (const key of keys) {
         await config.update(key, previous.get(key), vscode.ConfigurationTarget.Global);

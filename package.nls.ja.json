@@ -1,4 +1,5 @@
 {
+  "config.ticketList.showAssignee.description": "チケット一覧に担当者名を表示します。",
   "displayName": "Redmine Client",
   "description": "VS Code 上で Redmine チケットワークフローを操作",
   "command.setApiKey.title": "Redmine: API キーを設定",

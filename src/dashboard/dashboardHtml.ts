@@ -1,3 +1,4 @@
+import { dashboardActionIcon } from "./dashboardActionIcons";
 import { DashboardStrings } from "./dashboardI18n";
 import { dashboardStyles } from "./dashboardStyles";
 import { dashboardWebviewScript } from "./dashboardWebviewScript";
@@ -19,8 +20,8 @@ ${dashboardStyles}
     <div class="project-field"><label class="field-label" for="project-select">${strings.selectProjectTitle}</label><select class="project-select" id="project-select" title="${strings.selectProjectTitle}"><option value="">${strings.selectProjectPlaceholder}</option></select></div>
     <label class="toggle-children" for="include-children"><input type="checkbox" id="include-children"><span>${strings.includeChildren}</span></label>
     <div class="header-actions">
-      <button class="btn btn-secondary btn-icon-label" id="refresh-btn" type="button" title="${strings.refresh}" aria-label="${strings.refresh}"><span class="icon-refresh" aria-hidden="true"></span><span class="btn-label">${strings.refresh}</span></button>
-      <button class="btn btn-primary btn-primary-new" id="new-ticket-btn" type="button" title="${strings.newTicket}"><span class="icon-plus" aria-hidden="true"></span><span>${strings.newTicket}</span></button>
+      <button class="btn btn-secondary btn-icon-label" id="refresh-btn" type="button" title="${strings.refresh}" aria-label="${strings.refresh}">${dashboardActionIcon("refresh")}<span class="btn-label">${strings.refresh}</span></button>
+      <button class="btn btn-primary btn-primary-new" id="new-ticket-btn" type="button" title="${strings.newTicket}">${dashboardActionIcon("child")}<span>${strings.newTicket}</span></button>
     </div>
   </div>
 </header>
@@ -34,14 +35,14 @@ ${dashboardStyles}
   <section class="tab-panel active" id="panel-tickets" role="tabpanel" aria-labelledby="tab-tickets">
     <div class="tickets-layout">
       <div class="tickets-master">
-        <div id="filter-bar"><div id="search-row"><div class="search-box"><label class="sr-only" for="search-input">${strings.searchPlaceholder}</label><svg class="action-icon search-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><circle cx="10" cy="10" r="6.5"/><path d="m15 15 5 5"/></svg><input id="search-input" type="text" role="searchbox" placeholder="${strings.searchPlaceholder}" autocomplete="off"><button id="search-clear-btn" class="search-clear-btn hidden" type="button" title="${strings.clearSearch}" aria-label="${strings.clearSearch}">×</button></div></div><div class="filter-summary"><div id="filter-chips" aria-live="polite"></div><span id="ticket-count" class="ticket-count" role="status"></span></div></div>
+        <div id="filter-bar"><div id="search-row"><div class="search-box"><label class="sr-only" for="search-input">${strings.searchPlaceholder}</label><svg class="action-icon search-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><circle cx="10" cy="10" r="6.5"/><path d="m15 15 5 5"/></svg><input id="search-input" type="text" role="searchbox" placeholder="${strings.searchPlaceholder}" autocomplete="off"><button id="search-clear-btn" class="search-clear-btn hidden" type="button" title="${strings.clearSearch}" aria-label="${strings.clearSearch}">×</button></div><label class="sr-only" for="ticket-layout-mode">${strings.layoutModeLabel}</label><select id="ticket-layout-mode" class="layout-mode-select" title="${strings.layoutModeLabel}" aria-label="${strings.layoutModeLabel}"><option value="auto">${strings.layoutAuto}</option><option value="single">${strings.layoutSingle}</option><option value="split">${strings.layoutSplit}</option></select></div><div class="filter-summary"><div id="filter-chips" aria-live="polite"></div><span id="ticket-count" class="ticket-count" role="status"></span></div></div>
         <div id="ticket-scroll"><div id="ticket-list" role="list" aria-label="${strings.tabTickets}"></div><button id="load-more-row" class="load-more-row hidden" type="button"></button></div>
       </div>
       <div class="tickets-detail"><div id="ticket-detail-empty" class="state-msg">${strings.selectTicketHint}</div><div id="ticket-detail-card" class="ticket-work-panel ticket-detail-card hidden"></div></div>
     </div>
   </section>
   <section class="tab-panel" id="panel-unsynced" role="tabpanel" aria-labelledby="tab-unsynced" hidden>
-    <div id="unsynced-panel"><div class="unsynced-header"><div><h2 class="panel-title">${strings.tabUnsynced}</h2><p class="panel-subtitle" id="unsynced-count-label" aria-live="polite"></p></div><button id="sync-all-btn" class="btn btn-primary hidden" type="button"><span class="icon-sync" aria-hidden="true"></span><span>${strings.syncAllBtn}</span></button></div><div id="unsynced-summary" class="unsynced-summary" aria-live="polite"></div><div id="unsynced-feedback" class="operation-feedback hidden" role="status" aria-live="polite"></div><div id="unsynced-list" role="list"></div></div>
+    <div id="unsynced-panel"><div class="unsynced-header"><div><h2 class="panel-title">${strings.tabUnsynced}</h2><p class="panel-subtitle" id="unsynced-count-label" aria-live="polite"></p></div><button id="sync-all-btn" class="btn btn-primary hidden" type="button">${dashboardActionIcon("sync")}<span>${strings.syncAllBtn}</span></button></div><div id="unsynced-summary" class="unsynced-summary" aria-live="polite"></div><div id="unsynced-feedback" class="operation-feedback hidden" role="status" aria-live="polite"></div><div id="unsynced-list" role="list"></div></div>
   </section>
   <section class="tab-panel" id="panel-comments" role="tabpanel" aria-labelledby="tab-comments" hidden><div id="comments-panel"><div id="comments-list"></div></div></section>
   <section class="tab-panel" id="panel-settings" role="tabpanel" aria-labelledby="tab-settings" hidden><div id="settings-panel"><div id="settings-content"></div><button class="btn btn-secondary settings-reset-btn" id="settings-reset-btn" type="button">${strings.resetSettings}</button></div></section>

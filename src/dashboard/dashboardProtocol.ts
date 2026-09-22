@@ -108,6 +108,7 @@ export interface DashboardUnsyncedItem {
   documentUri?: string;
   lifecycle?: "queued" | "recovery_pending" | "commit_unknown";
   canDiscard?: boolean;
+  discardMode?: "active" | "nextIntent" | "none";
   canSync?: boolean;
 }
 
@@ -138,6 +139,7 @@ export interface DashboardTicketSettingsViewModel {
   showDueDate: boolean;
   showTracker: boolean;
   showPriority: boolean;
+  showAssignee: boolean;
   editorStorageDirectory: string;
   editorDefaults: {
     subject: string;
@@ -268,6 +270,7 @@ export interface DashboardGeneralSettingsPatch {
   showDueDate?: boolean;
   showTracker?: boolean;
   showPriority?: boolean;
+  showAssignee?: boolean;
 }
 
 export type DashboardRequest =

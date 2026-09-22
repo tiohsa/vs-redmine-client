@@ -125,8 +125,19 @@ button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-
 
 /* Controls and filters */
 #filter-bar { flex: 0 0 auto; padding: 12px; border-bottom: 1px solid var(--app-border-subtle); }
-#search-row { display: flex; min-width: 0; }
+#search-row { display: flex; min-width: 0; align-items: center; gap: 8px; }
 .search-box { position: relative; display: flex; flex: 1 1 auto; min-width: 0; align-items: center; }
+.layout-mode-select {
+  flex: 0 0 auto;
+  width: auto;
+  max-width: 132px;
+  height: 32px;
+  padding: 0 7px;
+  border: 1px solid var(--vscode-dropdown-border, var(--app-border));
+  border-radius: var(--app-radius-md);
+  background: var(--vscode-dropdown-background, var(--app-surface));
+  color: var(--vscode-dropdown-foreground, var(--app-text));
+}
 #search-input {
   width: 100%;
   height: 36px;
@@ -177,7 +188,7 @@ button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-
 .ticket-row:hover .ticket-action-btn, .ticket-row:focus-within .ticket-action-btn, .ticket-row.selected .ticket-action-btn, .ticket-action-btn[aria-expanded="true"] { opacity: 1; }
 .ticket-action-btn:hover, .ticket-action-btn[aria-expanded="true"] { background: var(--app-surface-hover); color: var(--app-accent); }
 .ticket-action-menu { position: fixed; z-index: 20; display: flex; min-width: 156px; max-width: calc(100vw - 16px); max-height: calc(100vh - 16px); overflow-y: auto; flex-direction: column; gap: 2px; padding: 5px; border: 1px solid var(--app-border); border-radius: var(--app-radius-md); background: var(--app-surface-raised); box-shadow: var(--app-shadow); }
-.ticket-action-menu button { padding: 6px 9px; border: 0; border-radius: var(--app-radius-sm); background: transparent; color: var(--app-text); cursor: pointer; text-align: left; font-size: 11px; }
+.ticket-action-menu button { display: flex; align-items: center; gap: 6px; padding: 6px 9px; border: 0; border-radius: var(--app-radius-sm); background: transparent; color: var(--app-text); cursor: pointer; text-align: left; font-size: 11px; }
 .ticket-action-menu button:hover, .ticket-action-menu button:focus-visible { background: var(--app-surface-hover); color: var(--app-accent); outline: 0; }
 .expand-btn { display: inline-flex; flex: 0 0 20px; width: 20px; height: 24px; align-items: center; justify-content: center; padding: 0; border: 0; border-radius: var(--app-radius-sm); background: transparent; color: var(--app-text-secondary); cursor: pointer; }
 .expand-btn:hover { background: var(--app-surface-hover); color: var(--app-accent); }
@@ -198,8 +209,7 @@ button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-
 .error-msg { color: var(--app-danger); }
 
 /* Ticket detail / composer */
-.ticket-detail-card { flex: 0 0 auto; padding: 14px; border: 1px solid var(--app-border-strong); border-radius: var(--app-radius-card); background: var(--app-surface-raised); }
-.ticket-detail-card.composer-popover { position: fixed; z-index: 50; top: var(--composer-popover-top, 48px); left: var(--composer-popover-left, 8px); width: var(--composer-popover-width, min(420px, calc(100vw - 16px))); max-width: 420px; max-height: var(--composer-popover-max-height, calc(100vh - 56px)); margin: 0; overflow: auto; }
+.ticket-detail-card { flex: 0 0 auto; min-width: 0; width: 100%; max-width: 100%; padding: 14px; border: 1px solid var(--app-border-strong); border-radius: var(--app-radius-card); background: var(--app-surface-raised); }
 .detail-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; }
 .detail-title { flex: 1 1 auto; flex-wrap: wrap; display: flex; min-width: 0; align-items: center; gap: 8px; font-size: 15px; font-weight: 700; }
 .detail-title > span:last-child { overflow-wrap: anywhere; }
@@ -249,6 +259,7 @@ button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-
 .composer-error { margin-top: 9px; padding: 7px 9px; border: 1px solid var(--app-danger); border-radius: var(--app-radius-sm); color: var(--app-danger); font-size: 11px; }
 .composer-loading { padding: 24px 0; color: var(--app-text-readable-muted); text-align: center; }
 .composer-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 7px; margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--app-border-subtle); }
+.composer-actions .btn { min-width: 0; max-width: 100%; overflow-wrap: anywhere; }
 
 /* Buttons */
 .btn { display: inline-flex; min-height: 30px; align-items: center; justify-content: center; gap: 6px; padding: 5px 11px; border: 1px solid transparent; border-radius: var(--app-radius-md); cursor: pointer; font-size: 11px; font-weight: 700; line-height: 1.3; }
@@ -259,12 +270,6 @@ button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-
 .btn-icon-label { min-width: 30px; }
 .btn-icon-label .btn-label { display: inline; }
 .btn-primary-new { white-space: nowrap; }
-.icon-refresh { display: inline-block; width: 13px; height: 13px; border: 2px solid currentColor; border-top-color: transparent; border-radius: 50%; }
-.icon-plus { position: relative; display: inline-block; width: 12px; height: 12px; }
-.icon-plus::before, .icon-plus::after { position: absolute; top: 5px; left: 1px; width: 10px; height: 2px; border-radius: 2px; background: currentColor; content: ""; }
-.icon-plus::after { transform: rotate(90deg); }
-.icon-sync { position: relative; display: inline-block; width: 13px; height: 13px; border: 2px solid currentColor; border-left-color: transparent; border-radius: 50%; }
-.icon-sync::after { position: absolute; right: -3px; bottom: -2px; width: 0; height: 0; border-width: 3px 0 3px 4px; border-style: solid; border-color: transparent transparent transparent currentColor; content: ""; }
 .action-icon { flex: 0 0 16px; width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; }
 .search-icon { position: absolute; left: 12px; color: var(--app-text-secondary); pointer-events: none; }
 
@@ -302,7 +307,7 @@ button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-
 .comment-author { color: var(--app-text); font-size: 12px; font-weight: 700; }
 .comment-date, .comment-id { color: var(--app-text-readable-muted); font-size: 10px; }
 .comment-status { display: flex; flex: 0 0 auto; flex-wrap: wrap; justify-content: flex-end; gap: 4px; }
-.comment-body{font-size:11px;color:var(--app-text-secondary);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.comment-body{font-size:12px;color:var(--app-text-secondary);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .comment-body { grid-column: 1 / -1; }
 .comment-actions { grid-column: 2; grid-row: 1; display: flex; flex-wrap: wrap; justify-content: flex-end; align-self: start; gap: 5px; margin-top: 0; }
 .comment-actions .btn { min-height: 27px; padding-inline: 9px; }
@@ -353,7 +358,7 @@ button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-
   .tickets-master { margin: 8px; }
   .tickets-detail { margin: 8px; }
   .tickets-master { min-height: 180px; }
-  .tickets-layout:has(.ticket-detail-card:not(.hidden):not(.composer-popover)) .tickets-master { flex: 0 0 auto; max-height: 40vh; }
+  .tickets-layout:has(.ticket-detail-card:not(.hidden)) .tickets-master { flex: 0 0 auto; max-height: 40vh; }
   .tickets-detail:has(.ticket-detail-card.hidden) { display: none; }
   .tickets-detail { overflow: visible; }
   .unsynced-card { grid-template-columns: max-content minmax(0, 1fr); }
@@ -374,6 +379,7 @@ button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-
   .btn-icon-label .btn-label { display: none; }
   .header-actions { margin-left: auto; }
   .header-actions .btn { padding-inline: 8px; }
+  .layout-mode-select { max-width: 84px; }
   .ticket-row { gap: 5px; padding-inline: 8px; }
   .badges { gap: 3px; }
   .ticket-subject { font-size: 11px; }
@@ -387,6 +393,9 @@ button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-
 @container (max-width: 280px) {
   .detail-actions { grid-template-columns: minmax(0, 1fr); }
   .detail-field, .detail-meta { grid-template-columns: minmax(0, 1fr); gap: 4px; }
+  .ticket-detail-card { padding: 8px; }
+  .composer-actions { align-items: stretch; flex-direction: column; }
+  .composer-actions .btn { width: 100%; }
 }
 /* 実際の一覧幅で折り返し、分割表示でも件名と操作を確保する。 */
 @container (max-width: 460px) {
@@ -417,6 +426,19 @@ button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-
   .ticket-detail-card { padding: 18px; }
 }
 
+/* 手動選択はレスポンシブの自動レイアウトより優先する。 */
+.tickets-layout.layout-single { flex-direction: column; overflow-y: auto; }
+.tickets-layout.layout-single .tickets-master,
+.tickets-layout.layout-single .tickets-detail { flex: 0 0 auto; }
+.tickets-layout.layout-single .tickets-master { min-height: 180px; margin: 8px; }
+.tickets-layout.layout-single:has(.ticket-detail-card:not(.hidden)) .tickets-master { max-height: 40vh; }
+.tickets-layout.layout-single .tickets-detail { margin: 8px; overflow: visible; }
+.tickets-layout.layout-single .tickets-detail:has(.ticket-detail-card.hidden) { display: none; }
+.tickets-layout.layout-split { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 10px; padding: 12px; overflow: hidden; }
+.tickets-layout.layout-split .tickets-master { min-width: 0; min-height: 0; max-height: none; margin: 0; }
+.tickets-layout.layout-split:has(.ticket-detail-card:not(.hidden)) .tickets-master { max-height: none; }
+.tickets-layout.layout-split .tickets-detail { display: flex; min-width: 0; min-height: 0; margin: 0; overflow-y: auto; }
+
 body.vscode-high-contrast-light .tab-panel,
 body.vscode-high-contrast-light .ticket-row,
 body.vscode-high-contrast-light .unsynced-card,
@@ -445,5 +467,4 @@ body.vscode-high-contrast .tab.active { border-bottom-width: 3px; }
 :root { --mm-radius-pill: var(--app-radius-pill); }
 #ticket-scroll{flex:1;overflow-y:auto;min-height:0;border-bottom:1px solid var(--app-border-subtle)}
 .ticket-detail-card{border-top:2px solid var(--app-accent)}
-.ticket-detail-card.composer-popover{max-width:420px;overflow:auto;z-index:50}
 `;

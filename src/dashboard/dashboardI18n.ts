@@ -29,6 +29,10 @@ export interface DashboardStrings {
   // Search
   searchPlaceholder: string;
   clearSearch: string;
+  layoutModeLabel: string;
+  layoutAuto: string;
+  layoutSingle: string;
+  layoutSplit: string;
   // Sync states
   syncDirty: string;
   syncQueued: string;
@@ -61,7 +65,6 @@ export interface DashboardStrings {
   syncToRedmine: string;
   syncTicketTooltip: string;
   editingState: string;
-  editorSyncHint: string;
   remoteDescription: string;
   descriptionUnsyncedWarning: string;
   noDescription: string;
@@ -74,9 +77,6 @@ export interface DashboardStrings {
   notSet: string;
   closeDetail: string;
   openDetail: string;
-  openTicketAction: string;
-  commentAction: string;
-  syncAction: string;
   statusFallbackHint: string;
   loadingEditOptions: string;
   trackerUnavailable: string;
@@ -86,7 +86,6 @@ export interface DashboardStrings {
   loadingTrackers: string;
   cancelAction: string;
   createDraft: string;
-  syncNewTicket: string;
   assigneeUnassigned: string;
   // Filter chips
   filterSubjectPrefix: string;
@@ -99,22 +98,20 @@ export interface DashboardStrings {
   unsyncedKindNewTicket: string;
   unsyncedKindComment: string;
   unsyncedKindFile: string;
-  openFileAction: string;
   discardAction: string;
+  discardLaterChangesAction: string;
   discardTitle: string;
+  discardLaterChangesTitle: string;
   syncAllBtn: string;
   unsyncedCountLabel: string;
   // Comments tab
   commentsForTicket: string;
-  addCommentBtn: string;
   reloadComments: string;
   noTicketSelected: string;
   loadingComments: string;
   noComments: string;
   unsyncedEditBadge: string;
   unsyncedEditAriaLabel: string;
-  editCommentAction: string;
-  openInRedmine: string;
   // Settings tab — API key
   sectionApiKey: string;
   apiKeyStatusSet: string;
@@ -166,6 +163,7 @@ export interface DashboardStrings {
   showDueDateLabel: string;
   showTrackerLabel: string;
   showPriorityLabel: string;
+  showAssigneeLabel: string;
   sectionGeneral: string;
   ticketLimitLabel: string;
   resetSettings: string;
@@ -202,6 +200,10 @@ export const buildDashboardStrings = (): DashboardStrings => ({
   // Search
   searchPlaceholder: vscode.l10n.t("Search tickets…"),
   clearSearch: vscode.l10n.t("Clear search"),
+  layoutModeLabel: vscode.l10n.t("Ticket layout"),
+  layoutAuto: vscode.l10n.t("Automatic layout"),
+  layoutSingle: vscode.l10n.t("One column"),
+  layoutSplit: vscode.l10n.t("Two columns"),
   // Sync states
   syncDirty: vscode.l10n.t("Unsynced changes"),
   syncQueued: vscode.l10n.t("Waiting to sync"),
@@ -234,7 +236,6 @@ export const buildDashboardStrings = (): DashboardStrings => ({
   syncToRedmine: vscode.l10n.t("Sync to Redmine"),
   syncTicketTooltip: vscode.l10n.t("Sync VS Code editor changes to Redmine"),
   editingState: vscode.l10n.t("Editing state"),
-  editorSyncHint: vscode.l10n.t("Edit Markdown in VS Code, then use “Sync to Redmine” to apply your changes."),
   remoteDescription: vscode.l10n.t("Description (on Redmine)"),
   descriptionUnsyncedWarning: vscode.l10n.t("Changes may not yet be reflected in the Redmine description below."),
   noDescription: vscode.l10n.t("No description."),
@@ -247,9 +248,6 @@ export const buildDashboardStrings = (): DashboardStrings => ({
   notSet: vscode.l10n.t("Not set"),
   closeDetail: vscode.l10n.t("Close detail"),
   openDetail: vscode.l10n.t("Open detail"),
-  openTicketAction: vscode.l10n.t("Edit in VS Code"),
-  commentAction: vscode.l10n.t("Comment"),
-  syncAction: vscode.l10n.t("Sync"),
   statusFallbackHint: vscode.l10n.t("Status options using global fallback."),
   loadingEditOptions: vscode.l10n.t("Loading edit options…"),
   trackerUnavailable: vscode.l10n.t("Cannot edit: tracker options unavailable."),
@@ -259,7 +257,6 @@ export const buildDashboardStrings = (): DashboardStrings => ({
   loadingTrackers: vscode.l10n.t("Loading trackers…"),
   cancelAction: vscode.l10n.t("Cancel"),
   createDraft: vscode.l10n.t("Create Markdown draft"),
-  syncNewTicket: vscode.l10n.t("Sync"),
   assigneeUnassigned: vscode.l10n.t("Unassigned"),
   // Filter chips
   filterSubjectPrefix: vscode.l10n.t("Subject: "),
@@ -272,22 +269,20 @@ export const buildDashboardStrings = (): DashboardStrings => ({
   unsyncedKindNewTicket: vscode.l10n.t("New ticket"),
   unsyncedKindComment: vscode.l10n.t("Comment"),
   unsyncedKindFile: vscode.l10n.t("File"),
-  openFileAction: vscode.l10n.t("Open"),
   discardAction: vscode.l10n.t("Discard"),
+  discardLaterChangesAction: vscode.l10n.t("Discard later changes"),
   discardTitle: vscode.l10n.t("Discard unsynced local changes"),
+  discardLaterChangesTitle: vscode.l10n.t("Discard later local changes and keep the recovery checkpoint"),
   syncAllBtn: vscode.l10n.t("Sync all"),
   unsyncedCountLabel: vscode.l10n.t("Unsynced changes: {0}"),
   // Comments tab
   commentsForTicket: vscode.l10n.t("Comments for ticket"),
-  addCommentBtn: vscode.l10n.t("Add"),
   reloadComments: vscode.l10n.t("Refresh"),
   noTicketSelected: vscode.l10n.t("Select a ticket to view comments."),
   loadingComments: vscode.l10n.t("Loading comments…"),
   noComments: vscode.l10n.t("No comments."),
   unsyncedEditBadge: vscode.l10n.t("Unsynced edit"),
   unsyncedEditAriaLabel: vscode.l10n.t("Has unsynced edits"),
-  editCommentAction: vscode.l10n.t("Edit"),
-  openInRedmine: vscode.l10n.t("Open in Redmine"),
   // Settings tab — API key
   sectionApiKey: vscode.l10n.t("API Key"),
   apiKeyStatusSet: vscode.l10n.t("Configured"),
@@ -339,6 +334,7 @@ export const buildDashboardStrings = (): DashboardStrings => ({
   showDueDateLabel: vscode.l10n.t("Show due date"),
   showTrackerLabel: vscode.l10n.t("Show tracker"),
   showPriorityLabel: vscode.l10n.t("Show priority"),
+  showAssigneeLabel: vscode.l10n.t("Show assignee name"),
   sectionGeneral: vscode.l10n.t("General"),
   ticketLimitLabel: vscode.l10n.t("Tickets per load"),
   resetSettings: vscode.l10n.t("Reset display settings"),

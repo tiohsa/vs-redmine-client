@@ -311,6 +311,11 @@
           "type": "boolean",
           "default": true,
           "description": "%config.ticketList.showPriority.description%"
+        },
+        "redmine-client.ticketList.showAssignee": {
+          "type": "boolean",
+          "default": true,
+          "description": "%config.ticketList.showAssignee.description%"
         }
       }
     }

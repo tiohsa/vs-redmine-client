@@ -13,7 +13,9 @@ export const computeChanges = (
   if (subject !== baseSubject) {
     changes.subject = subject;
   }
-  if (description !== baseDescription) {
+  // エディターの解析では改行が LF になるため、Redmine の CRLF と揃えて比較する。
+  // 末尾の空白や改行の追加・削除は本文の変更として保持する。
+  if (description.replace(/\r\n/g, "\n") !== baseDescription.replace(/\r\n/g, "\n")) {
     changes.description = description;
   }
   return changes;

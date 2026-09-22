@@ -58,5 +58,6 @@
   "config.ticketList.showStatus.description": "Show the status badge on each ticket row in the dashboard.",
   "config.ticketList.showDueDate.description": "Show due date badges on ticket rows in the dashboard. When disabled, all due date badges are hidden regardless of the per-window display rules.",
   "config.ticketList.showTracker.description": "Show the tracker badge on each ticket row in the dashboard.",
-  "config.ticketList.showPriority.description": "Show the priority badge on each ticket row in the dashboard."
+  "config.ticketList.showPriority.description": "Show the priority badge on each ticket row in the dashboard.",
+  "config.ticketList.showAssignee.description": "Show assignee names in the ticket list."
 }

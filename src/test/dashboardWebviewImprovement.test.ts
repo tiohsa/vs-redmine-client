@@ -38,13 +38,58 @@ suite("Dashboard Webview 改善", () => {
     assert.ok(!dashboardWebviewScript.includes("Latest comments"));
   });
 
-  test("Dashboard 全体更新であることを Refresh 表示に明示する", () => {
+  test("チケットレイアウトを自動・1列・2列から手動選択して保持する", () => {
+    const html = buildDashboardHtml("nonce", buildDashboardStrings());
+    assert.ok(html.includes('id="ticket-layout-mode"'));
+    assert.ok(html.includes('<option value="auto">'));
+    assert.ok(html.includes('<option value="single">'));
+    assert.ok(html.includes('<option value="split">'));
+    assert.ok(dashboardWebviewScript.includes("vscode.getState()"));
+    assert.ok(dashboardWebviewScript.includes("vscode.setState("));
+    assert.ok(dashboardWebviewScript.includes("applyTicketLayoutMode()"));
+    assert.ok(dashboardStyles.includes(".tickets-layout.layout-single"));
+    assert.ok(dashboardStyles.includes(".tickets-layout.layout-split"));
+    assert.ok(dashboardStyles.includes("grid-template-columns: minmax(0, 1fr) minmax(0, 1fr)"));
+  });
+
+  test("2列表示で新規チケット編集パネルを詳細列に収める", () => {
+    assert.ok(!dashboardWebviewScript.includes("composer-popover"));
+    assert.ok(!dashboardWebviewScript.includes("position: fixed"));
+    assert.ok(dashboardStyles.includes("min-width: 0; width: 100%; max-width: 100%"));
+  });
+
+  test("Dashboard の更新はヘッダーボタンだけに表示する", () => {
     const strings = buildDashboardStrings();
     const html = buildDashboardHtml("nonce", strings);
     assert.ok(strings.refresh);
     assert.ok(html.includes('id="refresh-btn"'));
     assert.ok(html.includes(strings.refresh));
-    assert.ok(dashboardWebviewScript.includes("data-ticket-action=\"refresh\""));
+    assert.ok(!dashboardWebviewScript.includes("data-ticket-action=\"refresh\""));
+  });
+
+  test("チケット一覧の三点リーダーメニューから同期できる", () => {
+    assert.ok(dashboardWebviewScript.includes("['sync',STRINGS.syncToRedmine]"));
+    assert.ok(dashboardWebviewScript.includes("action === 'sync') req('ticket.syncSelected',{ticketId:ticketId})"));
+    assert.ok(dashboardWebviewScript.includes('[data-ticket-action="sync"]'));
+  });
+
+  test("未同期一覧の要確認は詳細文と重複せずバッジだけに表示する", () => {
+    assert.ok(dashboardWebviewScript.includes("const detail=item.detail || ''"));
+    assert.ok(!dashboardWebviewScript.includes("const detail=status.requiresReview"));
+  });
+
+  test("Discard の操作名と説明文を用意する", () => {
+    const strings = buildDashboardStrings();
+    assert.ok(strings.discardLaterChangesAction);
+    assert.ok(strings.discardLaterChangesTitle);
+  });
+
+  test("未同期の新規チケットは文書書き換え対応の同期エンジンを使用する", () => {
+    const source = readFileSync(
+      join(__dirname, "..", "dashboard", "services", "DashboardUnsyncedService.js"),
+      "utf8",
+    );
+    assert.ok(source.includes('key.kind !== "newTicket" && this.deps.syncEngine'));
   });
 
   test("開始日と日付ピッカー視認性のスタイルを持つ", () => {
@@ -78,7 +123,12 @@ suite("Dashboard Webview 改善", () => {
   test("コメント本文は先頭行だけを1行省略表示する", () => {
     assert.ok(dashboardWebviewScript.includes("const firstLine=s=>String(s||'').split(/\\r?\\n/)[0]"));
     assert.ok(dashboardWebviewScript.includes("esc(firstLine(cm.body))"));
-    assert.ok(dashboardStyles.includes(".comment-body{font-size:11px;color:var(--app-text-secondary);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}"));
+    assert.ok(dashboardStyles.includes(".comment-body{font-size:12px;color:var(--app-text-secondary);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}"));
+  });
+
+  test("編集パネルは補足文と三点リーダーメニューを表示しない", () => {
+    assert.ok(!dashboardWebviewScript.includes("STRINGS.editorSyncHint"));
+    assert.ok(!dashboardWebviewScript.includes("const menuId='detail-'"));
   });
 
   test("未同期コメントの同期ボタンは comment key で unsynced.syncOne を送る", () => {
@@ -116,15 +166,9 @@ suite("Dashboard Webview 改善", () => {
     assert.ok(source.includes("listComments"));
   });
 
-  test("新規チケット composer は New Ticket ボタン近くにだけ popover 表示する", () => {
-    assert.ok(dashboardWebviewScript.includes("getBoundingClientRect()"));
-    assert.ok(dashboardWebviewScript.includes("panel.mode === 'newTicket'"));
-    assert.ok(dashboardWebviewScript.includes("classList.toggle('composer-popover', isNewTicketComposer)"));
+  test("新規チケット composer は詳細領域内に通常配置する", () => {
     assert.ok(dashboardWebviewScript.includes("panel.mode === 'childTicket' ? STRINGS.createChildTicketTitle"));
-    assert.ok(dashboardStyles.includes(".ticket-detail-card.composer-popover"));
-    assert.ok(dashboardStyles.includes("max-width:420px"));
-    assert.ok(dashboardStyles.includes("overflow:auto"));
-    assert.ok(dashboardStyles.includes("z-index:50"));
+    assert.ok(!dashboardStyles.includes(".ticket-detail-card.composer-popover"));
   });
 
   test("監査補修でフィルター表示・説明文省略・未同期件数を維持する", () => {
@@ -158,8 +202,8 @@ suite("Dashboard Webview 改善", () => {
     assert.ok(html.includes('aria-labelledby="tab-tickets"'));
     assert.ok(html.includes('id="sync-all-btn" class="btn btn-primary'));
     assert.ok(dashboardWebviewScript.includes("data-sync-key=\"'+safeJson(item.key)+'\""));
-    assert.ok(dashboardWebviewScript.includes("id=\"add-comment-btn\" type=\"button\">'+STRINGS.addCommentBtn"));
-    assert.ok(dashboardWebviewScript.includes("id=\"reload-comments-btn\" type=\"button\">'+STRINGS.reloadComments"));
+    assert.ok(dashboardWebviewScript.includes("id=\"add-comment-btn\" type=\"button\">'+actionIcon('comment')+esc(STRINGS.addCommentAction)"));
+    assert.ok(dashboardWebviewScript.includes("id=\"reload-comments-btn\" type=\"button\">'+actionIcon('refresh')+esc(STRINGS.reloadComments)"));
     assert.ok(dashboardStyles.includes("body.vscode-high-contrast"));
     assert.ok(dashboardStyles.includes("@media (max-width: 699px)"));
     assert.ok(dashboardStyles.includes("@media (max-width: 480px)"));

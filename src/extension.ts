@@ -121,7 +121,8 @@ export async function activate(context: vscode.ExtensionContext) {
         event.affectsConfiguration("redmine-client.ticketList.showStatus") ||
         event.affectsConfiguration("redmine-client.ticketList.showDueDate") ||
         event.affectsConfiguration("redmine-client.ticketList.showTracker") ||
-        event.affectsConfiguration("redmine-client.ticketList.showPriority");
+        event.affectsConfiguration("redmine-client.ticketList.showPriority") ||
+        event.affectsConfiguration("redmine-client.ticketList.showAssignee");
       if (affectsDashboardSettings) {
         views.dashboardProvider.refreshSettings();
       }
@@ -136,7 +137,8 @@ export async function activate(context: vscode.ExtensionContext) {
         event.affectsConfiguration("redmine-client.ticketList.showStatus") ||
         event.affectsConfiguration("redmine-client.ticketList.showDueDate") ||
         event.affectsConfiguration("redmine-client.ticketList.showTracker") ||
-        event.affectsConfiguration("redmine-client.ticketList.showPriority")
+        event.affectsConfiguration("redmine-client.ticketList.showPriority") ||
+        event.affectsConfiguration("redmine-client.ticketList.showAssignee")
       ) {
         views.ticketsPresentation.notifyChange();
       }

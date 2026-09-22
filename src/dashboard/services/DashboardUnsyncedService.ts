@@ -6,10 +6,8 @@ import { syncUnsyncedFile } from "../../commands/syncUnsyncedFile";
 import type { SyncUnsyncedFileResult } from "../../commands/syncUnsyncedFile";
 import {
   getOfflineSyncQueue,
-  discardOfflineCommentUpdateAsync,
-  discardOfflineNewTicketAsync,
-  discardOfflineTicketUpdateAsync,
-  type OfflineDiscardResult,
+  prepareOfflineDiscard,
+  commitOfflineDiscardAsync,
 } from "../../views/offlineSyncStore";
 import { buildUnsyncedDashboardItems } from "../viewModels/unsyncedDashboardViewModel";
 import type { DashboardUnsyncedKey } from "../dashboardProtocol";
@@ -140,34 +138,29 @@ export class DashboardUnsyncedService {
 
   async handleDiscardOne(requestId: string, key: DashboardUnsyncedKey): Promise<void> {
     const operationScope = getCurrentConnectionScope();
-    const discardLabel = vscode.l10n.t("Discard");
-    const confirmed = await vscode.window.showWarningMessage(
-      vscode.l10n.t("This will discard the unsynced local changes. The ticket on the Redmine server will not be deleted."),
-      { modal: true },
-      discardLabel,
-    );
-    if (confirmed !== discardLabel) {
+    if (key.kind === "newTicket" && !key.queueId && !key.documentUri) {
+      this.deps.context.notifyError(requestId, vscode.l10n.t("Cannot identify the target new ticket draft."));
       return;
     }
-
-    let result: OfflineDiscardResult;
-    if (key.kind === "ticket") {
-      result = await discardOfflineTicketUpdateAsync(key.ticketId, operationScope);
-    } else if (key.kind === "newTicket") {
-      if (!key.queueId && !key.documentUri) {
-        this.deps.context.notifyError(requestId, vscode.l10n.t("Cannot identify the target new ticket draft."));
+    const plan = prepareOfflineDiscard(key, operationScope);
+    if (plan.mode !== "none") {
+      const discardLaterChanges = plan.mode === "nextIntent";
+      const discardLabel = discardLaterChanges
+        ? vscode.l10n.t("Discard later changes")
+        : vscode.l10n.t("Discard");
+      const confirmed = await vscode.window.showWarningMessage(
+        discardLaterChanges
+          ? vscode.l10n.t("This will discard only the later local changes. The remote sync checkpoint will remain for review.")
+          : vscode.l10n.t("This will discard the unsynced local changes. The ticket on the Redmine server will not be deleted."),
+        { modal: true },
+        discardLabel,
+      );
+      if (confirmed !== discardLabel) {
         return;
       }
-      result = await discardOfflineNewTicketAsync(
-        { queueId: key.queueId, documentUri: key.documentUri },
-        operationScope,
-      );
-    } else {
-      result = await discardOfflineCommentUpdateAsync(
-        { ticketId: key.ticketId, commentId: key.commentId, documentUri: key.documentUri },
-        operationScope,
-      );
     }
+
+    const result = await commitOfflineDiscardAsync(plan);
 
     switch (result) {
       case "recovery_required":
@@ -176,6 +169,7 @@ export class DashboardUnsyncedService {
           vscode.l10n.t("This item has a remote sync checkpoint and must be resumed before it can be discarded."),
         );
         return;
+      case "stale":
       case "not_found":
         this.refreshUnsynced();
         this.deps.refreshTicketPresentation();
@@ -320,7 +314,7 @@ export class DashboardUnsyncedService {
       { syncKey },
       {
         onTicketCreated: () => this.deps.context.onTicketsRefreshed(),
-        createSyncEngine: this.deps.syncEngine
+        createSyncEngine: key.kind !== "newTicket" && this.deps.syncEngine
           ? () => this.deps.syncEngine!
           : undefined,
       },
