@@ -95,7 +95,9 @@ export interface DashboardStrings {
   unsyncedKindComment: string;
   unsyncedKindFile: string;
   discardAction: string;
+  discardLaterChangesAction: string;
   discardTitle: string;
+  discardLaterChangesTitle: string;
   syncAllBtn: string;
   unsyncedCountLabel: string;
   // Comments tab
@@ -260,7 +262,9 @@ export const buildDashboardStrings = (): DashboardStrings => ({
   unsyncedKindComment: vscode.l10n.t("Comment"),
   unsyncedKindFile: vscode.l10n.t("File"),
   discardAction: vscode.l10n.t("Discard"),
+  discardLaterChangesAction: vscode.l10n.t("Discard later changes"),
   discardTitle: vscode.l10n.t("Discard unsynced local changes"),
+  discardLaterChangesTitle: vscode.l10n.t("Discard later local changes and keep the recovery checkpoint"),
   syncAllBtn: vscode.l10n.t("Sync all"),
   unsyncedCountLabel: vscode.l10n.t("Unsynced changes: {0}"),
   // Comments tab

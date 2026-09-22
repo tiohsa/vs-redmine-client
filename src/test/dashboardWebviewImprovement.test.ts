@@ -47,6 +47,39 @@ suite("Dashboard Webview 改善", () => {
     assert.ok(!dashboardWebviewScript.includes("data-ticket-action=\"refresh\""));
   });
 
+  test("チケット一覧の三点リーダーメニューから同期できる", () => {
+    assert.ok(dashboardWebviewScript.includes("['sync',STRINGS.syncToRedmine]"));
+    assert.ok(dashboardWebviewScript.includes("action === 'sync') req('ticket.syncSelected',{ticketId:ticketId})"));
+    assert.ok(dashboardWebviewScript.includes('[data-ticket-action="sync"]'));
+  });
+
+  test("未同期一覧の要確認は詳細文と重複せずバッジだけに表示する", () => {
+    assert.ok(dashboardWebviewScript.includes("const detail=item.detail || ''"));
+    assert.ok(!dashboardWebviewScript.includes("const detail=status.requiresReview"));
+  });
+
+  test("要確認項目の破棄は復旧情報が残ることを操作名で示す", () => {
+    const strings = buildDashboardStrings();
+    assert.ok(strings.discardLaterChangesAction);
+    assert.ok(strings.discardLaterChangesTitle);
+    assert.ok(dashboardWebviewScript.includes("const discardsLaterChanges=status.requiresReview && item.canDiscard !== false"));
+    assert.ok(dashboardWebviewScript.includes("discardsLaterChanges ? STRINGS.discardLaterChangesAction"));
+    assert.ok(dashboardWebviewScript.includes("discardsLaterChanges ? STRINGS.discardLaterChangesTitle"));
+    const source = readFileSync(
+      join(__dirname, "..", "dashboard", "services", "DashboardUnsyncedService.js"),
+      "utf8",
+    );
+    assert.ok(source.includes("This will discard only the later local changes. The remote sync checkpoint will remain for review."));
+  });
+
+  test("未同期の新規チケットは文書書き換え対応の同期エンジンを使用する", () => {
+    const source = readFileSync(
+      join(__dirname, "..", "dashboard", "services", "DashboardUnsyncedService.js"),
+      "utf8",
+    );
+    assert.ok(source.includes('key.kind !== "newTicket" && this.deps.syncEngine'));
+  });
+
   test("開始日と日付ピッカー視認性のスタイルを持つ", () => {
     assert.ok(dashboardWebviewScript.includes("STRINGS.startDate"));
     assert.ok(buildDashboardStrings().startDate);

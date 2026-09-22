@@ -9,6 +9,7 @@ import {
   discardOfflineCommentUpdateAsync,
   discardOfflineNewTicketAsync,
   discardOfflineTicketUpdateAsync,
+  evaluateOfflineSyncPolicy,
   type OfflineDiscardResult,
 } from "../../views/offlineSyncStore";
 import { buildUnsyncedDashboardItems } from "../viewModels/unsyncedDashboardViewModel";
@@ -140,9 +141,26 @@ export class DashboardUnsyncedService {
 
   async handleDiscardOne(requestId: string, key: DashboardUnsyncedKey): Promise<void> {
     const operationScope = getCurrentConnectionScope();
-    const discardLabel = vscode.l10n.t("Discard");
+    const queue = getOfflineSyncQueue(operationScope);
+    const operation = key.kind === "ticket"
+      ? queue.tickets.get(key.ticketId)
+      : key.kind === "newTicket"
+        ? queue.newTickets.find((item) =>
+          (key.queueId === undefined || item.queueId === key.queueId) &&
+          (key.documentUri === undefined || item.documentUri === key.documentUri))
+        : queue.comments.find((item) =>
+          item.ticketId === key.ticketId &&
+          (key.commentId === undefined || item.commentId === key.commentId) &&
+          (key.documentUri === undefined || item.documentUri === key.documentUri));
+    const discardLaterChanges = operation?.nextIntent !== undefined &&
+      evaluateOfflineSyncPolicy(operation).lifecycle !== "queued";
+    const discardLabel = discardLaterChanges
+      ? vscode.l10n.t("Discard later changes")
+      : vscode.l10n.t("Discard");
     const confirmed = await vscode.window.showWarningMessage(
-      vscode.l10n.t("This will discard the unsynced local changes. The ticket on the Redmine server will not be deleted."),
+      discardLaterChanges
+        ? vscode.l10n.t("This will discard only the later local changes. The remote sync checkpoint will remain for review.")
+        : vscode.l10n.t("This will discard the unsynced local changes. The ticket on the Redmine server will not be deleted."),
       { modal: true },
       discardLabel,
     );
@@ -320,7 +338,7 @@ export class DashboardUnsyncedService {
       { syncKey },
       {
         onTicketCreated: () => this.deps.context.onTicketsRefreshed(),
-        createSyncEngine: this.deps.syncEngine
+        createSyncEngine: key.kind !== "newTicket" && this.deps.syncEngine
           ? () => this.deps.syncEngine!
           : undefined,
       },
