@@ -138,6 +138,7 @@ export interface DashboardTicketSettingsViewModel {
   showDueDate: boolean;
   showTracker: boolean;
   showPriority: boolean;
+  showAssignee: boolean;
   editorStorageDirectory: string;
   editorDefaults: {
     subject: string;
@@ -268,6 +269,7 @@ export interface DashboardGeneralSettingsPatch {
   showDueDate?: boolean;
   showTracker?: boolean;
   showPriority?: boolean;
+  showAssignee?: boolean;
 }
 
 export type DashboardRequest =

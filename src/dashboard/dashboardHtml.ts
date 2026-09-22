@@ -1,3 +1,4 @@
+import { dashboardActionIcon } from "./dashboardActionIcons";
 import { DashboardStrings } from "./dashboardI18n";
 import { dashboardStyles } from "./dashboardStyles";
 import { dashboardWebviewScript } from "./dashboardWebviewScript";
@@ -19,8 +20,8 @@ ${dashboardStyles}
     <div class="project-field"><label class="field-label" for="project-select">${strings.selectProjectTitle}</label><select class="project-select" id="project-select" title="${strings.selectProjectTitle}"><option value="">${strings.selectProjectPlaceholder}</option></select></div>
     <label class="toggle-children" for="include-children"><input type="checkbox" id="include-children"><span>${strings.includeChildren}</span></label>
     <div class="header-actions">
-      <button class="btn btn-secondary btn-icon-label" id="refresh-btn" type="button" title="${strings.refresh}" aria-label="${strings.refresh}"><span class="icon-refresh" aria-hidden="true"></span><span class="btn-label">${strings.refresh}</span></button>
-      <button class="btn btn-primary btn-primary-new" id="new-ticket-btn" type="button" title="${strings.newTicket}"><span class="icon-plus" aria-hidden="true"></span><span>${strings.newTicket}</span></button>
+      <button class="btn btn-secondary btn-icon-label" id="refresh-btn" type="button" title="${strings.refresh}" aria-label="${strings.refresh}">${dashboardActionIcon("refresh")}<span class="btn-label">${strings.refresh}</span></button>
+      <button class="btn btn-primary btn-primary-new" id="new-ticket-btn" type="button" title="${strings.newTicket}">${dashboardActionIcon("child")}<span>${strings.newTicket}</span></button>
     </div>
   </div>
 </header>
@@ -41,7 +42,7 @@ ${dashboardStyles}
     </div>
   </section>
   <section class="tab-panel" id="panel-unsynced" role="tabpanel" aria-labelledby="tab-unsynced" hidden>
-    <div id="unsynced-panel"><div class="unsynced-header"><div><h2 class="panel-title">${strings.tabUnsynced}</h2><p class="panel-subtitle" id="unsynced-count-label" aria-live="polite"></p></div><button id="sync-all-btn" class="btn btn-primary hidden" type="button"><span class="icon-sync" aria-hidden="true"></span><span>${strings.syncAllBtn}</span></button></div><div id="unsynced-summary" class="unsynced-summary" aria-live="polite"></div><div id="unsynced-feedback" class="operation-feedback hidden" role="status" aria-live="polite"></div><div id="unsynced-list" role="list"></div></div>
+    <div id="unsynced-panel"><div class="unsynced-header"><div><h2 class="panel-title">${strings.tabUnsynced}</h2><p class="panel-subtitle" id="unsynced-count-label" aria-live="polite"></p></div><button id="sync-all-btn" class="btn btn-primary hidden" type="button">${dashboardActionIcon("sync")}<span>${strings.syncAllBtn}</span></button></div><div id="unsynced-summary" class="unsynced-summary" aria-live="polite"></div><div id="unsynced-feedback" class="operation-feedback hidden" role="status" aria-live="polite"></div><div id="unsynced-list" role="list"></div></div>
   </section>
   <section class="tab-panel" id="panel-comments" role="tabpanel" aria-labelledby="tab-comments" hidden><div id="comments-panel"><div id="comments-list"></div></div></section>
   <section class="tab-panel" id="panel-settings" role="tabpanel" aria-labelledby="tab-settings" hidden><div id="settings-panel"><div id="settings-content"></div><button class="btn btn-secondary settings-reset-btn" id="settings-reset-btn" type="button">${strings.resetSettings}</button></div></section>

@@ -10,6 +10,7 @@ import {
   getTicketListLimit,
   getTicketListShowDueDate,
   getTicketListShowPriority,
+  getTicketListShowAssignee,
   getTicketListShowStatus,
   getTicketListShowTracker,
 } from "../../config/settings";
@@ -34,6 +35,7 @@ export const buildSettingsDashboardViewModel = (
   showDueDate: getTicketListShowDueDate(),
   showTracker: getTicketListShowTracker(),
   showPriority: getTicketListShowPriority(),
+  showAssignee: getTicketListShowAssignee(),
   editorStorageDirectory: getEditorStorageDirectory(),
   editorDefaults: (() => {
     const defaults = getTicketEditorDefaults();

@@ -70,10 +70,12 @@ suite("dashboardSettingsState — 初期設定状態", () => {
     assert.ok(Object.prototype.hasOwnProperty.call(s, "showDueDate"));
     assert.ok(Object.prototype.hasOwnProperty.call(s, "showTracker"));
     assert.ok(Object.prototype.hasOwnProperty.call(s, "showPriority"));
+    assert.ok(Object.prototype.hasOwnProperty.call(s, "showAssignee"));
     assert.strictEqual(s.showStatus, true);
     assert.strictEqual(s.showDueDate, true);
     assert.strictEqual(s.showTracker, true);
     assert.strictEqual(s.showPriority, true);
+    assert.strictEqual(s.showAssignee, true);
   });
 
   test("buildSettingsDashboardViewModel に表示設定が含まれる", () => {
@@ -82,6 +84,7 @@ suite("dashboardSettingsState — 初期設定状態", () => {
     assert.strictEqual(typeof vm.showDueDate, "boolean");
     assert.strictEqual(typeof vm.showTracker, "boolean");
     assert.strictEqual(typeof vm.showPriority, "boolean");
+    assert.strictEqual(typeof vm.showAssignee, "boolean");
   });
 
   test("buildSettingsDashboardViewModel に apiKeyStatus が含まれる", () => {

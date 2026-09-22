@@ -158,8 +158,8 @@ suite("Dashboard Webview 改善", () => {
     assert.ok(html.includes('aria-labelledby="tab-tickets"'));
     assert.ok(html.includes('id="sync-all-btn" class="btn btn-primary'));
     assert.ok(dashboardWebviewScript.includes("data-sync-key=\"'+safeJson(item.key)+'\""));
-    assert.ok(dashboardWebviewScript.includes("id=\"add-comment-btn\" type=\"button\">'+STRINGS.addCommentBtn"));
-    assert.ok(dashboardWebviewScript.includes("id=\"reload-comments-btn\" type=\"button\">'+STRINGS.reloadComments"));
+    assert.ok(dashboardWebviewScript.includes("id=\"add-comment-btn\" type=\"button\">'+actionIcon('comment')+esc(STRINGS.addCommentAction)"));
+    assert.ok(dashboardWebviewScript.includes("id=\"reload-comments-btn\" type=\"button\">'+actionIcon('refresh')+esc(STRINGS.reloadComments)"));
     assert.ok(dashboardStyles.includes("body.vscode-high-contrast"));
     assert.ok(dashboardStyles.includes("@media (max-width: 699px)"));
     assert.ok(dashboardStyles.includes("@media (max-width: 480px)"));

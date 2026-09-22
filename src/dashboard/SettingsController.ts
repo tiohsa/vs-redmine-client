@@ -87,6 +87,7 @@ export class SettingsController {
       "ticketList.showDueDate",
       "ticketList.showTracker",
       "ticketList.showPriority",
+      "ticketList.showAssignee",
     ]) {
       await resetConfigurationValue(config, section);
     }
@@ -145,6 +146,11 @@ export class SettingsController {
       await vscode.workspace
         .getConfiguration("redmine-client")
         .update("ticketList.showPriority", patch.showPriority, vscode.ConfigurationTarget.Global);
+    }
+    if (patch.showAssignee !== undefined) {
+      await vscode.workspace
+        .getConfiguration("redmine-client")
+        .update("ticketList.showAssignee", patch.showAssignee, vscode.ConfigurationTarget.Global);
     }
     if (patch.ticketListLimit !== undefined && patch.ticketListLimit >= 1 && patch.ticketListLimit <= 500) {
       await vscode.workspace

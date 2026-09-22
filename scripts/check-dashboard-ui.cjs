@@ -164,6 +164,36 @@ async function main() {
   assert.equal(await evaluate(`document.querySelector('.detail-avatar').getAttribute('aria-label')`), 'Taro Yamada');
   await evaluate(`document.getElementById('ticket-detail-toggle').click()`);
   assert.equal(await evaluate(`document.querySelectorAll('.detail-avatar').length`), 1);
+  // 設定の操作・再描画で一覧の担当者のみを非表示にする。
+  await evaluate(`document.getElementById('set-show-assignee').click()`);
+  assert.deepEqual(await evaluate(`window.messages.at(-1).patch`), { showAssignee: false });
+  state.settings.showAssignee = false;
+  await push();
+  assert.equal(await evaluate(`document.querySelectorAll('.ticket-avatar').length`), 0);
+  assert.equal(await evaluate(`document.querySelectorAll('.detail-avatar').length`), 1);
+  assert.equal(await evaluate(`document.getElementById('set-show-assignee').checked`), false);
+  state.settings.showAssignee = true;
+  await push();
+  assert.equal(await evaluate(`document.querySelectorAll('.ticket-avatar').length`), 1);
+  assert.equal(await evaluate(`document.getElementById('set-show-assignee').checked`), true);
+
+  // 一覧・詳細・コメント・未同期の同じ操作はラベルと SVG が一致する。
+  state.comments.items = [{ id: 20, authorName: 'Taro', body: 'Comment', editableByCurrentUser: true, syncKey: { kind: 'comment', ticketId: 10, commentId: 20 } }];
+  state.unsynced = { totalCount: 1, items: [{ key: { kind: 'ticket', ticketId: 10 }, label: 'Ticket', documentUri: 'file:///tmp/ticket.md', lifecycle: 'queued' }] };
+  await push();
+  async function assertSameAction(selectors) {
+    const appearances = await evaluate(`(${JSON.stringify(selectors)}).map(selector=>{const button=document.querySelector(selector);return {label:button.textContent.trim(),icon:button.querySelector('svg').outerHTML};})`);
+    appearances.slice(1).forEach(actual => assert.deepEqual(actual, appearances[0]));
+  }
+  await assertSameAction(['[data-ticket-action="open"]', '#detail-open-btn', '[data-edit-comment]', '[data-uri]']);
+  await assertSameAction(['[data-ticket-action="comment"]', '#detail-comment-btn', '#add-comment-btn']);
+  await assertSameAction(['[data-ticket-action="browser"]', '#detail-browser-btn', '[data-open-comment]']);
+  await assertSameAction(['#refresh-btn', '[data-ticket-action="refresh"]']);
+  await assertSameAction(['#detail-sync-btn', '[data-sync-key]', '[data-sync-comment-key]']);
+  assert.equal(await evaluate(`document.querySelector('#sync-all-btn svg').outerHTML`), await evaluate(`document.querySelector('#detail-sync-btn svg').outerHTML`));
+  state.comments.items = [];
+  state.unsynced = { totalCount: 0, items: [] };
+  await push();
   for (const assigneeName of [undefined, null, '', '   ']) {
     if (assigneeName === undefined) delete state.tickets[0].assigneeName;
     else state.tickets[0].assigneeName = assigneeName;

@@ -46,6 +46,7 @@ const DEFAULT_STATE: DashboardState = {
     showDueDate: true,
     showTracker: true,
     showPriority: true,
+    showAssignee: true,
     editorStorageDirectory: "",
     editorDefaults: {
       subject: "",

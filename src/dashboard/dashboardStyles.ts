@@ -177,7 +177,7 @@ button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-
 .ticket-row:hover .ticket-action-btn, .ticket-row:focus-within .ticket-action-btn, .ticket-row.selected .ticket-action-btn, .ticket-action-btn[aria-expanded="true"] { opacity: 1; }
 .ticket-action-btn:hover, .ticket-action-btn[aria-expanded="true"] { background: var(--app-surface-hover); color: var(--app-accent); }
 .ticket-action-menu { position: fixed; z-index: 20; display: flex; min-width: 156px; max-width: calc(100vw - 16px); max-height: calc(100vh - 16px); overflow-y: auto; flex-direction: column; gap: 2px; padding: 5px; border: 1px solid var(--app-border); border-radius: var(--app-radius-md); background: var(--app-surface-raised); box-shadow: var(--app-shadow); }
-.ticket-action-menu button { padding: 6px 9px; border: 0; border-radius: var(--app-radius-sm); background: transparent; color: var(--app-text); cursor: pointer; text-align: left; font-size: 11px; }
+.ticket-action-menu button { display: flex; align-items: center; gap: 6px; padding: 6px 9px; border: 0; border-radius: var(--app-radius-sm); background: transparent; color: var(--app-text); cursor: pointer; text-align: left; font-size: 11px; }
 .ticket-action-menu button:hover, .ticket-action-menu button:focus-visible { background: var(--app-surface-hover); color: var(--app-accent); outline: 0; }
 .expand-btn { display: inline-flex; flex: 0 0 20px; width: 20px; height: 24px; align-items: center; justify-content: center; padding: 0; border: 0; border-radius: var(--app-radius-sm); background: transparent; color: var(--app-text-secondary); cursor: pointer; }
 .expand-btn:hover { background: var(--app-surface-hover); color: var(--app-accent); }
@@ -259,12 +259,6 @@ button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-
 .btn-icon-label { min-width: 30px; }
 .btn-icon-label .btn-label { display: inline; }
 .btn-primary-new { white-space: nowrap; }
-.icon-refresh { display: inline-block; width: 13px; height: 13px; border: 2px solid currentColor; border-top-color: transparent; border-radius: 50%; }
-.icon-plus { position: relative; display: inline-block; width: 12px; height: 12px; }
-.icon-plus::before, .icon-plus::after { position: absolute; top: 5px; left: 1px; width: 10px; height: 2px; border-radius: 2px; background: currentColor; content: ""; }
-.icon-plus::after { transform: rotate(90deg); }
-.icon-sync { position: relative; display: inline-block; width: 13px; height: 13px; border: 2px solid currentColor; border-left-color: transparent; border-radius: 50%; }
-.icon-sync::after { position: absolute; right: -3px; bottom: -2px; width: 0; height: 0; border-width: 3px 0 3px 4px; border-style: solid; border-color: transparent transparent transparent currentColor; content: ""; }
 .action-icon { flex: 0 0 16px; width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; }
 .search-icon { position: absolute; left: 12px; color: var(--app-text-secondary); pointer-events: none; }
 

@@ -330,7 +330,7 @@ suite("Dashboard バリデーション拡張", () => {
   test("settings.updateGeneral: Display 設定の boolean patch を受け入れる", () => {
     const r = validateDashboardMessage({
       type: "settings.updateGeneral", requestId: "r",
-      patch: { showStatus: false, showDueDate: true, showTracker: false, showPriority: true },
+      patch: { showStatus: false, showDueDate: true, showTracker: false, showPriority: true, showAssignee: false },
     });
     assert.strictEqual(r.ok, true);
   });
@@ -341,6 +341,16 @@ suite("Dashboard バリデーション拡張", () => {
       patch: { showTracker: "yes" },
     });
     assert.strictEqual(r.ok, false);
+  });
+
+  test("settings.updateGeneral: 担当者表示は boolean のみ受け入れる", () => {
+    for (const value of [true, false, "false", 0, null, [], {}]) {
+      const result = validateDashboardMessage({
+        type: "settings.updateGeneral", requestId: "assignee",
+        patch: { showAssignee: value },
+      });
+      assert.strictEqual(result.ok, typeof value === "boolean");
+    }
   });
 
   test("settings.updateGeneral: 複数フィールドの正常ケース", () => {
