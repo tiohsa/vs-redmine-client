@@ -127,6 +127,13 @@ export interface DashboardStrings {
   discardLaterChangesAction: string;
   discardTitle: string;
   discardLaterChangesTitle: string;
+  moreActions: string;
+  abandonAction: string;
+  showAbandoned: string;
+  hideAbandoned: string;
+  abandonedCount: string;
+  processingRecord: string;
+  syncAbandoned: string;
   syncAllBtn: string;
   unsyncedCountLabel: string;
   // Comments tab
@@ -332,6 +339,13 @@ export const buildDashboardStrings = (): DashboardStrings => ({
   discardLaterChangesAction: vscode.l10n.t("Discard later changes"),
   discardTitle: vscode.l10n.t("Discard unsynced local changes"),
   discardLaterChangesTitle: vscode.l10n.t("Discard later local changes and keep the recovery checkpoint"),
+  moreActions: vscode.l10n.t("More actions"),
+  abandonAction: vscode.l10n.t("Abandon sync and exclude…"),
+  showAbandoned: vscode.l10n.t("Show abandoned items"),
+  hideAbandoned: vscode.l10n.t("Hide abandoned items"),
+  abandonedCount: vscode.l10n.t("Abandoned: {0}"),
+  processingRecord: vscode.l10n.t("Processing record"),
+  syncAbandoned: vscode.l10n.t("Sync abandoned"),
   syncAllBtn: vscode.l10n.t("Sync all"),
   unsyncedCountLabel: vscode.l10n.t("Unsynced changes: {0}"),
   // Comments tab

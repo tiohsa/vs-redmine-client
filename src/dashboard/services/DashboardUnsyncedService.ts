@@ -8,6 +8,9 @@ import {
   getOfflineSyncQueue,
   prepareOfflineDiscard,
   commitOfflineDiscardAsync,
+  prepareOfflineAbandon,
+  commitOfflineAbandonAsync,
+  isAbandoned,
 } from "../../views/offlineSyncStore";
 import type { OfflineTicketConflictExpectation } from "../../views/offlineSyncStore";
 import { buildUnsyncedDashboardItems } from "../viewModels/unsyncedDashboardViewModel";
@@ -69,7 +72,45 @@ export class DashboardUnsyncedService {
     this.deps.context.store.updateNested("unsynced", {
       totalCount: items.length,
       items,
+      abandonedItems: buildUnsyncedDashboardItems(true),
     });
+  }
+
+  async handleAbandonOne(requestId: string, key: DashboardUnsyncedKey): Promise<void> {
+    const scope = getCurrentConnectionScope();
+    const plan = prepareOfflineAbandon(key, scope);
+    if (!plan.expectation || isAbandoned(plan.expectation)) {
+      this.deps.context.notifyError(requestId, vscode.l10n.t("The unsynced item changed. Refresh and try again."));
+      return;
+    }
+    const target = buildUnsyncedDashboardItems().find((item) =>
+      JSON.stringify(item.key) === JSON.stringify(key));
+    const label = target?.label ?? vscode.l10n.t("Unsynced item");
+    const laterChanges = plan.expectation.nextIntent !== undefined
+      ? vscode.l10n.t("Later edits will also remain in the retained record and will not be synced automatically.")
+      : vscode.l10n.t("There are no later queued edits.");
+    const confirm = vscode.l10n.t("Abandon sync and exclude");
+    const selected = await vscode.window.showWarningMessage(
+      vscode.l10n.t("Abandon sync for this item?"),
+      {
+        modal: true,
+        detail: `${vscode.l10n.t("Connection: {0}", scope)}\n${vscode.l10n.t("Target: {0}", label)}\n${laterChanges}\n\n${vscode.l10n.t("This item will be removed from the unsynced list and future sync runs. Changes already applied to Redmine will not be undone. An unknown remote outcome will remain unknown. The local Markdown file and processing record will be retained.")}`,
+      },
+      confirm,
+    );
+    if (selected !== confirm) { return; }
+    const result = await commitOfflineAbandonAsync(plan);
+    this.refreshUnsynced();
+    this.deps.refreshTicketPresentation();
+    if (result === "abandoned") {
+      this.deps.context.notifySuccess(requestId, vscode.l10n.t("Sync abandoned. The processing record was retained."));
+    } else {
+      this.deps.context.notifyError(requestId, result === "busy"
+        ? vscode.l10n.t("This item is being synced. Wait for the current operation to finish and try again.")
+        : result === "persistence_failed"
+          ? vscode.l10n.t("Could not save the abandoned state. The item remains available for sync.")
+          : vscode.l10n.t("The unsynced item changed. Refresh and try again."));
+    }
   }
 
   async handleSyncOne(requestId: string, key: DashboardUnsyncedKey): Promise<void> {
@@ -371,11 +412,11 @@ export class DashboardUnsyncedService {
   private buildSelectedTicketSyncKeys(ticketId: number): DashboardUnsyncedKey[] {
     const queue = getOfflineSyncQueue(getCurrentConnectionScope());
     const keys: DashboardUnsyncedKey[] = [];
-    if (queue.tickets.has(ticketId)) {
+    if (queue.tickets.has(ticketId) && !isAbandoned(queue.tickets.get(ticketId)!)) {
       keys.push({ kind: "ticket", ticketId });
     }
     for (const comment of queue.comments) {
-      if (comment.ticketId !== ticketId) {
+      if (comment.ticketId !== ticketId || isAbandoned(comment)) {
         continue;
       }
       keys.push({

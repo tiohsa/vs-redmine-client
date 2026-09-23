@@ -364,7 +364,8 @@ export const validateDashboardMessage = (raw: unknown): ValidationResult => {
     }
 
     case "unsynced.syncOne":
-    case "unsynced.discardOne": {
+    case "unsynced.discardOne":
+    case "unsynced.abandonOne": {
       const key = raw["key"];
       if (!validateDashboardUnsyncedKey(key)) {
         return { ok: false, reason: `${type}: key is invalid` };

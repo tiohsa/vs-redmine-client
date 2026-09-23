@@ -21,9 +21,15 @@ import {
   transitionOfflineTicketUpdateLifecycleAsync,
   listSyncOperations,
   removeOfflineCommentEntryAsync,
+  prepareOfflineAbandon,
+  commitOfflineAbandonAsync,
+  beginActiveSync,
+  isAbandoned,
 } from "../views/offlineSyncStore";
 import { createTestMemento } from "./helpers/vscodeMemento";
 import { buildIssueMetadataFixture } from "./helpers/ticketMetadataFixtures";
+import { createSyncOperationRepository } from "../app/ticketSync/syncRepository";
+import { createSyncEngine } from "../app/syncEngine";
 
 const ticketUpdate = (ticketId: number) => {
   const metadata = buildIssueMetadataFixture();
@@ -1110,5 +1116,66 @@ suite("offlineSyncStore — workspaceState 永続化", () => {
     assert.strictEqual(operation.nextIntent?.body, "Later body 10000");
     assert.strictEqual(operation.nextIntent?.revision, 10_001);
     assert.strictEqual(getOfflineSyncQueue().comments.length, 1);
+  });
+});
+
+suite("offlineSyncStore — 同期中止", () => {
+  test("commit_unknown と後続編集の記録を保持し、再起動後も同期対象へ戻さない", async () => {
+    const storage = createTestMemento();
+    initializeOfflineSyncStore(storage, "scope-abandon");
+    await addOfflineCommentUpdateAsync({
+      ticketId: 902,
+      body: "original",
+      documentUri: "file:///comment-902.md",
+      phase: "commit_unknown",
+      nextIntent: { revision: 2, body: "later" },
+    }, "scope-abandon");
+    const key = { kind: "comment" as const, ticketId: 902, documentUri: "file:///comment-902.md" };
+    const repository = createSyncOperationRepository();
+    const beforeAbandon = repository.getOperation(key, "scope-abandon");
+    const result = await commitOfflineAbandonAsync(prepareOfflineAbandon(key, "scope-abandon"));
+    assert.strictEqual(result, "abandoned");
+    initializeOfflineSyncStore(storage, "scope-abandon");
+    const operation = getOfflineSyncQueue("scope-abandon").comments[0];
+    assert.ok(isAbandoned(operation));
+    assert.strictEqual(operation.phase, "commit_unknown");
+    assert.strictEqual(operation.nextIntent?.body, "later");
+    assert.strictEqual(listSyncOperations("scope-abandon").length, 0);
+    assert.strictEqual(repository.listOperations("scope-abandon").length, 0);
+    assert.strictEqual(repository.getOperation(key, "scope-abandon"), undefined);
+    const directSync = await createSyncEngine().syncOne(key, { connectionScope: "scope-abandon" });
+    assert.strictEqual(directSync.kind, "failed_before_commit");
+    assert.ok(beforeAbandon);
+    assert.strictEqual(await repository.saveOperation(beforeAbandon!, "scope-abandon"), undefined);
+    await addOfflineCommentUpdateAsync({ ticketId: 902, body: "later", documentUri: key.documentUri }, "scope-abandon");
+    assert.strictEqual(getOfflineSyncQueue("scope-abandon").comments.length, 1);
+    assert.strictEqual(getOfflineSyncQueue("scope-abandon").comments[0].body, "original");
+    await addOfflineCommentUpdateAsync({ ticketId: 902, body: "a new comment", documentUri: "file:///another-comment.md" }, "scope-abandon");
+    assert.strictEqual(repository.listOperations("scope-abandon").length, 1);
+    assert.strictEqual(getOfflineSyncQueue("another-scope").comments.length, 0);
+  });
+
+  test("確認後の変更、実行中、保存失敗では中止を公開しない", async () => {
+    const storage = createTestMemento();
+    let rejectWrites = false;
+    initializeOfflineSyncStore({
+      ...storage,
+      update: async (key, value) => {
+        if (rejectWrites) { throw new Error("storage unavailable"); }
+        await storage.update(key, value);
+      },
+    }, "scope-fence");
+    await addOfflineTicketUpdateAsync(903, ticketUpdate(903), "scope-fence");
+    const key = { kind: "ticket" as const, ticketId: 903 };
+    const stalePlan = prepareOfflineAbandon(key, "scope-fence");
+    await addOfflineTicketUpdateAsync(903, { ...ticketUpdate(903), description: "changed" }, "scope-fence");
+    assert.strictEqual(await commitOfflineAbandonAsync(stalePlan), "stale");
+    const plan = prepareOfflineAbandon(key, "scope-fence");
+    const end = beginActiveSync("scope-fence", plan.expectation?.operationId ?? "ticket:903");
+    assert.strictEqual(await commitOfflineAbandonAsync(plan), "busy");
+    end();
+    rejectWrites = true;
+    assert.strictEqual(await commitOfflineAbandonAsync(plan), "persistence_failed");
+    assert.strictEqual(isAbandoned(getOfflineSyncQueue("scope-fence").tickets.get(903)!), false);
   });
 });

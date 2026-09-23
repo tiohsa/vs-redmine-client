@@ -5,6 +5,8 @@ import {
   cancelQueuedTicketUpdateIfMatchesAsync,
   getActiveScope,
   getOfflineSyncQueue,
+  isAbandoned,
+  sameDocumentIdentity,
 } from "../offlineSyncStore";
 import { buildTicketEditorContent, parseTicketEditorContent } from "../ticketEditorContent";
 import { getTicketDraft, markDraftStatus, setTicketDraftContent, updateDraftAfterSave } from "../ticketDraftStore";
@@ -59,6 +61,9 @@ export const queueTicketDraft = async (
   const draft = getTicketDraft(input.ticketId, input.operationScope);
   if (!draft) {
     return buildResult("failed", "Missing draft state for ticket.");
+  }
+  if (isAbandoned(getOfflineSyncQueue(input.operationScope ?? getActiveScope()).tickets.get(input.ticketId) ?? {})) {
+    return buildResult("failed", vscode.l10n.t("Sync was abandoned for this ticket. Review the retained record before starting a new edit."));
   }
   if (containsConflictMarkers(input.content)) {
     return buildResult("failed", vscode.l10n.t("Resolve all merge conflict markers before syncing."));
@@ -655,6 +660,10 @@ export const queueNewTicketDraft = async (input: {
   operationScope?: string;
 }): Promise<TicketSaveResult> => {
   const content = input.editor.document.getText();
+  if (getOfflineSyncQueue(input.operationScope ?? getActiveScope()).newTickets.some((entry) =>
+    isAbandoned(entry) && sameDocumentIdentity(entry.documentUri, input.editor.document.uri.toString()))) {
+    return buildResult("failed", vscode.l10n.t("Sync was abandoned for this draft. Review the retained record before creating another ticket."));
+  }
   const validation = validateNewTicketContent(content);
   if (validation) {
     return validation;
@@ -675,6 +684,10 @@ export const queueNewTicketDraftContent = async (input: {
   projectId?: number;
   documentUri?: vscode.Uri;
 }): Promise<TicketSaveResult> => {
+  if (input.documentUri && getOfflineSyncQueue(input.operationScope ?? getActiveScope()).newTickets.some((entry) =>
+    isAbandoned(entry) && sameDocumentIdentity(entry.documentUri, input.documentUri?.toString()))) {
+    return buildResult("failed", vscode.l10n.t("Sync was abandoned for this draft. Review the retained record before creating another ticket."));
+  }
   const validation = validateNewTicketContent(input.content);
   if (validation) {
     return validation;

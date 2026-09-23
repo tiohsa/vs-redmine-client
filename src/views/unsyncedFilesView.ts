@@ -2,6 +2,7 @@ import * as vscode from "vscode";
 import {
   getOfflineSyncLifecycle,
   getOfflineSyncQueue,
+  isAbandoned,
   onOfflineSyncQueueChanged,
 } from "./offlineSyncStore";
 import { formatTicketLabel } from "./ticketLabel";
@@ -101,6 +102,7 @@ export class UnsyncedFilesTreeProvider
     const items: vscode.TreeItem[] = [];
 
     queue.tickets.forEach((update, ticketId) => {
+      if (isAbandoned(update)) { return; }
       const subject = getTicketSummary(ticketId);
       const label = subject
         ? `${formatTicketLabel(ticketId)} ${subject}`
@@ -123,6 +125,7 @@ export class UnsyncedFilesTreeProvider
     });
 
     for (const comment of queue.comments) {
+      if (isAbandoned(comment)) { continue; }
       const base = formatTicketLabel(comment.ticketId);
       if (comment.commentId !== undefined) {
         items.push(
@@ -148,6 +151,7 @@ export class UnsyncedFilesTreeProvider
     }
 
     for (const newTicket of queue.newTickets) {
+      if (isAbandoned(newTicket)) { continue; }
       const tooltipParts = [vscode.l10n.t("Type: New ticket")];
       if (newTicket.projectId !== undefined) {
         tooltipParts.push(vscode.l10n.t("Project ID: {0}", newTicket.projectId));

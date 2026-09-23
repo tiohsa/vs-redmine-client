@@ -84,6 +84,7 @@ export type OfflineTicketUpdate = {
   nextIntent?: TicketUpdateIntentSnapshot;
   createdAt?: number;
   effects?: DurableSyncEffect[];
+  disposition?: SyncDisposition;
 };
 
 export type OfflineCommentUpdate = {
@@ -103,6 +104,7 @@ export type OfflineCommentUpdate = {
   revision?: number;
   intentRevision?: number;
   effects?: DurableSyncEffect[];
+  disposition?: SyncDisposition;
   remoteProjectId?: number;
   finalizeDraft?: boolean;
   nextIntent?: CommentIntentSnapshot;
@@ -132,6 +134,7 @@ export type SyncOperation = {
   documentUri?: string;
   createdAt: number;
   effects: DurableSyncEffect[];
+  disposition?: SyncDisposition;
   payload: OfflineNewTicket | OfflineTicketUpdate | OfflineCommentUpdate;
 };
 
@@ -161,7 +164,12 @@ export type OfflineNewTicket = {
   nextIntent?: NewTicketIntentSnapshot;
   createdAt?: number;
   effects?: DurableSyncEffect[];
+  disposition?: SyncDisposition;
 };
+
+export type SyncDisposition = { kind: "abandoned"; abandonedAt: number };
+export const isAbandoned = (operation: { disposition?: SyncDisposition }): boolean =>
+  operation.disposition?.kind === "abandoned";
 
 export type OfflineSyncQueue = {
   tickets: Map<number, OfflineTicketUpdate>;
@@ -187,6 +195,9 @@ export type OfflineDiscardPlan = {
   readonly mode: OfflineDiscardMode;
   readonly expectation: StoredOfflineOperation | undefined;
 };
+
+export type OfflineAbandonPlan = Pick<OfflineDiscardPlan, "key" | "scope" | "expectation">;
+export type OfflineAbandonResult = "abandoned" | "not_found" | "stale" | "busy" | "persistence_failed";
 
 export type QueuedTicketCancellationExpectation = {
   operationId?: string;
@@ -340,6 +351,17 @@ let activeScope = "";
 export const getActiveScope = (): string => activeScope;
 const queuesByScope = new Map<string, OfflineSyncQueue>();
 const persistenceByScope = new Map<string, Promise<void>>();
+const activeSyncs = new Map<string, number>();
+const activeSyncKey = (scope: string, operationId: string): string => `${scope}\0${operationId}`;
+export const beginActiveSync = (scope: string, operationId: string): (() => void) => {
+  const key = activeSyncKey(scope, operationId);
+  activeSyncs.set(key, (activeSyncs.get(key) ?? 0) + 1);
+  return () => {
+    const remaining = (activeSyncs.get(key) ?? 1) - 1;
+    if (remaining) { activeSyncs.set(key, remaining); }
+    else { activeSyncs.delete(key); }
+  };
+};
 
 /**
  * Scope単位の永続 mutation mutex。
@@ -593,6 +615,7 @@ const businessPayload = <T extends OfflineNewTicket | OfflineTicketUpdate | Offl
   delete copy.revision;
   delete copy.createdAt;
   delete copy.effects;
+  delete copy.disposition;
   return copy;
 };
 
@@ -613,6 +636,7 @@ const operationFromTicketUpdate = (
   documentUri: update.documentUri,
   createdAt: update.createdAt ?? 0,
   effects: normalizeOperationEffects({ kind: "ticketUpdate", revision, attemptGeneration: getAttemptGeneration(update), phase, payload: update, effects: update.effects }),
+  disposition: update.disposition,
   payload: businessPayload(update),
   });
 };
@@ -633,6 +657,7 @@ const operationFromNewTicket = (
   documentUri: ticket.documentUri,
   createdAt: ticket.createdAt ?? 0,
   effects: normalizeOperationEffects({ kind: "ticketCreate", revision, attemptGeneration: getAttemptGeneration(ticket), phase, payload: ticket, effects: ticket.effects }),
+  disposition: ticket.disposition,
   payload: businessPayload(ticket),
   });
 };
@@ -664,6 +689,7 @@ const operationFromComment = (
   documentUri: comment.documentUri,
   createdAt: comment.createdAt ?? 0,
   effects: normalizeOperationEffects({ kind, revision, attemptGeneration: getAttemptGeneration(comment), phase, payload: comment, effects: comment.effects }),
+  disposition: comment.disposition,
   payload: businessPayload(comment),
   });
 };
@@ -688,6 +714,7 @@ const queueFromOperations = (operations: SyncOperation[]): OfflineSyncQueue => {
           phase: operation.phase as NewTicketSyncPhase,
           createdAt: operation.createdAt,
           effects: normalizeOperationEffects({ ...operation, attemptGeneration: operation.attemptGeneration, effects: operation.effects }),
+          disposition: operation.disposition,
         }));
         break;
       case "ticketUpdate": {
@@ -701,6 +728,7 @@ const queueFromOperations = (operations: SyncOperation[]): OfflineSyncQueue => {
           phase: operation.phase as TicketUpdateSyncPhase,
           createdAt: operation.createdAt,
           effects: normalizeOperationEffects({ ...operation, attemptGeneration: operation.attemptGeneration, effects: operation.effects }),
+          disposition: operation.disposition,
         };
         queue.tickets.set(update.ticketId, normalizeTicketUpdate(update.ticketId, update));
         break;
@@ -717,6 +745,7 @@ const queueFromOperations = (operations: SyncOperation[]): OfflineSyncQueue => {
           phase: (operation.phase === "remote_write_started" ? "commit_unknown" : operation.phase) as TicketUpdateSyncPhase,
           createdAt: operation.createdAt,
           effects: normalizeOperationEffects({ ...operation, attemptGeneration: operation.attemptGeneration, effects: operation.effects }),
+          disposition: operation.disposition,
         }, operation.connectionScope, queue.comments.length);
         queue.comments.push(comment);
         break;
@@ -1066,7 +1095,7 @@ const deserializeQueue = (raw: SerializedQueue | undefined): OfflineSyncQueue =>
 
 /** Returns the canonical, persisted representation of pending work. */
 export const listSyncOperations = (scope = activeScope): SyncOperation[] =>
-  structuredClone(operationsFromQueue(getQueue(scope), scope));
+  structuredClone(operationsFromQueue(getQueue(scope), scope).filter((operation) => !isAbandoned(operation)));
 
 export const getSyncOperation = (
   operationId: string,
@@ -1283,6 +1312,7 @@ export const addOfflineTicketUpdateAsync = (
   scope = activeScope,
 ): Promise<void> => mutateQueueAsync(scope, (queue) => {
   const existing = queue.tickets.get(ticketId);
+  if (existing && isAbandoned(existing)) { return skipQueueMutation(undefined); }
   queue.tickets.set(ticketId, mergeOfflineTicketUpdate(ticketId, existing, update));
   return commitQueueMutation(undefined);
 });
@@ -1294,7 +1324,7 @@ export const updateQueuedTicketIntentAsync = (
   update: (current: TicketEditorContent) => TicketEditorContent,
 ): Promise<TicketEditorContent | undefined> => mutateQueueAsync(scope, (queue) => {
   const existing = queue.tickets.get(ticketId);
-  if (!existing) {
+  if (!existing || isAbandoned(existing)) {
     return skipQueueMutation(undefined);
   }
   const current = existing.nextIntent ?? existing;
@@ -1381,6 +1411,7 @@ export const addOfflineCommentUpdateAsync = (
   );
   if (index !== -1) {
     const existing = queue.comments[index];
+    if (isAbandoned(existing)) { return skipQueueMutation(undefined); }
     if (existing.phase && existing.phase !== "queued" && existing.phase !== "completed") {
       const revision = Math.max(existing.revision ?? 1, existing.nextIntent?.revision ?? 0) + 1;
       queue.comments[index] = {
@@ -1507,6 +1538,7 @@ export const addOfflineNewTicketAsync = async (
       : -1;
   const queueId = update.queueId ?? randomUUID();
   const existing = index === -1 ? undefined : queue.newTickets[index];
+  if (existing && isAbandoned(existing)) { return skipQueueMutation(existing); }
   const entry: OfflineNewTicket = index === -1
     ? {
       ...update,
@@ -1873,6 +1905,37 @@ export const prepareOfflineDiscard = (
   };
 };
 
+export const prepareOfflineAbandon = (key: OfflineDiscardKey, scope: string): OfflineAbandonPlan => ({
+  key: structuredClone(key),
+  scope,
+  expectation: structuredClone(resolveOfflineDiscardTarget(getQueue(scope), key)),
+});
+
+export const commitOfflineAbandonAsync = async (plan: OfflineAbandonPlan): Promise<OfflineAbandonResult> => {
+  try {
+    return await mutateQueueAsync(plan.scope, (queue) => {
+      if (!plan.expectation) { return skipQueueMutation("not_found" as const); }
+      const operation = resolveOfflineDiscardTarget(queue, plan.key);
+      if (!operation || !isDeepStrictEqual(operation, plan.expectation) ||
+          (operation.connectionScope !== undefined && operation.connectionScope !== plan.scope) ||
+          isAbandoned(operation)) {
+        return skipQueueMutation("stale" as const);
+      }
+      if (activeSyncs.has(activeSyncKey(plan.scope, operation.operationId ??
+          ("queueId" in operation ? operation.queueId : `ticket:${operation.ticketId}`)))) {
+        return skipQueueMutation("busy" as const);
+      }
+      replaceStoredOperationInQueue(queue, operation, {
+        ...operation,
+        disposition: { kind: "abandoned", abandonedAt: Date.now() },
+      });
+      return commitQueueMutation("abandoned" as const);
+    });
+  } catch {
+    return "persistence_failed";
+  }
+};
+
 export const commitOfflineDiscardAsync = async (
   plan: OfflineDiscardPlan,
 ): Promise<OfflineDiscardResult> => {
@@ -1883,7 +1946,7 @@ export const commitOfflineDiscardAsync = async (
       }
       const operation = resolveOfflineDiscardTarget(queue, plan.key);
       if (!operation || !isDeepStrictEqual(operation, plan.expectation) ||
-        evaluateOfflineSyncPolicy(operation).discardMode !== plan.mode) {
+        evaluateOfflineSyncPolicy(operation).discardMode !== plan.mode || isAbandoned(operation)) {
         return skipQueueMutation("stale");
       }
       if (plan.mode === "none") {
@@ -1930,6 +1993,7 @@ export const completeOfflineNewTicketAsync = async (
         return skipQueueMutation(true);
       }
       const current = queue.newTickets[index];
+      if (isAbandoned(current)) { return skipQueueMutation(false); }
       if (expectedRevision === undefined || current.revision !== expectedRevision) {
         return skipQueueMutation(false);
       }
@@ -2227,6 +2291,7 @@ export const completeOfflineTicketUpdateAsync = async (
       if (!current) {
         return skipQueueMutation(true);
       }
+      if (isAbandoned(current)) { return skipQueueMutation(false); }
       if (expectedRevision === undefined || (current.intentRevision ?? current.revision) !== expectedRevision) {
         return skipQueueMutation(false);
       }
@@ -2437,6 +2502,7 @@ export const completeOfflineCommentAsync = async (
       const index = findCommentIndex(queue, key);
       if (index === -1) { return skipQueueMutation(true); }
       const current = queue.comments[index];
+      if (isAbandoned(current)) { return skipQueueMutation(false); }
       if ((current.intentRevision ?? current.revision) !== expectedRevision) { return skipQueueMutation(false); }
       queue.comments = current.nextIntent
         ? queue.comments.map((comment, currentIndex) =>

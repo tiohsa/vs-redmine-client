@@ -36,6 +36,7 @@ import {
   completeOfflineNewTicketAsync,
   completeOfflineTicketUpdateAsync,
   getOfflineSyncQueue,
+  isAbandoned,
   mutateOfflineSyncQueueAsync,
   removeOfflineCommentEntryAsync,
   removeOfflineNewTicketAsync,
@@ -398,6 +399,16 @@ export class DefaultSyncOperationRepository implements SyncOperationRepository {
 
   public getOperation<I extends SyncIntent = SyncIntent>(key: SyncOperationKey, scope: string): UnifiedSyncOperation<I> | undefined {
     const queue = getOfflineSyncQueue(scope);
+    const abandoned = key.kind === "ticket"
+      ? queue.tickets.get(key.ticketId)
+      : key.kind === "newTicket"
+        ? queue.newTickets.find((item) =>
+            (key.queueId !== undefined && item.queueId === key.queueId) ||
+            (key.documentUri !== undefined && sameDocumentIdentity(item.documentUri, key.documentUri)))
+        : queue.comments.find((item) => item.ticketId === key.ticketId && (
+            (key.commentId !== undefined && item.commentId === key.commentId) ||
+            (key.documentUri !== undefined && item.documentUri === key.documentUri)));
+    if (abandoned && isAbandoned(abandoned)) { return undefined; }
     const operation = getOperationFromQueue(queue, key, scope);
     if (operation) {
       return operation as UnifiedSyncOperation<I>;
@@ -411,12 +422,15 @@ export class DefaultSyncOperationRepository implements SyncOperationRepository {
     const operations: UnifiedSyncOperation[] = [];
 
     for (const ticket of queue.tickets.values()) {
+      if (isAbandoned(ticket)) { continue; }
       operations.push(toUnifiedOperationFromTicket(ticket, scope));
     }
     for (const newTicket of queue.newTickets) {
+      if (isAbandoned(newTicket)) { continue; }
       operations.push(toUnifiedOperationFromNewTicket(newTicket, scope));
     }
     for (const comment of queue.comments) {
+      if (isAbandoned(comment)) { continue; }
       operations.push(toUnifiedOperationFromComment(comment, scope));
     }
 
@@ -454,6 +468,16 @@ export class DefaultSyncOperationRepository implements SyncOperationRepository {
     try {
       return await mutateOfflineSyncQueueAsync(scope, (nextQueue) => {
     const key = getOperationKey(operation);
+    const stored = key.kind === "ticket"
+      ? nextQueue.tickets.get(key.ticketId)
+      : key.kind === "newTicket"
+        ? nextQueue.newTickets.find((item) =>
+            (key.queueId !== undefined && item.queueId === key.queueId) ||
+            (key.documentUri !== undefined && sameDocumentIdentity(item.documentUri, key.documentUri)))
+        : nextQueue.comments.find((item) => item.ticketId === key.ticketId && (
+            (key.commentId !== undefined && item.commentId === key.commentId) ||
+            (key.documentUri !== undefined && item.documentUri === key.documentUri)));
+    if (stored && isAbandoned(stored)) { return undefined; }
     const current = getOperationFromQueue(nextQueue, key, scope);
 
     if (options?.requireExisting && !current) {

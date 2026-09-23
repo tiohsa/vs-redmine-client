@@ -23,6 +23,7 @@ export type DashboardSyncState =
   | "Syncing"
   | "RecoveryPending"
   | "CommitUnknown"
+  | "Abandoned"
   | "Failed"
   | "Conflict";
 
@@ -117,6 +118,9 @@ export interface DashboardUnsyncedItem {
   discardMode?: "active" | "nextIntent" | "none";
   canSync?: boolean;
   requiresReview?: boolean;
+  abandonedAt?: number;
+  hasLaterChanges?: boolean;
+  processingRecord?: string;
 }
 
 export interface DashboardCommentItem {
@@ -230,6 +234,7 @@ export interface DashboardState {
   unsynced: {
     totalCount: number;
     items: DashboardUnsyncedItem[];
+    abandonedItems?: DashboardUnsyncedItem[];
   };
   comments: {
     ticketId?: number;
@@ -325,6 +330,7 @@ export type DashboardRequest =
   | { type: "unsynced.openLocalFile"; requestId: string; documentUri: string }
   | { type: "unsynced.syncOne"; requestId: string; key: DashboardUnsyncedKey }
   | { type: "unsynced.discardOne"; requestId: string; key: DashboardUnsyncedKey }
+  | { type: "unsynced.abandonOne"; requestId: string; key: DashboardUnsyncedKey }
   | { type: "unsynced.syncAll"; requestId: string }
   | { type: "settings.update"; requestId: string; patch: DashboardSettingsPatch }
   | { type: "settings.reset"; requestId: string }

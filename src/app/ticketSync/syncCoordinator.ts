@@ -39,6 +39,7 @@ import {
   RecoveryItem,
 } from "../syncEffects";
 import type { SyncContext } from "./ports";
+import { beginActiveSync } from "../../views/offlineSyncStore";
 
 export type SyncAllStopReason = "completed" | "user_cancelled" | "blocked_by_recovery" | "failed";
 
@@ -259,11 +260,13 @@ export class SyncCoordinator {
     }
 
     const runner = options.runInConnectionScope ?? runWithConnectionScope;
+    const endActiveSync = beginActiveSync(scope, operation.operationId);
     const flightPromise = runner(scope, async () => {
       try {
         return await this.executeSyncLifecycle(operation, context, options);
       } finally {
         this.inFlight.delete(flightKey);
+        endActiveSync();
       }
     });
 
@@ -646,6 +649,7 @@ export class SyncCoordinator {
     }
 
     const runner = (input as any).runInConnectionScope ?? runWithConnectionScope;
+    const endActiveSync = beginActiveSync(scope, op.operationId);
     const flightPromise = runner(scope, async (): Promise<SyncOutcome> => {
       const freshOp = this.repository.getOperation(input.key, scope);
       const freshRevision = freshOp?.intentRevision ?? freshOp?.revision ?? 1;
@@ -1071,6 +1075,7 @@ export class SyncCoordinator {
       return await flightPromise;
     } finally {
       this.inFlight.delete(flightKey);
+      endActiveSync();
     }
   }
 
@@ -1223,6 +1228,7 @@ export class SyncCoordinator {
       return this.inFlight.get(flightKey)!;
     }
 
+    const endActiveSync = beginActiveSync(scope, op.operationId);
     const flightPromise: Promise<SyncOutcome> = (async (): Promise<SyncOutcome> => {
       const handler = this.handlers[op.kind];
       const handlerCtx: OperationHandlerContext = { connectionScope: scope };
@@ -1251,6 +1257,7 @@ export class SyncCoordinator {
       return await flightPromise;
     } finally {
       this.inFlight.delete(flightKey);
+      endActiveSync();
     }
   }
 
