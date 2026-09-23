@@ -42,8 +42,7 @@ suite("Dashboard quick-filter metadata", () => {
       assert.strictEqual(store.getState().currentUserId, undefined);
 
       resolveUserId(42);
-      await currentUserId;
-      await Promise.resolve();
+      await new Promise((resolve) => setTimeout(resolve, 0));
       assert.strictEqual(store.getState().currentUserId, 42);
     } finally {
       controller.dispose();

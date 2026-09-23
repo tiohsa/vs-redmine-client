@@ -33,7 +33,7 @@ function send(message){ vscode.postMessage(message); }
 function req(type, extra){
   const requestId='req-'+(++requestCounter);
   if(type === 'unsynced.syncOne' || type === 'unsynced.syncAll') unsyncedFeedbackRequests.add(requestId);
-  if(type === 'ticket.syncSelected'){
+  if(type === 'ticket.syncSelected' || type === 'ticket.reviewConflict'){
     if(activeSyncRequests.size || state?.selectedTicket?.syncState === 'Syncing' || metadataEdit?.requestId) return;
     ticketSyncRequests.set(requestId,extra.ticketId);
     activeSyncRequests.add(requestId);
@@ -117,22 +117,45 @@ function startOperation(requestId, label){
   if(unsyncedFeedbackRequests.has(requestId)) setOperationFeedback('info', label || STRINGS.syncSyncing);
   updateSyncButtonStates();
 }
+function deriveSyncTrayState(){
+  const all=flattenAll(state.tickets || []);
+  const items=state.unsynced.items || [];
+  const count=state.unsynced.totalCount || 0;
+  const conflict=all.find(function(ticket){ return ticket.syncState === 'Conflict' && Number.isSafeInteger(ticket.id) && ticket.id > 0; });
+  if(conflict) return {kind:'conflict',ticketId:conflict.id,count:count};
+  const hasRecovery=all.some(function(ticket){ return ticket.syncState === 'RecoveryPending' || ticket.syncState === 'CommitUnknown'; }) || items.some(function(item){ return ['recovery_pending','commit_unknown'].includes(item.lifecycle); });
+  if(hasRecovery) return {kind:'recovery',count:count};
+  const failed=all.find(function(ticket){ return ticket.syncState === 'Failed' && Number.isSafeInteger(ticket.id) && ticket.id > 0; });
+  if(failed){
+    const hasTicketQueue=items.some(function(item){ return item.key?.kind === 'ticket' && item.key.ticketId === failed.id; });
+    return {kind:hasTicketQueue?'failedQueued':'failedTicket',ticketId:failed.id,count:count};
+  }
+  return count ? {kind:'pending',count:count} : {kind:'clear'};
+}
 function renderSyncTray(){
   if(!state) return;
   const tray=document.getElementById('sync-tray'); tray.replaceChildren();
-  const all=flattenAll(state.tickets || []);
-  const attentionStates=['Conflict','RecoveryPending','CommitUnknown','Failed'];
-  const hasAttention=all.some(function(ticket){ return attentionStates.includes(ticket.syncState); }) || (state.unsynced.items || []).some(function(item){ return ['recovery_pending','commit_unknown'].includes(item.lifecycle); });
-  const count=state.unsynced.totalCount || 0;
+  const model=deriveSyncTrayState();
   const message=document.createElement('span'); message.className='sync-tray-message';
-  message.textContent=hasAttention ? '⚠ '+STRINGS.syncTrayAttention+' · '+STRINGS.syncTrayItems.replace('{0}',String(count)) : count ? '↑ '+STRINGS.syncTrayItems.replace('{0}',String(count)) : '✓ '+STRINGS.syncTrayAllClear;
+  message.textContent=model.kind === 'failedTicket'
+    ? '⚠ '+STRINGS.syncTrayAttention+' · '+STRINGS.syncTrayFailedTicket.replace('{0}',String(model.ticketId))
+    : model.kind === 'clear'
+      ? '✓ '+STRINGS.syncTrayAllClear
+      : model.kind === 'pending'
+        ? '↑ '+STRINGS.syncTrayItems.replace('{0}',String(model.count))
+        : '⚠ '+STRINGS.syncTrayAttention+' · '+STRINGS.syncTrayItems.replace('{0}',String(model.count));
   tray.appendChild(message);
   const addButton=function(label,primary,action,syncAction){ const button=document.createElement('button'); button.type='button'; button.className='btn '+(primary?'btn-primary':'btn-secondary'); button.textContent=label; if(syncAction) button.dataset.syncTrayAction='true'; button.disabled=!!syncAction && activeSyncRequests.size > 0; button.addEventListener('click',function(){ if(syncAction) button.disabled=true; action(); }); tray.appendChild(button); };
-  if(hasAttention){
-    const conflict=all.find(function(ticket){ return ticket.syncState === 'Conflict'; });
-    if(conflict) addButton(STRINGS.syncTrayReviewConflict,false,function(){ activateTab('tickets'); req('ticket.syncSelected',{ticketId:conflict.id}); },true);
+  if(model.kind === 'conflict'){
+    addButton(STRINGS.syncTrayReviewConflict,false,function(){ activateTab('tickets'); req('ticket.reviewConflict',{ticketId:model.ticketId}); },true);
     addButton(STRINGS.syncTrayOpenUnsynced,true,function(){ activateTab('unsynced'); });
-  } else if(count) addButton(STRINGS.syncAllBtn,true,function(){ req('unsynced.syncAll'); },true);
+  } else if(model.kind === 'recovery' || model.kind === 'failedQueued'){
+    addButton(STRINGS.syncTrayOpenUnsynced,true,function(){ activateTab('unsynced'); });
+  } else if(model.kind === 'failedTicket'){
+    addButton(STRINGS.syncTrayOpenEditor,true,function(){ activateTab('tickets'); req('ticket.openEditor',{ticketId:model.ticketId}); });
+  } else if(model.kind === 'pending'){
+    addButton(STRINGS.syncAllBtn,true,function(){ req('unsynced.syncAll'); },true);
+  }
 }
 function endOperation(requestId){ ticketSyncRequests.delete(requestId); activeSyncRequests.delete(requestId); updateSyncButtonStates(); }
 function finishMetadataOperation(requestId, succeeded){
@@ -331,9 +354,27 @@ function syncExpandedState(nodes){
   for(const node of nodes || []){ if(node.children && node.children.length && !collapsedTicketIds.has(node.id)) expandedTicketIds.add(node.id); syncExpandedState(node.children); }
 }
 function matchesSearch(ticket){ return !searchQuery || String(ticket.id).indexOf(searchQuery) >= 0 || String(ticket.subject || '').toLowerCase().indexOf(searchQuery) >= 0; }
+function hasStatusClosureMetadata(){
+  return (state?.metadataOptions?.statuses || []).some(function(item){ return typeof item.isClosed === 'boolean'; });
+}
+function isQuickFilterAvailable(name){
+  if(!state) return true;
+  if(name === 'mine') return Number.isSafeInteger(state.currentUserId);
+  if(name === 'open') return hasStatusClosureMetadata();
+  return true;
+}
+function pruneUnavailableQuickFilters(){
+  if(!state) return false;
+  let changed=false;
+  Array.from(quickFilters).forEach(function(name){
+    if(!isQuickFilterAvailable(name)){ quickFilters.delete(name); changed=true; }
+  });
+  if(changed) persistViewState();
+  return changed;
+}
 function matchesQuickFilters(ticket){
-  if(quickFilters.has('mine') && Number.isSafeInteger(state.currentUserId) && ticket.assigneeId !== state.currentUserId) return false;
-  if(quickFilters.has('open') && (state.metadataOptions?.statuses || []).some(function(item){ return typeof item.isClosed === 'boolean'; })){
+  if(quickFilters.has('mine') && isQuickFilterAvailable('mine') && ticket.assigneeId !== state.currentUserId) return false;
+  if(quickFilters.has('open') && isQuickFilterAvailable('open')){
     const status=(state.metadataOptions?.statuses || []).find(function(item){ return item.id === ticket.statusId; });
     if(!status || status.isClosed !== false) return false;
   }
@@ -342,12 +383,13 @@ function matchesQuickFilters(ticket){
   return true;
 }
 function renderQuickFilters(){
+  pruneUnavailableQuickFilters();
   document.querySelectorAll('[data-quick-filter]').forEach(function(button){
     const name=button.dataset.quickFilter;
-    const disabled=name === 'mine' ? !Number.isSafeInteger(state.currentUserId) : name === 'open' ? !(state.metadataOptions?.statuses || []).some(function(item){ return typeof item.isClosed === 'boolean'; }) : false;
+    const disabled=!isQuickFilterAvailable(name);
     button.disabled=disabled;
     button.title=disabled ? (name === 'mine' ? STRINGS.quickMyIssuesUnavailable : STRINGS.quickOpenUnavailable) : '';
-    button.setAttribute('aria-pressed',String(quickFilters.has(name)));
+    button.setAttribute('aria-pressed',String(!disabled && quickFilters.has(name)));
   });
 }
 

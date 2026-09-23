@@ -271,7 +271,7 @@ async function main() {
   await push();
   assert.ok(await evaluate(`document.getElementById('sync-tray').textContent.includes(${JSON.stringify(strings.syncTrayAttention)})`));
   await evaluate(`document.querySelector('#sync-tray [data-sync-tray-action]').click()`);
-  assert.equal(await evaluate(`window.messages.at(-1).type`), 'ticket.syncSelected');
+  assert.equal(await evaluate(`window.messages.at(-1).type`), 'ticket.reviewConflict');
   state.tickets[0].syncState = 'Queued';
   await evaluate(`window.dispatchEvent(new MessageEvent('message',{data:{type:'operation.success',requestId:window.messages.at(-1).requestId,message:'完了'}}))`);
   await push();

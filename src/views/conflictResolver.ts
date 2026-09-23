@@ -314,6 +314,7 @@ export async function handleConflict(
     deps: ConflictResolverDeps = defaultDeps,
     operationScope?: string,
     syncEngine: Pick<SyncEngine, "syncOne"> = createSyncEngine(),
+    expectedConflictOperation?: OfflineTicketConflictExpectation,
 ): Promise<TicketSaveResult> {
     if (result.status !== "conflict" || !result.conflictContext) {
         return result;
@@ -323,6 +324,18 @@ export async function handleConflict(
     const queuedAtDialogOpen = operationScope === undefined
         ? undefined
         : getOfflineSyncQueue(operationScope).tickets.get(context.ticketId);
+    if (expectedConflictOperation && (
+        !queuedAtDialogOpen ||
+        queuedAtDialogOpen.operationId !== expectedConflictOperation.operationId ||
+        queuedAtDialogOpen.revision !== expectedConflictOperation.revision ||
+        queuedAtDialogOpen.content !== expectedConflictOperation.content
+    )) {
+        return {
+            status: "conflict",
+            message: vscode.l10n.t("Remote changes detected. Refresh before saving."),
+            conflictContext: context,
+        };
+    }
     const expectedOperation = queuedAtDialogOpen
         ? {
             operationId: queuedAtDialogOpen.operationId,
@@ -332,6 +345,7 @@ export async function handleConflict(
             content: queuedAtDialogOpen.content,
         }
         : undefined;
+    registerConflictContext(context, expectedOperation);
     const resolution = await deps.showConflictDialog(context);
     if (expectedOperation && operationScope !== undefined) {
         const current = getOfflineSyncQueue(operationScope).tickets.get(context.ticketId);

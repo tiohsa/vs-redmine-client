@@ -147,6 +147,7 @@ export class DashboardController {
       context,
       refreshTicketPresentation: () => this.refreshTicketPresentation(),
       loadComments: (ticketId) => this.loadComments(ticketId),
+      openTicketEditor: (ticketId) => this.ticketService.openEditor(ticketId),
       syncEngine: opts.syncEngine,
     });
     this.metadataService = new DashboardMetadataService({
@@ -325,6 +326,9 @@ export class DashboardController {
       case "ticket.syncSelected":
         await this.handleSyncSelectedTicket(req.requestId, req.ticketId);
         break;
+      case "ticket.reviewConflict":
+        await this.handleReviewTicketConflict(req.requestId, req.ticketId);
+        break;
       case "comment.add":
         await this.commentService.addComment(req.ticketId);
         break;
@@ -499,6 +503,10 @@ export class DashboardController {
 
   private async handleSyncSelectedTicket(requestId: string, ticketId: number): Promise<void> {
     await this.unsyncedService.handleSyncSelectedTicket(requestId, ticketId);
+  }
+
+  private async handleReviewTicketConflict(requestId: string, ticketId: number): Promise<void> {
+    await this.unsyncedService.handleReviewConflict(requestId, ticketId);
   }
 
   private async handleSyncNewTicketDraftFromComposer(requestId: string): Promise<void> {

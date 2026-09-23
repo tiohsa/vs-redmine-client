@@ -211,6 +211,14 @@ export const validateDashboardMessage = (raw: unknown): ValidationResult => {
       return { ok: true, request: { type, requestId, ticketId } };
     }
 
+    case "ticket.reviewConflict": {
+      const ticketId = raw["ticketId"];
+      if (!isPositiveInt(ticketId)) {
+        return { ok: false, reason: "ticket.reviewConflict: ticketId must be a positive integer" };
+      }
+      return { ok: true, request: { type, requestId, ticketId } };
+    }
+
     case "ticket.openBrowser": {
       const ticketId = raw["ticketId"];
       if (!isPositiveInt(ticketId)) {

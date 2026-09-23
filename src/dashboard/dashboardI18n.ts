@@ -51,6 +51,8 @@ export interface DashboardStrings {
   syncTrayAttention: string;
   syncTrayReviewConflict: string;
   syncTrayOpenUnsynced: string;
+  syncTrayOpenEditor: string;
+  syncTrayFailedTicket: string;
   // Sync states
   syncDirty: string;
   syncQueued: string;
@@ -240,6 +242,8 @@ export const buildDashboardStrings = (): DashboardStrings => ({
   syncTrayAttention: vscode.l10n.t("Sync attention required"),
   syncTrayReviewConflict: vscode.l10n.t("Review conflict"),
   syncTrayOpenUnsynced: vscode.l10n.t("Open Unsynced"),
+  syncTrayOpenEditor: vscode.l10n.t("Open in Editor"),
+  syncTrayFailedTicket: vscode.l10n.t("Ticket #{0} failed to sync"),
   // Sync states
   syncDirty: vscode.l10n.t("Unsynced changes"),
   syncQueued: vscode.l10n.t("Waiting to sync"),

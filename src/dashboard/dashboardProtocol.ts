@@ -309,6 +309,7 @@ export type DashboardRequest =
     }
   | { type: "ticket.metadata.update"; requestId: string; ticketId: number; patch: TicketMetadataPatch }
   | { type: "ticket.syncSelected"; requestId: string; ticketId: number }
+  | { type: "ticket.reviewConflict"; requestId: string; ticketId: number }
   | { type: "comment.add"; requestId: string; ticketId: number }
   | { type: "comment.edit"; requestId: string; ticketId: number; commentId: number }
   | { type: "comment.openBrowser"; requestId: string; ticketId: number; commentId: number; noteIndex?: number }
