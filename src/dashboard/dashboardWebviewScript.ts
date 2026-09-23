@@ -25,6 +25,7 @@ let activeTicketActionAnchorTop = null;
 let composerDraftKey = null;
 let composerDraftValues = null;
 let metadataEdit = null;
+let renderedSettingsBaseUrl = null;
 const ticketSyncRequests = new Map();
 const expandedTicketIds = new Set();
 const collapsedTicketIds = new Set();
@@ -216,6 +217,7 @@ function applyTicketLayoutMode(){
   layout.classList.toggle('layout-single',ticketLayoutMode === 'single');
   layout.classList.toggle('layout-split',ticketLayoutMode === 'split');
   ticketLayoutSelect.value=ticketLayoutMode;
+  updateCommentExpandButtons();
 }
 ticketLayoutSelect.addEventListener('change',function(){
   ticketLayoutMode=this.value;
@@ -720,7 +722,8 @@ function renderSettingsBase(){
   const element=document.getElementById('settings-content');
   const hadCategories=!!element.querySelector('.settings-category');
   const openCategories=new Set(Array.from(element.querySelectorAll('.settings-category[open]')).map(function(category){ return category.dataset.category; }));
-  const focused=document.activeElement && element.contains(document.activeElement) && document.activeElement.id ? {id:document.activeElement.id,value:document.activeElement.value} : null;
+  const active=document.activeElement;
+  const focused=renderedSettingsBaseUrl === settings.baseUrl && active && element.contains(active) && active.id && typeof active.defaultValue === 'string' && active.value !== active.defaultValue ? {id:active.id,value:active.value} : null;
   element.innerHTML='<section class="settings-section" data-section="connection"><h3>'+STRINGS.sectionConnection+'</h3>'+
     '<label class="setting-row" for="set-base-url"><span class="setting-label">'+STRINGS.redmineUrlLabel+'</span><input class="setting-input" id="set-base-url" type="url" value="'+esc(settings.baseUrl)+'" autocomplete="url"></label>'+
     '<label class="setting-row" for="set-default-project"><span class="setting-label">'+STRINGS.defaultProjectLabel+'</span><input class="setting-input" id="set-default-project" type="text" value="'+esc(settings.defaultProjectId)+'"></label>'+
@@ -759,6 +762,7 @@ function renderSettingsBase(){
     group[2].forEach(function(id){ const section=sections.get(id); if(section) category.appendChild(section); }); element.appendChild(category);
   });
   if(focused){ const input=document.getElementById(focused.id); if(input && 'value' in input) input.value=focused.value; }
+  renderedSettingsBaseUrl=settings.baseUrl;
   const assignees=state.ticketFilterOptions.assignees || []; const statuses=state.ticketFilterOptions.statuses || []; const assigneeSelect=document.getElementById('assignee-filter-select'); const statusSelect=document.getElementById('status-filter-select'); assigneeSelect.innerHTML=assignees.map(function(item){ return '<option value="'+item.id+'"'+((settings.filters.assigneeIds || []).indexOf(item.id)>=0?' selected':'')+'>'+esc(item.name)+'</option>'; }).join(''); statusSelect.innerHTML=statuses.map(function(item){ return '<option value="'+item.id+'"'+((settings.filters.statusIds || []).indexOf(item.id)>=0?' selected':'')+'>'+esc(item.name)+'</option>'; }).join(''); assigneeSelect.disabled=!assignees.length; statusSelect.disabled=!statuses.length; document.getElementById('assignee-unassigned-toggle').checked=!!settings.filters.includeUnassigned;
   const updateFilters=function(){ req('settings.update',{patch:{filters:Object.assign({},settings.filters,{assigneeIds:Array.from(assigneeSelect.selectedOptions).map(function(option){ return Number(option.value); }),statusIds:Array.from(statusSelect.selectedOptions).map(function(option){ return Number(option.value); }),includeUnassigned:document.getElementById('assignee-unassigned-toggle').checked})}}); }; assigneeSelect.addEventListener('change',updateFilters); statusSelect.addEventListener('change',updateFilters); document.getElementById('assignee-unassigned-toggle').addEventListener('change',updateFilters);
   document.getElementById('set-sort-field').addEventListener('change',function(){ req('settings.update',{patch:{sort:{field:this.value || undefined,direction:settings.sort.direction}}}); }); document.getElementById('set-sort-dir').addEventListener('change',function(){ req('settings.update',{patch:{sort:{field:settings.sort.field,direction:this.value}}}); });

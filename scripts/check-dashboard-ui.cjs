@@ -291,6 +291,19 @@ async function main() {
   assert.equal(await evaluate(`document.querySelector('.comment-body').classList.contains('comment-body-clamped')`), true);
   await evaluate(`document.querySelector('[data-expand-comment]').click()`);
   assert.equal(await evaluate(`document.querySelector('.comment-body').classList.contains('comment-body-clamped')`), false);
+  // ビューポートを変えずにレイアウトを切り替えても、省略判定を更新する。
+  await call('Emulation.setDeviceMetricsOverride', { width: 1200, height: 800, deviceScaleFactor: 1, mobile: false });
+  state.comments.items = [{ id: 32, authorName: 'Taro', body: 'あ'.repeat(160), editableByCurrentUser: true }];
+  await push();
+  await evaluate(`document.getElementById('ticket-layout-mode').value='single';document.getElementById('ticket-layout-mode').dispatchEvent(new Event('change'))`);
+  assert.equal(await evaluate(`document.querySelector('.comment-body').scrollHeight <= document.querySelector('.comment-body').clientHeight+1`), true);
+  assert.equal(await evaluate(`document.querySelector('.comment-expand').classList.contains('hidden')`), true);
+  await evaluate(`document.getElementById('ticket-layout-mode').value='split';document.getElementById('ticket-layout-mode').dispatchEvent(new Event('change'))`);
+  assert.equal(await evaluate(`document.querySelector('.comment-body').scrollHeight > document.querySelector('.comment-body').clientHeight+1`), true);
+  assert.equal(await evaluate(`document.querySelector('.comment-expand').classList.contains('hidden')`), false);
+  await evaluate(`document.getElementById('ticket-layout-mode').value='single';document.getElementById('ticket-layout-mode').dispatchEvent(new Event('change'))`);
+  assert.equal(await evaluate(`document.querySelector('.comment-expand').classList.contains('hidden')`), true);
+  await evaluate(`document.getElementById('ticket-layout-mode').value='auto';document.getElementById('ticket-layout-mode').dispatchEvent(new Event('change'))`);
   await evaluate(`document.getElementById('detail-tab-overview').click()`);
   state.comments.items = [];
   await push();
@@ -502,6 +515,35 @@ async function main() {
   for (const id of ['set-base-url', 'set-default-project', 'set-request-timeout', 'set-ignore-ssl', 'set-ticket-limit', 'set-editor-storage', 'set-editor-subject']) {
     assert.equal(await evaluate(`document.getElementById(${JSON.stringify(id)}) !== null`), true, `missing setting control: ${id}`);
   }
+  // 未編集のフォーカス値はホストの更新に従い、編集中の値は同じ接続先で維持する。
+  const previousBaseUrl = state.settings.baseUrl;
+  const previousDefaultProjectId = state.settings.defaultProjectId;
+  state.settings.baseUrl = 'https://first.example.com';
+  await push();
+  await evaluate(`document.getElementById('settings-connection').open=true;document.getElementById('set-base-url').focus()`);
+  state.settings.baseUrl = 'https://second.example.com';
+  await push();
+  assert.equal(await evaluate(`document.getElementById('set-base-url').value`), state.settings.baseUrl);
+  assert.equal(await evaluate(`document.activeElement.id`), 'set-base-url');
+  state.settings.defaultProjectId = 'first';
+  await push();
+  await evaluate(`document.getElementById('set-default-project').focus()`);
+  state.settings.defaultProjectId = 'second';
+  await push();
+  assert.equal(await evaluate(`document.getElementById('set-default-project').value`), 'second');
+  await evaluate(`document.getElementById('set-default-project').value='local draft';document.getElementById('set-default-project').dispatchEvent(new Event('input'))`);
+  state.settings.ticketListLimit += 1;
+  await push();
+  assert.equal(await evaluate(`document.getElementById('set-default-project').value`), 'local draft');
+  assert.equal(await evaluate(`document.activeElement.id`), 'set-default-project');
+  state.settings.baseUrl = 'https://third.example.com';
+  state.settings.defaultProjectId = 'third';
+  await push();
+  assert.equal(await evaluate(`document.getElementById('set-default-project').value`), 'third');
+  state.settings.baseUrl = previousBaseUrl;
+  state.settings.defaultProjectId = previousDefaultProjectId;
+  state.settings.ticketListLimit -= 1;
+  await push();
   await evaluate(`document.getElementById('settings-connection').open=true; document.getElementById('set-base-url').focus(); document.getElementById('set-base-url').value='https://redmine.example.com'; document.getElementById('set-base-url').dispatchEvent(new Event('change'))`);
   assert.equal(await evaluate('window.messages.at(-1).type'), 'settings.updateConnection');
   await key('Tab');
@@ -539,6 +581,26 @@ async function main() {
     const { data } = await call('Page.captureScreenshot', { format: 'png' });
     fs.writeFileSync(path.join(directory, `${theme}-${width}.png`), Buffer.from(data, 'base64'));
   }
+  // 長い名前を表示したまま、125% / 200% 拡大時の操作起点とキーボード操作を確認する。
+  const previousProjectName = state.selectedProject.name;
+  state.selectedProject.name = '長いプロジェクト名'.repeat(12);
+  state.projects[0].name = state.selectedProject.name;
+  await call('Emulation.setDeviceMetricsOverride', { width: 440, height: 800, deviceScaleFactor: 1, mobile: false });
+  for (const zoom of [1.25, 2]) {
+    await evaluate(`document.documentElement.style.zoom=${JSON.stringify(String(zoom))}`);
+    await push();
+    assert.equal(await evaluate('document.documentElement.scrollWidth <= innerWidth'), true, `page overflow at ${zoom}x`);
+    assert.equal(await evaluate(`document.getElementById('new-ticket-btn').getBoundingClientRect().right <= innerWidth`), true, `new ticket clipped at ${zoom}x`);
+    assert.equal(await evaluate(`document.querySelector('.ticket-subject').getBoundingClientRect().width > 0`), true, `subject clipped at ${zoom}x`);
+    await evaluate(`document.getElementById('layout-btn').focus()`);
+    await key('Enter');
+    assert.equal(await evaluate(`document.getElementById('layout-btn').getAttribute('aria-expanded')`), 'true');
+    await key('Escape');
+    assert.equal(await evaluate(`document.getElementById('layout-btn').getAttribute('aria-expanded')`), 'false');
+  }
+  await evaluate(`document.documentElement.style.zoom=''`);
+  state.selectedProject.name = previousProjectName;
+  state.projects[0].name = previousProjectName;
 
   // 操作結果は上で検証済み。プレビューには通常の表示を保存する。
   await evaluate(`document.getElementById('toast-area').replaceChildren()`);
