@@ -44,7 +44,8 @@ const createCommentOperation = (
   kind: "comment_create",
   key: { kind: "comment", ticketId: 10, documentUri: "file:///comment.md" },
   commentId: undefined,
-  intent: { ticketId: 10, body, baseDir },
+  documentUri: "file:///comment.md",
+  intent: { ticketId: 10, body, baseDir, documentUri: "file:///comment.md" },
 });
 
 const legacyEffectStates = ["planned", "committed", "commit_unknown", "failed"] as const;

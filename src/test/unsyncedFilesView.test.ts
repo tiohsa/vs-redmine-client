@@ -6,6 +6,7 @@ import {
 } from "../views/unsyncedFilesView";
 import {
   clearOfflineSyncQueueAsync,
+  getOfflineSyncQueue,
   addOfflineTicketUpdateAsync,
   addOfflineCommentUpdateAsync,
   addOfflineNewTicketAsync,
@@ -239,9 +240,12 @@ suite("UnsyncedFilesTreeProvider", () => {
 
     const items = await getItems(provider);
     const item = items[0] as UnsyncedFileTreeItem;
+    const operationId = getOfflineSyncQueue().comments[0].operationId;
+    assert.ok(operationId);
     assert.deepStrictEqual(item.syncKey, {
       kind: "comment",
       ticketId: 55,
+      operationId,
       commentId: 99,
       documentUri: "file:///tmp/c.md",
     });
@@ -256,9 +260,12 @@ suite("UnsyncedFilesTreeProvider", () => {
 
     const items = await getItems(provider);
     const item = items[0] as UnsyncedFileTreeItem;
+    const operationId = getOfflineSyncQueue().comments[0].operationId;
+    assert.ok(operationId);
     assert.deepStrictEqual(item.syncKey, {
       kind: "comment",
       ticketId: 44,
+      operationId,
       documentUri: "file:///tmp/nc.md",
     });
   });
