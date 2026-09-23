@@ -16,6 +16,10 @@ export const resolveTicketSyncState = (ticketId: number): DashboardSyncState => 
   const queue = getOfflineSyncQueue(scope);
   const queued = queue.tickets.get(ticketId);
   if (queued && isAbandoned(queued)) { return "Abandoned"; }
+  if (!queued && queue.abandonedTickets?.some((entry) => entry.ticketId === ticketId) &&
+      !queue.ticketEditAuthorizations?.some((entry) => entry.ticketId === ticketId)) {
+    return "Abandoned";
+  }
   const lifecycle = queued ? evaluateOfflineSyncPolicy(queued).lifecycle : undefined;
   if (draft?.status === "Syncing") {
     return "Syncing";

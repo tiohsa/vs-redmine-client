@@ -26,6 +26,7 @@ import {
   beginActiveSync,
   isAbandoned,
   beginFreshTicketEdit,
+  getTicketEditAuthorization,
   getOfflineCommentUpdate,
   completeOfflineCommentAsync,
 } from "../views/offlineSyncStore";
@@ -1263,10 +1264,14 @@ suite("offlineSyncStore — 同期中止", () => {
     assert.strictEqual(await commitOfflineAbandonAsync(prepareOfflineAbandon({ kind: "ticket", ticketId: 904 }, scope)), "abandoned");
     assert.strictEqual(await addOfflineTicketUpdateAsync(904, { ...ticketUpdate(904), operationId: "old:904" }, scope), false);
     const uri = "untitled:fresh-904.md";
-    const operationId = beginFreshTicketEdit(904, uri, scope);
+    const authorization = await beginFreshTicketEdit(904, uri, scope);
+    assert.ok(authorization);
     assert.strictEqual(await addOfflineTicketUpdateAsync(904, {
-      ...ticketUpdate(904), operationId, documentUri: uri, baseDescription: "Latest remote body",
-    }, scope), true);
+      ...ticketUpdate(904), documentUri: uri, baseDescription: "Latest remote body",
+    }, scope, authorization.editSessionId), true);
+    const operationId = getOfflineSyncQueue(scope).tickets.get(904)?.operationId;
+    assert.ok(operationId);
+    assert.notStrictEqual(operationId, authorization.editSessionId);
     assert.strictEqual(await repository.saveOperation(oldOperation, scope), undefined);
     assert.strictEqual(await addOfflineTicketUpdateAsync(904, {
       ...ticketUpdate(904), operationId: "old:904", documentUri: uri,
@@ -1278,6 +1283,106 @@ suite("offlineSyncStore — 同期中止", () => {
     assert.strictEqual(queue.abandonedTickets?.[0].operationId, old.operationId);
     assert.strictEqual(queue.abandonedTickets?.[0].phase, "commit_unknown");
     assert.strictEqual(createSyncOperationRepository().listOperations(scope).length, 1);
+  });
+
+  test("編集許可は同期完了・再初期化を越えて保持され、次回は別の操作を発行する", async () => {
+    const storage = createTestMemento();
+    const scope = "scope-edit-continuation";
+    const ticketId = 905;
+    initializeOfflineSyncStore(storage, scope);
+    await addOfflineTicketUpdateAsync(ticketId, {
+      ...ticketUpdate(ticketId), documentUri: "file:///old.md", operationId: "old:905",
+    }, scope);
+    await commitOfflineAbandonAsync(prepareOfflineAbandon({ kind: "ticket", ticketId }, scope));
+    initializeOfflineSyncStore(storage, scope);
+    const retained = getOfflineSyncQueue(scope).abandonedTickets;
+    assert.strictEqual(await beginFreshTicketEdit(ticketId, "file:///old.md", scope), undefined);
+    const authorization = await beginFreshTicketEdit(ticketId, "file:///fresh.md", scope);
+    assert.ok(authorization);
+    initializeOfflineSyncStore(storage, scope);
+    assert.deepStrictEqual(getTicketEditAuthorization(ticketId, scope), authorization);
+    const update = { ...ticketUpdate(ticketId), documentUri: authorization.documentUri };
+    const operationIds = new Set<string>();
+    for (let cycle = 0; cycle < 2; cycle++) {
+      assert.strictEqual(await addOfflineTicketUpdateAsync(ticketId, update, scope, authorization.editSessionId), true);
+      const operation = getOfflineSyncQueue(scope).tickets.get(ticketId)!;
+      assert.ok(operation.operationId);
+      assert.ok(!operationIds.has(operation.operationId));
+      operationIds.add(operation.operationId);
+      assert.strictEqual(await completeOfflineTicketUpdateAsync(ticketId, scope, undefined, operation.revision), true);
+      assert.strictEqual(getOfflineSyncQueue(scope).tickets.size, 0);
+      const beforeStaleSave = getOfflineSyncQueue(scope);
+      assert.strictEqual(await addOfflineTicketUpdateAsync(ticketId, operation, scope, authorization.editSessionId), false);
+      assert.strictEqual(await addOfflineTicketUpdateAsync(ticketId, {
+        ...update, documentUri: "file:///old.md",
+      }, scope, authorization.editSessionId), false);
+      assert.deepStrictEqual(getOfflineSyncQueue(scope), beforeStaleSave);
+      initializeOfflineSyncStore(storage, scope);
+      assert.deepStrictEqual(getTicketEditAuthorization(ticketId, scope), authorization);
+      assert.deepStrictEqual(getOfflineSyncQueue(scope).abandonedTickets, retained);
+    }
+    // 他接続先では同じ ticketId・URI・sessionId を渡しても許可されない。
+    await addOfflineTicketUpdateAsync(ticketId, ticketUpdate(ticketId), "other");
+    await commitOfflineAbandonAsync(prepareOfflineAbandon({ kind: "ticket", ticketId }, "other"));
+    assert.strictEqual(await addOfflineTicketUpdateAsync(ticketId, update, "other", authorization.editSessionId), false);
+    assert.strictEqual(await addOfflineTicketUpdateAsync(ticketId, update, scope, authorization.editSessionId), true);
+    await commitOfflineAbandonAsync(prepareOfflineAbandon({ kind: "ticket", ticketId }, scope));
+    assert.strictEqual(getTicketEditAuthorization(ticketId, scope), undefined);
+    assert.strictEqual(await addOfflineTicketUpdateAsync(ticketId, update, scope, authorization.editSessionId), false);
+    initializeOfflineSyncStore(storage, scope);
+    assert.strictEqual(getTicketEditAuthorization(ticketId, scope), undefined);
+  });
+
+  test("編集許可の保存失敗では許可を公開せず、旧セッションは再開操作後に登録できない", async () => {
+    const storage = createTestMemento();
+    let rejectWrites = false;
+    let writes = 0;
+    const scope = "scope-edit-persistence";
+    initializeOfflineSyncStore({ ...storage, update: async (key, value) => {
+      writes++;
+      if (rejectWrites) { throw new Error("storage unavailable"); }
+      await storage.update(key, value);
+    } }, scope);
+    await addOfflineTicketUpdateAsync(906, ticketUpdate(906), scope);
+    await commitOfflineAbandonAsync(prepareOfflineAbandon({ kind: "ticket", ticketId: 906 }, scope));
+    const before = getOfflineSyncQueue(scope);
+    rejectWrites = true;
+    await assert.rejects(beginFreshTicketEdit(906, "file:///fresh.md", scope), /storage unavailable/);
+    assert.deepStrictEqual(getOfflineSyncQueue(scope), before);
+    rejectWrites = false;
+    const first = await beginFreshTicketEdit(906, "file:///fresh.md", scope);
+    const second = await beginFreshTicketEdit(906, "file:///fresh.md", scope);
+    assert.ok(first && second);
+    assert.notStrictEqual(first.editSessionId, second.editSessionId);
+    const beforeStaleSave = writes;
+    assert.strictEqual(await addOfflineTicketUpdateAsync(906, {
+      ...ticketUpdate(906), documentUri: first.documentUri,
+    }, scope, first.editSessionId), false);
+    assert.strictEqual(writes, beforeStaleSave);
+    assert.deepStrictEqual(getTicketEditAuthorization(906, scope), second);
+  });
+
+  test("編集許可のない旧 v3 キューも現在の文書から同期後の編集を継続できる", async () => {
+    const storage = createTestMemento();
+    const scope = "scope-legacy-edit";
+    initializeOfflineSyncStore(storage, scope);
+    await replaceOfflineSyncQueueAsync({
+      tickets: new Map([[908, { ...ticketUpdate(908), documentUri: "file:///current.md", operationId: "current:908", revision: 1 }]]),
+      abandonedTickets: [{ ...ticketUpdate(908), documentUri: "file:///old.md", operationId: "old:908",
+        disposition: { kind: "abandoned", abandonedAt: 1 } }],
+      comments: [], newTickets: [],
+    }, scope);
+    initializeOfflineSyncStore(storage, scope);
+    const authorization = getTicketEditAuthorization(908, scope);
+    assert.ok(authorization);
+    assert.strictEqual(authorization.documentUri, "file:///current.md");
+    assert.strictEqual(await completeOfflineTicketUpdateAsync(908, scope, undefined, 1), true);
+    initializeOfflineSyncStore(storage, scope);
+    assert.deepStrictEqual(getTicketEditAuthorization(908, scope), authorization);
+    assert.strictEqual(await addOfflineTicketUpdateAsync(908, {
+      ...ticketUpdate(908), documentUri: authorization.documentUri,
+    }, scope, authorization.editSessionId), true);
+    assert.notStrictEqual(getOfflineSyncQueue(scope).tickets.get(908)?.operationId, "current:908");
   });
 
   test("確認後の変更、実行中、保存失敗では中止を公開しない", async () => {

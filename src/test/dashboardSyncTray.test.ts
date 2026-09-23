@@ -1,6 +1,18 @@
 import * as assert from "assert";
 import { runInNewContext } from "vm";
 import { dashboardWebviewScript } from "../dashboard/dashboardWebviewScript";
+import { resolveTicketSyncState } from "../dashboard/viewModels/ticketDashboardViewModel";
+import { getCurrentConnectionScope } from "../config/connectionScope";
+import {
+  addOfflineTicketUpdateAsync, beginFreshTicketEdit, commitOfflineAbandonAsync,
+  initializeOfflineSyncStore, prepareOfflineAbandon,
+} from "../views/offlineSyncStore";
+import {
+  initializeDraftStore, initializeTicketDraft, markDraftStatus, updateDraftAfterSave,
+} from "../views/ticketDraftStore";
+import { createInMemoryDraftStorage } from "../views/draftPersistence";
+import { createTestMemento } from "./helpers/vscodeMemento";
+import { buildIssueMetadataFixture } from "./helpers/ticketMetadataFixtures";
 
 const extract = (start: string, end: string): string => {
   const from = dashboardWebviewScript.indexOf(start);
@@ -116,6 +128,45 @@ const renderUnsynced = (
 };
 
 suite("Dashboard sync attention tray", () => {
+  for (const status of ["Conflict", "Failed"] as const) {
+    test(`${status} の中止後は注意表示を消し、新編集の ${status} は表示する`, async () => {
+      const scope = getCurrentConnectionScope();
+      initializeOfflineSyncStore(createTestMemento(), scope);
+      initializeDraftStore(createInMemoryDraftStorage(), scope);
+      const metadata = buildIssueMetadataFixture();
+      const update = {
+        ticketId: 10, baseSubject: "Title", baseDescription: "Base", baseMetadata: metadata,
+        subject: "Title", description: "Changed", metadata,
+      };
+      initializeTicketDraft(10, "Title", "Base", metadata, "t1", scope);
+      await addOfflineTicketUpdateAsync(10, update, scope);
+      markDraftStatus(10, status, scope);
+      assert.strictEqual(resolveTicketSyncState(10), status);
+      await commitOfflineAbandonAsync(prepareOfflineAbandon({ kind: "ticket", ticketId: 10 }, scope));
+      assert.strictEqual(resolveTicketSyncState(10), "Abandoned");
+      const abandoned = present(state(resolveTicketSyncState(10)));
+      assert.ok(abandoned.text.includes("All clear"));
+      assert.deepStrictEqual(abandoned.buttons, []);
+
+      const authorization = await beginFreshTicketEdit(10, "file:///fresh-tray.md", scope);
+      assert.ok(authorization);
+      updateDraftAfterSave(10, "Title", "Base", metadata, "t2", scope);
+      assert.strictEqual(resolveTicketSyncState(10), "Synced");
+      markDraftStatus(10, status, scope);
+      assert.strictEqual(resolveTicketSyncState(10), status);
+      assert.ok(present(state(resolveTicketSyncState(10))).text.includes("Attention"));
+      assert.strictEqual(await addOfflineTicketUpdateAsync(10, {
+        ...update, documentUri: authorization.documentUri,
+      }, scope, authorization.editSessionId), true);
+      assert.strictEqual(resolveTicketSyncState(10), status);
+      const active = present(state(resolveTicketSyncState(10), "queued", 1, 10));
+      assert.deepStrictEqual(active.buttons, status === "Conflict" ? ["Review", "Open Unsynced"] : ["Open Unsynced"]);
+      await commitOfflineAbandonAsync(prepareOfflineAbandon({ kind: "ticket", ticketId: 10 }, scope));
+      assert.strictEqual(resolveTicketSyncState(10), "Abandoned");
+      assert.deepStrictEqual(present(state(resolveTicketSyncState(10))).buttons, []);
+    });
+  }
+
   test("中止済み0件では切替を隠す", () => {
     const result = renderUnsynced([]);
     assert.equal(result.abandonedToggleHidden, true);

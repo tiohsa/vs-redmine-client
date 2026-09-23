@@ -4,7 +4,7 @@ import {
   addOfflineTicketUpdateAsync,
   cancelQueuedTicketUpdateIfMatchesAsync,
   getActiveScope,
-  getFreshTicketEdit,
+  getTicketEditAuthorization,
   getOfflineSyncQueue,
   isAbandoned,
   sameDocumentIdentity,
@@ -66,11 +66,11 @@ export const queueTicketDraft = async (
   const scope = input.operationScope ?? getActiveScope();
   const queue = getOfflineSyncQueue(scope);
   const documentUri = input.editor?.document.uri.toString() ?? input.documentUri?.toString();
-  const freshEdit = getFreshTicketEdit(input.ticketId, scope);
+  const editAuthorization = getTicketEditAuthorization(input.ticketId, scope);
   const activeTicket = queue.tickets.get(input.ticketId);
   const hasAbandonedTicket = (queue.abandonedTickets ?? []).some((entry) => entry.ticketId === input.ticketId);
   if (isAbandoned(activeTicket ?? {}) || (hasAbandonedTicket &&
-      (documentUri === undefined || documentUri !== (activeTicket?.documentUri ?? freshEdit?.documentUri)))) {
+      (documentUri === undefined || documentUri !== (activeTicket?.documentUri ?? editAuthorization?.documentUri)))) {
     return buildResult("failed", vscode.l10n.t("Sync was abandoned for this ticket. Review the retained record before starting a new edit."));
   }
   if (containsConflictMarkers(input.content)) {
@@ -152,10 +152,10 @@ export const queueTicketDraft = async (
     documentUri,
     connectionScope: input.operationScope,
     operationId: activeTicket?.operationId ?? (hasAbandonedTicket
-      ? freshEdit?.operationId
+      ? undefined
       : `${input.operationScope ?? "legacy"}:ticket:${input.ticketId}`),
     phase: "queued",
-  }, input.operationScope);
+  }, scope, editAuthorization?.editSessionId);
   if (!registered) {
     return buildResult("failed", vscode.l10n.t("The queued update changed. Save again."));
   }

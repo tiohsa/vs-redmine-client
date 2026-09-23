@@ -6,6 +6,9 @@ import {
   addOfflineTicketUpdateAsync,
   getOfflineSyncQueue,
   initializeOfflineSyncStore,
+  beginFreshTicketEdit,
+  prepareOfflineAbandon,
+  commitOfflineAbandonAsync,
 } from "../views/offlineSyncStore";
 import {
   buildTicketEditorContent,
@@ -21,6 +24,7 @@ import {
   initializeTicketDraft,
 } from "../views/ticketDraftStore";
 import { createInMemoryDraftStorage } from "../views/draftPersistence";
+import { queueTicketDraft } from "../views/ticketSync/ticketQueueSync";
 
 const SCOPE = "https://redmine.example/";
 const DOCUMENT_URI = "file:///tmp/durable-new-ticket.md";
@@ -61,6 +65,65 @@ const issueDetail = (id: number) => ({
 });
 
 suite("TicketSyncService durable lifecycle", () => {
+  test("中止後の新しい文書は同期完了後も保存・同期でき、旧文書は再送しない", async () => {
+    const storage = createTestMemento();
+    initializeOfflineSyncStore(storage, SCOPE);
+    initializeDraftStore(createInMemoryDraftStorage(), SCOPE);
+    const ticketId = 907;
+    const metadata = buildIssueMetadataFixture();
+    const oldUri = vscode.Uri.parse("file:///tmp/abandoned-ticket.md");
+    const documentUri = vscode.Uri.parse("file:///tmp/continued-ticket.md");
+    initializeTicketDraft(ticketId, "Title", "Base", metadata, "t1", SCOPE);
+    const save = (uri: vscode.Uri, description: string) => queueTicketDraft({
+      ticketId, operationScope: SCOPE, documentUri: uri,
+      content: buildTicketEditorContent({ subject: "Title", description, metadata }),
+    });
+    assert.strictEqual((await save(oldUri, "Abandoned body")).status, "queued");
+    await commitOfflineAbandonAsync(prepareOfflineAbandon({ kind: "ticket", ticketId }, SCOPE));
+    initializeOfflineSyncStore(storage, SCOPE);
+    const retained = getOfflineSyncQueue(SCOPE).abandonedTickets;
+    assert.ok(await beginFreshTicketEdit(ticketId, documentUri.toString(), SCOPE));
+    let updateCalls = 0;
+    let remoteBody = "Base";
+    const service = new TicketSyncService({
+      update: {
+        ...metadataDeps,
+        updateIssue: async ({ fields }) => {
+          updateCalls++;
+          remoteBody = fields.description ?? remoteBody;
+        },
+        getIssueDetail: async () => ({
+          ticket: { id: ticketId, projectId: 12, subject: "Title", description: remoteBody,
+            trackerName: metadata.tracker, priorityName: metadata.priority, statusName: metadata.status,
+            updatedAt: `t${updateCalls + 1}` },
+          comments: [],
+        }),
+      },
+      documents: {
+        findOpenDocument: () => undefined,
+        rewriteNewTicket: async () => ({ kind: "applied" }),
+        rewriteTicket: async () => ({ kind: "applied" }),
+      },
+    });
+    let previousOperationId = retained?.[0].operationId;
+    for (const description of ["First edit", "Second edit"]) {
+      assert.strictEqual((await save(documentUri, description)).status, "queued");
+      const operationId = getOfflineSyncQueue(SCOPE).tickets.get(ticketId)?.operationId;
+      assert.ok(operationId);
+      assert.notStrictEqual(operationId, previousOperationId);
+      previousOperationId = operationId;
+      const outcome = await service.syncQueueItem({ kind: "ticket", ticketId }, { connectionScope: SCOPE });
+      assert.strictEqual(outcome.kind, "completed");
+      assert.strictEqual(remoteBody, description);
+      assert.strictEqual(getOfflineSyncQueue(SCOPE).tickets.size, 0);
+      assert.strictEqual((await save(oldUri, "Old file saved again")).status, "failed");
+      assert.strictEqual(getOfflineSyncQueue(SCOPE).tickets.size, 0);
+      initializeOfflineSyncStore(storage, SCOPE);
+      assert.deepStrictEqual(getOfflineSyncQueue(SCOPE).abandonedTickets, retained);
+    }
+    assert.strictEqual(updateCalls, 2);
+  });
+
   test("direct editor no_change も共通reconcilerでremote canonicalを反映する", async () => {
     initializeOfflineSyncStore(createTestMemento(), SCOPE);
     initializeDraftStore(createInMemoryDraftStorage(), SCOPE);

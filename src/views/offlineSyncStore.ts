@@ -171,10 +171,18 @@ export type SyncDisposition = { kind: "abandoned"; abandonedAt: number };
 export const isAbandoned = (operation: { disposition?: SyncDisposition }): boolean =>
   operation.disposition?.kind === "abandoned";
 
+/** 接続先ごとに保持し、個々の同期操作が完了しても編集文書の許可を維持する。 */
+export type TicketEditAuthorization = {
+  ticketId: number;
+  documentUri: string;
+  editSessionId: string;
+};
+
 export type OfflineSyncQueue = {
   tickets: Map<number, OfflineTicketUpdate>;
   /** 中止済み更新を operationId 単位で保持する。 */
   abandonedTickets?: OfflineTicketUpdate[];
+  ticketEditAuthorizations?: TicketEditAuthorization[];
   comments: OfflineCommentUpdate[];
   newTickets: OfflineNewTicket[];
 };
@@ -342,6 +350,7 @@ export const onOfflineSyncQueueChanged = (
 type SerializedQueue = {
   version?: 2 | 3;
   operations?: SyncOperation[];
+  ticketEditAuthorizations?: TicketEditAuthorization[];
   /** v1 compatibility only. New snapshots persist `operations` as the source of truth. */
   tickets?: [number, OfflineTicketUpdate][];
   comments?: OfflineCommentUpdate[];
@@ -779,6 +788,7 @@ const serializeQueueFrom = (
 ): SerializedQueue => ({
   version: 3,
   operations: operationsFromQueue(queue, scope),
+  ticketEditAuthorizations: queue.ticketEditAuthorizations,
 });
 
 const serializeQueue = (scope: string): SerializedQueue =>
@@ -1069,7 +1079,28 @@ const deserializeQueue = (raw: SerializedQueue | undefined): OfflineSyncQueue =>
       operation.payload !== null &&
       typeof operation.payload === "object",
     );
-    return queueFromOperations(valid);
+    const queue = queueFromOperations(valid);
+    const authorizations = (Array.isArray(raw.ticketEditAuthorizations) ? raw.ticketEditAuthorizations : []).filter((entry) =>
+      entry && Number.isSafeInteger(entry.ticketId) && entry.ticketId > 0 &&
+      typeof entry.documentUri === "string" && entry.documentUri.length > 0 &&
+      typeof entry.editSessionId === "string" && entry.editSessionId.length > 0,
+    ).map((entry) => ({ ...entry }));
+    // 旧 v3 で新しい編集が既にキューにある場合も、その文書を継続利用できる。
+    for (const update of queue.tickets.values()) {
+      if (update.documentUri &&
+          queue.abandonedTickets?.some((entry) => entry.ticketId === update.ticketId) &&
+          !authorizations.some((entry) => entry.ticketId === update.ticketId)) {
+        authorizations.push({
+          ticketId: update.ticketId,
+          documentUri: update.documentUri,
+          editSessionId: randomUUID(),
+        });
+      }
+    }
+    if (Array.isArray(raw.ticketEditAuthorizations) || authorizations.length > 0) {
+      queue.ticketEditAuthorizations = authorizations;
+    }
+    return queue;
   }
   const legacyQueue: OfflineSyncQueue = {
     tickets: new Map(
@@ -1235,7 +1266,6 @@ export const initializeOfflineSyncStore = (storage: Memento, scope?: string): vo
   memento = storage;
   activeScope = requestedScope;
   queuesByScope.clear();
-  freshTicketStarts.clear();
   if (!sameStorage) {
     persistenceByScope.clear();
   }
@@ -1315,43 +1345,53 @@ export const mergeOfflineTicketUpdate = (
   };
 };
 
-const freshTicketStarts = new Map<string, Map<number, { operationId: string; documentUri: string }>>();
+/** 最新状態から明示的に開いた文書を許可する。operationId はキュー登録時に発行する。 */
+export const beginFreshTicketEdit = (
+  ticketId: number, documentUri: string, scope = activeScope,
+): Promise<TicketEditAuthorization | undefined> => mutateQueueAsync(scope, (queue) => {
+  if (queue.tickets.has(ticketId) ||
+      !queue.abandonedTickets?.some((entry) => entry.ticketId === ticketId) ||
+      queue.abandonedTickets.some((entry) => entry.ticketId === ticketId && entry.documentUri === documentUri)) {
+    return skipQueueMutation(undefined);
+  }
+  const authorization = { ticketId, documentUri, editSessionId: randomUUID() };
+  queue.ticketEditAuthorizations = [
+    ...(queue.ticketEditAuthorizations ?? []).filter((entry) => entry.ticketId !== ticketId),
+    authorization,
+  ];
+  return commitQueueMutation({ ...authorization });
+});
 
-/** 最新の Redmine 状態を開いた明示操作だけに、新しい operationId を発行する。 */
-export const beginFreshTicketEdit = (ticketId: number, documentUri: string, scope = activeScope): string => {
-  const operationId = `${scope}:ticket:${ticketId}:${randomUUID()}`;
-  const starts = freshTicketStarts.get(scope) ?? new Map();
-  starts.set(ticketId, { operationId, documentUri });
-  freshTicketStarts.set(scope, starts);
-  return operationId;
+export const getTicketEditAuthorization = (ticketId: number, scope = activeScope):
+  TicketEditAuthorization | undefined => {
+  const authorization = getQueue(scope).ticketEditAuthorizations?.find((entry) => entry.ticketId === ticketId);
+  return authorization ? { ...authorization } : undefined;
 };
-
-export const getFreshTicketEdit = (ticketId: number, scope = activeScope):
-  { operationId: string; documentUri: string } | undefined => freshTicketStarts.get(scope)?.get(ticketId);
 
 export const addOfflineTicketUpdateAsync = (
   ticketId: number,
   update: OfflineTicketUpdate,
   scope = activeScope,
+  editSessionId?: string,
 ): Promise<boolean> => mutateQueueAsync(scope, (queue) => {
   const existing = queue.tickets.get(ticketId);
   if (existing && isAbandoned(existing)) { return skipQueueMutation(false); }
   if ((queue.abandonedTickets ?? []).some((entry) => entry.ticketId === ticketId)) {
-    const expected = existing
-      ? { operationId: existing.operationId, documentUri: existing.documentUri }
-      : freshTicketStarts.get(scope)?.get(ticketId);
-    if (!expected || update.operationId !== expected.operationId ||
-        update.documentUri !== expected.documentUri) {
-      return skipQueueMutation(false);
+    if (existing) {
+      if (update.operationId !== existing.operationId || update.documentUri !== existing.documentUri) {
+        return skipQueueMutation(false);
+      }
+    } else {
+      const authorization = queue.ticketEditAuthorizations?.find((entry) => entry.ticketId === ticketId);
+      if (!authorization || authorization.editSessionId !== editSessionId ||
+          update.documentUri !== authorization.documentUri || update.operationId !== undefined) {
+        return skipQueueMutation(false);
+      }
+      update = { ...update, operationId: `${scope}:ticket:${ticketId}:${randomUUID()}`, connectionScope: scope };
     }
   }
   queue.tickets.set(ticketId, mergeOfflineTicketUpdate(ticketId, existing, update));
   return commitQueueMutation(true);
-}).then((registered) => {
-  if (registered && freshTicketStarts.get(scope)?.get(ticketId)?.operationId === update.operationId) {
-    freshTicketStarts.get(scope)?.delete(ticketId);
-  }
-  return registered;
 });
 
 /** 最新の編集意図と Markdown snapshot を同じ scope transaction 内で更新する。 */
@@ -1705,6 +1745,7 @@ export const clearOfflineSyncQueueAsync = (scope = activeScope): Promise<void> =
   mutateQueueAsync(scope, (queue) => {
   queue.tickets.clear();
   queue.abandonedTickets = [];
+  queue.ticketEditAuthorizations = [];
   queue.comments = [];
   queue.newTickets = [];
   return commitQueueMutation(undefined);
@@ -1717,6 +1758,7 @@ const replaceOfflineSyncQueueAsyncInternal = async (
   const isolated = cloneQueueForMutation(next);
   candidate.tickets = isolated.tickets;
   candidate.abandonedTickets = isolated.abandonedTickets;
+  candidate.ticketEditAuthorizations = isolated.ticketEditAuthorizations;
   candidate.comments = isolated.comments;
   candidate.newTickets = isolated.newTickets;
   return commitQueueMutation(undefined);
@@ -1996,8 +2038,11 @@ export const commitOfflineAbandonAsync = async (plan: OfflineAbandonPlan): Promi
         disposition: { kind: "abandoned" as const, abandonedAt: Date.now() },
       };
       if (plan.key.kind === "ticket") {
-        queue.tickets.delete(plan.key.ticketId);
+        const ticketId = plan.key.ticketId;
+        queue.tickets.delete(ticketId);
         (queue.abandonedTickets ??= []).push(abandoned as OfflineTicketUpdate);
+        queue.ticketEditAuthorizations = (queue.ticketEditAuthorizations ?? [])
+          .filter((entry) => entry.ticketId !== ticketId);
       } else {
         replaceStoredOperationInQueue(queue, operation, abandoned);
       }

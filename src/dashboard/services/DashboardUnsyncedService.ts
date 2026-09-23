@@ -108,9 +108,14 @@ export class DashboardUnsyncedService {
         this.deps.context.notifyError(requestId, vscode.l10n.t("The abandoned item changed. Refresh and try again."));
         return;
       }
+      const authorization = await beginFreshTicketEdit(ticketId, editor.document.uri.toString(), scope);
+      if (!authorization) {
+        this.deps.context.notifyError(requestId, vscode.l10n.t("The abandoned item changed. Refresh and try again."));
+        return;
+      }
       updateDraftAfterSave(ticketId, ticket.subject, ticket.description ?? "",
         metadataFromTicket(ticket), ticket.updatedAt, scope);
-      beginFreshTicketEdit(ticketId, editor.document.uri.toString(), scope);
+      this.deps.refreshTicketPresentation();
       this.deps.context.notifySuccess(requestId, vscode.l10n.t("Latest ticket loaded. Start a new edit in the opened editor."));
     } catch (error) {
       this.deps.context.notifyError(requestId, error instanceof Error ? error.message : vscode.l10n.t("Could not load the ticket."));
