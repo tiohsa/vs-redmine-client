@@ -25,6 +25,9 @@ import {
   commitOfflineAbandonAsync,
   beginActiveSync,
   isAbandoned,
+  beginFreshTicketEdit,
+  getOfflineCommentUpdate,
+  completeOfflineCommentAsync,
 } from "../views/offlineSyncStore";
 import { createTestMemento } from "./helpers/vscodeMemento";
 import { buildIssueMetadataFixture } from "./helpers/ticketMetadataFixtures";
@@ -1120,6 +1123,71 @@ suite("offlineSyncStore — workspaceState 永続化", () => {
 });
 
 suite("offlineSyncStore — 同期中止", () => {
+  test("コメントの保存先変更は同じ操作を更新し、中止済み文書の再登録は拒否する", async () => {
+    const scope = "scope-comment-save-as";
+    initializeOfflineSyncStore(createTestMemento(), scope);
+    await addOfflineCommentUpdateAsync({
+      ticketId: 907, commentId: 8, documentUri: "untitled:/tmp/comment.md", body: "first",
+    }, scope);
+    const originalId = getOfflineSyncQueue(scope).comments[0].operationId;
+    await addOfflineCommentUpdateAsync({
+      ticketId: 907, commentId: 8, documentUri: "file:///tmp/comment-saved.md", body: "saved",
+    }, scope);
+    assert.strictEqual(getOfflineSyncQueue(scope).comments.length, 1);
+    assert.strictEqual(getOfflineSyncQueue(scope).comments[0].operationId, originalId);
+    assert.strictEqual(getOfflineSyncQueue(scope).comments[0].body, "saved");
+    assert.strictEqual(await commitOfflineAbandonAsync(prepareOfflineAbandon({
+      kind: "comment", ticketId: 907, operationId: originalId,
+    }, scope)), "abandoned");
+    await addOfflineCommentUpdateAsync({
+      ticketId: 907, operationId: "new-id", documentUri: "file:///tmp/comment-saved.md", body: "retry",
+    }, scope);
+    assert.strictEqual(getOfflineSyncQueue(scope).comments.length, 1);
+    assert.strictEqual(getOfflineSyncQueue(scope).comments[0].body, "saved");
+  });
+
+  test("コメント削除は指定された識別子をすべて満たす1件に限定する", async () => {
+    const scope = "scope-comment-delete-identity";
+    initializeOfflineSyncStore(createTestMemento(), scope);
+    await replaceOfflineSyncQueueAsync({ tickets: new Map(), newTickets: [], comments: [
+      { ticketId: 906, commentId: 7, documentUri: "file:///a.md", body: "A" },
+      { ticketId: 906, commentId: 7, documentUri: "file:///b.md", body: "B" },
+    ] }, scope);
+    await removeOfflineCommentEntryAsync({ ticketId: 906, commentId: 7, documentUri: "file:///a.md" }, scope);
+    const remaining = getOfflineSyncQueue(scope).comments;
+    assert.strictEqual(remaining.length, 1);
+    assert.strictEqual(remaining[0].body, "B");
+  });
+
+  test("URIなしの別コメントも operationId で同期でき、中止済み記録を変更しない", async () => {
+    const scope = "scope-comment-id-only";
+    initializeOfflineSyncStore(createTestMemento(), scope);
+    await addOfflineCommentUpdateAsync({
+      ticketId: 905, operationId: "comment-old", body: "old",
+      phase: "commit_unknown",
+    }, scope);
+    assert.strictEqual(await commitOfflineAbandonAsync(prepareOfflineAbandon({
+      kind: "comment", ticketId: 905, operationId: "comment-old",
+    }, scope)), "abandoned");
+    await addOfflineCommentUpdateAsync({ ticketId: 905, operationId: "comment-new", body: "new" }, scope);
+    const key = { kind: "comment" as const, ticketId: 905, operationId: "comment-new" };
+    const repository = createSyncOperationRepository();
+    assert.strictEqual(repository.getOperation(key, scope)?.operationId, "comment-new");
+    assert.strictEqual(repository.getOperation({ kind: "comment", ticketId: 905 }, scope), undefined);
+    assert.strictEqual(getOfflineCommentUpdate(key, scope)?.body, "new");
+    const abandoned = getOfflineSyncQueue(scope).comments[0];
+    let sentBody: string | undefined;
+    await createSyncEngine({ comments: {
+      addComment: async (_ticketId, body) => { sentBody = body; throw new Error("400 Bad Request"); },
+      getIssueDetail: async (id) => ({ ticket: { id, projectId: 1 } as any, comments: [] }),
+    } }).syncOne(key, { connectionScope: scope });
+    assert.strictEqual(sentBody, "new");
+    assert.deepStrictEqual(getOfflineSyncQueue(scope).comments[0], abandoned);
+    assert.strictEqual(await completeOfflineCommentAsync(key, scope, 1), true);
+    assert.strictEqual(getOfflineSyncQueue(scope).comments.length, 1);
+    assert.deepStrictEqual(getOfflineSyncQueue(scope).comments[0], abandoned);
+  });
+
   test("commit_unknown と後続編集の記録を保持し、再起動後も同期対象へ戻さない", async () => {
     const storage = createTestMemento();
     initializeOfflineSyncStore(storage, "scope-abandon");
@@ -1152,7 +1220,64 @@ suite("offlineSyncStore — 同期中止", () => {
     assert.strictEqual(getOfflineSyncQueue("scope-abandon").comments[0].body, "original");
     await addOfflineCommentUpdateAsync({ ticketId: 902, body: "a new comment", documentUri: "file:///another-comment.md" }, "scope-abandon");
     assert.strictEqual(repository.listOperations("scope-abandon").length, 1);
+    const newKey = { kind: "comment" as const, ticketId: 902, documentUri: "file:///another-comment.md" };
+    const newOperation = repository.getOperation(newKey, "scope-abandon");
+    assert.ok(newOperation);
+    assert.notStrictEqual(newOperation.operationId, beforeAbandon?.operationId);
+    assert.strictEqual((newOperation.intent as { body: string }).body, "a new comment");
+    assert.strictEqual(repository.getOperation({ ...newKey, documentUri: key.documentUri }, "scope-abandon"), undefined);
+    assert.strictEqual(repository.getOperation({ ...newKey, commentId: 5 }, "scope-abandon"), undefined);
+    let sentBody: string | undefined;
+    const engine = createSyncEngine({ comments: {
+      addComment: async (_ticketId, body) => {
+        sentBody = body;
+        throw new Error("400 Bad Request");
+      },
+      getIssueDetail: async (id) => ({ ticket: { id, projectId: 1 } as any, comments: [] }),
+    } });
+    await engine.syncOne(newKey, { connectionScope: "scope-abandon" });
+    assert.strictEqual(sentBody, "a new comment");
+    assert.deepStrictEqual(getOfflineSyncQueue("scope-abandon").comments[0], operation);
     assert.strictEqual(getOfflineSyncQueue("another-scope").comments.length, 0);
+  });
+
+  test("中止済み新規チケットは queueId と operationId の両方で取得できない", async () => {
+    initializeOfflineSyncStore(createTestMemento(), "scope-new-abandon");
+    await addOfflineNewTicketAsync({ queueId: "queue-1", operationId: "create:queue-1", content: "draft" }, "scope-new-abandon");
+    const key = { kind: "newTicket" as const, queueId: "queue-1" };
+    assert.strictEqual(await commitOfflineAbandonAsync(prepareOfflineAbandon(key, "scope-new-abandon")), "abandoned");
+    const repository = createSyncOperationRepository();
+    assert.strictEqual(repository.getOperation(key, "scope-new-abandon"), undefined);
+    assert.strictEqual(repository.getOperation({ kind: "newTicket", queueId: "create:queue-1" }, "scope-new-abandon"), undefined);
+    assert.strictEqual(repository.getOperation({ ...key, documentUri: "file:///other.md" }, "scope-new-abandon"), undefined);
+  });
+
+  test("明示的な新規編集は旧操作を保持して新しい operationId を登録する", async () => {
+    const storage = createTestMemento();
+    const scope = "scope-fresh-edit";
+    initializeOfflineSyncStore(storage, scope);
+    await addOfflineTicketUpdateAsync(904, { ...ticketUpdate(904), operationId: "old:904", phase: "commit_unknown" }, scope);
+    const old = getOfflineSyncQueue(scope).tickets.get(904)!;
+    const repository = createSyncOperationRepository();
+    const oldOperation = repository.getOperation({ kind: "ticket", ticketId: 904 }, scope)!;
+    assert.strictEqual(await commitOfflineAbandonAsync(prepareOfflineAbandon({ kind: "ticket", ticketId: 904 }, scope)), "abandoned");
+    assert.strictEqual(await addOfflineTicketUpdateAsync(904, { ...ticketUpdate(904), operationId: "old:904" }, scope), false);
+    const uri = "untitled:fresh-904.md";
+    const operationId = beginFreshTicketEdit(904, uri, scope);
+    assert.strictEqual(await addOfflineTicketUpdateAsync(904, {
+      ...ticketUpdate(904), operationId, documentUri: uri, baseDescription: "Latest remote body",
+    }, scope), true);
+    assert.strictEqual(await repository.saveOperation(oldOperation, scope), undefined);
+    assert.strictEqual(await addOfflineTicketUpdateAsync(904, {
+      ...ticketUpdate(904), operationId: "old:904", documentUri: uri,
+    }, scope), false);
+    initializeOfflineSyncStore(storage, scope);
+    const queue = getOfflineSyncQueue(scope);
+    assert.strictEqual(queue.tickets.get(904)?.operationId, operationId);
+    assert.strictEqual(queue.abandonedTickets?.length, 1);
+    assert.strictEqual(queue.abandonedTickets?.[0].operationId, old.operationId);
+    assert.strictEqual(queue.abandonedTickets?.[0].phase, "commit_unknown");
+    assert.strictEqual(createSyncOperationRepository().listOperations(scope).length, 1);
   });
 
   test("確認後の変更、実行中、保存失敗では中止を公開しない", async () => {

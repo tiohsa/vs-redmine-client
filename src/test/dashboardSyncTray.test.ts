@@ -65,9 +65,13 @@ interface UnsyncedElement {
   querySelectorAll: (selector: string) => Array<{ addEventListener: (name: string, action: () => void) => void }>;
 }
 
-const renderUnsynced = (items: Array<{ lifecycle: string; requiresReview?: boolean; key: { kind: string; ticketId: number }; label: string }>) => {
+const renderUnsynced = (
+  items: Array<{ lifecycle: string; requiresReview?: boolean; key: { kind: string; ticketId: number }; label: string }>,
+  abandonedItems: Array<{ key: { kind: string; ticketId: number }; label: string; processingRecord?: string }> = [],
+  toggleAbandoned = false,
+) => {
   const elements: Record<string, UnsyncedElement> = {};
-  for (const id of ["unsynced-badge", "unsynced-count-label", "sync-all-btn", "unsynced-summary", "unsynced-list"]) {
+  for (const id of ["unsynced-badge", "unsynced-count-label", "sync-all-btn", "unsynced-summary", "unsynced-list", "abandoned-toggle", "abandoned-list"]) {
     const element: UnsyncedElement = {
       textContent: "",
       innerHTML: "",
@@ -79,8 +83,8 @@ const renderUnsynced = (items: Array<{ lifecycle: string; requiresReview?: boole
     elements[id] = element;
   }
   const unsyncedFunctions = extract("const UNSYNCED_BADGE_META=", "// ── Comments");
-  runInNewContext(`${unsyncedFunctions}\nrenderUnsynced();`, {
-    state: { unsynced: { items, totalCount: items.length } },
+  runInNewContext(`${unsyncedFunctions}\nrenderUnsynced();${toggleAbandoned ? "document.getElementById('abandoned-toggle').onclick();" : ""}`, {
+    state: { unsynced: { items, totalCount: items.length, abandonedItems } },
     document: { getElementById: (id: string) => elements[id] },
     STRINGS: {
       syncQueued: "Queued", syncReviewRequired: "Review Required", syncFailed: "Failed", syncConflict: "Conflict",
@@ -89,6 +93,8 @@ const renderUnsynced = (items: Array<{ lifecycle: string; requiresReview?: boole
       unsyncedKindFile: "File", resolveRecovery: "Resolve recovery", resolveRecoveryTooltip: "Resolve recovery",
       syncToRedmine: "Sync to Redmine", discardAction: "Discard", discardLaterChangesAction: "Discard later changes",
       discardLaterChangesTitle: "Discard later changes", discardTitle: "Discard",
+      showAbandoned: "Show abandoned", hideAbandoned: "Hide abandoned", abandonedCount: "Abandoned: {0}",
+      processingRecord: "Processing record", startNewTicketEdit: "Load latest and start new edit",
     },
     esc: (value: unknown) => String(value ?? ""),
     safeJson: (value: unknown) => JSON.stringify(value),
@@ -102,10 +108,43 @@ const renderUnsynced = (items: Array<{ lifecycle: string; requiresReview?: boole
     cardHtml: elements["unsynced-list"].innerHTML,
     summaryHtml: elements["unsynced-summary"].innerHTML,
     syncAllHidden: elements["sync-all-btn"].hidden,
+    abandonedHtml: elements["abandoned-list"].innerHTML,
+    abandonedHidden: elements["abandoned-list"].hidden,
+    abandonedToggleHidden: elements["abandoned-toggle"].hidden,
+    abandonedToggleText: elements["abandoned-toggle"].textContent,
   };
 };
 
 suite("Dashboard sync attention tray", () => {
+  test("中止済み0件では切替を隠す", () => {
+    const result = renderUnsynced([]);
+    assert.equal(result.abandonedToggleHidden, true);
+    assert.equal(result.abandonedHtml, "");
+  });
+
+  test("中止済みのみを切り替えて処理記録と新規編集操作を表示する", () => {
+    const abandoned = [{ key: { kind: "ticket", ticketId: 10 }, label: "Old ticket update", processingRecord: "old-operation" }];
+    const closed = renderUnsynced([], abandoned);
+    assert.equal(closed.abandonedToggleHidden, false);
+    assert.equal(closed.abandonedHidden, true);
+    assert.ok(closed.abandonedToggleText.includes("Abandoned: 1"));
+    const opened = renderUnsynced([], abandoned, true);
+    assert.equal(opened.abandonedHidden, false);
+    assert.ok(opened.abandonedHtml.includes("old-operation"));
+    assert.ok(opened.abandonedHtml.includes("Load latest and start new edit"));
+  });
+
+  test("通常項目と中止済み項目の混在時は通常項目だけを同期数に含める", () => {
+    const result = renderUnsynced(
+      [{ lifecycle: "queued", key: { kind: "ticket", ticketId: 11 }, label: "New update" }],
+      [{ key: { kind: "ticket", ticketId: 10 }, label: "Old update" }],
+      true,
+    );
+    assert.ok(result.cardHtml.includes("New update"));
+    assert.ok(!result.cardHtml.includes("Old update"));
+    assert.ok(result.abandonedHtml.includes("Old update"));
+    assert.ok(result.summaryHtml.includes("Queued <strong>1</strong>"));
+  });
   test("未同期なしと通常の未同期を区別する", () => {
     assert.deepStrictEqual(present(state()).buttons, []);
     assert.ok(present(state()).text.includes("All clear"));

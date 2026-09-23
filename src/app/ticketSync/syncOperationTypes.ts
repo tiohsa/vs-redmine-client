@@ -49,7 +49,7 @@ export interface LifecycleExpectation {
 export type SyncOperationKey =
   | { kind: "ticket"; ticketId: number }
   | { kind: "newTicket"; queueId?: string; documentUri?: string }
-  | { kind: "comment"; ticketId: number; commentId?: number; documentUri?: string };
+  | { kind: "comment"; ticketId: number; commentId?: number; documentUri?: string; operationId?: string };
 
 export type IssueAttachmentSource =
   | { kind: "file"; filePath: string; filename?: string; contentType?: string }

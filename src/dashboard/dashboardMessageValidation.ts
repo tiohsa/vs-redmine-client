@@ -52,7 +52,8 @@ export const validateDashboardUnsyncedKey = (v: unknown): v is DashboardUnsynced
     if (!isPositiveInt(v["ticketId"])) { return false; }
     if ("commentId" in v && !isPositiveInt(v["commentId"])) { return false; }
     if ("documentUri" in v && !isNonEmptyString(v["documentUri"])) { return false; }
-    if (!("commentId" in v) && !("documentUri" in v)) { return false; }
+    if ("operationId" in v && !isNonEmptyString(v["operationId"])) { return false; }
+    if (!("commentId" in v) && !("documentUri" in v) && !("operationId" in v)) { return false; }
   }
   return true;
 };
@@ -375,6 +376,14 @@ export const validateDashboardMessage = (raw: unknown): ValidationResult => {
 
     case "unsynced.syncAll":
       return { ok: true, request: { type, requestId } };
+
+    case "unsynced.startNewTicketEdit": {
+      const ticketId = raw["ticketId"];
+      if (!isPositiveInt(ticketId)) {
+        return { ok: false, reason: "unsynced.startNewTicketEdit: ticketId is invalid" };
+      }
+      return { ok: true, request: { type, requestId, ticketId } };
+    }
 
     case "settings.update": {
       const patch = raw["patch"];

@@ -13,7 +13,7 @@ import { getCurrentConnectionScope } from "../config/connectionScope";
 export type UnsyncedFileSyncKey =
   | { kind: "ticket"; ticketId: number }
   | { kind: "newTicket"; queueId?: string; documentUri?: string }
-  | { kind: "comment"; ticketId: number; commentId?: number; documentUri?: string };
+  | { kind: "comment"; ticketId: number; commentId?: number; documentUri?: string; operationId?: string };
 
 export class UnsyncedFileTreeItem extends vscode.TreeItem {
   readonly syncKey: UnsyncedFileSyncKey;
@@ -132,7 +132,7 @@ export class UnsyncedFilesTreeProvider
           new UnsyncedFileTreeItem(
             `${base} Comment #${comment.commentId} update`,
             "comment",
-            { kind: "comment", ticketId: comment.ticketId, commentId: comment.commentId, documentUri: comment.documentUri },
+            { kind: "comment", ticketId: comment.ticketId, operationId: comment.operationId, commentId: comment.commentId, documentUri: comment.documentUri },
             comment.documentUri,
             buildCommentTooltip(comment.ticketId, comment.commentId, comment.documentUri),
           ),
@@ -142,7 +142,7 @@ export class UnsyncedFilesTreeProvider
           new UnsyncedFileTreeItem(
             `${base} New comment`,
             "comment",
-            { kind: "comment", ticketId: comment.ticketId, documentUri: comment.documentUri },
+            { kind: "comment", ticketId: comment.ticketId, operationId: comment.operationId, documentUri: comment.documentUri },
             comment.documentUri,
             buildCommentTooltip(comment.ticketId, undefined, comment.documentUri),
           ),

@@ -173,6 +173,8 @@ export const isAbandoned = (operation: { disposition?: SyncDisposition }): boole
 
 export type OfflineSyncQueue = {
   tickets: Map<number, OfflineTicketUpdate>;
+  /** 中止済み更新を operationId 単位で保持する。 */
+  abandonedTickets?: OfflineTicketUpdate[];
   comments: OfflineCommentUpdate[];
   newTickets: OfflineNewTicket[];
 };
@@ -187,7 +189,7 @@ export type OfflineDiscardResult =
 export type OfflineDiscardKey =
   | { kind: "ticket"; ticketId: number }
   | { kind: "newTicket"; queueId?: string; documentUri?: string }
-  | { kind: "comment"; ticketId: number; commentId?: number; documentUri?: string };
+  | { kind: "comment"; ticketId: number; commentId?: number; documentUri?: string; operationId?: string };
 
 export type OfflineDiscardPlan = {
   readonly key: OfflineDiscardKey;
@@ -421,6 +423,7 @@ const runScopeMutation = <T>(scope: string, mutation: () => Promise<T>): Promise
 
 const emptyQueue = (): OfflineSyncQueue => ({
   tickets: new Map<number, OfflineTicketUpdate>(),
+  abandonedTickets: [],
   comments: [],
   newTickets: [],
 });
@@ -697,6 +700,7 @@ const operationFromComment = (
 const operationsFromQueue = (queue: OfflineSyncQueue, scope: string): SyncOperation[] => [
   ...queue.newTickets.map((ticket) => operationFromNewTicket(ticket, scope)),
   ...Array.from(queue.tickets.values()).map((update) => operationFromTicketUpdate(update, scope)),
+  ...(queue.abandonedTickets ?? []).map((update) => operationFromTicketUpdate(update, scope)),
   ...queue.comments.map((comment, index) => operationFromComment(comment, scope, index)),
 ];
 
@@ -730,7 +734,12 @@ const queueFromOperations = (operations: SyncOperation[]): OfflineSyncQueue => {
           effects: normalizeOperationEffects({ ...operation, attemptGeneration: operation.attemptGeneration, effects: operation.effects }),
           disposition: operation.disposition,
         };
-        queue.tickets.set(update.ticketId, normalizeTicketUpdate(update.ticketId, update));
+        const normalized = normalizeTicketUpdate(update.ticketId, update);
+        if (isAbandoned(normalized)) {
+          queue.abandonedTickets!.push(normalized);
+        } else {
+          queue.tickets.set(update.ticketId, normalized);
+        }
         break;
       }
       case "commentCreate":
@@ -1062,7 +1071,7 @@ const deserializeQueue = (raw: SerializedQueue | undefined): OfflineSyncQueue =>
     );
     return queueFromOperations(valid);
   }
-  return {
+  const legacyQueue: OfflineSyncQueue = {
     tickets: new Map(
       raw && Array.isArray(raw.tickets)
         ? raw.tickets
@@ -1078,6 +1087,7 @@ const deserializeQueue = (raw: SerializedQueue | undefined): OfflineSyncQueue =>
           .filter((e): e is [number, OfflineTicketUpdate] => e !== undefined)
         : [],
     ),
+    abandonedTickets: [],
     comments:
       raw && Array.isArray(raw.comments)
         ? raw.comments
@@ -1091,6 +1101,13 @@ const deserializeQueue = (raw: SerializedQueue | undefined): OfflineSyncQueue =>
           .map(normalizeNewTicket)
         : [],
   };
+  for (const [ticketId, update] of legacyQueue.tickets) {
+    if (isAbandoned(update)) {
+      legacyQueue.abandonedTickets!.push(update);
+      legacyQueue.tickets.delete(ticketId);
+    }
+  }
+  return legacyQueue;
 };
 
 /** Returns the canonical, persisted representation of pending work. */
@@ -1108,28 +1125,17 @@ const findStoredOperation = (
   queue: OfflineSyncQueue,
   operationId: string,
 ): OfflineNewTicket | OfflineTicketUpdate | OfflineCommentUpdate | undefined => {
-  const newTicket = queue.newTickets.find((op) =>
-    op.operationId === operationId ||
-    (op.queueId !== undefined && op.queueId === operationId) ||
-    (op.documentUri !== undefined && (operationId.endsWith(`:${op.documentUri}`) || operationId === op.documentUri))
-  );
-  if (newTicket) { return newTicket; }
-
-  const ticket = Array.from(queue.tickets.values()).find((op) =>
-    op.operationId === operationId ||
-    `ticket:${op.ticketId}` === operationId ||
-    operationId.endsWith(`:${op.ticketId}`)
-  );
-  if (ticket) { return ticket; }
-
-  return queue.comments.find((op) =>
-    op.operationId === operationId ||
-    (op.operationId !== undefined && (operationId.endsWith(`:${op.operationId}`) || op.operationId.endsWith(`:${operationId}`))) ||
-    (op.commentId !== undefined && `comment:${op.ticketId}:${op.commentId}` === operationId) ||
-    (op.commentId !== undefined && operationId.includes(`:${op.ticketId}:${op.commentId}`)) ||
-    (op.documentUri !== undefined && (operationId.endsWith(`:${op.documentUri}`) || operationId === op.documentUri)) ||
-    (op.ticketId !== undefined && operationId.includes(`:${op.ticketId}:`))
-  );
+  const operations = [
+    ...queue.newTickets,
+    ...queue.tickets.values(),
+    ...queue.comments,
+  ];
+  const exact = operations.filter((op) => op.operationId === operationId);
+  if (exact.length > 0) { return exact.length === 1 ? exact[0] : undefined; }
+  const aliases = operations.filter((op) =>
+    ("queueId" in op && op.queueId === operationId) ||
+    (op.operationId !== undefined && operationId.endsWith(`:${op.operationId}`)));
+  return aliases.length === 1 ? aliases[0] : undefined;
 };
 
 export const planOfflineSyncEffectAsync = async (
@@ -1142,6 +1148,7 @@ export const planOfflineSyncEffectAsync = async (
   const operation = findStoredOperation(queue, operationId);
   if (
     !operation ||
+    isAbandoned(operation) ||
     operation.revision !== expectedRevision ||
     effect.operationRevision !== expectedRevision ||
     (effect.attemptGeneration !== undefined &&
@@ -1188,6 +1195,7 @@ export const transitionOfflineSyncEffectAsync = async (
   const operation = findStoredOperation(queue, operationId);
   if (
     !operation ||
+    isAbandoned(operation) ||
     operation.revision !== expected.operationRevision ||
     (expected.attemptGeneration !== undefined &&
       getAttemptGeneration(operation) !== normalizeAttemptGeneration(expected.attemptGeneration)) ||
@@ -1227,6 +1235,7 @@ export const initializeOfflineSyncStore = (storage: Memento, scope?: string): vo
   memento = storage;
   activeScope = requestedScope;
   queuesByScope.clear();
+  freshTicketStarts.clear();
   if (!sameStorage) {
     persistenceByScope.clear();
   }
@@ -1306,15 +1315,43 @@ export const mergeOfflineTicketUpdate = (
   };
 };
 
+const freshTicketStarts = new Map<string, Map<number, { operationId: string; documentUri: string }>>();
+
+/** 最新の Redmine 状態を開いた明示操作だけに、新しい operationId を発行する。 */
+export const beginFreshTicketEdit = (ticketId: number, documentUri: string, scope = activeScope): string => {
+  const operationId = `${scope}:ticket:${ticketId}:${randomUUID()}`;
+  const starts = freshTicketStarts.get(scope) ?? new Map();
+  starts.set(ticketId, { operationId, documentUri });
+  freshTicketStarts.set(scope, starts);
+  return operationId;
+};
+
+export const getFreshTicketEdit = (ticketId: number, scope = activeScope):
+  { operationId: string; documentUri: string } | undefined => freshTicketStarts.get(scope)?.get(ticketId);
+
 export const addOfflineTicketUpdateAsync = (
   ticketId: number,
   update: OfflineTicketUpdate,
   scope = activeScope,
-): Promise<void> => mutateQueueAsync(scope, (queue) => {
+): Promise<boolean> => mutateQueueAsync(scope, (queue) => {
   const existing = queue.tickets.get(ticketId);
-  if (existing && isAbandoned(existing)) { return skipQueueMutation(undefined); }
+  if (existing && isAbandoned(existing)) { return skipQueueMutation(false); }
+  if ((queue.abandonedTickets ?? []).some((entry) => entry.ticketId === ticketId)) {
+    const expected = existing
+      ? { operationId: existing.operationId, documentUri: existing.documentUri }
+      : freshTicketStarts.get(scope)?.get(ticketId);
+    if (!expected || update.operationId !== expected.operationId ||
+        update.documentUri !== expected.documentUri) {
+      return skipQueueMutation(false);
+    }
+  }
   queue.tickets.set(ticketId, mergeOfflineTicketUpdate(ticketId, existing, update));
-  return commitQueueMutation(undefined);
+  return commitQueueMutation(true);
+}).then((registered) => {
+  if (registered && freshTicketStarts.get(scope)?.get(ticketId)?.operationId === update.operationId) {
+    freshTicketStarts.get(scope)?.delete(ticketId);
+  }
+  return registered;
 });
 
 /** 最新の編集意図と Markdown snapshot を同じ scope transaction 内で更新する。 */
@@ -1405,10 +1442,24 @@ export const addOfflineCommentUpdateAsync = (
   update: OfflineCommentUpdate,
   scope = activeScope,
 ): Promise<void> => mutateQueueAsync(scope, (queue) => {
-  const index = queue.comments.findIndex((item) =>
-    (update.commentId !== undefined && item.commentId === update.commentId) ||
-    (update.documentUri !== undefined && item.documentUri === update.documentUri),
-  );
+  const byOperationId = update.operationId === undefined ? [] : queue.comments.filter((item) =>
+    item.ticketId === update.ticketId && item.operationId === update.operationId);
+  const byCommentId = update.commentId === undefined ? [] : queue.comments.filter((item) =>
+    item.ticketId === update.ticketId && item.commentId === update.commentId);
+  const byDocumentUri = update.documentUri === undefined ? [] : queue.comments.filter((item) =>
+    item.ticketId === update.ticketId && sameDocumentIdentity(item.documentUri, update.documentUri));
+  if (byOperationId.length > 1 || byCommentId.length > 1 || byDocumentUri.length > 1) {
+    return skipQueueMutation(undefined);
+  }
+  const target = update.operationId !== undefined
+    ? byOperationId[0]
+    : update.commentId !== undefined
+      ? byCommentId[0]
+      : byDocumentUri[0];
+  if (byDocumentUri[0] && byDocumentUri[0] !== target) {
+    return skipQueueMutation(undefined);
+  }
+  const index = target ? queue.comments.indexOf(target) : -1;
   if (index !== -1) {
     const existing = queue.comments[index];
     if (isAbandoned(existing)) { return skipQueueMutation(undefined); }
@@ -1525,6 +1576,42 @@ export const sameDocumentIdentity = (
 ): boolean => left !== undefined && right !== undefined &&
   documentIdentity(left) === documentIdentity(right);
 
+export type ResolvedStoredOperation =
+  | { kind: "ticket"; value: OfflineTicketUpdate }
+  | { kind: "newTicket"; value: OfflineNewTicket }
+  | { kind: "comment"; value: OfflineCommentUpdate };
+
+/** 同期・確認・破棄が同じ保存済み項目を選ぶための複合 identity 解決。 */
+export const resolveStoredOfflineOperation = (
+  queue: OfflineSyncQueue,
+  key: OfflineDiscardKey,
+): ResolvedStoredOperation | undefined => {
+  if (key.kind === "ticket") {
+    const value = queue.tickets.get(key.ticketId);
+    return value ? { kind: "ticket", value } : undefined;
+  }
+  if (key.kind === "newTicket") {
+    if (key.queueId === undefined && key.documentUri === undefined) { return undefined; }
+    const matches = queue.newTickets.filter((candidate) =>
+      (key.queueId === undefined || candidate.queueId === key.queueId ||
+        candidate.operationId === key.queueId ||
+        Boolean(candidate.operationId?.endsWith(`:${key.queueId}`))) &&
+      (key.documentUri === undefined || sameDocumentIdentity(candidate.documentUri, key.documentUri)));
+    return matches.length === 1 ? { kind: "newTicket", value: matches[0] } : undefined;
+  }
+  if (key.commentId === undefined && key.documentUri === undefined && key.operationId === undefined) {
+    // 識別子のない旧キューは同じチケットのコメントが1件のときのみ扱う。
+    const legacy = queue.comments.filter((candidate) => candidate.ticketId === key.ticketId);
+    return legacy.length === 1 ? { kind: "comment", value: legacy[0] } : undefined;
+  }
+  const matches = queue.comments.filter((candidate) =>
+    candidate.ticketId === key.ticketId &&
+    (key.operationId === undefined || candidate.operationId === key.operationId) &&
+    (key.commentId === undefined || candidate.commentId === key.commentId) &&
+    (key.documentUri === undefined || candidate.documentUri === key.documentUri));
+  return matches.length === 1 ? { kind: "comment", value: matches[0] } : undefined;
+};
+
 export const addOfflineNewTicketAsync = async (
   update: Omit<OfflineNewTicket, "queueId"> & { queueId?: string },
   scope = activeScope,
@@ -1617,6 +1704,7 @@ export const getOfflineNewTicket = (
 export const clearOfflineSyncQueueAsync = (scope = activeScope): Promise<void> =>
   mutateQueueAsync(scope, (queue) => {
   queue.tickets.clear();
+  queue.abandonedTickets = [];
   queue.comments = [];
   queue.newTickets = [];
   return commitQueueMutation(undefined);
@@ -1628,6 +1716,7 @@ const replaceOfflineSyncQueueAsyncInternal = async (
 ): Promise<void> => mutateQueueAsync(scope, (candidate) => {
   const isolated = cloneQueueForMutation(next);
   candidate.tickets = isolated.tickets;
+  candidate.abandonedTickets = isolated.abandonedTickets;
   candidate.comments = isolated.comments;
   candidate.newTickets = isolated.newTickets;
   return commitQueueMutation(undefined);
@@ -1863,33 +1952,10 @@ export const removeOfflineNewTicketAsync = async (
   });
 };
 
-/** 確認と破棄は同じ複合 identity 条件で対象を解決する。 */
 const resolveOfflineDiscardTarget = (
   queue: OfflineSyncQueue,
   key: OfflineDiscardKey,
-): StoredOfflineOperation | undefined => {
-  switch (key.kind) {
-    case "ticket":
-      return queue.tickets.get(key.ticketId);
-    case "newTicket":
-      if (key.queueId === undefined && key.documentUri === undefined) {
-        return undefined;
-      }
-      return queue.newTickets.find((ticket) =>
-        (key.queueId === undefined || ticket.queueId === key.queueId) &&
-        (key.documentUri === undefined || sameDocumentIdentity(ticket.documentUri, key.documentUri)),
-      );
-    case "comment":
-      if (key.commentId === undefined && key.documentUri === undefined) {
-        return undefined;
-      }
-      return queue.comments.find((comment) =>
-        comment.ticketId === key.ticketId &&
-        (key.commentId === undefined || comment.commentId === key.commentId) &&
-        (key.documentUri === undefined || comment.documentUri === key.documentUri),
-      );
-  }
-};
+): StoredOfflineOperation | undefined => resolveStoredOfflineOperation(queue, key)?.value;
 
 export const prepareOfflineDiscard = (
   key: OfflineDiscardKey,
@@ -1925,10 +1991,16 @@ export const commitOfflineAbandonAsync = async (plan: OfflineAbandonPlan): Promi
           ("queueId" in operation ? operation.queueId : `ticket:${operation.ticketId}`)))) {
         return skipQueueMutation("busy" as const);
       }
-      replaceStoredOperationInQueue(queue, operation, {
+      const abandoned = {
         ...operation,
-        disposition: { kind: "abandoned", abandonedAt: Date.now() },
-      });
+        disposition: { kind: "abandoned" as const, abandonedAt: Date.now() },
+      };
+      if (plan.key.kind === "ticket") {
+        queue.tickets.delete(plan.key.ticketId);
+        (queue.abandonedTickets ??= []).push(abandoned as OfflineTicketUpdate);
+      } else {
+        replaceStoredOperationInQueue(queue, operation, abandoned);
+      }
       return commitQueueMutation("abandoned" as const);
     });
   } catch {
@@ -2330,16 +2402,12 @@ export const completeOfflineTicketUpdateAsync = async (
   }
 };
 
-type CommentQueueKey = { ticketId: number; commentId?: number; documentUri?: string };
+type CommentQueueKey = { ticketId: number; commentId?: number; documentUri?: string; operationId?: string };
 
-const findCommentIndex = (queue: OfflineSyncQueue, key: CommentQueueKey): number =>
-  queue.comments.findIndex((comment) =>
-    comment.ticketId === key.ticketId && (
-      (key.documentUri !== undefined && comment.documentUri !== undefined && comment.documentUri === key.documentUri) ||
-      (key.commentId !== undefined && comment.commentId === key.commentId) ||
-      (key.commentId === undefined && comment.commentId === undefined)
-    ),
-  );
+const findCommentIndex = (queue: OfflineSyncQueue, key: CommentQueueKey): number => {
+  const resolved = resolveStoredOfflineOperation(queue, { kind: "comment", ...key });
+  return resolved?.kind === "comment" ? queue.comments.indexOf(resolved.value) : -1;
+};
 
 export const getOfflineCommentUpdate = (
   key: CommentQueueKey,
@@ -2522,26 +2590,13 @@ export const discardOfflineCommentUpdateAsync = (
   commitOfflineDiscardAsync(prepareOfflineDiscard({ kind: "comment", ...key }, scope));
 
 export const removeOfflineCommentEntryAsync = (
-  params: { ticketId?: number; commentId?: number; documentUri?: string },
+  params: CommentQueueKey,
   scope = activeScope,
 ): Promise<void> => mutateQueueAsync(scope, (queue) => {
-  const hasIdentity = params.commentId !== undefined || params.documentUri !== undefined;
-  const previousLength = queue.comments.length;
-  queue.comments = queue.comments.filter((item) => {
-    if (!hasIdentity || (params.ticketId !== undefined && item.ticketId !== params.ticketId)) {
-      return true;
-    }
-    if (params.commentId !== undefined && item.commentId === params.commentId) {
-      return false;
-    }
-    if (params.documentUri && item.documentUri === params.documentUri) {
-      return false;
-    }
-    return true;
-  });
-  return queue.comments.length === previousLength
-    ? skipQueueMutation(undefined)
-    : commitQueueMutation(undefined);
+  const index = findCommentIndex(queue, params);
+  if (index === -1 || isAbandoned(queue.comments[index])) { return skipQueueMutation(undefined); }
+  queue.comments.splice(index, 1);
+  return commitQueueMutation(undefined);
 });
 
 export const removeOfflineCommentEntryIfMatchesAsync = (
@@ -2556,6 +2611,7 @@ export const removeOfflineCommentEntryIfMatchesAsync = (
   const current = queue.comments[index];
   if (
     expected === undefined ||
+    isAbandoned(current) ||
     (current.phase !== undefined && current.phase !== "queued") ||
     current.nextIntent !== undefined ||
     (current.connectionScope !== undefined && current.connectionScope !== scope) ||
@@ -2621,7 +2677,7 @@ export const discardSyncOperation = async (
     case "commentUpdate": {
       const comment = operation.payload as OfflineCommentUpdate;
       await removeOfflineCommentEntryAsync(
-        { ticketId: comment.ticketId, commentId: comment.commentId, documentUri: comment.documentUri },
+        { ticketId: comment.ticketId, operationId: comment.operationId, commentId: comment.commentId, documentUri: comment.documentUri },
         scope,
       );
       return "discarded";

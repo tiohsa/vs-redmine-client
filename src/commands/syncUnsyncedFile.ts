@@ -3,7 +3,7 @@ import {
   getOfflineNewTicket,
   getOfflineSyncQueue,
   isAbandoned,
-  sameDocumentIdentity,
+  resolveStoredOfflineOperation,
 } from "../views/offlineSyncStore";
 import { UnsyncedFileSyncKey } from "../app/unsyncedTypes";
 import { showInfo, showWarning } from "../utils/notifications";
@@ -404,15 +404,7 @@ const syncUnsyncedFileAtScope = async (
 ): Promise<SyncUnsyncedFileResult | undefined> => {
   const { syncKey } = item;
   const queue = getOfflineSyncQueue(operationScope);
-  const stored = syncKey.kind === "ticket"
-    ? queue.tickets.get(syncKey.ticketId)
-    : syncKey.kind === "newTicket"
-      ? queue.newTickets.find((entry) =>
-          (syncKey.queueId !== undefined && entry.queueId === syncKey.queueId) ||
-          (syncKey.documentUri !== undefined && sameDocumentIdentity(entry.documentUri, syncKey.documentUri)))
-      : queue.comments.find((entry) => entry.ticketId === syncKey.ticketId && (
-          (syncKey.commentId !== undefined && entry.commentId === syncKey.commentId) ||
-          (syncKey.documentUri !== undefined && entry.documentUri === syncKey.documentUri)));
+  const stored = resolveStoredOfflineOperation(queue, syncKey)?.value;
   if (stored && isAbandoned(stored)) {
     return { status: "failed", kind: syncKey.kind, message: vscode.l10n.t("Sync was abandoned for this item.") };
   }

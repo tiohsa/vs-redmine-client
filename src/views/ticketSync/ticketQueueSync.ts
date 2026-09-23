@@ -4,6 +4,7 @@ import {
   addOfflineTicketUpdateAsync,
   cancelQueuedTicketUpdateIfMatchesAsync,
   getActiveScope,
+  getFreshTicketEdit,
   getOfflineSyncQueue,
   isAbandoned,
   sameDocumentIdentity,
@@ -62,7 +63,14 @@ export const queueTicketDraft = async (
   if (!draft) {
     return buildResult("failed", "Missing draft state for ticket.");
   }
-  if (isAbandoned(getOfflineSyncQueue(input.operationScope ?? getActiveScope()).tickets.get(input.ticketId) ?? {})) {
+  const scope = input.operationScope ?? getActiveScope();
+  const queue = getOfflineSyncQueue(scope);
+  const documentUri = input.editor?.document.uri.toString() ?? input.documentUri?.toString();
+  const freshEdit = getFreshTicketEdit(input.ticketId, scope);
+  const activeTicket = queue.tickets.get(input.ticketId);
+  const hasAbandonedTicket = (queue.abandonedTickets ?? []).some((entry) => entry.ticketId === input.ticketId);
+  if (isAbandoned(activeTicket ?? {}) || (hasAbandonedTicket &&
+      (documentUri === undefined || documentUri !== (activeTicket?.documentUri ?? freshEdit?.documentUri)))) {
     return buildResult("failed", vscode.l10n.t("Sync was abandoned for this ticket. Review the retained record before starting a new edit."));
   }
   if (containsConflictMarkers(input.content)) {
@@ -127,7 +135,7 @@ export const queueTicketDraft = async (
     controlFields: parsed.controlFields,
   });
 
-  await addOfflineTicketUpdateAsync(input.ticketId, {
+  const registered = await addOfflineTicketUpdateAsync(input.ticketId, {
     ticketId: input.ticketId,
     baseSubject: draft.baseSubject,
     baseDescription: draft.baseDescription,
@@ -141,11 +149,16 @@ export const queueTicketDraft = async (
     metadataBlock: parsed.metadataBlock,
     controlFields: parsed.controlFields,
     baseDir,
-    documentUri: input.editor?.document.uri.toString() ?? input.documentUri?.toString(),
+    documentUri,
     connectionScope: input.operationScope,
-    operationId: `${input.operationScope ?? "legacy"}:ticket:${input.ticketId}`,
+    operationId: activeTicket?.operationId ?? (hasAbandonedTicket
+      ? freshEdit?.operationId
+      : `${input.operationScope ?? "legacy"}:ticket:${input.ticketId}`),
     phase: "queued",
   }, input.operationScope);
+  if (!registered) {
+    return buildResult("failed", vscode.l10n.t("The queued update changed. Save again."));
+  }
   if (!changeState.hasChanges) {
     return buildResult("no_change", "No changes to save.");
   }

@@ -38,7 +38,11 @@ export const buildUnsyncedDashboardItems = (abandoned = false): DashboardUnsynce
     engine.getRecoveryItems(key, { connectionScope }).some((item) => item.allowedActions.length > 0);
   const items: DashboardUnsyncedItem[] = [];
 
-  queue.tickets.forEach((update, ticketId) => {
+  const ticketUpdates = abandoned
+    ? [...(queue.abandonedTickets ?? []), ...Array.from(queue.tickets.values()).filter(isAbandoned)]
+    : Array.from(queue.tickets.values());
+  ticketUpdates.forEach((update) => {
+    const ticketId = update.ticketId;
     if (isAbandoned(update) !== abandoned) { return; }
     const subject = getTicketSummary(ticketId);
     const policy = evaluateOfflineSyncPolicy(update);
@@ -54,7 +58,7 @@ export const buildUnsyncedDashboardItems = (abandoned = false): DashboardUnsynce
       abandonedAt: update.disposition?.abandonedAt,
       hasLaterChanges: update.nextIntent !== undefined,
       processingRecord: abandoned ? processingRecord(update) : undefined,
-      ...(requiresReview({ kind: "ticket", ticketId }) ? { requiresReview: true } : {}),
+      ...(!abandoned && requiresReview({ kind: "ticket", ticketId }) ? { requiresReview: true } : {}),
     });
   });
 
@@ -69,6 +73,7 @@ export const buildUnsyncedDashboardItems = (abandoned = false): DashboardUnsynce
       key: {
         kind: "comment",
         ticketId: comment.ticketId,
+        operationId: comment.operationId,
         commentId: comment.commentId,
         documentUri: comment.documentUri,
       },
@@ -82,6 +87,7 @@ export const buildUnsyncedDashboardItems = (abandoned = false): DashboardUnsynce
       ...(requiresReview({
         kind: "comment",
         ticketId: comment.ticketId,
+        operationId: comment.operationId,
         commentId: comment.commentId,
         documentUri: comment.documentUri,
       }) ? { requiresReview: true } : {}),

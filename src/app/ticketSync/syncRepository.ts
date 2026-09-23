@@ -41,10 +41,13 @@ import {
   removeOfflineCommentEntryAsync,
   removeOfflineNewTicketAsync,
   removeOfflineTicketUpdateAsync,
+  resolveStoredOfflineOperation,
   sameDocumentIdentity,
   type OfflineCommentUpdate,
   type OfflineNewTicket,
   type OfflineTicketUpdate,
+  type OfflineSyncQueue,
+  type ResolvedStoredOperation,
 } from "../../views/offlineSyncStore";
 import {
   parseTicketEditorContent,
@@ -59,14 +62,14 @@ const getOpKeyString = (key: SyncOperationKey): string => {
   if (key.kind === "newTicket") {
     return `newTicket:${key.queueId ?? key.documentUri ?? "0"}`;
   }
-  return `comment:${key.ticketId}:${key.commentId ?? key.documentUri ?? "new"}`;
+  return `comment:${key.ticketId}:${key.operationId ?? key.commentId ?? key.documentUri ?? "new"}`;
 };
 
 const getOperationKey = (operation: UnifiedSyncOperation): SyncOperationKey => operation.key ?? (
   operation.kind === "ticket_create"
     ? { kind: "newTicket", queueId: operation.operationId, documentUri: operation.documentUri }
     : operation.kind === "comment_create" || operation.kind === "comment_update"
-      ? { kind: "comment", ticketId: operation.ticketId ?? 0, commentId: operation.commentId, documentUri: operation.documentUri }
+      ? { kind: "comment", ticketId: operation.ticketId ?? 0, commentId: operation.commentId, documentUri: operation.documentUri, operationId: operation.operationId }
       : { kind: "ticket", ticketId: operation.ticketId ?? 0 }
 );
 
@@ -310,7 +313,7 @@ export const toUnifiedOperationFromComment = (
 ): UnifiedSyncOperation<CommentCreateIntent | CommentUpdateIntent> => ({
   operationId: comment.operationId ?? `${scope}:comment:${comment.ticketId}:${comment.commentId ?? comment.documentUri}`,
   kind: comment.commentId !== undefined ? "comment_update" : "comment_create",
-  key: { kind: "comment", ticketId: comment.ticketId, commentId: comment.commentId, documentUri: comment.documentUri },
+  key: { kind: "comment", ticketId: comment.ticketId, commentId: comment.commentId, documentUri: comment.documentUri, operationId: comment.operationId },
   connectionScope: scope,
   phase: (comment.phase ?? "queued") as GenericSyncPhase,
   revision: (comment as any).intentRevision ?? comment.revision ?? 1,
@@ -362,36 +365,25 @@ export const toUnifiedOperationFromComment = (
   updatedAt: comment.createdAt ?? Date.now(),
 });
 
+const toUnifiedOperationFromStored = (
+  stored: ResolvedStoredOperation,
+  scope: string,
+): UnifiedSyncOperation | undefined => {
+  if (isAbandoned(stored.value)) { return undefined; }
+  switch (stored.kind) {
+    case "ticket": return toUnifiedOperationFromTicket(stored.value, scope);
+    case "newTicket": return toUnifiedOperationFromNewTicket(stored.value, scope);
+    case "comment": return toUnifiedOperationFromComment(stored.value, scope);
+  }
+};
+
 const getOperationFromQueue = (
-  queue: ReturnType<typeof getOfflineSyncQueue>,
+  queue: OfflineSyncQueue,
   key: SyncOperationKey,
   scope: string,
 ): UnifiedSyncOperation | undefined => {
-  if (key.kind === "ticket") {
-    const ticket = queue.tickets.get(key.ticketId);
-    return ticket ? toUnifiedOperationFromTicket(ticket, scope) : undefined;
-  }
-  if (key.kind === "newTicket") {
-    const ticketByQueueId = key.queueId !== undefined
-      ? queue.newTickets.find((candidate) =>
-        candidate.queueId === key.queueId ||
-        candidate.operationId === key.queueId ||
-        Boolean(candidate.operationId?.endsWith(`:${key.queueId}`)))
-      : undefined;
-    const ticket = ticketByQueueId ?? (key.documentUri
-      ? queue.newTickets.find((candidate) =>
-        candidate.documentUri !== undefined &&
-        sameDocumentIdentity(candidate.documentUri, key.documentUri))
-      : undefined);
-    return ticket ? toUnifiedOperationFromNewTicket(ticket, scope) : undefined;
-  }
-  const comment = queue.comments.find((candidate) =>
-    (key.documentUri !== undefined && candidate.documentUri === key.documentUri) ||
-    (candidate.ticketId === key.ticketId &&
-      ((key.commentId !== undefined && candidate.commentId === key.commentId) ||
-        (key.commentId === undefined && candidate.commentId === undefined))),
-  );
-  return comment ? toUnifiedOperationFromComment(comment, scope) : undefined;
+  const stored = resolveStoredOfflineOperation(queue, key);
+  return stored ? toUnifiedOperationFromStored(stored, scope) : undefined;
 };
 
 export class DefaultSyncOperationRepository implements SyncOperationRepository {
@@ -399,17 +391,13 @@ export class DefaultSyncOperationRepository implements SyncOperationRepository {
 
   public getOperation<I extends SyncIntent = SyncIntent>(key: SyncOperationKey, scope: string): UnifiedSyncOperation<I> | undefined {
     const queue = getOfflineSyncQueue(scope);
-    const abandoned = key.kind === "ticket"
-      ? queue.tickets.get(key.ticketId)
-      : key.kind === "newTicket"
-        ? queue.newTickets.find((item) =>
-            (key.queueId !== undefined && item.queueId === key.queueId) ||
-            (key.documentUri !== undefined && sameDocumentIdentity(item.documentUri, key.documentUri)))
-        : queue.comments.find((item) => item.ticketId === key.ticketId && (
-            (key.commentId !== undefined && item.commentId === key.commentId) ||
-            (key.documentUri !== undefined && item.documentUri === key.documentUri)));
-    if (abandoned && isAbandoned(abandoned)) { return undefined; }
-    const operation = getOperationFromQueue(queue, key, scope);
+    const stored = resolveStoredOfflineOperation(queue, key);
+    if (stored && isAbandoned(stored.value)) { return undefined; }
+    if (key.kind === "ticket" && !stored &&
+        (queue.abandonedTickets ?? []).some((item) => item.ticketId === key.ticketId)) {
+      return undefined;
+    }
+    const operation = stored ? toUnifiedOperationFromStored(stored, scope) : undefined;
     if (operation) {
       return operation as UnifiedSyncOperation<I>;
     }
@@ -468,17 +456,17 @@ export class DefaultSyncOperationRepository implements SyncOperationRepository {
     try {
       return await mutateOfflineSyncQueueAsync(scope, (nextQueue) => {
     const key = getOperationKey(operation);
-    const stored = key.kind === "ticket"
-      ? nextQueue.tickets.get(key.ticketId)
-      : key.kind === "newTicket"
-        ? nextQueue.newTickets.find((item) =>
-            (key.queueId !== undefined && item.queueId === key.queueId) ||
-            (key.documentUri !== undefined && sameDocumentIdentity(item.documentUri, key.documentUri)))
-        : nextQueue.comments.find((item) => item.ticketId === key.ticketId && (
-            (key.commentId !== undefined && item.commentId === key.commentId) ||
-            (key.documentUri !== undefined && item.documentUri === key.documentUri)));
+    if (key.kind === "ticket") {
+      const active = nextQueue.tickets.get(key.ticketId);
+      if ((active && active.operationId !== operation.operationId) ||
+          (!active && (nextQueue.abandonedTickets ?? []).some((item) => item.ticketId === key.ticketId))) {
+        return undefined;
+      }
+    }
+    const stored = resolveStoredOfflineOperation(nextQueue, key)?.value;
     if (stored && isAbandoned(stored)) { return undefined; }
     const current = getOperationFromQueue(nextQueue, key, scope);
+    if (current && current.operationId !== operation.operationId) { return undefined; }
 
     if (options?.requireExisting && !current) {
       return undefined;
@@ -651,7 +639,7 @@ export class DefaultSyncOperationRepository implements SyncOperationRepository {
         finalizeDraft: (intentObj as any)?.finalizeDraft ?? (operation as any).finalizeDraft,
         sourceNotesHash: (intentObj as any)?.sourceNotesHash ?? (operation as any).sourceNotesHash,
         lastKnownRemoteUpdatedAt: (intentObj as any)?.lastKnownRemoteUpdatedAt ?? operation.remoteUpdatedAt,
-        effects: operation.effects ?? nextQueue.comments.find((c) => (operation.operationId && c.operationId === operation.operationId) || (operation.documentUri && c.documentUri === operation.documentUri) || (c.ticketId === operation.ticketId && c.commentId === operation.commentId))?.effects,
+        effects: operation.effects ?? nextQueue.comments.find((c) => c.operationId === operation.operationId)?.effects,
         nextIntent: nextIntentObj ? {
           body: nextIntentObj.body,
           revision: (nextIntentObj as any)?.revision ?? (intentRevision + 1),
@@ -659,13 +647,7 @@ export class DefaultSyncOperationRepository implements SyncOperationRepository {
           baseDir: nextIntentObj.baseDir ?? intentObj?.baseDir,
         } : undefined,
       } as any;
-      const idx = nextQueue.comments.findIndex((c) =>
-        (payload.operationId && c.operationId && c.operationId === payload.operationId) ||
-        (payload.documentUri !== undefined && c.documentUri !== undefined && sameDocumentIdentity(c.documentUri, payload.documentUri)) ||
-        (c.ticketId === payload.ticketId &&
-          ((payload.commentId !== undefined && c.commentId === payload.commentId) ||
-            (payload.commentId === undefined && c.commentId === undefined))),
-      );
+      const idx = nextQueue.comments.findIndex((c) => c.operationId === payload.operationId);
       if (idx !== -1) {
         nextQueue.comments[idx] = payload;
       } else {
@@ -974,6 +956,7 @@ export class DefaultSyncOperationRepository implements SyncOperationRepository {
         } else if (key.kind === "comment") {
           await addOfflineCommentUpdateAsync({
             ticketId: key.ticketId,
+            operationId: key.operationId,
             commentId: key.commentId,
             documentUri: key.documentUri,
             phase: "queued",
@@ -1343,7 +1326,7 @@ export class DefaultSyncOperationRepository implements SyncOperationRepository {
       }
       if (key.kind === "comment") {
         const completed = await completeOfflineCommentAsync(
-          { commentId: key.commentId, documentUri: key.documentUri, ticketId: key.ticketId },
+          { commentId: key.commentId, documentUri: key.documentUri, ticketId: key.ticketId, operationId: key.operationId },
           scope,
           revision,
         );
@@ -1385,7 +1368,7 @@ export class DefaultSyncOperationRepository implements SyncOperationRepository {
       }
       if (key.kind === "comment") {
         await removeOfflineCommentEntryAsync(
-          { ticketId: key.ticketId, commentId: key.commentId, documentUri: key.documentUri },
+          { ticketId: key.ticketId, commentId: key.commentId, documentUri: key.documentUri, operationId: key.operationId },
           scope,
         );
         return true;

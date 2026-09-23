@@ -132,6 +132,7 @@ export interface DashboardStrings {
   showAbandoned: string;
   hideAbandoned: string;
   abandonedCount: string;
+  startNewTicketEdit: string;
   processingRecord: string;
   syncAbandoned: string;
   syncAllBtn: string;
@@ -344,6 +345,7 @@ export const buildDashboardStrings = (): DashboardStrings => ({
   showAbandoned: vscode.l10n.t("Show abandoned items"),
   hideAbandoned: vscode.l10n.t("Hide abandoned items"),
   abandonedCount: vscode.l10n.t("Abandoned: {0}"),
+  startNewTicketEdit: vscode.l10n.t("Load latest and start new edit"),
   processingRecord: vscode.l10n.t("Processing record"),
   syncAbandoned: vscode.l10n.t("Sync abandoned"),
   syncAllBtn: vscode.l10n.t("Sync all"),
