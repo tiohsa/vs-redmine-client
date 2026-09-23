@@ -299,7 +299,8 @@ async function main() {
   assert.equal(await evaluate(`document.querySelector('.comment-body').classList.contains('comment-body-clamped')`), false);
   // ビューポートを変えずにレイアウトを切り替えても、省略判定を更新する。
   await call('Emulation.setDeviceMetricsOverride', { width: 1200, height: 800, deviceScaleFactor: 1, mobile: false });
-  state.comments.items = [{ id: 32, authorName: 'Taro', body: 'あ'.repeat(160), editableByCurrentUser: true }];
+  // CI の日本語フォント差に依存せず、単一表示は3行以内、分割表示は4行以上にする。
+  state.comments.items = [{ id: 32, authorName: 'Taro', body: 'W'.repeat(240), editableByCurrentUser: true }];
   await push();
   await evaluate(`document.getElementById('ticket-layout-mode').value='single';document.getElementById('ticket-layout-mode').dispatchEvent(new Event('change'))`);
   assert.equal(await evaluate(`document.querySelector('.comment-body').scrollHeight <= document.querySelector('.comment-body').clientHeight+1`), true);
