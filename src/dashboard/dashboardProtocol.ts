@@ -71,10 +71,14 @@ export interface DashboardMetadataOption {
   name: string;
 }
 
+export interface DashboardStatusMetadata extends DashboardMetadataOption {
+  isClosed?: boolean;
+}
+
 export interface DashboardMetadataOptions {
   trackers: DashboardMetadataOption[];
   priorities: DashboardMetadataOption[];
-  statuses: DashboardMetadataOption[];
+  statuses: DashboardStatusMetadata[];
 }
 
 export interface DashboardEditOptions {
@@ -91,7 +95,7 @@ export interface DashboardEditOptions {
 
 export interface DashboardTicketFilterOptions {
   assignees: DashboardMetadataOption[];
-  statuses: DashboardMetadataOption[];
+  statuses: DashboardStatusMetadata[];
 }
 
 export type DashboardUnsyncedKind = "ticket" | "newTicket" | "comment";
@@ -205,6 +209,7 @@ export type DashboardWorkPanel =
 
 export interface DashboardState {
   selectedProject?: DashboardSelectedProject;
+  currentUserId?: number;
   includeChildProjects: boolean;
   projects: DashboardProjectNode[];
   tickets: DashboardTicketNode[];

@@ -1,5 +1,6 @@
 import * as vscode from "vscode";
 import { listIssuePriorities, listIssueStatuses, listTrackers } from "../redmine/issues";
+import { getCurrentUserId } from "../redmine/users";
 import {
   getOfflineSyncQueue,
   onOfflineSyncQueueChanged,
@@ -58,6 +59,12 @@ export interface DashboardControllerOptions {
   onTicketsRefreshed: () => void;
   syncEngine?: SyncEngine;
   _composerSyncTestHooks?: ComposerSyncTestHooks;
+  _metadataTestHooks?: {
+    listTrackers?: typeof listTrackers;
+    listIssuePriorities?: typeof listIssuePriorities;
+    listIssueStatuses?: typeof listIssueStatuses;
+    getCurrentUserId?: typeof getCurrentUserId;
+  };
 }
 
 export class DashboardController {
@@ -240,6 +247,7 @@ export class DashboardController {
       totalTicketCount: 0,
       loadedTicketCount: 0,
       selectedProject: undefined,
+      currentUserId: undefined,
       selectedTicketId: undefined,
       selectedTicket: undefined,
       workPanel: undefined,
@@ -406,11 +414,25 @@ export class DashboardController {
 
   private async loadMetadataOptions(): Promise<void> {
     const generation = this.connectionGeneration;
+    this.opts.store.update({ currentUserId: undefined });
+    const resolveCurrentUserId = this.opts._metadataTestHooks?.getCurrentUserId ?? getCurrentUserId;
+    void Promise.resolve()
+      .then(resolveCurrentUserId)
+      .then(
+        (id) => Number.isSafeInteger(id) && id > 0 ? id : undefined,
+        () => undefined,
+      )
+      .then((currentUserId) => {
+        if (generation === this.connectionGeneration) {
+          this.opts.store.update({ currentUserId });
+        }
+      })
+      .catch(() => undefined);
     try {
       const [trackers, priorities, statuses] = await Promise.all([
-        listTrackers(),
-        listIssuePriorities(),
-        listIssueStatuses(),
+        (this.opts._metadataTestHooks?.listTrackers ?? listTrackers)(),
+        (this.opts._metadataTestHooks?.listIssuePriorities ?? listIssuePriorities)(),
+        (this.opts._metadataTestHooks?.listIssueStatuses ?? listIssueStatuses)(),
       ]);
       if (generation !== this.connectionGeneration) {
         return;

@@ -33,6 +33,24 @@ export interface DashboardStrings {
   layoutAuto: string;
   layoutSingle: string;
   layoutSplit: string;
+  quickFiltersLabel: string;
+  quickMyIssues: string;
+  quickOpen: string;
+  quickOverdue: string;
+  quickUnsynced: string;
+  quickMyIssuesUnavailable: string;
+  quickOpenUnavailable: string;
+  advancedFilters: string;
+  closeFilters: string;
+  applyFilters: string;
+  resetFilters: string;
+  overview: string;
+  shownLoadedTotal: string;
+  syncTrayAllClear: string;
+  syncTrayItems: string;
+  syncTrayAttention: string;
+  syncTrayReviewConflict: string;
+  syncTrayOpenUnsynced: string;
   // Sync states
   syncDirty: string;
   syncQueued: string;
@@ -204,6 +222,24 @@ export const buildDashboardStrings = (): DashboardStrings => ({
   layoutAuto: vscode.l10n.t("Automatic layout"),
   layoutSingle: vscode.l10n.t("One column"),
   layoutSplit: vscode.l10n.t("Two columns"),
+  quickFiltersLabel: vscode.l10n.t("Quick filters"),
+  quickMyIssues: vscode.l10n.t("My Issues"),
+  quickOpen: vscode.l10n.t("Open issues"),
+  quickOverdue: vscode.l10n.t("Overdue"),
+  quickUnsynced: vscode.l10n.t("Unsynced"),
+  quickMyIssuesUnavailable: vscode.l10n.t("Current Redmine user is unavailable"),
+  quickOpenUnavailable: vscode.l10n.t("Issue status metadata is unavailable"),
+  advancedFilters: vscode.l10n.t("Filters…"),
+  closeFilters: vscode.l10n.t("Close filters"),
+  applyFilters: vscode.l10n.t("Apply filters"),
+  resetFilters: vscode.l10n.t("Reset ticket filters"),
+  overview: vscode.l10n.t("Overview"),
+  shownLoadedTotal: vscode.l10n.t("{0} shown · {1} loaded · {2} total"),
+  syncTrayAllClear: vscode.l10n.t("Everything synced"),
+  syncTrayItems: vscode.l10n.t("{0} unsynced items"),
+  syncTrayAttention: vscode.l10n.t("Sync attention required"),
+  syncTrayReviewConflict: vscode.l10n.t("Review conflict"),
+  syncTrayOpenUnsynced: vscode.l10n.t("Open Unsynced"),
   // Sync states
   syncDirty: vscode.l10n.t("Unsynced changes"),
   syncQueued: vscode.l10n.t("Waiting to sync"),
@@ -297,7 +333,7 @@ export const buildDashboardStrings = (): DashboardStrings => ({
   requestTimeoutLabel: vscode.l10n.t("Request timeout (ms)"),
   ignoreSSLErrorsLabel: vscode.l10n.t("Ignore SSL certificate errors"),
   ignoreSSLErrorsWarning: vscode.l10n.t("Use only in trusted development environments."),
-  sectionTickets: vscode.l10n.t("Tickets"),
+  sectionTickets: vscode.l10n.t("Ticket List"),
   includeChildProjectsLabel: vscode.l10n.t("Include child projects"),
   sectionEditor: vscode.l10n.t("Editor"),
   editorStorageDirectoryLabel: vscode.l10n.t("Storage directory"),

@@ -17,6 +17,7 @@ suite("Dashboard connection reset", () => {
       totalTicketCount: 100,
       loadedTicketCount: 50,
       selectedProject: { id: 1, name: "Old" },
+      currentUserId: 9,
       selectedTicketId: 1,
       workPanel: { mode: "detail", ticketId: 1 },
       comments: { ticketId: 1, loading: true, items: [] },
@@ -51,6 +52,7 @@ suite("Dashboard connection reset", () => {
     assert.strictEqual(state.totalTicketCount, 0);
     assert.strictEqual(state.loadedTicketCount, 0);
     assert.strictEqual(state.selectedProject, undefined);
+    assert.strictEqual(state.currentUserId, undefined);
     assert.strictEqual(state.selectedTicketId, undefined);
     assert.strictEqual(state.workPanel, undefined);
     assert.deepStrictEqual(state.comments.items, []);
