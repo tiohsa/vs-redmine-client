@@ -65,6 +65,9 @@ export interface DashboardControllerOptions {
     listIssueStatuses?: typeof listIssueStatuses;
     getCurrentUserId?: typeof getCurrentUserId;
   };
+  _maintenanceTestHooks?: {
+    confirmDashboardCacheReset?: () => Promise<boolean>;
+  };
 }
 
 export class DashboardController {
@@ -81,6 +84,7 @@ export class DashboardController {
   private readonly composerService: DashboardComposerService;
   private readonly disposables: vscode.Disposable[] = [];
   private connectionGeneration = 0;
+  private metadataLoadGeneration = 0;
 
   constructor(private readonly opts: DashboardControllerOptions) {
     this.settingsCtrl = new SettingsController(opts.store);
@@ -137,7 +141,7 @@ export class DashboardController {
         this.totalCount = count;
       },
       getSettings: () => this.settingsCtrl.getSettings(),
-      loadComments: (ticketId) => this.loadComments(ticketId),
+      loadComments: (ticketId, throwOnError) => this.loadComments(ticketId, throwOnError),
       refreshUnsynced: () => this.refreshUnsynced(),
     });
     this.commentService = new DashboardCommentService(context, {
@@ -234,6 +238,7 @@ export class DashboardController {
 
   async resetForConnectionChange(): Promise<void> {
     const generation = ++this.connectionGeneration;
+    this.metadataLoadGeneration++;
     this.ticketService.invalidate();
     this.commentService.invalidate();
     this.metadataService.invalidate();
@@ -267,6 +272,97 @@ export class DashboardController {
     await this.initialize();
   }
 
+  private async resetDashboardCache(requestId: string): Promise<void> {
+    const confirmed = await this.confirmDashboardCacheReset();
+    if (!confirmed) {
+      return;
+    }
+
+    this.opts.notifyOperationStarted(requestId, vscode.l10n.t("Resetting Dashboard cache…"));
+    const previous = this.opts.store.getState();
+    const selectedDetailId = previous.workPanel?.mode === "detail"
+      ? previous.workPanel.ticketId
+      : undefined;
+
+    this.projectService.invalidate();
+    this.ticketService.invalidate();
+    this.commentService.invalidate();
+    this.metadataService.invalidate();
+    this.metadataLoadGeneration++;
+    this.tickets = [];
+    this.projects = [];
+    this.totalCount = 0;
+    this.metadataOptionsLoaded = false;
+    clearTicketSummaries();
+    this.opts.store.update({
+      currentUserId: undefined,
+      projects: [],
+      tickets: [],
+      totalTicketCount: 0,
+      loadedTicketCount: 0,
+      ticketFilterOptions: { assignees: [], statuses: [] },
+      selectedTicketId: undefined,
+      selectedTicket: undefined,
+      workPanel: previous.workPanel?.mode === "detail" ? undefined : previous.workPanel,
+      editOptions: undefined,
+      metadataOptions: { trackers: [], priorities: [], statuses: [] },
+      comments: { loading: false, items: [] },
+      loading: { tickets: false, comments: false },
+      errors: {},
+    });
+
+    try {
+      await this.loadProjects(true);
+      const results = await Promise.allSettled([
+        this.loadMetadataOptions(true),
+        this.loadTickets(true),
+      ]);
+      const failures = results
+        .filter((result): result is PromiseRejectedResult => result.status === "rejected")
+        .map((result) => result.reason instanceof Error ? result.reason.message : String(result.reason));
+      if (failures.length > 0) {
+        throw new Error(failures.join("; "));
+      }
+
+      // Ticket filter options depend on both the refreshed ticket list and status metadata.
+      this.pushTickets();
+      if (selectedDetailId !== undefined && this.tickets.some((ticket) => ticket.id === selectedDetailId)) {
+        await this.selectTicket(selectedDetailId, true);
+      }
+      this.refreshUnsynced();
+      this.opts.notifySuccess(requestId, vscode.l10n.t("Dashboard cache reset."));
+    } catch (err) {
+      const reason = err instanceof Error ? err.message : String(err);
+      this.opts.notifyError(
+        requestId,
+        vscode.l10n.t("Dashboard cache reset failed: {0}", reason),
+      );
+    } finally {
+      // RefreshUnsynced only rebuilds presentation from the existing stores.
+      this.refreshUnsynced();
+    }
+  }
+
+  private async confirmDashboardCacheReset(): Promise<boolean> {
+    const testConfirmation = this.opts._maintenanceTestHooks?.confirmDashboardCacheReset;
+    if (testConfirmation) {
+      return testConfirmation();
+    }
+    const resetLabel = vscode.l10n.t("Reset Dashboard Cache");
+    const result = await vscode.window.showWarningMessage(
+      vscode.l10n.t("Reset Dashboard Cache?"),
+      {
+        modal: true,
+        detail: vscode.l10n.t(
+          "Projects, tickets, and Dashboard metadata will be reloaded from Redmine.\nLocal drafts, unsynced changes, recovery data, API keys, and settings will not be deleted.",
+        ),
+      },
+      resetLabel,
+      vscode.l10n.t("Cancel"),
+    );
+    return result === resetLabel;
+  }
+
   // ── Private request handler ────────────────────────────────────────────
 
   private async handleRequest(req: DashboardRequest): Promise<void> {
@@ -274,6 +370,9 @@ export class DashboardController {
       case "dashboard.ready":
       case "dashboard.refresh":
         await Promise.all([this.loadProjects(), this.loadMetadataOptions(), this.loadTickets()]);
+        break;
+      case "dashboard.resetCache":
+        await this.resetDashboardCache(req.requestId);
         break;
       case "project.select":
         await this.projectService.selectProject(req.projectId);
@@ -404,64 +503,82 @@ export class DashboardController {
 
   // ── Private ────────────────────────────────────────────────────────────
 
-  private async loadTickets(): Promise<void> {
-    await this.ticketService.loadTickets();
+  private async loadTickets(throwOnError = false): Promise<void> {
+    await this.ticketService.loadTickets(throwOnError);
   }
 
   private async loadMoreTickets(): Promise<void> {
     await this.ticketService.loadMoreTickets();
   }
 
-  private async loadProjects(): Promise<void> {
-    await this.projectService.loadProjects();
+  private async loadProjects(throwOnError = false): Promise<void> {
+    await this.projectService.loadProjects(throwOnError);
   }
 
-  private async loadMetadataOptions(): Promise<void> {
-    const generation = this.connectionGeneration;
-    this.opts.store.update({ currentUserId: undefined });
+  private async loadMetadataOptions(throwOnError = false): Promise<void> {
+    const connectionGeneration = this.connectionGeneration;
+    const metadataGeneration = ++this.metadataLoadGeneration;
+    const isCurrent = () =>
+      connectionGeneration === this.connectionGeneration &&
+      metadataGeneration === this.metadataLoadGeneration;
     const resolveCurrentUserId = this.opts._metadataTestHooks?.getCurrentUserId ?? getCurrentUserId;
-    void Promise.resolve()
-      .then(resolveCurrentUserId)
-      .then(
-        (id) => Number.isSafeInteger(id) && id > 0 ? id : undefined,
-        () => undefined,
-      )
-      .then((currentUserId) => {
-        if (generation === this.connectionGeneration) {
-          this.opts.store.update({ currentUserId });
-        }
-      })
-      .catch(() => undefined);
+    const currentUserTask = Promise.resolve().then(resolveCurrentUserId).then((id) =>
+      Number.isSafeInteger(id) && id > 0 ? id : undefined,
+    );
+    const metadataTask = Promise.all([
+      (this.opts._metadataTestHooks?.listTrackers ?? listTrackers)(),
+      (this.opts._metadataTestHooks?.listIssuePriorities ?? listIssuePriorities)(),
+      (this.opts._metadataTestHooks?.listIssueStatuses ?? listIssueStatuses)(),
+    ]);
     try {
-      const [trackers, priorities, statuses] = await Promise.all([
-        (this.opts._metadataTestHooks?.listTrackers ?? listTrackers)(),
-        (this.opts._metadataTestHooks?.listIssuePriorities ?? listIssuePriorities)(),
-        (this.opts._metadataTestHooks?.listIssueStatuses ?? listIssueStatuses)(),
-      ]);
-      if (generation !== this.connectionGeneration) {
+      let options: DashboardMetadataOptions;
+      let currentUserId: number | undefined;
+      if (throwOnError) {
+        const [metadata, refreshedUserId] = await Promise.all([metadataTask, currentUserTask]);
+        options = { trackers: metadata[0], priorities: metadata[1], statuses: metadata[2] };
+        currentUserId = refreshedUserId;
+      } else {
+        void currentUserTask.then(
+          (id) => {
+            if (isCurrent()) {
+              this.opts.store.update({ currentUserId: id });
+            }
+          },
+          () => undefined,
+        );
+        const [trackers, priorities, statuses] = await metadataTask;
+        options = { trackers, priorities, statuses };
+      }
+      if (!isCurrent()) {
         return;
       }
-      const options: DashboardMetadataOptions = {
-        trackers,
-        priorities,
-        statuses,
-      };
       this.metadataOptionsLoaded = true;
-      this.opts.store.update({ metadataOptions: options });
-    } catch {
-      if (generation !== this.connectionGeneration) {
+      this.opts.store.update({
+        metadataOptions: options,
+        ...(throwOnError ? { currentUserId } : {}),
+      });
+    } catch (err) {
+      if (!isCurrent()) {
         return;
       }
       this.metadataOptionsLoaded = false;
       this.opts.store.update({ metadataOptions: { trackers: [], priorities: [], statuses: [] } });
+      if (throwOnError) {
+        throw err;
+      }
     }
   }
 
-  private async selectTicket(ticketId: number): Promise<void> {
-    await this.ticketService.selectTicket(ticketId);
+  private async selectTicket(ticketId: number, throwOnLoadError = false): Promise<void> {
+    await this.ticketService.selectTicket(ticketId, throwOnLoadError);
     const ticket = this.tickets.find((t) => t.id === ticketId);
     if (ticket?.projectId) {
-      void this.metadataService.loadEditOptions(ticketId, ticket.projectId);
+      const editOptions = this.metadataService.loadEditOptions(ticketId, ticket.projectId, throwOnLoadError);
+      if (throwOnLoadError) {
+        await editOptions;
+      } else {
+        void editOptions;
+      }
     }
   }
 
@@ -473,8 +590,8 @@ export class DashboardController {
     await this.metadataService.updateTicketMetadata(requestId, ticketId, patch);
   }
 
-  private async loadComments(ticketId: number): Promise<void> {
-    await this.commentService.loadComments(ticketId);
+  private async loadComments(ticketId: number, throwOnError = false): Promise<void> {
+    await this.commentService.loadComments(ticketId, throwOnError);
   }
 
   private async openEditor(ticketId: number): Promise<void> {

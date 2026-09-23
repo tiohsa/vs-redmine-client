@@ -31,7 +31,11 @@ export class DashboardProjectService {
     });
   }
 
-  async loadProjects(): Promise<void> {
+  invalidate(): void {
+    this.loadGeneration++;
+  }
+
+  async loadProjects(throwOnError = false): Promise<void> {
     const generation = ++this.loadGeneration;
     try {
       const raw = await listProjects(true);
@@ -41,8 +45,11 @@ export class DashboardProjectService {
       const projects = this.buildProjectNodes(raw);
       this.deps.setProjects(projects);
       this.deps.context.store.update({ projects });
-    } catch {
+    } catch (err) {
       // keep existing project list when loading fails
+      if (throwOnError) {
+        throw err;
+      }
     }
   }
 

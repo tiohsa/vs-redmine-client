@@ -163,6 +163,7 @@ export const validateDashboardMessage = (raw: unknown): ValidationResult => {
   switch (type) {
     case "dashboard.ready":
     case "dashboard.refresh":
+    case "dashboard.resetCache":
       return { ok: true, request: { type, requestId } };
 
     case "project.select": {

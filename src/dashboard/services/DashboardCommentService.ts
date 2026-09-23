@@ -22,7 +22,7 @@ export class DashboardCommentService {
     this.loadGeneration++;
   }
 
-  async loadComments(ticketId: number): Promise<void> {
+  async loadComments(ticketId: number, throwOnError = false): Promise<void> {
     const { store } = this.context;
     if (store.getState().selectedTicketId !== ticketId) {
       return;
@@ -56,6 +56,9 @@ export class DashboardCommentService {
         loading: false,
         error: `Failed to load comments: ${msg}`,
       });
+      if (throwOnError) {
+        throw err;
+      }
     }
   }
 

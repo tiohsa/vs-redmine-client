@@ -60,6 +60,10 @@ The Tickets tab shows the ticket list for the selected project.
 
 Quick filters (My Issues, Open, Overdue, Unsynced) filter tickets already loaded into the Dashboard. The displayed count distinguishes shown, loaded, and total tickets. **Filters…** edits persistent ticket filters. The sync attention tray at the bottom links to the existing Unsynced and conflict flows.
 
+### Dashboard Maintenance
+
+In Settings > Maintenance, **Reset Dashboard Cache** reloads reconstructable Dashboard data and metadata from Redmine while preserving local drafts, unsynced changes, recovery data, credentials, and settings. **Reset View State** clears Dashboard layout and quick-filter preferences; it does not change persistent ticket-list settings.
+
 ### Unsynced Tab
 
 The Unsynced tab lists all pending items:

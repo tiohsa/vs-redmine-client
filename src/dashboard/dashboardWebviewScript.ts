@@ -363,15 +363,6 @@ function isQuickFilterAvailable(name){
   if(name === 'open') return hasStatusClosureMetadata();
   return true;
 }
-function pruneUnavailableQuickFilters(){
-  if(!state) return false;
-  let changed=false;
-  Array.from(quickFilters).forEach(function(name){
-    if(!isQuickFilterAvailable(name)){ quickFilters.delete(name); changed=true; }
-  });
-  if(changed) persistViewState();
-  return changed;
-}
 function matchesQuickFilters(ticket){
   if(quickFilters.has('mine') && isQuickFilterAvailable('mine') && ticket.assigneeId !== state.currentUserId) return false;
   if(quickFilters.has('open') && isQuickFilterAvailable('open')){
@@ -383,13 +374,12 @@ function matchesQuickFilters(ticket){
   return true;
 }
 function renderQuickFilters(){
-  pruneUnavailableQuickFilters();
   document.querySelectorAll('[data-quick-filter]').forEach(function(button){
     const name=button.dataset.quickFilter;
     const disabled=!isQuickFilterAvailable(name);
     button.disabled=disabled;
     button.title=disabled ? (name === 'mine' ? STRINGS.quickMyIssuesUnavailable : STRINGS.quickOpenUnavailable) : '';
-    button.setAttribute('aria-pressed',String(!disabled && quickFilters.has(name)));
+    button.setAttribute('aria-pressed',String(quickFilters.has(name)));
   });
 }
 
@@ -704,8 +694,12 @@ function renderSettingsBase(){
     '<section class="settings-section"><h3>'+STRINGS.sectionSort+'</h3><label class="setting-row"><span class="setting-label">'+STRINGS.sortFieldLabel+'</span><select class="setting-select" id="set-sort-field">'+selectOptions(sortFields(),settings.sort.field || '')+'</select></label><label class="setting-row"><span class="setting-label">'+STRINGS.sortDirectionLabel+'</span><select class="setting-select" id="set-sort-dir">'+selectOptions([['asc',STRINGS.sortAsc],['desc',STRINGS.sortDesc]],settings.sort.direction)+'</select></label></section>'+
     '<section class="settings-section"><h3>'+STRINGS.sectionDueDate+'</h3>'+dueToggles(settings.dueDate)+'</section>'+
     '<section class="settings-section"><h3>'+STRINGS.sectionSync+'</h3><label class="setting-row"><span class="setting-label">'+STRINGS.offlineSyncModeLabel+'</span><select class="setting-select" id="set-sync-mode">'+selectOptions([['auto',STRINGS.offlineSyncAuto],['manual',STRINGS.offlineSyncManual]],settings.offlineSyncMode)+'</select></label></section>';
+  element.insertAdjacentHTML('beforeend','<section class="settings-section"><h3>'+esc(STRINGS.sectionMaintenance)+'</h3>'+
+    '<h4 class="maintenance-heading">'+esc(STRINGS.dashboardCacheHeading)+'</h4><p class="maintenance-description">'+esc(STRINGS.dashboardCacheDescription)+'</p><button class="btn btn-secondary" id="dashboard-cache-reset-btn" type="button">'+esc(STRINGS.resetDashboardCache)+'</button>'+
+    '<h4 class="maintenance-heading">'+esc(STRINGS.dashboardViewStateHeading)+'</h4><p class="maintenance-description">'+esc(STRINGS.dashboardViewStateDescription)+'</p><button class="btn btn-secondary" id="settings-reset-view-btn" type="button">'+esc(STRINGS.resetViewState)+'</button>'+
+    '<p class="maintenance-safety-note" role="note">'+esc(STRINGS.maintenanceSafetyNote)+'</p></section>');
   const sections=Array.from(element.children); element.replaceChildren();
-  [[STRINGS.sectionTickets,[1,3,4,5]],[STRINGS.sectionSync,[6]],[STRINGS.sectionEditor,[2]],[STRINGS.sectionConnection,[0]]].forEach(function(group){
+  [[STRINGS.sectionTickets,[1,3,4,5]],[STRINGS.sectionSync,[6]],[STRINGS.sectionEditor,[2]],[STRINGS.sectionConnection,[0]],[STRINGS.sectionMaintenance,[7]]].forEach(function(group){
     const category=document.createElement('div'); category.className='settings-category';
     const heading=document.createElement('h2'); heading.textContent=group[0]; category.appendChild(heading);
     group[1].forEach(function(index){ category.appendChild(sections[index]); }); element.appendChild(category);
@@ -718,6 +712,18 @@ function renderSettingsBase(){
   document.getElementById('set-ticket-limit').addEventListener('change',function(){ const value=Number(this.value); if(value >= 1 && value <= 500) req('settings.updateGeneral',{patch:{ticketListLimit:value}}); }); document.getElementById('set-include-children').addEventListener('change',function(){ req('settings.updateGeneral',{patch:{includeChildProjects:this.checked}}); }); document.getElementById('set-show-status').addEventListener('change',function(){ req('settings.updateGeneral',{patch:{showStatus:this.checked}}); }); document.getElementById('set-show-due-date').addEventListener('change',function(){ req('settings.updateGeneral',{patch:{showDueDate:this.checked}}); }); document.getElementById('set-show-tracker').addEventListener('change',function(){ req('settings.updateGeneral',{patch:{showTracker:this.checked}}); }); document.getElementById('set-show-priority').addEventListener('change',function(){ req('settings.updateGeneral',{patch:{showPriority:this.checked}}); }); document.getElementById('set-show-assignee').addEventListener('change',function(){ req('settings.updateGeneral',{patch:{showAssignee:this.checked}}); }); document.getElementById('set-sync-mode').addEventListener('change',function(){ req('settings.updateGeneral',{patch:{offlineSyncMode:this.value}}); });
   document.getElementById('set-editor-storage').addEventListener('change',function(){ req('settings.updateEditor',{patch:{editorStorageDirectory:this.value}}); }); document.querySelectorAll('[data-editor-default]').forEach(function(input){ input.addEventListener('change',function(){ req('settings.updateEditorDefault',{field:this.dataset.editorDefault,value:this.value}); }); }); document.getElementById('reset-editor-defaults-btn').addEventListener('click',function(){ req('settings.resetEditorDefaults',{fields:['subject','description','tracker','priority','status','due_date']}); });
   document.getElementById('set-apikey-btn').addEventListener('click',function(){ req('apiKey.set'); }); document.getElementById('clear-api-key-btn')?.addEventListener('click',function(){ req('apiKey.clear'); }); document.getElementById('settings-reset-btn').onclick=function(){ req('settings.reset'); };
+  document.getElementById('dashboard-cache-reset-btn').addEventListener('click',function(){ req('dashboard.resetCache'); }); document.getElementById('settings-reset-view-btn').addEventListener('click',resetViewState);
+}
+
+function resetViewState(){
+  ticketLayoutMode='auto'; detailTab='overview'; quickFilters.clear();
+  expandedTicketIds.clear(); collapsedTicketIds.clear(); ticketDetailExpanded=false;
+  activeTicketActionMenuId=null; activeTicketActionAnchorTop=null; searchQuery='';
+  if(searchTimer){ window.clearTimeout(searchTimer); searchTimer=null; }
+  searchInput.value=''; updateSearchClearButton(); filterDialog.classList.add('hidden');
+  vscode.setState(Object.assign({},vscode.getState() || {},{ticketLayoutMode:ticketLayoutMode,detailTab:detailTab,quickFilters:[]}));
+  if(!state || !state.selectedProject) req('tickets.searchAllProjects',{query:''});
+  render(); applyTicketLayoutMode(); showToast('success',STRINGS.viewStateReset);
 }
 
 function renderSettings(){

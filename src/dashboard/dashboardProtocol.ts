@@ -281,6 +281,7 @@ export interface DashboardGeneralSettingsPatch {
 export type DashboardRequest =
   | { type: "dashboard.ready"; requestId: string }
   | { type: "dashboard.refresh"; requestId: string }
+  | { type: "dashboard.resetCache"; requestId: string }
   | { type: "project.select"; requestId: string; projectId: number }
   | { type: "project.toggleChildren"; requestId: string; includeChildProjects: boolean }
   | { type: "tickets.refresh"; requestId: string }

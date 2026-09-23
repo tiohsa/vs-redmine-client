@@ -187,6 +187,15 @@ export interface DashboardStrings {
   sectionGeneral: string;
   ticketLimitLabel: string;
   resetSettings: string;
+  sectionMaintenance: string;
+  dashboardCacheHeading: string;
+  dashboardCacheDescription: string;
+  resetDashboardCache: string;
+  dashboardViewStateHeading: string;
+  dashboardViewStateDescription: string;
+  resetViewState: string;
+  maintenanceSafetyNote: string;
+  viewStateReset: string;
   // Project label
   projectNone: string;
 }
@@ -378,6 +387,15 @@ export const buildDashboardStrings = (): DashboardStrings => ({
   sectionGeneral: vscode.l10n.t("General"),
   ticketLimitLabel: vscode.l10n.t("Tickets per load"),
   resetSettings: vscode.l10n.t("Reset display settings"),
+  sectionMaintenance: vscode.l10n.t("Maintenance"),
+  dashboardCacheHeading: vscode.l10n.t("Dashboard Cache"),
+  dashboardCacheDescription: vscode.l10n.t("Reload Dashboard data and metadata from Redmine. Local drafts and unsynced changes are preserved."),
+  resetDashboardCache: vscode.l10n.t("Reset Dashboard Cache"),
+  dashboardViewStateHeading: vscode.l10n.t("Dashboard View State"),
+  dashboardViewStateDescription: vscode.l10n.t("Reset Dashboard layout and quick-filter preferences."),
+  resetViewState: vscode.l10n.t("Reset View State"),
+  maintenanceSafetyNote: vscode.l10n.t("Local drafts, unsynced changes, recovery data, and credentials are never removed by these actions."),
+  viewStateReset: vscode.l10n.t("Dashboard view state reset."),
   // Project label
   projectNone: vscode.l10n.t("(none)"),
 });

@@ -321,6 +321,10 @@ button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-
 .settings-category > .settings-section:first-of-type > h3:first-child { display:none; }
 .settings-section { min-width: 0; padding: 13px; border: 1px solid var(--app-border); border-radius: var(--app-radius-card); background: var(--app-surface-raised); box-shadow: var(--app-shadow); }
 .settings-section h3 { margin: 0 0 9px; color: var(--app-text); font-size: 12px; font-weight: 700; }
+.settings-section .maintenance-heading { margin: 12px 0 4px; color: var(--app-text); font-size: 11px; font-weight: 600; }
+.settings-section .maintenance-heading:first-of-type { margin-top: 0; }
+.maintenance-description { margin: 0 0 8px; color: var(--app-text-secondary); font-size: 11px; line-height: 1.45; }
+.maintenance-safety-note { margin: 10px 0 0; color: var(--app-text-secondary); font-size: 10px; line-height: 1.45; }
 .setting-row { display: flex; min-width: 0; align-items: center; justify-content: space-between; gap: 10px; padding: 8px 0; border-bottom: 1px solid var(--app-border-subtle); color: var(--app-text-secondary); font-size: 11px; }
 .setting-row:last-child { border-bottom: 0; }
 .setting-label { min-width: 0; color: var(--app-text); font-weight: 600; }

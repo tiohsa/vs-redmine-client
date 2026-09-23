@@ -80,21 +80,21 @@ suite("Dashboard quick filters", () => {
     assert.strictEqual(matches({ assigneeId: 8, syncState: "Synced" }, rendered.active, 7), false);
   });
 
-  test("利用できなくなった My Issues は無効・非選択にして修正状態を保存する", () => {
+  test("一時的に利用できない My Issues の選択を保持して無効化する", () => {
     const rendered = renderFilterButtons(["mine"], undefined);
-    assert.deepStrictEqual(rendered.active, []);
-    assert.deepStrictEqual(rendered.persisted, []);
+    assert.deepStrictEqual(rendered.active, ["mine"]);
+    assert.strictEqual(rendered.persisted, undefined);
     assert.strictEqual(rendered.buttons[0].disabled, true);
-    assert.strictEqual(rendered.buttons[0].pressed, "false");
+    assert.strictEqual(rendered.buttons[0].pressed, "true");
     assert.strictEqual(matches({ assigneeId: 8, syncState: "Synced" }, rendered.active), true);
   });
 
-  test("終了 metadata のない Open は無効・非選択にして修正状態を保存する", () => {
+  test("終了 metadata のない Open の選択を保持して無効化する", () => {
     const rendered = renderFilterButtons(["open"], undefined, [{ id: 1 }]);
-    assert.deepStrictEqual(rendered.active, []);
-    assert.deepStrictEqual(rendered.persisted, []);
+    assert.deepStrictEqual(rendered.active, ["open"]);
+    assert.strictEqual(rendered.persisted, undefined);
     assert.strictEqual(rendered.buttons[1].disabled, true);
-    assert.strictEqual(rendered.buttons[1].pressed, "false");
+    assert.strictEqual(rendered.buttons[1].pressed, "true");
     assert.strictEqual(matches({ statusId: 1, syncState: "Synced" }, rendered.active, undefined, [{ id: 1 }]), true);
   });
 
