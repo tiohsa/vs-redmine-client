@@ -1,6 +1,6 @@
 import { Comment } from "../../redmine/types";
 import type { DashboardCommentItem, DashboardUnsyncedKey } from "../dashboardProtocol";
-import { getOfflineSyncQueue } from "../../views/offlineSyncStore";
+import { getOfflineSyncQueue, isAbandoned } from "../../views/offlineSyncStore";
 import { getCurrentConnectionScope } from "../../config/connectionScope";
 
 export const buildCommentDashboardItems = (
@@ -13,7 +13,7 @@ export const buildCommentDashboardItems = (
     targetTicketId === undefined
       ? []
       : queue.comments
-        .filter((entry) => entry.ticketId === targetTicketId && entry.commentId === undefined)
+        .filter((entry) => entry.ticketId === targetTicketId && entry.commentId === undefined && !isAbandoned(entry))
         .map((entry) => ({
           authorName: "Local draft",
           body: entry.body,
@@ -34,6 +34,7 @@ export const buildCommentDashboardItems = (
       queue.comments.some(
         (entry) =>
           entry.ticketId === c.ticketId &&
+          !isAbandoned(entry) &&
           entry.commentId === c.id &&
           entry.sourceNotesHash !== undefined,
       )

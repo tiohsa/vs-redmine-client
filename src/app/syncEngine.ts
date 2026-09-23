@@ -18,7 +18,7 @@ import { getAttemptGeneration, type DurableSyncEffectState, type RecoveryItem } 
 
 export type SyncEngineKey =
   | TicketSyncQueueKey
-  | { kind: "comment"; ticketId: number; commentId?: number; documentUri?: string };
+  | { kind: "comment"; ticketId: number; commentId?: number; documentUri?: string; operationId?: string };
 
 export type CommentSyncOutcome =
   | { kind: "completed"; ticketId: number; commentId?: number }

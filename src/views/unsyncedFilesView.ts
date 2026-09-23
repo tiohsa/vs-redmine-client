@@ -2,6 +2,7 @@ import * as vscode from "vscode";
 import {
   getOfflineSyncLifecycle,
   getOfflineSyncQueue,
+  isAbandoned,
   onOfflineSyncQueueChanged,
 } from "./offlineSyncStore";
 import { formatTicketLabel } from "./ticketLabel";
@@ -12,7 +13,7 @@ import { getCurrentConnectionScope } from "../config/connectionScope";
 export type UnsyncedFileSyncKey =
   | { kind: "ticket"; ticketId: number }
   | { kind: "newTicket"; queueId?: string; documentUri?: string }
-  | { kind: "comment"; ticketId: number; commentId?: number; documentUri?: string };
+  | { kind: "comment"; ticketId: number; commentId?: number; documentUri?: string; operationId?: string };
 
 export class UnsyncedFileTreeItem extends vscode.TreeItem {
   readonly syncKey: UnsyncedFileSyncKey;
@@ -101,6 +102,7 @@ export class UnsyncedFilesTreeProvider
     const items: vscode.TreeItem[] = [];
 
     queue.tickets.forEach((update, ticketId) => {
+      if (isAbandoned(update)) { return; }
       const subject = getTicketSummary(ticketId);
       const label = subject
         ? `${formatTicketLabel(ticketId)} ${subject}`
@@ -123,13 +125,14 @@ export class UnsyncedFilesTreeProvider
     });
 
     for (const comment of queue.comments) {
+      if (isAbandoned(comment)) { continue; }
       const base = formatTicketLabel(comment.ticketId);
       if (comment.commentId !== undefined) {
         items.push(
           new UnsyncedFileTreeItem(
             `${base} Comment #${comment.commentId} update`,
             "comment",
-            { kind: "comment", ticketId: comment.ticketId, commentId: comment.commentId, documentUri: comment.documentUri },
+            { kind: "comment", ticketId: comment.ticketId, operationId: comment.operationId, commentId: comment.commentId, documentUri: comment.documentUri },
             comment.documentUri,
             buildCommentTooltip(comment.ticketId, comment.commentId, comment.documentUri),
           ),
@@ -139,7 +142,7 @@ export class UnsyncedFilesTreeProvider
           new UnsyncedFileTreeItem(
             `${base} New comment`,
             "comment",
-            { kind: "comment", ticketId: comment.ticketId, documentUri: comment.documentUri },
+            { kind: "comment", ticketId: comment.ticketId, operationId: comment.operationId, documentUri: comment.documentUri },
             comment.documentUri,
             buildCommentTooltip(comment.ticketId, undefined, comment.documentUri),
           ),
@@ -148,6 +151,7 @@ export class UnsyncedFilesTreeProvider
     }
 
     for (const newTicket of queue.newTickets) {
+      if (isAbandoned(newTicket)) { continue; }
       const tooltipParts = [vscode.l10n.t("Type: New ticket")];
       if (newTicket.projectId !== undefined) {
         tooltipParts.push(vscode.l10n.t("Project ID: {0}", newTicket.projectId));

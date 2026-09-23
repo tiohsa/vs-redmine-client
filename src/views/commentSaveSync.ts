@@ -28,7 +28,7 @@ import { CommentSaveResult } from "./commentSaveTypes";
 import { applyEditorContent } from "./ticketPreview";
 import { resolveUploadSummary } from "./ticketSync/ticketImageUploadSync";
 import { getOfflineSyncMode } from "../config/settings";
-import { addOfflineCommentUpdateAsync, OfflineCommentUpdate } from "./offlineSyncStore";
+import { addOfflineCommentUpdateAsync, getActiveScope, getOfflineSyncQueue, isAbandoned, OfflineCommentUpdate } from "./offlineSyncStore";
 import { setCommentDraft } from "./commentDraftStore";
 import { isRemoteCommitUnknownError } from "./ticketSync/ticketSyncResult";
 import { containsConflictMarkers } from "../utils/threeWayMerge";
@@ -76,6 +76,15 @@ const buildResult = (
   message,
   ...extras,
 });
+
+const hasAbandonedComment = (ticketId: number, commentId: number | undefined, documentUri: string | undefined, scope?: string): boolean =>
+  getOfflineSyncQueue(scope ?? getActiveScope()).comments.some((entry) =>
+    isAbandoned(entry) && entry.ticketId === ticketId && (
+      (commentId !== undefined && entry.commentId === commentId) ||
+      (documentUri !== undefined && entry.documentUri === documentUri)));
+
+const abandonedCommentResult = (): CommentSaveResult =>
+  buildResult("failed", vscode.l10n.t("Sync was abandoned for this comment draft. Review the retained record before sending it again."));
 
 export const shouldRefreshComments = (status: CommentSaveResult["status"]): boolean =>
   status === "created" || status === "created_unresolved" || status === "success";
@@ -378,6 +387,11 @@ export const syncCommentDraft = async (input: {
   documentUri?: vscode.Uri;
   deps?: Partial<CommentSaveDependencies>;
 }): Promise<CommentSaveResult> => {
+  const guardedEdit = getCommentEdit(input.commentId, input.operationScope);
+  if (guardedEdit && hasAbandonedComment(guardedEdit.ticketId, input.commentId,
+    input.documentUri?.toString() ?? input.editor?.document.uri.toString(), input.operationScope)) {
+    return abandonedCommentResult();
+  }
   if (getOfflineSyncMode() === "manual") {
     const validation = validateComment(input.content);
     if (!validation.valid) {
@@ -474,6 +488,10 @@ export const syncNewCommentDraft = async (input: {
   deps?: Partial<CommentSaveDependencies>;
   onCreated?: (created: { commentId: number; projectId: number }) => Promise<void>;
 }): Promise<CommentSaveResult> => {
+  if (hasAbandonedComment(input.ticketId, undefined,
+    input.documentUri?.toString() ?? input.editor?.document.uri.toString(), input.operationScope)) {
+    return abandonedCommentResult();
+  }
   if (getOfflineSyncMode() === "manual") {
     const validation = validateComment(input.content);
     if (!validation.valid) {
@@ -539,6 +557,9 @@ export const saveCommentDraftLocally = async (
   const documentContent = editor.document.getText();
   const parsedCommentUpdate = parseCommentUpdateFile(documentContent);
   const commentId = getCommentIdForEditor(editor);
+  if (hasAbandonedComment(ticketId, commentId, editor.document.uri.toString(), operationScope)) {
+    return abandonedCommentResult();
+  }
   if (
     (!parsedCommentUpdate && isCommentUpdateDocument(documentContent, editor.document.uri.path)) ||
     (parsedCommentUpdate &&
@@ -573,6 +594,9 @@ export const saveCommentDocumentLocally = async (input: {
   content: string;
   documentUri: vscode.Uri;
 }): Promise<CommentSaveResult> => {
+  if (hasAbandonedComment(input.ticketId, input.commentId, input.documentUri.toString(), input.operationScope)) {
+    return abandonedCommentResult();
+  }
   const parsedCommentUpdate = parseCommentUpdateFile(input.content);
   if (
     (!parsedCommentUpdate && isCommentUpdateDocument(input.content, input.documentUri.path)) ||

@@ -66,6 +66,8 @@ suite("Dashboard recovery policy — lifecycle matrix", () => {
     attemptGeneration: 2, state: "planned", target: {}, ...overrides,
   });
   const queuedOperations = (effects: DurableSyncEffect[] = [], hasNext = false): OfflineSyncQueue => ({
+    abandonedTickets: [],
+    ticketEditAuthorizations: [],
     tickets: new Map([[ticketId, {
       ...update, phase: "queued", revision: 4, intentRevision: 4, attemptGeneration: 2, effects,
       nextIntent: hasNext ? { ...update, revision: 5, subject: "Later" } : undefined,
@@ -92,6 +94,7 @@ suite("Dashboard recovery policy — lifecycle matrix", () => {
     await discardOfflineNewTicketAsync({ queueId: "new-recovery", documentUri }, scope),
   ];
   const withoutNextIntents = (queue: OfflineSyncQueue): OfflineSyncQueue => ({
+    ...queue,
     tickets: new Map(Array.from(queue.tickets, ([id, item]) => [id, { ...item, nextIntent: undefined }])),
     comments: queue.comments.map((item) => ({ ...item, nextIntent: undefined })),
     newTickets: queue.newTickets.map((item) => ({ ...item, nextIntent: undefined })),
@@ -202,7 +205,9 @@ suite("Dashboard recovery policy — lifecycle matrix", () => {
             }
           }
         } else {
-          assert.deepStrictEqual(getOfflineSyncQueue(scope), { tickets: new Map(), comments: [], newTickets: [] });
+          assert.deepStrictEqual(getOfflineSyncQueue(scope), {
+            tickets: new Map(), comments: [], newTickets: [], abandonedTickets: [], ticketEditAuthorizations: [],
+          });
         }
         assert.deepStrictEqual(getOfflineSyncQueue("other-scope"), otherScope);
         initializeOfflineSyncStore(storage, scope);
@@ -348,7 +353,7 @@ suite("Dashboard recovery policy — lifecycle matrix", () => {
           assert.strictEqual(warningArguments[0][2], vscode.l10n.t("Discard"));
           assert.deepStrictEqual(errors, [vscode.l10n.t("The unsynced item changed. Refresh and try again.")]);
           assert.deepStrictEqual(successes, []);
-          assert.deepStrictEqual(store.getState().unsynced, { items: [], totalCount: 0 });
+          assert.deepStrictEqual(store.getState().unsynced, { items: [], totalCount: 0, abandonedItems: [] });
         } else {
           assert.strictEqual(warningArguments.length, 1);
           assert.strictEqual(warningArguments[0][0], vscode.l10n.t(outcome === "discarded_next"

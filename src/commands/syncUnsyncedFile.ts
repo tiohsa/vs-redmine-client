@@ -2,6 +2,8 @@ import * as vscode from "vscode";
 import {
   getOfflineNewTicket,
   getOfflineSyncQueue,
+  isAbandoned,
+  resolveStoredOfflineOperation,
 } from "../views/offlineSyncStore";
 import { UnsyncedFileSyncKey } from "../app/unsyncedTypes";
 import { showInfo, showWarning } from "../utils/notifications";
@@ -401,6 +403,11 @@ const syncUnsyncedFileAtScope = async (
   operationScope: string,
 ): Promise<SyncUnsyncedFileResult | undefined> => {
   const { syncKey } = item;
+  const queue = getOfflineSyncQueue(operationScope);
+  const stored = resolveStoredOfflineOperation(queue, syncKey)?.value;
+  if (stored && isAbandoned(stored)) {
+    return { status: "failed", kind: syncKey.kind, message: vscode.l10n.t("Sync was abandoned for this item.") };
+  }
   const serviceFactory = options.createTicketSyncService ?? createTicketSyncService;
   const engineFactory = options.createSyncEngine ?? createSyncEngine;
 

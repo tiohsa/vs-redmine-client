@@ -8,7 +8,13 @@ import {
   getOfflineSyncQueue,
   prepareOfflineDiscard,
   commitOfflineDiscardAsync,
+  prepareOfflineAbandon,
+  commitOfflineAbandonAsync,
+  isAbandoned,
+  beginFreshTicketEdit,
 } from "../../views/offlineSyncStore";
+import { updateDraftAfterSave } from "../../views/ticketDraftStore";
+import { showTicketPreview } from "../../views/ticketPreview";
 import type { OfflineTicketConflictExpectation } from "../../views/offlineSyncStore";
 import { buildUnsyncedDashboardItems } from "../viewModels/unsyncedDashboardViewModel";
 import type { DashboardUnsyncedKey } from "../dashboardProtocol";
@@ -69,7 +75,88 @@ export class DashboardUnsyncedService {
     this.deps.context.store.updateNested("unsynced", {
       totalCount: items.length,
       items,
+      abandonedItems: buildUnsyncedDashboardItems(true),
     });
+  }
+
+  async handleStartNewTicketEdit(requestId: string, ticketId: number): Promise<void> {
+    const scope = getCurrentConnectionScope();
+    const queue = getOfflineSyncQueue(scope);
+    if (queue.tickets.has(ticketId) || !(queue.abandonedTickets ?? []).some((item) => item.ticketId === ticketId)) {
+      this.deps.context.notifyError(requestId, vscode.l10n.t("The abandoned item changed. Refresh and try again."));
+      return;
+    }
+    this.deps.context.notifyOperationStarted(requestId, vscode.l10n.t("Loading the latest ticket…"));
+    try {
+      const detail = await runWithConnectionScope(scope, () => (this.deps.getIssueDetail ?? getIssueDetail)(ticketId));
+      if (scope !== getCurrentConnectionScope()) {
+        this.deps.context.notifyError(requestId, vscode.l10n.t("The connection changed. Try again."));
+        return;
+      }
+      const current = getOfflineSyncQueue(scope);
+      if (current.tickets.has(ticketId) || !(current.abandonedTickets ?? []).some((item) => item.ticketId === ticketId)) {
+        this.deps.context.notifyError(requestId, vscode.l10n.t("The abandoned item changed. Refresh and try again."));
+        return;
+      }
+      const ticket = detail.ticket;
+      const editor = await showTicketPreview(ticket, { kind: "extra", freshStart: true });
+      if (scope !== getCurrentConnectionScope()) {
+        this.deps.context.notifyError(requestId, vscode.l10n.t("The connection changed. Try again."));
+        return;
+      }
+      if (getOfflineSyncQueue(scope).tickets.has(ticketId)) {
+        this.deps.context.notifyError(requestId, vscode.l10n.t("The abandoned item changed. Refresh and try again."));
+        return;
+      }
+      const authorization = await beginFreshTicketEdit(ticketId, editor.document.uri.toString(), scope);
+      if (!authorization) {
+        this.deps.context.notifyError(requestId, vscode.l10n.t("The abandoned item changed. Refresh and try again."));
+        return;
+      }
+      updateDraftAfterSave(ticketId, ticket.subject, ticket.description ?? "",
+        metadataFromTicket(ticket), ticket.updatedAt, scope);
+      this.deps.refreshTicketPresentation();
+      this.deps.context.notifySuccess(requestId, vscode.l10n.t("Latest ticket loaded. Start a new edit in the opened editor."));
+    } catch (error) {
+      this.deps.context.notifyError(requestId, error instanceof Error ? error.message : vscode.l10n.t("Could not load the ticket."));
+    }
+  }
+
+  async handleAbandonOne(requestId: string, key: DashboardUnsyncedKey): Promise<void> {
+    const scope = getCurrentConnectionScope();
+    const plan = prepareOfflineAbandon(key, scope);
+    if (!plan.expectation || isAbandoned(plan.expectation)) {
+      this.deps.context.notifyError(requestId, vscode.l10n.t("The unsynced item changed. Refresh and try again."));
+      return;
+    }
+    const target = buildUnsyncedDashboardItems().find((item) =>
+      JSON.stringify(item.key) === JSON.stringify(key));
+    const label = target?.label ?? vscode.l10n.t("Unsynced item");
+    const laterChanges = plan.expectation.nextIntent !== undefined
+      ? vscode.l10n.t("Later edits will also remain in the retained record and will not be synced automatically.")
+      : vscode.l10n.t("There are no later queued edits.");
+    const confirm = vscode.l10n.t("Abandon sync and exclude");
+    const selected = await vscode.window.showWarningMessage(
+      vscode.l10n.t("Abandon sync for this item?"),
+      {
+        modal: true,
+        detail: `${vscode.l10n.t("Connection: {0}", scope)}\n${vscode.l10n.t("Target: {0}", label)}\n${laterChanges}\n\n${vscode.l10n.t("This item will be removed from the unsynced list and future sync runs. Changes already applied to Redmine will not be undone. An unknown remote outcome will remain unknown. The local Markdown file and processing record will be retained.")}`,
+      },
+      confirm,
+    );
+    if (selected !== confirm) { return; }
+    const result = await commitOfflineAbandonAsync(plan);
+    this.refreshUnsynced();
+    this.deps.refreshTicketPresentation();
+    if (result === "abandoned") {
+      this.deps.context.notifySuccess(requestId, vscode.l10n.t("Sync abandoned. The processing record was retained."));
+    } else {
+      this.deps.context.notifyError(requestId, result === "busy"
+        ? vscode.l10n.t("This item is being synced. Wait for the current operation to finish and try again.")
+        : result === "persistence_failed"
+          ? vscode.l10n.t("Could not save the abandoned state. The item remains available for sync.")
+          : vscode.l10n.t("The unsynced item changed. Refresh and try again."));
+    }
   }
 
   async handleSyncOne(requestId: string, key: DashboardUnsyncedKey): Promise<void> {
@@ -371,16 +458,17 @@ export class DashboardUnsyncedService {
   private buildSelectedTicketSyncKeys(ticketId: number): DashboardUnsyncedKey[] {
     const queue = getOfflineSyncQueue(getCurrentConnectionScope());
     const keys: DashboardUnsyncedKey[] = [];
-    if (queue.tickets.has(ticketId)) {
+    if (queue.tickets.has(ticketId) && !isAbandoned(queue.tickets.get(ticketId)!)) {
       keys.push({ kind: "ticket", ticketId });
     }
     for (const comment of queue.comments) {
-      if (comment.ticketId !== ticketId) {
+      if (comment.ticketId !== ticketId || isAbandoned(comment)) {
         continue;
       }
       keys.push({
         kind: "comment",
         ticketId,
+        operationId: comment.operationId,
         commentId: comment.commentId,
         documentUri: comment.documentUri,
       });

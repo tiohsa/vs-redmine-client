@@ -294,6 +294,13 @@ button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-
 .unsynced-state { display: flex; flex-wrap: wrap; gap: 4px; }
 .unsynced-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 5px; }
 .unsynced-actions .btn { min-height: 28px; padding-inline: 9px; }
+.unsynced-more { position: relative; align-self: center; }
+.unsynced-more summary { list-style: none; }
+.unsynced-more summary::-webkit-details-marker { display: none; }
+.unsynced-more[open] > button.btn { position: absolute; z-index: 5; right: 0; top: 100%; width: max-content; background: var(--app-surface-raised); box-shadow: var(--app-shadow); }
+#abandoned-list { display: flex; flex-direction: column; gap: 8px; }
+#abandoned-list .unsynced-card { grid-template-columns: max-content minmax(0, 1fr); }
+#abandoned-list pre { max-height: 240px; overflow: auto; white-space: pre-wrap; }
 
 /* Comments */
 #comments-panel { flex: 1 1 auto; min-width: 0; min-height: 0; overflow-y: auto; padding: 16px 14px 20px; }

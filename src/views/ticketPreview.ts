@@ -1,6 +1,8 @@
 import * as vscode from "vscode";
 import * as fs from "fs";
 import * as path from "path";
+import * as os from "os";
+import { randomUUID } from "crypto";
 import { Ticket } from "../redmine/types";
 import { TicketEditorKind } from "./ticketEditorTypes";
 import {
@@ -241,8 +243,32 @@ const openTicketEditor = async (
   ticket: Ticket,
   kind: TicketEditorKind,
   content: string,
+  freshStart = false,
 ): Promise<vscode.TextEditor> => {
   const connectionScope = getCurrentConnectionScope();
+  if (freshStart) {
+    const storage = resolveEditorStorageDir({ connectionScope });
+    if (storage.errorMessage) { showError(storage.errorMessage); }
+    const filename = `ticket-${ticket.id}-new-edit-${randomUUID()}.md`;
+    const fileUri = storage.uri
+      ? vscode.Uri.joinPath(storage.uri, filename)
+      : await vscode.window.showSaveDialog({
+        saveLabel: vscode.l10n.t("Create new edit file"),
+        defaultUri: vscode.Uri.file(path.join(os.homedir(), filename)),
+      });
+    if (!fileUri) {
+      throw new Error(vscode.l10n.t("Choose a file to start the new edit."));
+    }
+    if (await fileExists(fileUri)) {
+      throw new Error(vscode.l10n.t("Choose a new file for this edit."));
+    }
+    if (storage.uri) { await vscode.workspace.fs.createDirectory(storage.uri); }
+    await vscode.workspace.fs.writeFile(fileUri, new TextEncoder().encode(content));
+    const document = await vscode.workspace.openTextDocument(fileUri);
+    const editor = await vscode.window.showTextDocument(document, { preview: false });
+    registerTicketEditor(ticket.id, editor, kind, "ticket", ticket.projectId, connectionScope);
+    return editor;
+  }
   const storageResolution = resolveEditorStorageDir({ connectionScope });
   if (storageResolution.errorMessage) {
     showError(storageResolution.errorMessage);
@@ -275,7 +301,7 @@ const openTicketEditor = async (
 
 export const showTicketPreview = async (
   ticket: Ticket,
-  options?: { kind?: TicketEditorKind },
+  options?: { kind?: TicketEditorKind; freshStart?: boolean },
 ): Promise<vscode.TextEditor> => {
   rememberTicketSummary(ticket);
   const controlFields = {
@@ -297,7 +323,7 @@ export const showTicketPreview = async (
     },
     controlFields,
   };
-  const draftContent = getTicketDraftContent(ticket.id);
+  const draftContent = options?.freshStart ? undefined : getTicketDraftContent(ticket.id);
   const display = resolveTicketEditorDisplay(savedContent, draftContent);
   const displayContent: TicketEditorContent = { ...display.content, controlFields };
   const content = withTrailingEditLines(buildTicketEditorContent(displayContent));
@@ -305,6 +331,7 @@ export const showTicketPreview = async (
     ticket,
     options?.kind ?? "primary",
     content,
+    options?.freshStart,
   );
   setEditorContentType(editor, "ticket");
   setEditorProjectId(editor, ticket.projectId);

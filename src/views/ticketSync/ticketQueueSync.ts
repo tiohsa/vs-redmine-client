@@ -4,7 +4,10 @@ import {
   addOfflineTicketUpdateAsync,
   cancelQueuedTicketUpdateIfMatchesAsync,
   getActiveScope,
+  getTicketEditAuthorization,
   getOfflineSyncQueue,
+  isAbandoned,
+  sameDocumentIdentity,
 } from "../offlineSyncStore";
 import { buildTicketEditorContent, parseTicketEditorContent } from "../ticketEditorContent";
 import { getTicketDraft, markDraftStatus, setTicketDraftContent, updateDraftAfterSave } from "../ticketDraftStore";
@@ -59,6 +62,16 @@ export const queueTicketDraft = async (
   const draft = getTicketDraft(input.ticketId, input.operationScope);
   if (!draft) {
     return buildResult("failed", "Missing draft state for ticket.");
+  }
+  const scope = input.operationScope ?? getActiveScope();
+  const queue = getOfflineSyncQueue(scope);
+  const documentUri = input.editor?.document.uri.toString() ?? input.documentUri?.toString();
+  const editAuthorization = getTicketEditAuthorization(input.ticketId, scope);
+  const activeTicket = queue.tickets.get(input.ticketId);
+  const hasAbandonedTicket = (queue.abandonedTickets ?? []).some((entry) => entry.ticketId === input.ticketId);
+  if (isAbandoned(activeTicket ?? {}) || (hasAbandonedTicket &&
+      (documentUri === undefined || documentUri !== (activeTicket?.documentUri ?? editAuthorization?.documentUri)))) {
+    return buildResult("failed", vscode.l10n.t("Sync was abandoned for this ticket. Review the retained record before starting a new edit."));
   }
   if (containsConflictMarkers(input.content)) {
     return buildResult("failed", vscode.l10n.t("Resolve all merge conflict markers before syncing."));
@@ -122,7 +135,7 @@ export const queueTicketDraft = async (
     controlFields: parsed.controlFields,
   });
 
-  await addOfflineTicketUpdateAsync(input.ticketId, {
+  const registered = await addOfflineTicketUpdateAsync(input.ticketId, {
     ticketId: input.ticketId,
     baseSubject: draft.baseSubject,
     baseDescription: draft.baseDescription,
@@ -136,11 +149,16 @@ export const queueTicketDraft = async (
     metadataBlock: parsed.metadataBlock,
     controlFields: parsed.controlFields,
     baseDir,
-    documentUri: input.editor?.document.uri.toString() ?? input.documentUri?.toString(),
+    documentUri,
     connectionScope: input.operationScope,
-    operationId: `${input.operationScope ?? "legacy"}:ticket:${input.ticketId}`,
+    operationId: activeTicket?.operationId ?? (hasAbandonedTicket
+      ? undefined
+      : `${input.operationScope ?? "legacy"}:ticket:${input.ticketId}`),
     phase: "queued",
-  }, input.operationScope);
+  }, scope, editAuthorization?.editSessionId);
+  if (!registered) {
+    return buildResult("failed", vscode.l10n.t("The queued update changed. Save again."));
+  }
   if (!changeState.hasChanges) {
     return buildResult("no_change", "No changes to save.");
   }
@@ -655,6 +673,10 @@ export const queueNewTicketDraft = async (input: {
   operationScope?: string;
 }): Promise<TicketSaveResult> => {
   const content = input.editor.document.getText();
+  if (getOfflineSyncQueue(input.operationScope ?? getActiveScope()).newTickets.some((entry) =>
+    isAbandoned(entry) && sameDocumentIdentity(entry.documentUri, input.editor.document.uri.toString()))) {
+    return buildResult("failed", vscode.l10n.t("Sync was abandoned for this draft. Review the retained record before creating another ticket."));
+  }
   const validation = validateNewTicketContent(content);
   if (validation) {
     return validation;
@@ -675,6 +697,10 @@ export const queueNewTicketDraftContent = async (input: {
   projectId?: number;
   documentUri?: vscode.Uri;
 }): Promise<TicketSaveResult> => {
+  if (input.documentUri && getOfflineSyncQueue(input.operationScope ?? getActiveScope()).newTickets.some((entry) =>
+    isAbandoned(entry) && sameDocumentIdentity(entry.documentUri, input.documentUri?.toString()))) {
+    return buildResult("failed", vscode.l10n.t("Sync was abandoned for this draft. Review the retained record before creating another ticket."));
+  }
   const validation = validateNewTicketContent(input.content);
   if (validation) {
     return validation;

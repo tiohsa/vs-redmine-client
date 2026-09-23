@@ -228,4 +228,31 @@ suite("Dashboard メッセージバリデーション", () => {
     const r = validateDashboardMessage({ type: "settings.reset", requestId: "r" });
     assert.strictEqual(r.ok, true);
   });
+
+  test("unsynced.abandonOne は対象キーを検証する", () => {
+    assert.strictEqual(validateDashboardMessage({
+      type: "unsynced.abandonOne", requestId: "r", key: { kind: "comment", ticketId: 1 },
+    }).ok, false);
+    assert.strictEqual(validateDashboardMessage({
+      type: "unsynced.abandonOne", requestId: "r", key: { kind: "newTicket", documentUri: "file:///draft.md" },
+    }).ok, true);
+  });
+
+  test("unsynced.startNewTicketEdit は正の ticketId のみ受け付ける", () => {
+    assert.strictEqual(validateDashboardMessage({
+      type: "unsynced.startNewTicketEdit", requestId: "r", ticketId: 0,
+    }).ok, false);
+    assert.strictEqual(validateDashboardMessage({
+      type: "unsynced.startNewTicketEdit", requestId: "r", ticketId: 904,
+    }).ok, true);
+  });
+
+  test("コメントは operationId だけでも指定でき、空の operationId は拒否する", () => {
+    assert.strictEqual(validateDashboardMessage({
+      type: "unsynced.syncOne", requestId: "r", key: { kind: "comment", ticketId: 905, operationId: "comment-new" },
+    }).ok, true);
+    assert.strictEqual(validateDashboardMessage({
+      type: "unsynced.syncOne", requestId: "r", key: { kind: "comment", ticketId: 905, operationId: "" },
+    }).ok, false);
+  });
 });

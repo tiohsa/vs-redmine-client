@@ -1,6 +1,6 @@
 import { Ticket } from "../../redmine/types";
 import { getTicketDraft, getTicketDraftContent } from "../../views/ticketDraftStore";
-import { getOfflineSyncQueue, evaluateOfflineSyncPolicy } from "../../views/offlineSyncStore";
+import { getOfflineSyncQueue, evaluateOfflineSyncPolicy, isAbandoned } from "../../views/offlineSyncStore";
 import { getCurrentConnectionScope } from "../../config/connectionScope";
 import { buildTree } from "../../views/treeBuilder";
 import { TreeNode, TreeSource } from "../../views/treeTypes";
@@ -15,6 +15,11 @@ export const resolveTicketSyncState = (ticketId: number): DashboardSyncState => 
   const draft = getTicketDraft(ticketId, scope);
   const queue = getOfflineSyncQueue(scope);
   const queued = queue.tickets.get(ticketId);
+  if (queued && isAbandoned(queued)) { return "Abandoned"; }
+  if (!queued && queue.abandonedTickets?.some((entry) => entry.ticketId === ticketId) &&
+      !queue.ticketEditAuthorizations?.some((entry) => entry.ticketId === ticketId)) {
+    return "Abandoned";
+  }
   const lifecycle = queued ? evaluateOfflineSyncPolicy(queued).lifecycle : undefined;
   if (draft?.status === "Syncing") {
     return "Syncing";

@@ -1,6 +1,7 @@
 import * as vscode from "vscode";
 import {
   getOfflineSyncQueue,
+  isAbandoned,
   OfflineCommentUpdate,
   OfflineTicketUpdate,
 } from "../views/offlineSyncStore";
@@ -65,9 +66,10 @@ const runOfflineSyncAtScope = async (
     syncAll: (context: { connectionScope: string }, options: { shouldContinue?: () => boolean }) =>
       deps.createTicketSyncService!().syncAll(context, options),
   };
-  const ticketUpdates = Array.from(queue.tickets.values());
+  const ticketUpdates = Array.from(queue.tickets.values()).filter((item) => !isAbandoned(item));
   const totalItems =
-    queue.newTickets.length + ticketUpdates.length + queue.comments.length;
+    queue.newTickets.filter((item) => !isAbandoned(item)).length + ticketUpdates.length +
+    queue.comments.filter((item) => !isAbandoned(item)).length;
 
   if (totalItems === 0) {
     showInfo(vscode.l10n.t("No local changes to sync."));
