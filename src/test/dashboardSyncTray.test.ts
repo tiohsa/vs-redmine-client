@@ -22,6 +22,7 @@ interface FakeElement {
   dataset: Record<string, string>;
   disabled: boolean;
   click?: () => void;
+  setAttribute: (name: string, value: string) => void;
   addEventListener: (name: string, action: () => void) => void;
 }
 
@@ -32,7 +33,7 @@ const present = (state: TrayState, clickLabel?: string): { text: string; buttons
   const document = {
     getElementById: () => tray,
     createElement: (): FakeElement => {
-      const element: FakeElement = { textContent: "", className: "", dataset: {}, disabled: false, addEventListener: (_name, action) => { element.click = action; } };
+      const element: FakeElement = { textContent: "", className: "", dataset: {}, disabled: false, setAttribute: () => {}, addEventListener: (_name, action) => { element.click = action; } };
       return element;
     },
   };

@@ -196,7 +196,7 @@ suite("Dashboard quick filters", () => {
       assert.strictEqual(button.capability, capability);
       assert.deepStrictEqual(rendered.preferences, ["mine"]);
       assert.deepStrictEqual(rendered.ids, [1]);
-      assert.strictEqual(rendered.count, "Ticket count: 1");
+      assert.strictEqual(rendered.count, "Showing 1 / 2 / 2");
       assert.strictEqual(matches({ assigneeId: 8, syncState: "Synced" }, ["mine"], undefined, [], capabilities), true);
     }
   });
@@ -232,7 +232,7 @@ suite("Dashboard quick filters", () => {
     assert.strictEqual(button.capability, "unavailable");
     assert.deepStrictEqual(rendered.preferences, ["open"]);
     assert.deepStrictEqual(rendered.ids, [1]);
-    assert.strictEqual(rendered.count, "Ticket count: 1");
+    assert.strictEqual(rendered.count, "Showing 1 / 2 / 2");
     assert.strictEqual(matches({ statusId: 1, syncState: "Synced" }, ["open"], undefined, [{ id: 1 }], capabilities), true);
   });
 
@@ -243,7 +243,7 @@ suite("Dashboard quick filters", () => {
     const before = renderTicketList(["mine"], loading, tickets);
     const after = renderTicketList(["mine"], available, tickets);
     assert.deepStrictEqual(before.ids, [1]);
-    assert.strictEqual(before.count, "Ticket count: 1");
+    assert.strictEqual(before.count, "Showing 1 / 2 / 2");
     assert.deepStrictEqual(after.ids, [2]);
     assert.strictEqual(after.count, "Showing 1 / 2 / 2");
     assert.deepStrictEqual(after.preferences, ["mine"]);

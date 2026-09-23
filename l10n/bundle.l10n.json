@@ -15,6 +15,7 @@
     "Overview": "Overview",
     "{0} shown · {1} loaded · {2} total": "{0} shown · {1} loaded · {2} total",
     "Everything synced": "Everything synced",
+    "No unsynced items in sync queue": "No unsynced items in sync queue",
     "{0} unsynced items": "{0} unsynced items",
     "Sync attention required": "Sync attention required",
     "Review conflict": "Review conflict",
