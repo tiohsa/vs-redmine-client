@@ -1311,7 +1311,7 @@ export const updateQueuedTicketIntentAsync = (
 
 export type OfflineTicketConflictExpectation = Pick<
   OfflineTicketUpdate,
-  "operationId" | "revision" | "intentRevision" | "connectionScope" | "content"
+  "operationId" | "revision" | "intentRevision" | "attemptGeneration" | "connectionScope" | "content"
 >;
 
 export type OfflineCommentConflictExpectation = Pick<
@@ -1350,6 +1350,8 @@ export const rebaseOfflineTicketUpdateAfterConflictAsync = (
       existing.revision !== expected.revision ||
       (expected.intentRevision !== undefined &&
         (existing.intentRevision ?? existing.revision) !== expected.intentRevision) ||
+      (expected.attemptGeneration !== undefined &&
+        getAttemptGeneration(existing) !== expected.attemptGeneration) ||
       (expected.connectionScope !== undefined &&
         existing.connectionScope !== expected.connectionScope) ||
       existing.content !== expected.content

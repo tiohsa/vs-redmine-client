@@ -141,6 +141,36 @@ suite("Dashboard recovery policy — lifecycle matrix", () => {
     });
   });
 
+  test("ambiguous な新規コメント recovery は allowedActions に基づいて Review を表示する", async () => {
+    const primaryEffect: DurableSyncEffect = {
+      effectId: "comment-create",
+      kind: "comment_create",
+      operationRevision: 4,
+      attemptGeneration: 2,
+      state: "committed",
+      target: {},
+    };
+    await replaceOfflineSyncQueueAsync({
+      tickets: new Map(),
+      comments: [{
+        ticketId,
+        body: "Same text",
+        operationId: "ambiguous-comment",
+        connectionScope: scope,
+        phase: "reconciliation_pending",
+        revision: 4,
+        intentRevision: 4,
+        attemptGeneration: 2,
+        effects: [primaryEffect],
+      }],
+      newTickets: [],
+    }, scope);
+
+    const [item] = buildUnsyncedDashboardItems();
+    assert.strictEqual(item.lifecycle, "recovery_pending");
+    assert.strictEqual(item.requiresReview, true);
+  });
+
   for (const entry of effectCases) {
     for (const hasNext of [false, true]) {
       test(`queued Effect=${entry.label}, nextIntent=${hasNext}: 全種別の破棄・scope分離・再起動`, async () => {

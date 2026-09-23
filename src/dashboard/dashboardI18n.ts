@@ -40,6 +40,9 @@ export interface DashboardStrings {
   quickUnsynced: string;
   quickMyIssuesUnavailable: string;
   quickOpenUnavailable: string;
+  quickFilterCapabilityLoading: string;
+  quickMyIssuesUnavailableSelected: string;
+  quickOpenUnavailableSelected: string;
   advancedFilters: string;
   closeFilters: string;
   applyFilters: string;
@@ -83,6 +86,8 @@ export interface DashboardStrings {
   // Ticket detail panel
   openTicketTooltip: string;
   syncToRedmine: string;
+  resolveRecovery: string;
+  resolveRecoveryTooltip: string;
   syncTicketTooltip: string;
   editingState: string;
   remoteDescription: string;
@@ -240,6 +245,9 @@ export const buildDashboardStrings = (): DashboardStrings => ({
   quickUnsynced: vscode.l10n.t("Unsynced"),
   quickMyIssuesUnavailable: vscode.l10n.t("Current Redmine user is unavailable"),
   quickOpenUnavailable: vscode.l10n.t("Issue status metadata is unavailable"),
+  quickFilterCapabilityLoading: vscode.l10n.t("Filter capability is loading; the saved preference is not currently applied."),
+  quickMyIssuesUnavailableSelected: vscode.l10n.t("Current Redmine user is unavailable; the saved My Issues preference is not applied."),
+  quickOpenUnavailableSelected: vscode.l10n.t("Issue status metadata is unavailable; the saved Open preference is not applied."),
   advancedFilters: vscode.l10n.t("Filters…"),
   closeFilters: vscode.l10n.t("Close filters"),
   applyFilters: vscode.l10n.t("Apply filters"),
@@ -283,6 +291,8 @@ export const buildDashboardStrings = (): DashboardStrings => ({
   // Ticket detail panel
   openTicketTooltip: vscode.l10n.t("Edit ticket Markdown in VS Code"),
   syncToRedmine: vscode.l10n.t("Sync to Redmine"),
+  resolveRecovery: vscode.l10n.t("Resolve"),
+  resolveRecoveryTooltip: vscode.l10n.t("Review available recovery actions before continuing."),
   syncTicketTooltip: vscode.l10n.t("Sync VS Code editor changes to Redmine"),
   editingState: vscode.l10n.t("Editing state"),
   remoteDescription: vscode.l10n.t("Description (on Redmine)"),

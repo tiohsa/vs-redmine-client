@@ -130,14 +130,16 @@ export class SyncEngine {
   public async resolveCommentCommitUnknown(input: {
     key: Extract<SyncEngineKey, { kind: "comment" }>;
     context: SyncContext;
+    operationId?: string;
+    operationRevision?: number;
     attemptGeneration?: number;
     resolution?: { kind: "reconcile_remote" } | { kind: "link_remote_comment"; commentId: number };
   }): Promise<SyncEngineOutcome> {
     const identity = this.currentRecoveryIdentity(input.key, input.context);
     return this.coordinator.resolveCommitUnknown({
       key: input.key,
-      operationId: identity.operationId,
-      operationRevision: identity.operationRevision,
+      operationId: input.operationId ?? identity.operationId,
+      operationRevision: input.operationRevision ?? identity.operationRevision,
       context: input.context,
       attemptGeneration: input.attemptGeneration ?? identity.attemptGeneration,
       resolution: input.resolution,

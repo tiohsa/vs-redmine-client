@@ -189,13 +189,20 @@ const resolveCommentCommitUnknownInteractive = async (
     return undefined;
   }
   const primaryItem = recoveryItems.find((item) => isPrimaryEffectKind(item.effectKind));
+  const actions = primaryItem?.allowedActions ?? [];
   const reconcileLabel = vscode.l10n.t("Reconcile from Redmine");
   const linkLabel = vscode.l10n.t("Link comment journal");
+  const choices = [
+    ...(actions.includes("reconcile_remote") ? [reconcileLabel] : []),
+    ...(actions.includes("link_remote_comment") ? [linkLabel] : []),
+  ];
+  if (choices.length === 0 || !primaryItem) {
+    return undefined;
+  }
   const choice = await vscode.window.showWarningMessage(
     vscode.l10n.t("The previous comment write may have reached Redmine. Check Redmine for one uniquely matching journal without sending the comment again."),
     { modal: true },
-    reconcileLabel,
-    linkLabel,
+    ...choices,
   );
   if (choice === linkLabel) {
     const rawCommentId = await vscode.window.showInputBox({
@@ -208,7 +215,9 @@ const resolveCommentCommitUnknownInteractive = async (
     return engine.resolveCommentCommitUnknown({
       key,
       context: { connectionScope: operationScope },
-      attemptGeneration: primaryItem?.attemptGeneration,
+      operationId: primaryItem.operationId,
+      operationRevision: primaryItem.operationRevision,
+      attemptGeneration: primaryItem.attemptGeneration,
       resolution: { kind: "link_remote_comment", commentId: Number(rawCommentId) },
     });
   }
@@ -216,7 +225,9 @@ const resolveCommentCommitUnknownInteractive = async (
   return engine.resolveCommentCommitUnknown({
     key,
     context: { connectionScope: operationScope },
-    attemptGeneration: primaryItem?.attemptGeneration,
+    operationId: primaryItem.operationId,
+    operationRevision: primaryItem.operationRevision,
+    attemptGeneration: primaryItem.attemptGeneration,
     resolution: { kind: "reconcile_remote" },
   });
 };
@@ -550,17 +561,18 @@ const syncUnsyncedFileAtScope = async (
   }
 
   if (syncKey.kind === "comment") {
-    const previousPhase = getOfflineSyncQueue(operationScope).comments.find((comment) =>
-      comment.ticketId === syncKey.ticketId &&
-      ((syncKey.commentId !== undefined && comment.commentId === syncKey.commentId) ||
-        (syncKey.documentUri !== undefined && comment.documentUri === syncKey.documentUri)),
-    )?.phase;
     const engine = engineFactory();
     let outcome = await engine.syncOne(syncKey, { connectionScope: operationScope });
-    if (
-      outcome.kind === "commit_unknown" &&
-      (previousPhase === "commit_unknown" || previousPhase === "remote_write_started")
-    ) {
+    const recoveryItems = engine.getRecoveryItems(syncKey, { connectionScope: operationScope });
+    const primaryRecovery = recoveryItems.find((item) =>
+      isPrimaryEffectKind(item.effectKind) &&
+      (item.allowedActions.includes("reconcile_remote") || item.allowedActions.includes("link_remote_comment")),
+    );
+    if (primaryRecovery && (
+      outcome.kind === "commit_unknown" ||
+      outcome.kind === "failed_before_commit" ||
+      (outcome.kind === "remote_committed" && outcome.pending === "remote_reconcile")
+    )) {
       outcome = await resolveCommentCommitUnknownInteractive(
         engine,
         syncKey,

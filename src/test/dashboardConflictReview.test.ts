@@ -27,6 +27,8 @@ suite("Dashboard conflict review", () => {
   let errors: string[];
   let warningChoices: string[];
   let registeredEditor: vscode.TextEditor | undefined;
+  let remoteReadCalls: number;
+  let remoteMutationCalls: number;
 
   const conflictContext = (): ConflictContext => ({
     connectionScope: scope,
@@ -57,11 +59,14 @@ suite("Dashboard conflict review", () => {
     openedUris = [];
     errors = [];
     warningChoices = [];
+    remoteReadCalls = 0;
+    remoteMutationCalls = 0;
     registerConflictContext(conflictContext());
 
     const engine = createSyncEngine();
     engine.syncOne = async () => {
       syncAttempts++;
+      remoteMutationCalls++;
       return { kind: "completed", ticketId };
     };
     service = new DashboardUnsyncedService({
@@ -79,6 +84,20 @@ suite("Dashboard conflict review", () => {
         assert.strictEqual(requestedTicketId, ticketId);
         openTicketEditorCalls++;
         registerEditor();
+      },
+      getIssueDetail: async (requestedTicketId) => {
+        remoteReadCalls++;
+        assert.strictEqual(requestedTicketId, ticketId);
+        return {
+          ticket: {
+            id: ticketId,
+            subject: "Current remote subject",
+            description: "Current remote description",
+            projectId: 1,
+            updatedAt: "2026-09-23T01:00:00Z",
+          },
+          comments: [],
+        };
       },
       syncEngine: engine,
     });
@@ -125,6 +144,33 @@ suite("Dashboard conflict review", () => {
     assert.deepStrictEqual(openedUris, [uri]);
     assert.ok(warningChoices.includes("Local Priority"));
     assert.strictEqual(syncAttempts, 0);
+  });
+
+  test("extension restart 後は保存済み operation と Redmine read から conflict context を再構築する", async () => {
+    clearConflictContext(ticketId, scope);
+    await addOfflineTicketUpdateAsync(ticketId, {
+      ticketId,
+      baseSubject: "Base",
+      baseDescription: "Base description",
+      baseMetadata: { tracker: "", priority: "", status: "", due_date: "" },
+      subject: "Local after restart",
+      description: "Local description after restart",
+      metadata: { tracker: "Bug", priority: "Normal", status: "Open", due_date: "" },
+      operationId: "restart-ticket-operation",
+      connectionScope: scope,
+      revision: 2,
+      intentRevision: 2,
+      attemptGeneration: 3,
+    }, scope);
+
+    await service.handleReviewConflict("review-restart", ticketId);
+
+    assert.strictEqual(remoteReadCalls, 1);
+    assert.strictEqual(remoteMutationCalls, 0);
+    assert.strictEqual(syncAttempts, 0);
+    assert.strictEqual(openTicketEditorCalls, 1);
+    assert.ok(warningChoices.includes("Local Priority"));
+    assert.ok(warningChoices.includes("Remote Priority"));
   });
 
   test("別 connection scope の conflict context は開かず拒否する", async () => {
@@ -207,6 +253,46 @@ suite("Dashboard conflict review", () => {
     assert.strictEqual(syncAttempts, 0);
     assert.strictEqual(errors.length, 1);
     assert.strictEqual(getOfflineSyncQueue(scope).tickets.get(ticketId)?.revision, 3);
+  });
+
+  test("resolver を開いている間に attempt generation が変われば stale resolution を拒否する", async () => {
+    await addOfflineTicketUpdateAsync(ticketId, {
+      ticketId,
+      baseSubject: "Base",
+      baseDescription: "Base description",
+      baseMetadata: { tracker: "", priority: "", status: "", due_date: "" },
+      subject: "Local",
+      description: "Local description",
+      metadata: { tracker: "", priority: "", status: "", due_date: "" },
+      operationId: "ticket:72",
+      connectionScope: scope,
+      revision: 2,
+      intentRevision: 2,
+      attemptGeneration: 3,
+    }, scope);
+    const originalOperation = getOfflineSyncQueue(scope).tickets.get(ticketId);
+    assert.ok(originalOperation);
+    registerConflictContext(conflictContext(), originalOperation);
+    registerEditor();
+
+    let chooseRemote!: () => void;
+    vscode.window.showWarningMessage = (() => new Promise<string>((resolve) => {
+      chooseRemote = () => resolve("Remote Priority");
+    })) as typeof vscode.window.showWarningMessage;
+    const review = service.handleReviewConflict("review-stale-attempt", ticketId);
+    await Promise.resolve();
+    const queue = getOfflineSyncQueue(scope);
+    const current = queue.tickets.get(ticketId);
+    assert.ok(current);
+    const changed = new Map(queue.tickets);
+    changed.set(ticketId, { ...current, attemptGeneration: 4 });
+    await replaceOfflineSyncQueueAsync({ ...queue, tickets: changed }, scope);
+    chooseRemote();
+    await review;
+
+    assert.strictEqual(syncAttempts, 0);
+    assert.strictEqual(errors.length, 1);
+    assert.strictEqual(getOfflineSyncQueue(scope).tickets.get(ticketId)?.attemptGeneration, 4);
   });
 
   test("専用 request は有効な ticketId を検証し、不正な ID を拒否する", () => {

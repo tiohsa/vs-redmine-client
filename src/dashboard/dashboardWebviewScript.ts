@@ -354,18 +354,14 @@ function syncExpandedState(nodes){
   for(const node of nodes || []){ if(node.children && node.children.length && !collapsedTicketIds.has(node.id)) expandedTicketIds.add(node.id); syncExpandedState(node.children); }
 }
 function matchesSearch(ticket){ return !searchQuery || String(ticket.id).indexOf(searchQuery) >= 0 || String(ticket.subject || '').toLowerCase().indexOf(searchQuery) >= 0; }
-function hasStatusClosureMetadata(){
-  return (state?.metadataOptions?.statuses || []).some(function(item){ return typeof item.isClosed === 'boolean'; });
-}
-function isQuickFilterAvailable(name){
-  if(!state) return true;
-  if(name === 'mine') return Number.isSafeInteger(state.currentUserId);
-  if(name === 'open') return hasStatusClosureMetadata();
-  return true;
+function quickFilterCapability(name){
+  if(name === 'mine') return state?.quickFilterCapabilities?.mine || 'loading';
+  if(name === 'open') return state?.quickFilterCapabilities?.open || 'loading';
+  return 'available';
 }
 function matchesQuickFilters(ticket){
-  if(quickFilters.has('mine') && isQuickFilterAvailable('mine') && ticket.assigneeId !== state.currentUserId) return false;
-  if(quickFilters.has('open') && isQuickFilterAvailable('open')){
+  if(quickFilters.has('mine') && quickFilterCapability('mine') === 'available' && ticket.assigneeId !== state.currentUserId) return false;
+  if(quickFilters.has('open') && quickFilterCapability('open') === 'available'){
     const status=(state.metadataOptions?.statuses || []).find(function(item){ return item.id === ticket.statusId; });
     if(!status || status.isClosed !== false) return false;
   }
@@ -376,10 +372,23 @@ function matchesQuickFilters(ticket){
 function renderQuickFilters(){
   document.querySelectorAll('[data-quick-filter]').forEach(function(button){
     const name=button.dataset.quickFilter;
-    const disabled=!isQuickFilterAvailable(name);
+    const capability=quickFilterCapability(name);
+    const preferred=quickFilters.has(name);
+    const disabled=capability !== 'available';
+    const unavailableReason=name === 'mine' ? STRINGS.quickMyIssuesUnavailable : STRINGS.quickOpenUnavailable;
+    const preferenceReason=name === 'mine' ? STRINGS.quickMyIssuesUnavailableSelected : STRINGS.quickOpenUnavailableSelected;
+    const description=capability === 'loading'
+      ? STRINGS.quickFilterCapabilityLoading
+      : capability === 'unavailable'
+        ? (preferred ? preferenceReason : unavailableReason)
+        : '';
     button.disabled=disabled;
-    button.title=disabled ? (name === 'mine' ? STRINGS.quickMyIssuesUnavailable : STRINGS.quickOpenUnavailable) : '';
-    button.setAttribute('aria-pressed',String(quickFilters.has(name)));
+    button.title=description;
+    button.setAttribute('data-capability',capability);
+    button.setAttribute('data-preferred',String(preferred));
+    button.setAttribute('aria-pressed',String(preferred && !disabled));
+    if(description) button.setAttribute('aria-label',(button.textContent || name)+'. '+description);
+    else button.removeAttribute('aria-label');
   });
 }
 
@@ -636,7 +645,7 @@ function renderUnsynced(){
   const countLabel=document.getElementById('unsynced-count-label'); countLabel.textContent=(STRINGS.unsyncedCountLabel || STRINGS.tabUnsynced).replace('{0}',String(count)); const syncAll=document.getElementById('sync-all-btn'); syncAll.classList.toggle('hidden',count === 0); syncAll.onclick=function(){ req('unsynced.syncAll'); };
   const queued=items.filter(function(item){ return resolveUnsyncedBadge(item).kind === 'queued'; }).length; const review=items.filter(function(item){ return resolveUnsyncedBadge(item).kind === 'review'; }).length; const conflict=items.filter(function(item){ return resolveUnsyncedBadge(item).kind === 'conflict'; }).length; const failed=items.filter(function(item){ return resolveUnsyncedBadge(item).kind === 'failed'; }).length; const summary=document.getElementById('unsynced-summary'); summary.innerHTML=(queued ? '<span class="summary-badge">'+esc(STRINGS.syncQueued)+' <strong>'+queued+'</strong></span>' : '')+(review ? '<span class="summary-badge">'+esc(STRINGS.syncReviewRequired || STRINGS.syncFailed)+' <strong>'+review+'</strong></span>' : '')+(conflict ? '<span class="summary-badge">'+esc(STRINGS.syncConflict)+' <strong>'+conflict+'</strong></span>' : '')+(failed ? '<span class="summary-badge">'+esc(STRINGS.syncFailed)+' <strong>'+failed+'</strong></span>' : '');
   const list=document.getElementById('unsynced-list'); if(!items.length){ list.innerHTML='<div class="state-msg">'+STRINGS.noUnsyncedChanges+'</div>'; updateSyncButtonStates(); return; }
-  list.innerHTML=items.map(function(item){ const status=resolveUnsyncedBadge(item); const open=item.documentUri ? '<button class="btn btn-secondary" type="button" data-uri="'+esc(item.documentUri)+'">'+actionIcon('open')+esc(STRINGS.openInEditor)+'</button>' : ''; const discardsLaterChanges=item.discardMode === 'nextIntent'; const discardLabel=discardsLaterChanges ? STRINGS.discardLaterChangesAction : STRINGS.discardAction; const discardTitle=discardsLaterChanges ? STRINGS.discardLaterChangesTitle : STRINGS.discardTitle; const discard=item.discardMode === 'none' || item.canDiscard === false ? '<button class="btn btn-secondary" type="button" disabled>'+esc(discardLabel)+'</button>' : '<button class="btn btn-secondary" type="button" data-discard-key="'+safeJson(item.key)+'" title="'+esc(discardTitle)+'">'+esc(discardLabel)+'</button>'; const sync=item.canSync === false ? '<button class="btn btn-secondary" type="button" disabled>'+actionIcon('sync')+esc(STRINGS.syncToRedmine)+'</button>' : '<button class="btn btn-secondary" type="button" data-sync-key="'+safeJson(item.key)+'">'+actionIcon('sync')+esc(STRINGS.syncToRedmine)+'</button>'; const detail=item.detail || ''; return '<div class="unsynced-card" role="listitem"><span class="unsynced-kind-label">'+esc(unsyncedKindLabel(item.key.kind))+'</span><div class="unsynced-body"><div class="unsynced-label">'+esc(item.label)+'</div>'+(detail ? '<div class="unsynced-detail">'+esc(detail)+'</div>' : '')+'</div><div class="unsynced-state">'+badge(status.label,status.cls,status.icon)+'</div><div class="unsynced-actions">'+open+discard+sync+'</div></div>'; }).join('');
+  list.innerHTML=items.map(function(item){ const status=resolveUnsyncedBadge(item); const open=item.documentUri ? '<button class="btn btn-secondary" type="button" data-uri="'+esc(item.documentUri)+'">'+actionIcon('open')+esc(STRINGS.openInEditor)+'</button>' : ''; const discardsLaterChanges=item.discardMode === 'nextIntent'; const discardLabel=discardsLaterChanges ? STRINGS.discardLaterChangesAction : STRINGS.discardAction; const discardTitle=discardsLaterChanges ? STRINGS.discardLaterChangesTitle : STRINGS.discardTitle; const discard=item.discardMode === 'none' || item.canDiscard === false ? '<button class="btn btn-secondary" type="button" disabled>'+esc(discardLabel)+'</button>' : '<button class="btn btn-secondary" type="button" data-discard-key="'+safeJson(item.key)+'" title="'+esc(discardTitle)+'">'+esc(discardLabel)+'</button>'; const actionLabel=item.requiresReview ? STRINGS.resolveRecovery : STRINGS.syncToRedmine; const actionTitle=item.requiresReview ? ' title="'+esc(STRINGS.resolveRecoveryTooltip)+'"' : ''; const sync=item.canSync === false ? '<button class="btn btn-secondary" type="button" disabled>'+actionIcon('sync')+esc(actionLabel)+'</button>' : '<button class="btn btn-secondary" type="button" data-sync-key="'+safeJson(item.key)+'"'+actionTitle+'>'+actionIcon('sync')+esc(actionLabel)+'</button>'; const detail=item.detail || ''; return '<div class="unsynced-card" role="listitem"><span class="unsynced-kind-label">'+esc(unsyncedKindLabel(item.key.kind))+'</span><div class="unsynced-body"><div class="unsynced-label">'+esc(item.label)+'</div>'+(detail ? '<div class="unsynced-detail">'+esc(detail)+'</div>' : '')+'</div><div class="unsynced-state">'+badge(status.label,status.cls,status.icon)+'</div><div class="unsynced-actions">'+open+discard+sync+'</div></div>'; }).join('');
   list.querySelectorAll('[data-uri]').forEach(function(button){ button.addEventListener('click',function(){ req('unsynced.openLocalFile',{documentUri:button.dataset.uri}); }); });
   list.querySelectorAll('[data-discard-key]').forEach(function(button){ button.addEventListener('click',function(){ try { req('unsynced.discardOne',{key:JSON.parse(button.getAttribute('data-discard-key'))}); } catch {} }); });
   list.querySelectorAll('[data-sync-key]').forEach(function(button){ button.addEventListener('click',function(){ try { req('unsynced.syncOne',{key:JSON.parse(button.getAttribute('data-sync-key'))}); } catch {} }); });

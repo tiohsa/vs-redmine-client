@@ -631,6 +631,13 @@ export const isPrimaryRecoveryRequired = (
   return false;
 };
 
+const isCommittedCommentIdentityPending = (
+  operation: { kind?: string; phase?: string },
+  primaryEffect?: { state?: DurableSyncEffectState },
+): boolean => operation.kind === "comment_create" &&
+  operation.phase === "reconciliation_pending" &&
+  primaryEffect?.state === "committed";
+
 export type RecoveryActionKind =
   | "retry_remote_write"
   | "reconcile_remote"
@@ -733,7 +740,10 @@ export const getRecoveryItemsForOperation = (
     const isPrimary = isPrimaryEffect(effect);
 
     if (isPrimary) {
-      if (isPrimaryRecoveryRequired(operation, effect)) {
+      if (
+        isPrimaryRecoveryRequired(operation, effect) ||
+        isCommittedCommentIdentityPending(operation, effect)
+      ) {
         const allowedActions: RecoveryActionKind[] = [];
         if (effect.state === "compensation_unknown" || effect.state === "compensation_started") {
           allowedActions.push("reconcile_compensation");

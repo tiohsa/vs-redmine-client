@@ -102,6 +102,7 @@ async function main() {
   assert.equal(await evaluate(`document.getElementById('tab-comments')`), null);
   assert.ok(await evaluate(`document.getElementById('sync-tray') !== null`));
   state.currentUserId = 7;
+  state.quickFilterCapabilities = { mine: 'available', open: 'available' };
   state.metadataOptions.statuses = [{ id: 1, name: '進行中', isClosed: false }, { id: 2, name: '完了', isClosed: true }];
   state.tickets[0].assigneeId = 7;
   state.tickets[0].statusId = 1;
@@ -424,7 +425,7 @@ async function main() {
     await push();
     await evaluate(`document.getElementById('metadata-edit-btn').click()`);
     assert.equal(await evaluate(`document.getElementById('ticket-detail-card').scrollWidth <= document.getElementById('ticket-detail-card').clientWidth`), true, `metadata overflow: ${theme} ${width}`);
-    assert.equal(await evaluate(`(()=>{const card=document.getElementById('ticket-detail-card').getBoundingClientRect();return [...document.querySelectorAll('.detail-actions button,[data-metadata-field]')].every(el=>{const r=el.getBoundingClientRect();return r.left>=card.left && r.right<=card.right;});})()`), true, `control overflow: ${theme} ${width}`);
+    assert.equal(await evaluate(`(()=>{const card=document.getElementById('ticket-detail-card').getBoundingClientRect();return [...document.querySelectorAll('.detail-actions button,[data-metadata-field]')].filter(el=>el.getClientRects().length>0).every(el=>{const r=el.getBoundingClientRect();return r.left>=card.left && r.right<=card.right;});})()`), true, `control overflow: ${theme} ${width}`);
     await evaluate(`document.querySelector('.ticket-row[data-id="10"]').focus()`);
     assert.notEqual(await evaluate(`getComputedStyle(document.querySelector('.ticket-row[data-id="10"]')).outlineStyle`), 'none');
     assert.notEqual(await evaluate(`getComputedStyle(document.querySelector('.ticket-row[data-id="10"]'),'::before').backgroundColor`), 'rgba(0, 0, 0, 0)');
@@ -515,7 +516,7 @@ async function main() {
     assert.equal(await evaluate(`document.getElementById('ticket-scroll').scrollWidth <= document.getElementById('ticket-scroll').clientWidth`), true, `list overflow: ${theme} ${width}`);
     assert.equal(await evaluate(`getComputedStyle(document.querySelector('.tickets-master')).borderRightWidth`), '1px');
     assert.equal(await evaluate(`document.querySelector('.ticket-subject').getBoundingClientRect().width >= 40`), true, `subject clipped: ${theme} ${width}`);
-    assert.equal(await evaluate(`document.querySelectorAll('.detail-actions svg[aria-hidden="true"]').length`), 4);
+    assert.equal(await evaluate(`document.querySelectorAll('.detail-actions svg[aria-hidden="true"]').length`), 7);
     if (width < 700) assert.equal(await evaluate(`document.querySelector('.tickets-master').getBoundingClientRect().height <= innerHeight * .4 + 1`), true);
     await evaluate(`document.querySelector('[data-ticket-action-menu="29"]').scrollIntoView(); document.querySelector('[data-ticket-action-menu="29"]').click()`);
     await evaluate('new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)))');

@@ -98,6 +98,8 @@ export interface DashboardTicketFilterOptions {
   statuses: DashboardStatusMetadata[];
 }
 
+export type QuickFilterCapability = "loading" | "available" | "unavailable";
+
 export type DashboardUnsyncedKind = "ticket" | "newTicket" | "comment";
 
 export type DashboardUnsyncedKey =
@@ -114,6 +116,7 @@ export interface DashboardUnsyncedItem {
   canDiscard?: boolean;
   discardMode?: "active" | "nextIntent" | "none";
   canSync?: boolean;
+  requiresReview?: boolean;
 }
 
 export interface DashboardCommentItem {
@@ -210,6 +213,10 @@ export type DashboardWorkPanel =
 export interface DashboardState {
   selectedProject?: DashboardSelectedProject;
   currentUserId?: number;
+  quickFilterCapabilities: {
+    mine: QuickFilterCapability;
+    open: QuickFilterCapability;
+  };
   includeChildProjects: boolean;
   projects: DashboardProjectNode[];
   tickets: DashboardTicketNode[];

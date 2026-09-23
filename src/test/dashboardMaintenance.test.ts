@@ -4,8 +4,11 @@ import { DashboardController } from "../dashboard/DashboardController";
 import { DashboardStateStore } from "../dashboard/DashboardStateStore";
 import { dashboardWebviewScript } from "../dashboard/dashboardWebviewScript";
 import type { DashboardMetadataOption, DashboardStatusMetadata } from "../dashboard/dashboardProtocol";
+import type { DashboardTicketNode } from "../dashboard/dashboardProtocol";
+import type { Project, Ticket } from "../redmine/types";
 import type { DurableSyncEffect } from "../app/syncEffects";
 import { getCurrentConnectionScope } from "../config/connectionScope";
+import { clearTicketSummaries, getTicketSummary, rememberTicketSummary } from "../views/ticketSummaryStore";
 import { buildIssueMetadataFixture } from "./helpers/ticketMetadataFixtures";
 import { createTestMemento } from "./helpers/vscodeMemento";
 import {
@@ -208,6 +211,7 @@ const installReloadStubs = (
   store: DashboardStateStore,
   events: string[],
   failure?: Error,
+  onTicketLoad?: () => void,
 ): { invalidations: string[] } => {
   const internal = controller as unknown as ControllerInternals;
   const invalidations: string[] = [];
@@ -236,6 +240,7 @@ const installReloadStubs = (
     if (failure && failure.message !== "Metadata unavailable") {
       throw failure;
     }
+    onTicketLoad?.();
     store.update({
       tickets: [],
       totalTicketCount: 0,
@@ -251,7 +256,10 @@ const installReloadStubs = (
 };
 
 suite("Dashboard maintenance", () => {
-  teardown(() => resetLocalStores());
+  teardown(() => {
+    resetLocalStores();
+    clearTicketSummaries();
+  });
 
   test("Reset Dashboard Cache はキャッシュだけを再取得し、ローカル作業と同期 checkpoint を保持する", async () => {
     const localStorage = await seedLocalWork();
@@ -310,7 +318,37 @@ suite("Dashboard maintenance", () => {
     const store = new DashboardStateStore();
     const events: string[] = [];
     const controller = makeController(store, events);
-    store.update({ settings: { ...store.getState().settings, baseUrl: "https://redmine.example/", apiKeyStatus: "set" } });
+    const previousTicket: Ticket = {
+      id: ticketId,
+      subject: "Previously loaded ticket",
+      description: "Previous description",
+      projectId: 1,
+      updatedAt: "2026-09-22T00:00:00Z",
+    };
+    const previousProject: Project = { id: 1, name: "Previously loaded project", identifier: "previous" };
+    const previousTicketNode: DashboardTicketNode = {
+      id: ticketId,
+      subject: previousTicket.subject,
+      syncState: "Synced",
+      children: [],
+      level: 0,
+    };
+    const internals = controller as unknown as { tickets: Ticket[]; projects: Project[]; totalCount: number };
+    internals.tickets = [previousTicket];
+    internals.projects = [previousProject];
+    internals.totalCount = 1;
+    store.update({
+      settings: { ...store.getState().settings, baseUrl: "https://redmine.example/", apiKeyStatus: "set" },
+      selectedProject: { id: 1, name: previousProject.name },
+      projects: [{ ...previousProject, level: 0 }],
+      tickets: [previousTicketNode],
+      totalTicketCount: 1,
+      loadedTicketCount: 1,
+      selectedTicketId: ticketId,
+      selectedTicket: { id: ticketId, subject: previousTicket.subject, syncState: "Synced" },
+      quickFilterCapabilities: { mine: "available", open: "available" },
+    });
+    const beforePresentation = structuredClone(store.getState());
     const beforeSettings = structuredClone(store.getState().settings);
     installReloadStubs(controller, store, events, new Error("Redmine is offline"));
 
@@ -319,8 +357,46 @@ suite("Dashboard maintenance", () => {
     assert.deepStrictEqual(localWorkSnapshot(), beforeWork);
     assert.strictEqual(localStorage.queueWrites(), beforeWrites);
     assert.deepStrictEqual(store.getState().settings, beforeSettings);
+    assert.deepStrictEqual(store.getState().projects, beforePresentation.projects);
+    assert.deepStrictEqual(store.getState().tickets, beforePresentation.tickets);
+    assert.strictEqual(store.getState().totalTicketCount, beforePresentation.totalTicketCount);
+    assert.strictEqual(store.getState().loadedTicketCount, beforePresentation.loadedTicketCount);
+    assert.strictEqual(store.getState().selectedTicketId, beforePresentation.selectedTicketId);
+    assert.deepStrictEqual(store.getState().selectedTicket, beforePresentation.selectedTicket);
+    assert.deepStrictEqual(internals.tickets, [previousTicket]);
+    assert.deepStrictEqual(internals.projects, [previousProject]);
+    assert.strictEqual(internals.totalCount, 1);
     assert.ok(events.some((event) => event.includes("Redmine is offline")));
     assert.strictEqual(events.some((event) => event.startsWith("success:")), false);
+    controller.dispose();
+  });
+
+  test("一部の一覧を読み込んだ後に失敗してもチケット要約キャッシュを戻す", async () => {
+    await seedLocalWork();
+    const previousTicket: Ticket = {
+      id: ticketId,
+      subject: "Previously loaded ticket",
+      description: "Previous description",
+      projectId: 1,
+      updatedAt: "2026-09-22T00:00:00Z",
+    };
+    rememberTicketSummary(previousTicket);
+    const store = new DashboardStateStore();
+    const events: string[] = [];
+    const controller = makeController(store, events);
+    installReloadStubs(
+      controller,
+      store,
+      events,
+      new Error("Metadata unavailable"),
+      () => rememberTicketSummary({ ...previousTicket, id: ticketId + 1, subject: "Partially loaded ticket" }),
+    );
+
+    await controller.handle({ type: "dashboard.resetCache", requestId: "reset-cache-partial-failure" });
+
+    assert.strictEqual(getTicketSummary(ticketId), "Previously loaded ticket");
+    assert.strictEqual(getTicketSummary(ticketId + 1), undefined);
+    assert.ok(events.some((event) => event.includes("Metadata unavailable")));
     controller.dispose();
   });
 

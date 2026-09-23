@@ -479,6 +479,7 @@ body.vscode-high-contrast .tab.active { border-bottom-width: 3px; }
 .quick-filter { padding:4px 9px; border:1px solid var(--app-border); border-radius:var(--app-radius-pill); background:var(--app-surface); color:var(--app-text-secondary); cursor:pointer; font-size:11px; }
 .quick-filter:hover { background:var(--app-surface-hover); color:var(--app-text); }
 .quick-filter[aria-pressed="true"] { border-color:var(--app-focus); background:color-mix(in srgb,var(--app-focus) 18%,var(--app-surface)); color:var(--app-text); }
+.quick-filter[data-preferred="true"][aria-pressed="false"] { border-style:dashed; }
 .detail-chips { display:flex; gap:6px; flex-wrap:wrap; margin-top:10px; }
 .detail-actions { display:flex; flex-wrap:wrap; align-items:center; }
 .detail-actions .btn { flex:0 1 auto; }
