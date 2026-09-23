@@ -26,6 +26,7 @@ import { buildTicketEditorContent, parseTicketEditorContent } from "./ticketEdit
 import { mergeThreeWay } from "../utils/threeWayMerge";
 import { computeNotesHash } from "../utils/notesHash";
 import { getConnectionScopeHash, getCurrentConnectionScope } from "../config/connectionScope";
+import { getAttemptGeneration } from "../app/syncEffects";
 
 export type ConflictResolution = "local" | "remote" | "merge" | "cancel";
 
@@ -314,6 +315,7 @@ export async function handleConflict(
     deps: ConflictResolverDeps = defaultDeps,
     operationScope?: string,
     syncEngine: Pick<SyncEngine, "syncOne"> = createSyncEngine(),
+    expectedConflictOperation?: OfflineTicketConflictExpectation,
 ): Promise<TicketSaveResult> {
     if (result.status !== "conflict" || !result.conflictContext) {
         return result;
@@ -323,15 +325,35 @@ export async function handleConflict(
     const queuedAtDialogOpen = operationScope === undefined
         ? undefined
         : getOfflineSyncQueue(operationScope).tickets.get(context.ticketId);
+    if (expectedConflictOperation && (
+        !queuedAtDialogOpen ||
+        queuedAtDialogOpen.operationId !== expectedConflictOperation.operationId ||
+        queuedAtDialogOpen.revision !== expectedConflictOperation.revision ||
+        (expectedConflictOperation.intentRevision !== undefined &&
+            (queuedAtDialogOpen.intentRevision ?? queuedAtDialogOpen.revision) !== expectedConflictOperation.intentRevision) ||
+        (expectedConflictOperation.attemptGeneration !== undefined &&
+            getAttemptGeneration(queuedAtDialogOpen) !== expectedConflictOperation.attemptGeneration) ||
+        (expectedConflictOperation.connectionScope !== undefined &&
+            queuedAtDialogOpen.connectionScope !== expectedConflictOperation.connectionScope) ||
+        queuedAtDialogOpen.content !== expectedConflictOperation.content
+    )) {
+        return {
+            status: "conflict",
+            message: vscode.l10n.t("Remote changes detected. Refresh before saving."),
+            conflictContext: context,
+        };
+    }
     const expectedOperation = queuedAtDialogOpen
         ? {
             operationId: queuedAtDialogOpen.operationId,
             revision: queuedAtDialogOpen.revision,
             intentRevision: queuedAtDialogOpen.intentRevision,
+            attemptGeneration: getAttemptGeneration(queuedAtDialogOpen),
             connectionScope: queuedAtDialogOpen.connectionScope,
             content: queuedAtDialogOpen.content,
         }
         : undefined;
+    registerConflictContext(context, expectedOperation);
     const resolution = await deps.showConflictDialog(context);
     if (expectedOperation && operationScope !== undefined) {
         const current = getOfflineSyncQueue(operationScope).tickets.get(context.ticketId);
@@ -339,6 +361,12 @@ export async function handleConflict(
             !current ||
             current.operationId !== expectedOperation.operationId ||
             current.revision !== expectedOperation.revision ||
+            (expectedOperation.intentRevision !== undefined &&
+                (current.intentRevision ?? current.revision) !== expectedOperation.intentRevision) ||
+            (expectedOperation.attemptGeneration !== undefined &&
+                getAttemptGeneration(current) !== expectedOperation.attemptGeneration) ||
+            (expectedOperation.connectionScope !== undefined &&
+                current.connectionScope !== expectedOperation.connectionScope) ||
             current.content !== expectedOperation.content
         ) {
             return {

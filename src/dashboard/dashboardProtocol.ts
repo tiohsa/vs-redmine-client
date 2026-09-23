@@ -71,10 +71,14 @@ export interface DashboardMetadataOption {
   name: string;
 }
 
+export interface DashboardStatusMetadata extends DashboardMetadataOption {
+  isClosed?: boolean;
+}
+
 export interface DashboardMetadataOptions {
   trackers: DashboardMetadataOption[];
   priorities: DashboardMetadataOption[];
-  statuses: DashboardMetadataOption[];
+  statuses: DashboardStatusMetadata[];
 }
 
 export interface DashboardEditOptions {
@@ -91,8 +95,10 @@ export interface DashboardEditOptions {
 
 export interface DashboardTicketFilterOptions {
   assignees: DashboardMetadataOption[];
-  statuses: DashboardMetadataOption[];
+  statuses: DashboardStatusMetadata[];
 }
+
+export type QuickFilterCapability = "loading" | "available" | "unavailable";
 
 export type DashboardUnsyncedKind = "ticket" | "newTicket" | "comment";
 
@@ -110,6 +116,7 @@ export interface DashboardUnsyncedItem {
   canDiscard?: boolean;
   discardMode?: "active" | "nextIntent" | "none";
   canSync?: boolean;
+  requiresReview?: boolean;
 }
 
 export interface DashboardCommentItem {
@@ -205,6 +212,11 @@ export type DashboardWorkPanel =
 
 export interface DashboardState {
   selectedProject?: DashboardSelectedProject;
+  currentUserId?: number;
+  quickFilterCapabilities: {
+    mine: QuickFilterCapability;
+    open: QuickFilterCapability;
+  };
   includeChildProjects: boolean;
   projects: DashboardProjectNode[];
   tickets: DashboardTicketNode[];
@@ -276,6 +288,7 @@ export interface DashboardGeneralSettingsPatch {
 export type DashboardRequest =
   | { type: "dashboard.ready"; requestId: string }
   | { type: "dashboard.refresh"; requestId: string }
+  | { type: "dashboard.resetCache"; requestId: string }
   | { type: "project.select"; requestId: string; projectId: number }
   | { type: "project.toggleChildren"; requestId: string; includeChildProjects: boolean }
   | { type: "tickets.refresh"; requestId: string }
@@ -304,6 +317,7 @@ export type DashboardRequest =
     }
   | { type: "ticket.metadata.update"; requestId: string; ticketId: number; patch: TicketMetadataPatch }
   | { type: "ticket.syncSelected"; requestId: string; ticketId: number }
+  | { type: "ticket.reviewConflict"; requestId: string; ticketId: number }
   | { type: "comment.add"; requestId: string; ticketId: number }
   | { type: "comment.edit"; requestId: string; ticketId: number; commentId: number }
   | { type: "comment.openBrowser"; requestId: string; ticketId: number; commentId: number; noteIndex?: number }

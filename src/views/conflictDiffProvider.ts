@@ -3,12 +3,14 @@ import { ConflictContext } from "./ticketSaveTypes";
 import { CommentConflictContext } from "./commentSaveTypes";
 import { buildTicketPreviewContent } from "./ticketPreview";
 import { getConnectionScopeHash, getCurrentConnectionScope } from "../config/connectionScope";
+import type { OfflineTicketConflictExpectation } from "./offlineSyncStore";
 
 export const CONFLICT_SCHEME = "redmine-conflict";
 export const COMMENT_CONFLICT_SCHEME = "redmine-comment-conflict";
 
 // Store for ticket conflict context, keyed by connection scope and ticketId.
 const conflictContexts = new Map<string, ConflictContext>();
+const conflictContextExpectations = new Map<string, OfflineTicketConflictExpectation>();
 
 // Store for comment conflict context, keyed by connection scope and commentId.
 const commentConflictContexts = new Map<string, CommentConflictContext>();
@@ -23,11 +25,18 @@ const scopeHashFromUri = (uri: vscode.Uri): string | undefined => {
 /**
  * Register a conflict context for a ticket.
  */
-export function registerConflictContext(context: ConflictContext): void {
-    conflictContexts.set(
-        scopedKey(getConnectionScopeHash(contextScope(context.connectionScope)), context.ticketId),
-        context,
-    );
+export function registerConflictContext(
+    context: ConflictContext,
+    expectedOperation?: OfflineTicketConflictExpectation,
+): void {
+    const key = scopedKey(getConnectionScopeHash(contextScope(context.connectionScope)), context.ticketId);
+    const previous = conflictContexts.get(key);
+    conflictContexts.set(key, context);
+    if (expectedOperation) {
+        conflictContextExpectations.set(key, structuredClone(expectedOperation));
+    } else if (previous !== context) {
+        conflictContextExpectations.delete(key);
+    }
 }
 
 /**
@@ -43,8 +52,18 @@ export function getConflictContext(
 /**
  * Clear a conflict context for a ticket.
  */
+export function getConflictContextExpectation(
+    ticketId: number,
+    scope = getCurrentConnectionScope(),
+): OfflineTicketConflictExpectation | undefined {
+    const expectation = conflictContextExpectations.get(scopedKey(getConnectionScopeHash(scope), ticketId));
+    return expectation ? structuredClone(expectation) : undefined;
+}
+
 export function clearConflictContext(ticketId: number, scope = getCurrentConnectionScope()): void {
-    conflictContexts.delete(scopedKey(getConnectionScopeHash(scope), ticketId));
+    const key = scopedKey(getConnectionScopeHash(scope), ticketId);
+    conflictContexts.delete(key);
+    conflictContextExpectations.delete(key);
 }
 
 /**

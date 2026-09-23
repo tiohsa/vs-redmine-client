@@ -1,4 +1,4 @@
-import { requestJson } from "./client";
+import { requestJson, type RequestOptions } from "./client";
 import {
   Comment,
   RedmineIssueDetailResponse,
@@ -20,6 +20,8 @@ export interface IssuesListInput {
   statusIds?: string[];
   assigneeIds?: string[];
 }
+
+type IssueStatusRequester = (options: RequestOptions) => Promise<RedmineIssueStatusResponse>;
 
 export const buildIssuesListQuery = (input: IssuesListInput): Record<string, string | number | boolean> => {
   const query: Record<string, string | number | boolean> = {
@@ -262,13 +264,19 @@ export const getIssueDetail = async (issueId: number): Promise<IssueDetailResult
   return { ticket, comments };
 };
 
-export const listIssueStatuses = async (): Promise<Array<{ id: number; name: string }>> => {
-  const response = await requestJson<RedmineIssueStatusResponse>({
+export const listIssueStatuses = async (
+  requester: IssueStatusRequester = requestJson,
+): Promise<Array<{ id: number; name: string; isClosed?: boolean }>> => {
+  const response = await requester({
     method: "GET",
     path: "/issue_statuses.json",
   });
 
-  return response.issue_statuses ?? [];
+  return (response.issue_statuses ?? []).map((status) => ({
+    id: status.id,
+    name: status.name,
+    ...(typeof status.is_closed === "boolean" ? { isClosed: status.is_closed } : {}),
+  }));
 };
 
 export const listTrackers = async (): Promise<Array<{ id: number; name: string }>> => {

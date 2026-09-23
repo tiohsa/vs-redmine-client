@@ -6,9 +6,14 @@ import { getTicketSummary } from "../../views/ticketSummaryStore";
 import { formatTicketLabel } from "../../views/ticketLabel";
 import type { DashboardUnsyncedItem } from "../dashboardProtocol";
 import { getCurrentConnectionScope } from "../../config/connectionScope";
+import { createSyncEngine } from "../../app/syncEngine";
 
 export const buildUnsyncedDashboardItems = (): DashboardUnsyncedItem[] => {
-  const queue = getOfflineSyncQueue(getCurrentConnectionScope());
+  const connectionScope = getCurrentConnectionScope();
+  const queue = getOfflineSyncQueue(connectionScope);
+  const engine = createSyncEngine();
+  const requiresReview = (key: Parameters<typeof engine.getRecoveryItems>[0]): boolean =>
+    engine.getRecoveryItems(key, { connectionScope }).some((item) => item.allowedActions.length > 0);
   const items: DashboardUnsyncedItem[] = [];
 
   queue.tickets.forEach((update, ticketId) => {
@@ -23,6 +28,7 @@ export const buildUnsyncedDashboardItems = (): DashboardUnsyncedItem[] => {
       canDiscard: policy.canDiscard,
       discardMode: policy.discardMode,
       canSync: true,
+      ...(requiresReview({ kind: "ticket", ticketId }) ? { requiresReview: true } : {}),
     });
   });
 
@@ -43,6 +49,12 @@ export const buildUnsyncedDashboardItems = (): DashboardUnsyncedItem[] => {
       documentUri: comment.documentUri,
       ...evaluateOfflineSyncPolicy(comment),
       canSync: true,
+      ...(requiresReview({
+        kind: "comment",
+        ticketId: comment.ticketId,
+        commentId: comment.commentId,
+        documentUri: comment.documentUri,
+      }) ? { requiresReview: true } : {}),
     });
   }
 
@@ -62,6 +74,9 @@ export const buildUnsyncedDashboardItems = (): DashboardUnsyncedItem[] => {
       canDiscard: policy.canDiscard,
       discardMode: policy.discardMode,
       canSync: true,
+      ...(requiresReview({ kind: "newTicket", queueId: newTicket.queueId, documentUri: newTicket.documentUri })
+        ? { requiresReview: true }
+        : {}),
     });
   }
 

@@ -152,7 +152,7 @@ export interface RedmineIssueDetailResponse {
 export type RedmineIssueDetailResponseIssue = RedmineIssueDetailResponse["issue"];
 
 export interface RedmineIssueStatusResponse {
-  issue_statuses: Array<{ id: number; name: string }>;
+  issue_statuses: Array<{ id: number; name: string; is_closed?: boolean }>;
 }
 
 export interface RedmineTrackerResponse {

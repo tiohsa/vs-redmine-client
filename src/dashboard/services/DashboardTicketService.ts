@@ -26,13 +26,13 @@ export class DashboardTicketService {
     getTotalCount: () => number;
     setTotalCount: (count: number) => void;
     getSettings: () => TicketListSettings;
-    loadComments: (ticketId: number) => Promise<void>;
+    loadComments: (ticketId: number, throwOnError?: boolean) => Promise<void>;
     refreshUnsynced: () => void;
     listIssues?: typeof fetchIssues;
     getIssueDetail?: typeof fetchIssueDetail;
   }) {}
 
-  async loadTickets(): Promise<void> {
+  async loadTickets(throwOnError = false): Promise<void> {
     const generation = ++this.ticketLoadGeneration;
     this.allProjectsSearchQuery = "";
     this.allProjectsSearchIssueOffset = 0;
@@ -84,6 +84,9 @@ export class DashboardTicketService {
         loading: { ...store.getState().loading, tickets: false },
         errors: { ...store.getState().errors, tickets: `Failed to load tickets: ${msg}` },
       });
+      if (throwOnError) {
+        throw err;
+      }
     }
   }
 
@@ -245,7 +248,7 @@ export class DashboardTicketService {
     }
   }
 
-  async selectTicket(ticketId: number): Promise<void> {
+  async selectTicket(ticketId: number, throwOnCommentError = false): Promise<void> {
     const { store } = this.deps.context;
     const tickets = this.deps.getTickets();
     const ticket = tickets.find((t) => t.id === ticketId);
@@ -257,7 +260,7 @@ export class DashboardTicketService {
       selectedTicket: buildTicketDetail(ticket, tickets),
       workPanel: { mode: "detail", ticketId },
     });
-    await this.deps.loadComments(ticketId);
+    await this.deps.loadComments(ticketId, throwOnCommentError);
   }
 
   async openEditor(ticketId: number): Promise<void> {

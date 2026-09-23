@@ -7,6 +7,23 @@ import { readFileSync } from "fs";
 import { join } from "path";
 
 suite("Dashboard Webview 改善", () => {
+  test("3つの主タブ、詳細内コメント、クイックフィルター、同期トレイを持つ", () => {
+    const html = buildDashboardHtml("nonce", buildDashboardStrings());
+    assert.ok(html.includes('id="tab-tickets"'));
+    assert.ok(html.includes('id="tab-unsynced"'));
+    assert.ok(html.includes('id="tab-settings"'));
+    assert.ok(!html.includes('id="tab-comments"'));
+    assert.ok(!html.includes('id="panel-comments"'));
+    assert.ok(html.includes('id="sync-tray"'));
+    assert.ok(html.includes('id="advanced-filter-dialog"'));
+    for (const name of ["mine", "open", "overdue", "unsynced"]) {
+      assert.ok(html.includes(`data-quick-filter="${name}"`));
+    }
+    assert.ok(dashboardWebviewScript.includes('id="detail-tab-overview"'));
+    assert.ok(dashboardWebviewScript.includes('id="detail-tab-comments"'));
+    assert.ok(dashboardWebviewScript.includes("function renderSyncTray()"));
+    assert.ok(dashboardWebviewScript.includes("runTicketAction(button.dataset.detailAction,ticket.id)"));
+  });
   test("readable muted token と ticket ID badge style を定義する", () => {
     assert.ok(dashboardStyles.includes("--app-text-readable-muted"));
     assert.ok(dashboardStyles.includes(".ticket-id"));

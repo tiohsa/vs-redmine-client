@@ -163,6 +163,7 @@ export const validateDashboardMessage = (raw: unknown): ValidationResult => {
   switch (type) {
     case "dashboard.ready":
     case "dashboard.refresh":
+    case "dashboard.resetCache":
       return { ok: true, request: { type, requestId } };
 
     case "project.select": {
@@ -207,6 +208,14 @@ export const validateDashboardMessage = (raw: unknown): ValidationResult => {
       const ticketId = raw["ticketId"];
       if (!isPositiveInt(ticketId)) {
         return { ok: false, reason: "ticket.openEditor: ticketId must be a positive integer" };
+      }
+      return { ok: true, request: { type, requestId, ticketId } };
+    }
+
+    case "ticket.reviewConflict": {
+      const ticketId = raw["ticketId"];
+      if (!isPositiveInt(ticketId)) {
+        return { ok: false, reason: "ticket.reviewConflict: ticketId must be a positive integer" };
       }
       return { ok: true, request: { type, requestId, ticketId } };
     }

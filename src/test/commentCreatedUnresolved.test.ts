@@ -3,16 +3,19 @@ import * as fs from "fs";
 import * as os from "os";
 import * as path from "path";
 import * as vscode from "vscode";
+import { syncUnsyncedFile } from "../commands/syncUnsyncedFile";
 import { syncNewCommentDraft, applyQueuedCommentUpdate } from "../views/commentSaveSync";
 import {
   addOfflineCommentUpdateAsync,
   getOfflineSyncQueue,
   initializeOfflineSyncStore,
+  replaceOfflineSyncQueueAsync,
 } from "../views/offlineSyncStore";
 import { createSyncEngine } from "../app/syncEngine";
 import { computeNotesHash } from "../utils/notesHash";
 import { parseCommentUpdateFile } from "../views/commentUpdateFile";
 import { createTestMemento } from "./helpers/vscodeMemento";
+import { getCurrentConnectionScope } from "../config/connectionScope";
 
 const SCOPE = "https://comments.example/";
 
@@ -620,5 +623,220 @@ suite("Comment created_unresolved", () => {
     assert.strictEqual(firstOutcome.kind, "completed");
     assert.strictEqual(secondOutcome.kind, "completed");
     assert.strictEqual(addCalls, 1);
+  });
+
+  test("reconciliation_pending の重複 journal は Resolve から明示 link でき、POST を再送しない", async () => {
+    const operationScope = getCurrentConnectionScope();
+    initializeOfflineSyncStore(createTestMemento(), operationScope);
+    const documentUri = "file:///tmp/comment-reconciliation-review.md";
+    await addOfflineCommentUpdateAsync({ ticketId: 26, body: "Same text", documentUri }, operationScope);
+    let addCalls = 0;
+    const engine = createSyncEngine({
+      comments: {
+        addComment: async () => { addCalls++; },
+        updateComment: async () => { throw new Error("should not update"); },
+        getIssueDetail: async () => ({
+          ticket: { id: 26, subject: "T", projectId: 4 },
+          comments: [101, 102].map((id) => ({
+            id,
+            body: "Same text",
+            authorId: 7,
+            ticketId: 26,
+            authorName: "User",
+            editableByCurrentUser: true,
+          })),
+        }),
+        getCurrentUserId: async () => 7,
+        updateIssue: async () => undefined,
+      },
+    });
+    const key = { kind: "comment" as const, ticketId: 26, documentUri };
+    const initial = await engine.syncOne(key, { connectionScope: operationScope });
+    assert.strictEqual(initial.kind, "remote_committed");
+    assert.strictEqual(getOfflineSyncQueue(operationScope).comments[0]?.phase, "reconciliation_pending");
+    const recovery = engine.getRecoveryItems(key, { connectionScope: operationScope });
+    assert.ok(recovery.some((item) => item.allowedActions.includes("reconcile_remote")));
+    assert.ok(recovery.some((item) => item.allowedActions.includes("link_remote_comment")));
+
+    const originalWarning = vscode.window.showWarningMessage;
+    const originalInput = vscode.window.showInputBox;
+    try {
+      vscode.window.showWarningMessage = (async (...args: unknown[]) => {
+        const choices = args.filter((value): value is string => typeof value === "string");
+        assert.ok(choices.includes("Reconcile from Redmine"));
+        assert.ok(choices.includes("Link comment journal"));
+        return "Link comment journal";
+      }) as unknown as typeof vscode.window.showWarningMessage;
+      vscode.window.showInputBox = (async () => "102") as typeof vscode.window.showInputBox;
+
+      const result = await syncUnsyncedFile(
+        { syncKey: key },
+        { createSyncEngine: () => engine },
+      );
+      assert.deepStrictEqual(result, { status: "success", kind: "comment", id: 102 });
+      assert.strictEqual(addCalls, 1);
+      assert.strictEqual(getOfflineSyncQueue(operationScope).comments.length, 0);
+    } finally {
+      vscode.window.showWarningMessage = originalWarning;
+      vscode.window.showInputBox = originalInput;
+    }
+  });
+
+  test("無関係な journal ID は reject され、reconciliation_pending の queue を残す", async () => {
+    const operationScope = getCurrentConnectionScope();
+    initializeOfflineSyncStore(createTestMemento(), operationScope);
+    const documentUri = "file:///tmp/comment-reconciliation-invalid-link.md";
+    await addOfflineCommentUpdateAsync({ ticketId: 27, body: "Same text", documentUri }, operationScope);
+    let addCalls = 0;
+    const engine = createSyncEngine({
+      comments: {
+        addComment: async () => { addCalls++; },
+        updateComment: async () => { throw new Error("should not update"); },
+        getIssueDetail: async () => ({
+          ticket: { id: 27, subject: "T", projectId: 4 },
+          comments: [101, 102].map((id) => ({
+            id,
+            body: "Same text",
+            authorId: 7,
+            ticketId: 27,
+            authorName: "User",
+            editableByCurrentUser: true,
+          })).concat([{
+            id: 103,
+            body: "Unrelated text",
+            authorId: 7,
+            ticketId: 27,
+            authorName: "User",
+            editableByCurrentUser: true,
+          }]),
+        }),
+        getCurrentUserId: async () => 7,
+        updateIssue: async () => undefined,
+      },
+    });
+    const key = { kind: "comment" as const, ticketId: 27, documentUri };
+    assert.strictEqual((await engine.syncOne(key, { connectionScope: operationScope })).kind, "remote_committed");
+
+    const originalWarning = vscode.window.showWarningMessage;
+    const originalInput = vscode.window.showInputBox;
+    try {
+      vscode.window.showWarningMessage = (async () => "Link comment journal") as unknown as typeof vscode.window.showWarningMessage;
+      vscode.window.showInputBox = (async () => "103") as typeof vscode.window.showInputBox;
+      const result = await syncUnsyncedFile(
+        { syncKey: key },
+        { createSyncEngine: () => engine },
+      );
+      assert.strictEqual(result?.status, "failed");
+      assert.strictEqual(addCalls, 1);
+      assert.strictEqual(getOfflineSyncQueue(operationScope).comments.length, 1);
+      assert.strictEqual(getOfflineSyncQueue(operationScope).comments[0]?.phase, "reconciliation_pending");
+    } finally {
+      vscode.window.showWarningMessage = originalWarning;
+      vscode.window.showInputBox = originalInput;
+    }
+  });
+
+  test("journal link dialog 中に attemptGeneration が変わると stale resolution を拒否する", async () => {
+    const operationScope = getCurrentConnectionScope();
+    initializeOfflineSyncStore(createTestMemento(), operationScope);
+    const documentUri = "file:///tmp/comment-reconciliation-stale.md";
+    await addOfflineCommentUpdateAsync({ ticketId: 28, body: "Same text", documentUri }, operationScope);
+    let addCalls = 0;
+    const engine = createSyncEngine({
+      comments: {
+        addComment: async () => { addCalls++; },
+        updateComment: async () => { throw new Error("should not update"); },
+        getIssueDetail: async () => ({
+          ticket: { id: 28, subject: "T", projectId: 4 },
+          comments: [101, 102].map((id) => ({
+            id,
+            body: "Same text",
+            authorId: 7,
+            ticketId: 28,
+            authorName: "User",
+            editableByCurrentUser: true,
+          })),
+        }),
+        getCurrentUserId: async () => 7,
+        updateIssue: async () => undefined,
+      },
+    });
+    const key = { kind: "comment" as const, ticketId: 28, documentUri };
+    assert.strictEqual((await engine.syncOne(key, { connectionScope: operationScope })).kind, "remote_committed");
+
+    const originalWarning = vscode.window.showWarningMessage;
+    const originalInput = vscode.window.showInputBox;
+    try {
+      vscode.window.showWarningMessage = (async () => "Link comment journal") as unknown as typeof vscode.window.showWarningMessage;
+      vscode.window.showInputBox = (async () => {
+        const queue = getOfflineSyncQueue(operationScope);
+        const current = queue.comments[0];
+        assert.ok(current);
+        await replaceOfflineSyncQueueAsync({
+          ...queue,
+          comments: [{ ...current, attemptGeneration: (current.attemptGeneration ?? 1) + 1 }],
+        }, operationScope);
+        return "102";
+      }) as typeof vscode.window.showInputBox;
+      const result = await syncUnsyncedFile(
+        { syncKey: key },
+        { createSyncEngine: () => engine },
+      );
+      assert.strictEqual(result?.status, "failed");
+      assert.strictEqual(addCalls, 1);
+      assert.strictEqual(getOfflineSyncQueue(operationScope).comments.length, 1);
+      assert.notStrictEqual(getOfflineSyncQueue(operationScope).comments[0]?.attemptGeneration, 1);
+    } finally {
+      vscode.window.showWarningMessage = originalWarning;
+      vscode.window.showInputBox = originalInput;
+    }
+  });
+
+  test("重複が解消された後の Reconcile from Redmine は unique candidate を完了する", async () => {
+    const operationScope = getCurrentConnectionScope();
+    initializeOfflineSyncStore(createTestMemento(), operationScope);
+    const documentUri = "file:///tmp/comment-reconciliation-unique-later.md";
+    await addOfflineCommentUpdateAsync({ ticketId: 29, body: "Same text", documentUri }, operationScope);
+    let addCalls = 0;
+    let readCalls = 0;
+    const engine = createSyncEngine({
+      comments: {
+        addComment: async () => { addCalls++; },
+        updateComment: async () => { throw new Error("should not update"); },
+        getIssueDetail: async () => {
+          readCalls++;
+          return {
+            ticket: { id: 29, subject: "T", projectId: 4 },
+            comments: (readCalls === 1 ? [101, 102] : [102]).map((id) => ({
+              id,
+              body: "Same text",
+              authorId: 7,
+              ticketId: 29,
+              authorName: "User",
+              editableByCurrentUser: true,
+            })),
+          };
+        },
+        getCurrentUserId: async () => 7,
+        updateIssue: async () => undefined,
+      },
+    });
+    const key = { kind: "comment" as const, ticketId: 29, documentUri };
+    assert.strictEqual((await engine.syncOne(key, { connectionScope: operationScope })).kind, "remote_committed");
+    const primary = engine.getRecoveryItems(key, { connectionScope: operationScope }).find((item) =>
+      item.allowedActions.includes("reconcile_remote"),
+    );
+    assert.ok(primary);
+    const reconciled = await engine.resolveCommentCommitUnknown({
+      key,
+      context: { connectionScope: operationScope },
+      operationId: primary.operationId,
+      operationRevision: primary.operationRevision,
+      attemptGeneration: primary.attemptGeneration,
+      resolution: { kind: "reconcile_remote" },
+    });
+    assert.strictEqual(reconciled.kind, "completed");
+    assert.strictEqual(addCalls, 1);
+    assert.strictEqual(getOfflineSyncQueue(operationScope).comments.length, 0);
   });
 });

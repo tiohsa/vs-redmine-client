@@ -1,5 +1,6 @@
 import * as vscode from "vscode";
 import { listIssuePriorities, listIssueStatuses, listTrackers } from "../redmine/issues";
+import { getCurrentUserId } from "../redmine/users";
 import {
   getOfflineSyncQueue,
   onOfflineSyncQueueChanged,
@@ -19,12 +20,18 @@ import type {
   DashboardProjectNode,
   DashboardRequest,
   DashboardMetadataOptions,
+  DashboardState,
   DashboardUnsyncedKey,
   TicketMetadataPatch,
 } from "./dashboardProtocol";
 import type { TicketSaveResult } from "../views/ticketSaveTypes";
 import type { DashboardServiceContext } from "./services/DashboardServiceContext";
-import { clearTicketSummaries } from "../views/ticketSummaryStore";
+import {
+  clearTicketSummaries,
+  rememberTicketSummaries,
+  restoreTicketSummaries,
+  snapshotTicketSummaries,
+} from "../views/ticketSummaryStore";
 import type { SyncEngine } from "../app/syncEngine";
 import { getCurrentConnectionScope } from "../config/connectionScope";
 
@@ -58,6 +65,15 @@ export interface DashboardControllerOptions {
   onTicketsRefreshed: () => void;
   syncEngine?: SyncEngine;
   _composerSyncTestHooks?: ComposerSyncTestHooks;
+  _metadataTestHooks?: {
+    listTrackers?: typeof listTrackers;
+    listIssuePriorities?: typeof listIssuePriorities;
+    listIssueStatuses?: typeof listIssueStatuses;
+    getCurrentUserId?: typeof getCurrentUserId;
+  };
+  _maintenanceTestHooks?: {
+    confirmDashboardCacheReset?: () => Promise<boolean>;
+  };
 }
 
 export class DashboardController {
@@ -74,6 +90,7 @@ export class DashboardController {
   private readonly composerService: DashboardComposerService;
   private readonly disposables: vscode.Disposable[] = [];
   private connectionGeneration = 0;
+  private metadataLoadGeneration = 0;
 
   constructor(private readonly opts: DashboardControllerOptions) {
     this.settingsCtrl = new SettingsController(opts.store);
@@ -130,7 +147,7 @@ export class DashboardController {
         this.totalCount = count;
       },
       getSettings: () => this.settingsCtrl.getSettings(),
-      loadComments: (ticketId) => this.loadComments(ticketId),
+      loadComments: (ticketId, throwOnError) => this.loadComments(ticketId, throwOnError),
       refreshUnsynced: () => this.refreshUnsynced(),
     });
     this.commentService = new DashboardCommentService(context, {
@@ -140,6 +157,7 @@ export class DashboardController {
       context,
       refreshTicketPresentation: () => this.refreshTicketPresentation(),
       loadComments: (ticketId) => this.loadComments(ticketId),
+      openTicketEditor: (ticketId) => this.ticketService.openEditor(ticketId),
       syncEngine: opts.syncEngine,
     });
     this.metadataService = new DashboardMetadataService({
@@ -226,6 +244,7 @@ export class DashboardController {
 
   async resetForConnectionChange(): Promise<void> {
     const generation = ++this.connectionGeneration;
+    this.metadataLoadGeneration++;
     this.ticketService.invalidate();
     this.commentService.invalidate();
     this.metadataService.invalidate();
@@ -240,6 +259,8 @@ export class DashboardController {
       totalTicketCount: 0,
       loadedTicketCount: 0,
       selectedProject: undefined,
+      currentUserId: undefined,
+      quickFilterCapabilities: { mine: "loading", open: "loading" },
       selectedTicketId: undefined,
       selectedTicket: undefined,
       workPanel: undefined,
@@ -258,6 +279,107 @@ export class DashboardController {
     await this.initialize();
   }
 
+  private async resetDashboardCache(requestId: string): Promise<void> {
+    const confirmed = await this.confirmDashboardCacheReset();
+    if (!confirmed) {
+      return;
+    }
+
+    this.opts.notifyOperationStarted(requestId, vscode.l10n.t("Resetting Dashboard cache…"));
+    const previous = this.opts.store.getState();
+    const previousState = structuredClone(previous);
+    const previousTickets = this.tickets;
+    const previousProjects = this.projects;
+    const previousTotalCount = this.totalCount;
+    const previousTicketSummaries = snapshotTicketSummaries();
+    const selectedDetailId = previous.workPanel?.mode === "detail"
+      ? previous.workPanel.ticketId
+      : undefined;
+
+    this.projectService.invalidate();
+    this.ticketService.invalidate();
+    this.commentService.invalidate();
+    this.metadataService.invalidate();
+    this.metadataLoadGeneration++;
+    this.metadataOptionsLoaded = false;
+
+    try {
+      await this.loadProjects(true);
+      const results = await Promise.allSettled([
+        this.loadMetadataOptions(true),
+        this.loadTickets(true),
+      ]);
+      const failures = results
+        .filter((result): result is PromiseRejectedResult => result.status === "rejected")
+        .map((result) => result.reason instanceof Error ? result.reason.message : String(result.reason));
+      if (failures.length > 0) {
+        throw new Error(failures.join("; "));
+      }
+
+      // Ticket filter options depend on both the refreshed ticket list and status metadata.
+      this.pushTickets();
+      if (selectedDetailId !== undefined && this.tickets.some((ticket) => ticket.id === selectedDetailId)) {
+        await this.selectTicket(selectedDetailId, true);
+      }
+      this.refreshUnsynced();
+      clearTicketSummaries();
+      rememberTicketSummaries(this.tickets);
+      this.opts.notifySuccess(requestId, vscode.l10n.t("Dashboard cache reset."));
+    } catch (err) {
+      const reason = err instanceof Error ? err.message : String(err);
+      const current = this.opts.store.getState();
+      this.tickets = previousTickets;
+      this.projects = previousProjects;
+      this.totalCount = previousTotalCount;
+      restoreTicketSummaries(previousTicketSummaries);
+      this.opts.store.update({
+        projects: previousState.projects,
+        tickets: previousState.tickets,
+        totalTicketCount: previousState.totalTicketCount,
+        loadedTicketCount: previousState.loadedTicketCount,
+        selectedProject: previousState.selectedProject,
+        currentUserId: previousState.currentUserId,
+        quickFilterCapabilities: previousState.quickFilterCapabilities,
+        ticketFilterOptions: previousState.ticketFilterOptions,
+        selectedTicketId: previousState.selectedTicketId,
+        selectedTicket: previousState.selectedTicket,
+        workPanel: previousState.workPanel,
+        editOptions: previousState.editOptions,
+        metadataOptions: previousState.metadataOptions,
+        comments: previousState.comments,
+        loading: { ...current.loading, tickets: false },
+        errors: current.errors,
+      });
+      this.opts.notifyError(
+        requestId,
+        vscode.l10n.t("Dashboard cache reset failed: {0}", reason),
+      );
+    } finally {
+      // RefreshUnsynced only rebuilds presentation from the existing stores.
+      this.refreshUnsynced();
+    }
+  }
+
+  private async confirmDashboardCacheReset(): Promise<boolean> {
+    const testConfirmation = this.opts._maintenanceTestHooks?.confirmDashboardCacheReset;
+    if (testConfirmation) {
+      return testConfirmation();
+    }
+    const resetLabel = vscode.l10n.t("Reset Dashboard Cache");
+    const result = await vscode.window.showWarningMessage(
+      vscode.l10n.t("Reset Dashboard Cache?"),
+      {
+        modal: true,
+        detail: vscode.l10n.t(
+          "Projects, tickets, and Dashboard metadata will be reloaded from Redmine.\nLocal drafts, unsynced changes, recovery data, API keys, and settings will not be deleted.",
+        ),
+      },
+      resetLabel,
+      vscode.l10n.t("Cancel"),
+    );
+    return result === resetLabel;
+  }
+
   // ── Private request handler ────────────────────────────────────────────
 
   private async handleRequest(req: DashboardRequest): Promise<void> {
@@ -265,6 +387,9 @@ export class DashboardController {
       case "dashboard.ready":
       case "dashboard.refresh":
         await Promise.all([this.loadProjects(), this.loadMetadataOptions(), this.loadTickets()]);
+        break;
+      case "dashboard.resetCache":
+        await this.resetDashboardCache(req.requestId);
         break;
       case "project.select":
         await this.projectService.selectProject(req.projectId);
@@ -316,6 +441,9 @@ export class DashboardController {
         break;
       case "ticket.syncSelected":
         await this.handleSyncSelectedTicket(req.requestId, req.ticketId);
+        break;
+      case "ticket.reviewConflict":
+        await this.handleReviewTicketConflict(req.requestId, req.ticketId);
         break;
       case "comment.add":
         await this.commentService.addComment(req.ticketId);
@@ -392,50 +520,119 @@ export class DashboardController {
 
   // ── Private ────────────────────────────────────────────────────────────
 
-  private async loadTickets(): Promise<void> {
-    await this.ticketService.loadTickets();
+  private async loadTickets(throwOnError = false): Promise<void> {
+    await this.ticketService.loadTickets(throwOnError);
   }
 
   private async loadMoreTickets(): Promise<void> {
     await this.ticketService.loadMoreTickets();
   }
 
-  private async loadProjects(): Promise<void> {
-    await this.projectService.loadProjects();
+  private async loadProjects(throwOnError = false): Promise<void> {
+    await this.projectService.loadProjects(throwOnError);
   }
 
-  private async loadMetadataOptions(): Promise<void> {
-    const generation = this.connectionGeneration;
+  private async loadMetadataOptions(throwOnError = false): Promise<void> {
+    const connectionGeneration = this.connectionGeneration;
+    const metadataGeneration = ++this.metadataLoadGeneration;
+    const isCurrent = () =>
+      connectionGeneration === this.connectionGeneration &&
+      metadataGeneration === this.metadataLoadGeneration;
+    this.opts.store.update({
+      currentUserId: undefined,
+      quickFilterCapabilities: { mine: "loading", open: "loading" },
+    });
+    const resolveCurrentUserId = this.opts._metadataTestHooks?.getCurrentUserId ?? getCurrentUserId;
+    const currentUserTask = Promise.resolve().then(resolveCurrentUserId).then((id) =>
+      Number.isSafeInteger(id) && id > 0 ? id : undefined,
+    );
+    const metadataTask = Promise.all([
+      (this.opts._metadataTestHooks?.listTrackers ?? listTrackers)(),
+      (this.opts._metadataTestHooks?.listIssuePriorities ?? listIssuePriorities)(),
+      (this.opts._metadataTestHooks?.listIssueStatuses ?? listIssueStatuses)(),
+    ]);
     try {
-      const [trackers, priorities, statuses] = await Promise.all([
-        listTrackers(),
-        listIssuePriorities(),
-        listIssueStatuses(),
-      ]);
-      if (generation !== this.connectionGeneration) {
+      let options: DashboardMetadataOptions;
+      let currentUserId: number | undefined;
+      if (throwOnError) {
+        const [metadata, refreshedUserId] = await Promise.all([metadataTask, currentUserTask]);
+        options = { trackers: metadata[0], priorities: metadata[1], statuses: metadata[2] };
+        currentUserId = refreshedUserId;
+      } else {
+        void currentUserTask.then(
+          (id) => {
+            if (isCurrent()) {
+              this.opts.store.update({
+                currentUserId: id,
+                quickFilterCapabilities: {
+                  ...this.opts.store.getState().quickFilterCapabilities,
+                  mine: id === undefined ? "unavailable" : "available",
+                },
+              });
+            }
+          },
+          () => {
+            if (isCurrent()) {
+              this.opts.store.update({
+                currentUserId: undefined,
+                quickFilterCapabilities: {
+                  ...this.opts.store.getState().quickFilterCapabilities,
+                  mine: "unavailable",
+                },
+              });
+            }
+          },
+        );
+        const [trackers, priorities, statuses] = await metadataTask;
+        options = { trackers, priorities, statuses };
+      }
+      if (!isCurrent()) {
         return;
       }
-      const options: DashboardMetadataOptions = {
-        trackers,
-        priorities,
-        statuses,
-      };
       this.metadataOptionsLoaded = true;
-      this.opts.store.update({ metadataOptions: options });
-    } catch {
-      if (generation !== this.connectionGeneration) {
+      const quickFilterCapabilities: DashboardState["quickFilterCapabilities"] = {
+        mine: throwOnError
+          ? currentUserId === undefined
+            ? "unavailable"
+            : "available"
+          : this.opts.store.getState().quickFilterCapabilities.mine,
+        open: options.statuses.some((status) => typeof status.isClosed === "boolean")
+          ? "available"
+          : "unavailable",
+      };
+      this.opts.store.update({
+        metadataOptions: options,
+        quickFilterCapabilities,
+        ...(throwOnError ? { currentUserId } : {}),
+      });
+    } catch (err) {
+      if (!isCurrent()) {
         return;
       }
       this.metadataOptionsLoaded = false;
-      this.opts.store.update({ metadataOptions: { trackers: [], priorities: [], statuses: [] } });
+      this.opts.store.update({
+        metadataOptions: { trackers: [], priorities: [], statuses: [] },
+        quickFilterCapabilities: {
+          mine: throwOnError ? "unavailable" : this.opts.store.getState().quickFilterCapabilities.mine,
+          open: "unavailable",
+        },
+      });
+      if (throwOnError) {
+        throw err;
+      }
     }
   }
 
-  private async selectTicket(ticketId: number): Promise<void> {
-    await this.ticketService.selectTicket(ticketId);
+  private async selectTicket(ticketId: number, throwOnLoadError = false): Promise<void> {
+    await this.ticketService.selectTicket(ticketId, throwOnLoadError);
     const ticket = this.tickets.find((t) => t.id === ticketId);
     if (ticket?.projectId) {
-      void this.metadataService.loadEditOptions(ticketId, ticket.projectId);
+      const editOptions = this.metadataService.loadEditOptions(ticketId, ticket.projectId, throwOnLoadError);
+      if (throwOnLoadError) {
+        await editOptions;
+      } else {
+        void editOptions;
+      }
     }
   }
 
@@ -447,8 +644,8 @@ export class DashboardController {
     await this.metadataService.updateTicketMetadata(requestId, ticketId, patch);
   }
 
-  private async loadComments(ticketId: number): Promise<void> {
-    await this.commentService.loadComments(ticketId);
+  private async loadComments(ticketId: number, throwOnError = false): Promise<void> {
+    await this.commentService.loadComments(ticketId, throwOnError);
   }
 
   private async openEditor(ticketId: number): Promise<void> {
@@ -477,6 +674,10 @@ export class DashboardController {
 
   private async handleSyncSelectedTicket(requestId: string, ticketId: number): Promise<void> {
     await this.unsyncedService.handleSyncSelectedTicket(requestId, ticketId);
+  }
+
+  private async handleReviewTicketConflict(requestId: string, ticketId: number): Promise<void> {
+    await this.unsyncedService.handleReviewConflict(requestId, ticketId);
   }
 
   private async handleSyncNewTicketDraftFromComposer(requestId: string): Promise<void> {

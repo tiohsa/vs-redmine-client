@@ -37,6 +37,14 @@ suite("Dashboard メッセージバリデーション", () => {
     assert.strictEqual(r.ok, true);
   });
 
+  test("dashboard.resetCache は有効な request として受け入れられる", () => {
+    const r = validateDashboardMessage({ type: "dashboard.resetCache", requestId: "r3" });
+    assert.strictEqual(r.ok, true);
+    if (r.ok) {
+      assert.strictEqual(r.request.type, "dashboard.resetCache");
+    }
+  });
+
   test("tickets.searchAllProjects: query が文字列でないと拒否される", () => {
     const r = validateDashboardMessage({ type: "tickets.searchAllProjects", requestId: "r", query: 123 });
     assert.strictEqual(r.ok, false);

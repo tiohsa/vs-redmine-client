@@ -38,7 +38,7 @@ export class DashboardMetadataService {
     this.projectTrackerCache.clear();
   }
 
-  async loadEditOptions(ticketId: number, projectId: number): Promise<void> {
+  async loadEditOptions(ticketId: number, projectId: number, throwOnError = false): Promise<void> {
     const generation = ++this.editOptionsGeneration;
     const { store } = this.deps.context;
     store.update({
@@ -99,6 +99,9 @@ export class DashboardMetadataService {
           error: vscode.l10n.t("Failed to load trackers for this project: {0}", msg),
         },
       });
+      if (throwOnError) {
+        throw err;
+      }
     }
   }
 

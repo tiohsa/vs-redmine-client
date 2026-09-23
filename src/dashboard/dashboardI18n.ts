@@ -33,6 +33,29 @@ export interface DashboardStrings {
   layoutAuto: string;
   layoutSingle: string;
   layoutSplit: string;
+  quickFiltersLabel: string;
+  quickMyIssues: string;
+  quickOpen: string;
+  quickOverdue: string;
+  quickUnsynced: string;
+  quickMyIssuesUnavailable: string;
+  quickOpenUnavailable: string;
+  quickFilterCapabilityLoading: string;
+  quickMyIssuesUnavailableSelected: string;
+  quickOpenUnavailableSelected: string;
+  advancedFilters: string;
+  closeFilters: string;
+  applyFilters: string;
+  resetFilters: string;
+  overview: string;
+  shownLoadedTotal: string;
+  syncTrayAllClear: string;
+  syncTrayItems: string;
+  syncTrayAttention: string;
+  syncTrayReviewConflict: string;
+  syncTrayOpenUnsynced: string;
+  syncTrayOpenEditor: string;
+  syncTrayFailedTicket: string;
   // Sync states
   syncDirty: string;
   syncQueued: string;
@@ -63,6 +86,8 @@ export interface DashboardStrings {
   // Ticket detail panel
   openTicketTooltip: string;
   syncToRedmine: string;
+  resolveRecovery: string;
+  resolveRecoveryTooltip: string;
   syncTicketTooltip: string;
   editingState: string;
   remoteDescription: string;
@@ -167,6 +192,15 @@ export interface DashboardStrings {
   sectionGeneral: string;
   ticketLimitLabel: string;
   resetSettings: string;
+  sectionMaintenance: string;
+  dashboardCacheHeading: string;
+  dashboardCacheDescription: string;
+  resetDashboardCache: string;
+  dashboardViewStateHeading: string;
+  dashboardViewStateDescription: string;
+  resetViewState: string;
+  maintenanceSafetyNote: string;
+  viewStateReset: string;
   // Project label
   projectNone: string;
 }
@@ -204,6 +238,29 @@ export const buildDashboardStrings = (): DashboardStrings => ({
   layoutAuto: vscode.l10n.t("Automatic layout"),
   layoutSingle: vscode.l10n.t("One column"),
   layoutSplit: vscode.l10n.t("Two columns"),
+  quickFiltersLabel: vscode.l10n.t("Quick filters"),
+  quickMyIssues: vscode.l10n.t("My Issues"),
+  quickOpen: vscode.l10n.t("Open issues"),
+  quickOverdue: vscode.l10n.t("Overdue"),
+  quickUnsynced: vscode.l10n.t("Unsynced"),
+  quickMyIssuesUnavailable: vscode.l10n.t("Current Redmine user is unavailable"),
+  quickOpenUnavailable: vscode.l10n.t("Issue status metadata is unavailable"),
+  quickFilterCapabilityLoading: vscode.l10n.t("Filter capability is loading; the saved preference is not currently applied."),
+  quickMyIssuesUnavailableSelected: vscode.l10n.t("Current Redmine user is unavailable; the saved My Issues preference is not applied."),
+  quickOpenUnavailableSelected: vscode.l10n.t("Issue status metadata is unavailable; the saved Open preference is not applied."),
+  advancedFilters: vscode.l10n.t("Filters…"),
+  closeFilters: vscode.l10n.t("Close filters"),
+  applyFilters: vscode.l10n.t("Apply filters"),
+  resetFilters: vscode.l10n.t("Reset ticket filters"),
+  overview: vscode.l10n.t("Overview"),
+  shownLoadedTotal: vscode.l10n.t("{0} shown · {1} loaded · {2} total"),
+  syncTrayAllClear: vscode.l10n.t("Everything synced"),
+  syncTrayItems: vscode.l10n.t("{0} unsynced items"),
+  syncTrayAttention: vscode.l10n.t("Sync attention required"),
+  syncTrayReviewConflict: vscode.l10n.t("Review conflict"),
+  syncTrayOpenUnsynced: vscode.l10n.t("Open Unsynced"),
+  syncTrayOpenEditor: vscode.l10n.t("Open in Editor"),
+  syncTrayFailedTicket: vscode.l10n.t("Ticket #{0} failed to sync"),
   // Sync states
   syncDirty: vscode.l10n.t("Unsynced changes"),
   syncQueued: vscode.l10n.t("Waiting to sync"),
@@ -234,6 +291,8 @@ export const buildDashboardStrings = (): DashboardStrings => ({
   // Ticket detail panel
   openTicketTooltip: vscode.l10n.t("Edit ticket Markdown in VS Code"),
   syncToRedmine: vscode.l10n.t("Sync to Redmine"),
+  resolveRecovery: vscode.l10n.t("Resolve"),
+  resolveRecoveryTooltip: vscode.l10n.t("Review available recovery actions before continuing."),
   syncTicketTooltip: vscode.l10n.t("Sync VS Code editor changes to Redmine"),
   editingState: vscode.l10n.t("Editing state"),
   remoteDescription: vscode.l10n.t("Description (on Redmine)"),
@@ -297,7 +356,7 @@ export const buildDashboardStrings = (): DashboardStrings => ({
   requestTimeoutLabel: vscode.l10n.t("Request timeout (ms)"),
   ignoreSSLErrorsLabel: vscode.l10n.t("Ignore SSL certificate errors"),
   ignoreSSLErrorsWarning: vscode.l10n.t("Use only in trusted development environments."),
-  sectionTickets: vscode.l10n.t("Tickets"),
+  sectionTickets: vscode.l10n.t("Ticket List"),
   includeChildProjectsLabel: vscode.l10n.t("Include child projects"),
   sectionEditor: vscode.l10n.t("Editor"),
   editorStorageDirectoryLabel: vscode.l10n.t("Storage directory"),
@@ -338,6 +397,15 @@ export const buildDashboardStrings = (): DashboardStrings => ({
   sectionGeneral: vscode.l10n.t("General"),
   ticketLimitLabel: vscode.l10n.t("Tickets per load"),
   resetSettings: vscode.l10n.t("Reset display settings"),
+  sectionMaintenance: vscode.l10n.t("Maintenance"),
+  dashboardCacheHeading: vscode.l10n.t("Dashboard Cache"),
+  dashboardCacheDescription: vscode.l10n.t("Reload Dashboard data and metadata from Redmine. Local drafts and unsynced changes are preserved."),
+  resetDashboardCache: vscode.l10n.t("Reset Dashboard Cache"),
+  dashboardViewStateHeading: vscode.l10n.t("Dashboard View State"),
+  dashboardViewStateDescription: vscode.l10n.t("Reset Dashboard layout and quick-filter preferences."),
+  resetViewState: vscode.l10n.t("Reset View State"),
+  maintenanceSafetyNote: vscode.l10n.t("Local drafts, unsynced changes, recovery data, and credentials are never removed by these actions."),
+  viewStateReset: vscode.l10n.t("Dashboard view state reset."),
   // Project label
   projectNone: vscode.l10n.t("(none)"),
 });

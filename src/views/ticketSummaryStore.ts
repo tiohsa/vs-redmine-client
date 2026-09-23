@@ -2,6 +2,8 @@ import { Ticket } from "../redmine/types";
 
 const summaries = new Map<number, string>();
 
+export type TicketSummarySnapshot = ReadonlyMap<number, string>;
+
 export const rememberTicketSummary = (ticket: Ticket): void => {
   if (!ticket.subject) {
     return;
@@ -24,6 +26,13 @@ export const setTicketSummary = (ticketId: number, subject: string): void => {
 
 export const getTicketSummary = (ticketId: number): string | undefined =>
   summaries.get(ticketId);
+
+export const snapshotTicketSummaries = (): TicketSummarySnapshot => new Map(summaries);
+
+export const restoreTicketSummaries = (snapshot: TicketSummarySnapshot): void => {
+  summaries.clear();
+  snapshot.forEach((subject, ticketId) => summaries.set(ticketId, subject));
+};
 
 export const clearTicketSummaries = (): void => {
   summaries.clear();

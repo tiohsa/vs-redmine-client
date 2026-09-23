@@ -6,7 +6,7 @@ Japanese README: `README.ja.md`
 
 ## Highlights
 
-- Single **Dashboard Webview** with Tickets / Unsynced / Comments / Settings tabs
+- Single **Dashboard Webview** with Tickets / Unsynced / Settings tabs; comments live in the selected ticket's Work Panel
 - Fast ticket browsing with status, priority, tracker, assignee, and title filters
 - Create new tickets and child tickets directly from the Dashboard composer
 - Open tickets as editable Markdown files — save locally or sync to Redmine immediately
@@ -39,13 +39,12 @@ Japanese README: `README.ja.md`
 
 ## Dashboard
 
-The extension provides a single Activity Bar Dashboard Webview with four tabs:
+The extension provides a single Activity Bar Dashboard Webview with three tabs:
 
 | Tab | Description |
 |-----|-------------|
 | **Tickets** | Browse and filter project tickets; select a ticket to view its detail panel |
 | **Unsynced** | Manage pending ticket updates, new ticket drafts, and comment drafts |
-| **Comments** | View and edit comments for the selected ticket |
 | **Settings** | Configure filters, sort order, offline sync mode, and editor defaults |
 
 ### Ticket Tab
@@ -57,7 +56,13 @@ The Tickets tab shows the ticket list for the selected project.
 - **Double click** — open ticket as a Markdown editor
 - **⋮ menu** — Open editor, Add comment, Open in browser, Create child ticket
 
-**Detail panel** shows ticket metadata (ID, subject, project, tracker, status, priority, dates, parent) and provides inline metadata editing and a sync action.
+**Work Panel** shows ticket metadata (ID, subject, project, tracker, status, priority, dates, parent) and provides **Overview / Comments** tabs, inline metadata editing, and ticket actions. Comments open in the VS Code Markdown editor for editing.
+
+Quick filters (My Issues, Open, Overdue, Unsynced) filter tickets already loaded into the Dashboard. The displayed count distinguishes shown, loaded, and total tickets. **Filters…** edits persistent ticket filters. The sync attention tray at the bottom links to the existing Unsynced and conflict flows.
+
+### Dashboard Maintenance
+
+In Settings > Maintenance, **Reset Dashboard Cache** reloads reconstructable Dashboard data and metadata from Redmine while preserving local drafts, unsynced changes, recovery data, credentials, and settings. **Reset View State** clears Dashboard layout and quick-filter preferences; it does not change persistent ticket-list settings.
 
 ### Unsynced Tab
 

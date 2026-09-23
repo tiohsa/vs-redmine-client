@@ -9,6 +9,7 @@ import {
   prepareOfflineDiscard,
   commitOfflineDiscardAsync,
 } from "../../views/offlineSyncStore";
+import type { OfflineTicketConflictExpectation } from "../../views/offlineSyncStore";
 import { buildUnsyncedDashboardItems } from "../viewModels/unsyncedDashboardViewModel";
 import type { DashboardUnsyncedKey } from "../dashboardProtocol";
 import type { UnsyncedFileSyncKey } from "../../app/unsyncedTypes";
@@ -17,17 +18,49 @@ import {
   getTicketEditors,
 } from "../../views/ticketEditorRegistry";
 import { handleConflict, handleCommentConflict } from "../../views/conflictResolver";
+import { getConflictContext, getConflictContextExpectation } from "../../views/conflictDiffProvider";
 import type { TicketSaveResult } from "../../views/ticketSaveTypes";
 import type { CommentSaveResult } from "../../views/commentSaveTypes";
 import type { SyncStatus } from "../../app/syncController";
 import { getCurrentConnectionScope } from "../../config/connectionScope";
 import { createSyncEngine, type SyncEngine } from "../../app/syncEngine";
+import { getIssueDetail } from "../../redmine/issues";
+import { runWithConnectionScope } from "../../redmine/client";
+import { parseQueuedTicketIntent } from "../../views/ticketSync/ticketChangeDetector";
+import { metadataFromTicket } from "../../views/ticketSync/ticketRemoteContent";
+import { getAttemptGeneration } from "../../app/syncEffects";
+import { registerConflictContext } from "../../views/conflictDiffProvider";
+import type { OfflineTicketUpdate } from "../../views/offlineSyncStore";
+
+const conflictExpectationFor = (operation: OfflineTicketUpdate): OfflineTicketConflictExpectation => ({
+  operationId: operation.operationId,
+  revision: operation.revision,
+  intentRevision: operation.intentRevision,
+  attemptGeneration: getAttemptGeneration(operation),
+  connectionScope: operation.connectionScope,
+  content: operation.content,
+});
+
+const matchesConflictExpectation = (
+  operation: OfflineTicketUpdate | undefined,
+  expected: OfflineTicketConflictExpectation,
+): boolean => !!operation &&
+  operation.operationId === expected.operationId &&
+  operation.revision === expected.revision &&
+  (expected.intentRevision === undefined ||
+    (operation.intentRevision ?? operation.revision) === expected.intentRevision) &&
+  (expected.attemptGeneration === undefined ||
+    getAttemptGeneration(operation) === expected.attemptGeneration) &&
+  (expected.connectionScope === undefined || operation.connectionScope === expected.connectionScope) &&
+  operation.content === expected.content;
 
 export class DashboardUnsyncedService {
   constructor(private readonly deps: {
     context: DashboardServiceContext;
     refreshTicketPresentation: () => void;
     loadComments: (ticketId: number) => Promise<void>;
+    openTicketEditor?: (ticketId: number) => Promise<void>;
+    getIssueDetail?: typeof getIssueDetail;
     syncEngine?: SyncEngine;
   }) {}
 
@@ -134,6 +167,122 @@ export class DashboardUnsyncedService {
         ? vscode.l10n.t("Sync completed. Synced: {0}; recovery queued: {1}.", synced, queued)
         : vscode.l10n.t("Sync completed. Synced: {0}.", synced),
     );
+  }
+
+  async handleReviewConflict(requestId: string, ticketId: number): Promise<void> {
+    this.deps.context.notifyOperationStarted(requestId, vscode.l10n.t("Reviewing conflict…"));
+    const operationScope = getCurrentConnectionScope();
+    let conflictContext = getConflictContext(ticketId, operationScope);
+    if (
+      (conflictContext && conflictContext.ticketId !== ticketId) ||
+      (conflictContext?.connectionScope !== undefined && conflictContext.connectionScope !== operationScope)
+    ) {
+      this.deps.context.notifyError(
+        requestId,
+        vscode.l10n.t("Conflict context is no longer available. Refresh before saving."),
+      );
+      return;
+    }
+
+    let expectedOperation = getConflictContextExpectation(ticketId, operationScope);
+    let queued = getOfflineSyncQueue(operationScope).tickets.get(ticketId);
+    if (!expectedOperation && queued) {
+      expectedOperation = conflictExpectationFor(queued);
+    }
+    if (expectedOperation && !matchesConflictExpectation(queued, expectedOperation)) {
+      this.deps.context.notifyError(
+        requestId,
+        vscode.l10n.t("Remote changes detected. Refresh before saving."),
+      );
+      return;
+    }
+
+    if (!conflictContext) {
+      if (
+        !queued ||
+        !queued.operationId ||
+        typeof queued.revision !== "number" ||
+        !Number.isSafeInteger(queued.revision) ||
+        queued.revision <= 0
+      ) {
+        this.deps.context.notifyError(
+          requestId,
+          vscode.l10n.t("Persisted conflict data is unavailable. Refresh before saving."),
+        );
+        return;
+      }
+      const local = parseQueuedTicketIntent(queued);
+      if (!local) {
+        this.deps.context.notifyError(
+          requestId,
+          vscode.l10n.t("Persisted conflict data is invalid. Refresh before saving."),
+        );
+        return;
+      }
+
+      const capturedOperation = conflictExpectationFor(queued);
+      try {
+        const detail = await runWithConnectionScope(
+          operationScope,
+          () => (this.deps.getIssueDetail ?? getIssueDetail)(ticketId),
+        );
+        if (getCurrentConnectionScope() !== operationScope || detail.ticket.id !== ticketId) {
+          throw new Error(vscode.l10n.t("The Redmine connection changed while refreshing the conflict."));
+        }
+        const current = getOfflineSyncQueue(operationScope).tickets.get(ticketId);
+        if (!current || !matchesConflictExpectation(current, capturedOperation)) {
+          this.deps.context.notifyError(
+            requestId,
+            vscode.l10n.t("Remote changes detected. Refresh before saving."),
+          );
+          return;
+        }
+        if (!detail.ticket.updatedAt) {
+          throw new Error(vscode.l10n.t("Redmine did not return the ticket update time."));
+        }
+        conflictContext = {
+          connectionScope: operationScope,
+          ticketId,
+          baseSubject: current.baseSubject,
+          baseDescription: current.baseDescription,
+          localSubject: local.subject || current.baseSubject,
+          localDescription: local.description,
+          remoteSubject: detail.ticket.subject,
+          remoteDescription: detail.ticket.description ?? "",
+          remoteMetadata: metadataFromTicket(detail.ticket),
+          remoteUpdatedAt: detail.ticket.updatedAt,
+        };
+        expectedOperation = capturedOperation;
+        registerConflictContext(conflictContext, expectedOperation);
+      } catch (error) {
+        this.deps.context.notifyError(
+          requestId,
+          vscode.l10n.t(
+            "Conflict review could not be refreshed from Redmine: {0}",
+            error instanceof Error ? error.message : String(error),
+          ),
+        );
+        return;
+      }
+    }
+
+    const key: DashboardUnsyncedKey = { kind: "ticket", ticketId };
+    const result: Extract<SyncUnsyncedFileResult, { status: "conflict" }> = {
+      status: "conflict",
+      kind: "ticket",
+      id: ticketId,
+      conflictContext,
+    };
+    const status = await this.resolveConflictInEditor(key, result, expectedOperation);
+    if (!status) {
+      this.deps.context.notifyError(
+        requestId,
+        vscode.l10n.t("Conflicts with remote changes detected. Open the file to review."),
+      );
+      return;
+    }
+    await this.refreshAfterConflict(key, status);
+    this.notifySyncStatusResult(requestId, status);
   }
 
   async handleDiscardOne(requestId: string, key: DashboardUnsyncedKey): Promise<void> {
@@ -328,8 +477,9 @@ export class DashboardUnsyncedService {
   private async resolveConflictInEditor(
     key: DashboardUnsyncedKey,
     result: Extract<SyncUnsyncedFileResult, { status: "conflict" }>,
+    expectedOperation?: OfflineTicketConflictExpectation,
   ): Promise<SyncStatus | undefined> {
-    if (key.kind !== "ticket" && key.kind !== "comment") {
+    if ((key.kind !== "ticket" && key.kind !== "comment") || key.ticketId === undefined) {
       return undefined;
     }
     const commentContext = result.kind === "comment" ? result.commentConflictContext : undefined;
@@ -342,7 +492,16 @@ export class DashboardUnsyncedService {
     )) {
       return undefined;
     }
-    const editor = getTicketEditors(key.ticketId)
+    if (key.kind === "ticket" && result.kind === "ticket" && (
+      !result.conflictContext ||
+      result.conflictContext.ticketId !== key.ticketId ||
+      (result.conflictContext.connectionScope !== undefined &&
+        result.conflictContext.connectionScope !== getCurrentConnectionScope())
+    )) {
+      return undefined;
+    }
+    const operationScope = getCurrentConnectionScope();
+    const findEditor = () => getTicketEditors(key.ticketId, operationScope)
       .filter((record) => key.kind === "ticket"
         ? record.contentType === "ticket"
         : (record.contentType === "comment" || record.contentType === "commentDraft") &&
@@ -350,6 +509,11 @@ export class DashboardUnsyncedService {
           record.commentId === commentContext?.commentId &&
           (key.documentUri === undefined || record.uri === key.documentUri))
       .sort((a, b) => b.lastActiveAt - a.lastActiveAt)[0];
+    let editor = findEditor();
+    if (!editor && key.kind === "ticket") {
+      await this.deps.openTicketEditor?.(key.ticketId);
+      editor = findEditor();
+    }
     if (!editor) {
       return undefined;
     }
@@ -357,7 +521,11 @@ export class DashboardUnsyncedService {
     const textEditor = vscode.window.visibleTextEditors.find(
       (candidate) => candidate.document === document,
     ) ?? await vscode.window.showTextDocument(document, { preview: false });
-    const operationScope = getConnectionScopeForEditor(textEditor) ?? getCurrentConnectionScope();
+    const editorScope = getConnectionScopeForEditor(textEditor);
+    if (editorScope !== undefined && editorScope !== operationScope) {
+      return undefined;
+    }
+    const resolverScope = editorScope ?? operationScope;
     const syncEngine = this.deps.syncEngine ?? createSyncEngine();
 
     if (key.kind === "ticket" && result.kind === "ticket" && result.conflictContext) {
@@ -369,8 +537,9 @@ export class DashboardUnsyncedService {
         } satisfies TicketSaveResult,
         textEditor,
         undefined,
-        operationScope,
+        resolverScope,
         syncEngine,
+        expectedOperation,
       );
       return toSyncStatus(resolved.status);
     }
@@ -384,7 +553,7 @@ export class DashboardUnsyncedService {
           conflictContext: result.commentConflictContext,
         } satisfies CommentSaveResult,
         textEditor,
-        operationScope,
+        resolverScope,
         syncEngine,
       );
       return toSyncStatus(resolved.status);

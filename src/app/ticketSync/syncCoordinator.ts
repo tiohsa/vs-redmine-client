@@ -613,7 +613,12 @@ export class SyncCoordinator {
       };
     }
     const primaryEffect = op ? getPrimaryEffectForRevision(op, currentRevision) : undefined;
-    const isRecoverable = op && isPrimaryRecoveryRequired(op, primaryEffect);
+    const isCommittedCommentIdentityPending = op?.kind === "comment_create" &&
+      op.phase === "reconciliation_pending" &&
+      primaryEffect?.state === "committed";
+    const isRecoverable = op && (
+      isPrimaryRecoveryRequired(op, primaryEffect) || isCommittedCommentIdentityPending
+    );
     if (!op || !isRecoverable) {
       return {
         kind: "commit_unknown",
@@ -646,7 +651,12 @@ export class SyncCoordinator {
       const freshRevision = freshOp?.intentRevision ?? freshOp?.revision ?? 1;
       const freshAttemptGeneration = getAttemptGeneration(freshOp);
       const freshPrimaryEffect = freshOp ? getPrimaryEffectForRevision(freshOp, freshRevision) : undefined;
-      const isFreshRecoverable = freshOp && isPrimaryRecoveryRequired(freshOp, freshPrimaryEffect);
+      const isFreshCommittedCommentIdentityPending = freshOp?.kind === "comment_create" &&
+        freshOp.phase === "reconciliation_pending" &&
+        freshPrimaryEffect?.state === "committed";
+      const isFreshRecoverable = freshOp && (
+        isPrimaryRecoveryRequired(freshOp, freshPrimaryEffect) || isFreshCommittedCommentIdentityPending
+      );
       if (!freshOp || !isFreshRecoverable) {
         return {
           kind: "commit_unknown",
@@ -722,7 +732,11 @@ export class SyncCoordinator {
           input.resolution?.kind === "link_remote_comment" ||
           (input.resolution as { kind?: string } | undefined)?.kind === "assume_remote_commit" ||
           (input.resolution as { kind?: string } | undefined)?.kind === "assume_update_committed") &&
-        freshOp.phase !== "commit_unknown"
+        freshOp.phase !== "commit_unknown" &&
+        !(input.resolution?.kind === "link_remote_comment" &&
+          freshOp.kind === "comment_create" &&
+          freshOp.phase === "reconciliation_pending" &&
+          freshPrimaryEffect?.state === "committed")
       ) {
         return {
           kind: "commit_unknown",
