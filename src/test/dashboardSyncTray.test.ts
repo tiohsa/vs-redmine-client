@@ -54,6 +54,56 @@ const state = (syncState = "Synced", lifecycle?: string, count = 0, queuedTicket
   unsynced: { totalCount: count, items: lifecycle ? [{ lifecycle, requiresReview, ...(queuedTicketId === undefined ? {} : { key: { kind: "ticket", ticketId: queuedTicketId } }) }] : [] },
 });
 
+interface UnsyncedElement {
+  textContent: string;
+  innerHTML: string;
+  hidden: boolean;
+  onclick?: () => void;
+  setAttribute: (name: string, value: string) => void;
+  classList: { toggle: (name: string, force?: boolean) => void };
+  querySelectorAll: (selector: string) => Array<{ addEventListener: (name: string, action: () => void) => void }>;
+}
+
+const renderUnsynced = (items: Array<{ lifecycle: string; requiresReview?: boolean; key: { kind: string; ticketId: number }; label: string }>) => {
+  const elements: Record<string, UnsyncedElement> = {};
+  for (const id of ["unsynced-badge", "unsynced-count-label", "sync-all-btn", "unsynced-summary", "unsynced-list"]) {
+    const element: UnsyncedElement = {
+      textContent: "",
+      innerHTML: "",
+      hidden: false,
+      setAttribute: () => {},
+      classList: { toggle: (name, force) => { if (name === "hidden") { element.hidden = force === true; } } },
+      querySelectorAll: () => [],
+    };
+    elements[id] = element;
+  }
+  const unsyncedFunctions = extract("const UNSYNCED_BADGE_META=", "// ── Comments");
+  runInNewContext(`${unsyncedFunctions}\nrenderUnsynced();`, {
+    state: { unsynced: { items, totalCount: items.length } },
+    document: { getElementById: (id: string) => elements[id] },
+    STRINGS: {
+      syncQueued: "Queued", syncReviewRequired: "Review Required", syncFailed: "Failed", syncConflict: "Conflict",
+      unsyncedCountLabel: "{0} items", tabUnsynced: "Unsynced", noUnsyncedChanges: "No changes",
+      unsyncedKindTicket: "Ticket", unsyncedKindNewTicket: "New ticket", unsyncedKindComment: "Comment",
+      unsyncedKindFile: "File", resolveRecovery: "Resolve recovery", resolveRecoveryTooltip: "Resolve recovery",
+      syncToRedmine: "Sync to Redmine", discardAction: "Discard", discardLaterChangesAction: "Discard later changes",
+      discardLaterChangesTitle: "Discard later changes", discardTitle: "Discard",
+    },
+    esc: (value: unknown) => String(value ?? ""),
+    safeJson: (value: unknown) => JSON.stringify(value),
+    actionIcon: () => "",
+    badge: (label: string, className: string) => `<span class="badge ${className}">${label}</span>`,
+    unsyncedKindLabel: () => "Ticket",
+    updateSyncButtonStates: () => {},
+    req: () => {},
+  });
+  return {
+    cardHtml: elements["unsynced-list"].innerHTML,
+    summaryHtml: elements["unsynced-summary"].innerHTML,
+    syncAllHidden: elements["sync-all-btn"].hidden,
+  };
+};
+
 suite("Dashboard sync attention tray", () => {
   test("未同期なしと通常の未同期を区別する", () => {
     assert.deepStrictEqual(present(state()).buttons, []);
@@ -91,5 +141,43 @@ suite("Dashboard sync attention tray", () => {
     assert.ok(result.text.includes("Ticket #10 failed to sync"));
     assert.deepStrictEqual(result.buttons, ["Open in Editor"]);
     assert.deepStrictEqual(result.actions, [{ type: "tab:tickets" }, { type: "ticket.openEditor", ticketId: 10 }]);
+  });
+
+  test("通常の queued item は queued 表示と Sync All を維持する", () => {
+    const result = renderUnsynced([{ lifecycle: "queued", requiresReview: false, key: { kind: "ticket", ticketId: 10 }, label: "Ticket #10" }]);
+    assert.ok(result.cardHtml.includes('class="badge sync-queued">Queued</span>'));
+    assert.ok(result.summaryHtml.includes('Queued <strong>1</strong>'));
+    assert.ok(result.cardHtml.includes("Sync to Redmine"));
+    assert.equal(result.syncAllHidden, false);
+  });
+
+  test("queued + requiresReview はカード・summary・bulk action の review 状態を共有する", () => {
+    const result = renderUnsynced([{ lifecycle: "queued", requiresReview: true, key: { kind: "ticket", ticketId: 10 }, label: "Ticket #10" }]);
+    assert.ok(result.cardHtml.includes('class="badge sync-conflict">Review Required</span>'));
+    assert.ok(result.summaryHtml.includes('Review Required <strong>1</strong>'));
+    assert.ok(!result.summaryHtml.includes("Queued"));
+    assert.ok(result.cardHtml.includes("Resolve recovery"));
+    assert.ok(!result.cardHtml.includes("Sync to Redmine"));
+    assert.equal(result.syncAllHidden, true);
+  });
+
+  test("recovery_pending と commit_unknown の既存 review 分類を保つ", () => {
+    for (const lifecycle of ["recovery_pending", "commit_unknown"]) {
+      const result = renderUnsynced([{ lifecycle, key: { kind: "ticket", ticketId: 10 }, label: "Ticket #10" }]);
+      assert.ok(result.cardHtml.includes('class="badge sync-conflict">Review Required</span>'));
+      assert.ok(result.summaryHtml.includes('Review Required <strong>1</strong>'));
+      assert.ok(result.cardHtml.includes("Resolve recovery"));
+      assert.equal(result.syncAllHidden, true);
+    }
+  });
+
+  test("mixed queue は各 summary を正しく分け、review があれば Sync All を隠す", () => {
+    const result = renderUnsynced([
+      { lifecycle: "queued", requiresReview: false, key: { kind: "ticket", ticketId: 10 }, label: "Ticket #10" },
+      { lifecycle: "queued", requiresReview: true, key: { kind: "ticket", ticketId: 11 }, label: "Ticket #11" },
+    ]);
+    assert.ok(result.summaryHtml.includes('Queued <strong>1</strong>'));
+    assert.ok(result.summaryHtml.includes('Review Required <strong>1</strong>'));
+    assert.equal(result.syncAllHidden, true);
   });
 });
