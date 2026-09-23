@@ -600,6 +600,72 @@ async function main() {
   state.settings.ticketListLimit -= 1;
   await push();
 
+  // 接続設定以外も実入力、背景再描画、接続切替、ホスト確定値を同じ操作列で検証する。
+  const settingInputs = [
+    { id: 'set-ticket-limit', type: 'settings.updateGeneral', initial: 50, values: ['75', '76', '77'], host: value => { state.settings.ticketListLimit = Number(value); }, payload: value => ({ patch: { ticketListLimit: Number(value) } }) },
+    { id: 'set-editor-storage', type: 'settings.updateEditor', initial: '', values: ['normal-storage', 'redrawn-storage', 'stale-storage'], host: value => { state.settings.editorStorageDirectory = value; }, payload: value => ({ patch: { editorStorageDirectory: value } }) },
+    ...['subject', 'description', 'tracker', 'priority', 'status'].map(field => ({
+      id: `set-editor-${field}`, type: 'settings.updateEditorDefault', initial: '',
+      values: [`normal-${field}`, `redrawn-${field}`, `stale-${field}`],
+      host: value => { state.settings.editorDefaults[field] = value; },
+      payload: value => ({ field, value }),
+    })),
+  ];
+  const formBaseUrl = 'https://settings-form.example.com';
+  const editSetting = async (entry, value) => {
+    await evaluate(`{document.getElementById('settings-editor').open=true;document.getElementById('settings-tickets').open=true;const input=document.getElementById(${JSON.stringify(entry.id)});input.focus();${entry.id === 'set-ticket-limit' ? "input.value=''" : 'input.select()'}}`);
+    await typeText(value);
+    assert.equal(await evaluate(`document.getElementById(${JSON.stringify(entry.id)}).value`), value, entry.id);
+  };
+  const settingRequests = async type => evaluate(`window.messages.filter(message=>message.type===${JSON.stringify(type)}).map(message=>({type:message.type,patch:message.patch,field:message.field,value:message.value}))`);
+  for (const entry of settingInputs) {
+    state.settings.baseUrl = formBaseUrl;
+    entry.host(entry.initial);
+    await push();
+    await evaluate('window.messages=[]');
+    await editSetting(entry, entry.values[0]);
+    await key('Tab');
+    assert.deepEqual(await settingRequests(entry.type), [{ type: entry.type, ...entry.payload(entry.values[0]) }], `${entry.id}: normal Tab`);
+
+    entry.host(entry.values[0]);
+    await push();
+    await evaluate('window.messages=[]');
+    await editSetting(entry, entry.values[1]);
+    state.settings.showStatus = !state.settings.showStatus;
+    await push();
+    assert.equal(await evaluate(`document.getElementById(${JSON.stringify(entry.id)}).value`), entry.values[1], `${entry.id}: redraw value`);
+    assert.equal((await settingRequests(entry.type)).length, 0, `${entry.id}: before Tab`);
+    await key('Tab');
+    assert.deepEqual(await settingRequests(entry.type), [{ type: entry.type, ...entry.payload(entry.values[1]) }], `${entry.id}: redraw Tab`);
+
+    entry.host(entry.values[1]);
+    state.settings.baseUrl = 'https://settings-before-switch.example.com';
+    await push();
+    await evaluate('window.messages=[]');
+    await editSetting(entry, entry.values[2]);
+    state.settings.baseUrl = 'https://settings-after-switch.example.com';
+    entry.host(entry.initial);
+    await push();
+    assert.equal((await settingRequests(entry.type)).length, 0, `${entry.id}: old form after switch`);
+    assert.equal(await evaluate(`document.getElementById(${JSON.stringify(entry.id)}).value`), String(entry.initial), `${entry.id}: new connection value`);
+  }
+
+  state.settings.baseUrl = formBaseUrl;
+  state.settings.editorDefaults.subject = '';
+  await push();
+  await evaluate('window.messages=[]');
+  await editSetting(settingInputs[2], '  normalized-subject  ');
+  await key('Enter');
+  assert.deepEqual(await settingRequests('settings.updateEditorDefault'), [{ type: 'settings.updateEditorDefault', field: 'subject', value: '  normalized-subject  ' }]);
+  state.settings.editorDefaults.subject = 'normalized-subject';
+  await push();
+  assert.equal(await evaluate(`document.getElementById('set-editor-subject').value`), 'normalized-subject');
+  assert.equal((await settingRequests('settings.updateEditorDefault')).length, 1);
+  state.settings.baseUrl = previousBaseUrl;
+  state.settings.showStatus = true;
+  state.settings.editorDefaults.subject = '';
+  await push();
+
   // 日本語・テーマ・320/480/768/1200px で設定の横はみ出しを検証。
   for (const width of [320, 480, 768, 1200]) {
     await call('Emulation.setDeviceMetricsOverride', { width, height: 800, deviceScaleFactor: 1, mobile: false });

@@ -774,23 +774,31 @@ function renderSettingsBase(){
   const updateFilters=function(){ requestForRenderedSettings('settings.update',{patch:{filters:Object.assign({},settings.filters,{assigneeIds:Array.from(assigneeSelect.selectedOptions).map(function(option){ return Number(option.value); }),statusIds:Array.from(statusSelect.selectedOptions).map(function(option){ return Number(option.value); }),includeUnassigned:document.getElementById('assignee-unassigned-toggle').checked})}}); }; assigneeSelect.addEventListener('change',updateFilters); statusSelect.addEventListener('change',updateFilters); document.getElementById('assignee-unassigned-toggle').addEventListener('change',updateFilters);
   document.getElementById('set-sort-field').addEventListener('change',function(){ requestForRenderedSettings('settings.update',{patch:{sort:{field:this.value || undefined,direction:settings.sort.direction}}}); }); document.getElementById('set-sort-dir').addEventListener('change',function(){ requestForRenderedSettings('settings.update',{patch:{sort:{field:settings.sort.field,direction:this.value}}}); });
   [['set-dd-overdue','showOverdue'],['set-dd-1d','showWithin1Day'],['set-dd-3d','showWithin3Days'],['set-dd-7d','showWithin7Days']].forEach(function(item){ document.getElementById(item[0]).addEventListener('change',function(){ const due=Object.assign({},settings.dueDate); due[item[1]]=this.checked; requestForRenderedSettings('settings.update',{patch:{dueDate:due}}); }); });
-  const bindConnectionInput=function(id,field,parse){
-    const input=document.getElementById(id);
+  const bindSettingInput=function(input,type,buildPayload){
     const commit=function(){
       if(input.value === input.defaultValue) return;
-      const value=parse ? parse(input.value) : input.value;
-      if(value === undefined) return;
-      if(requestForRenderedSettings('settings.updateConnection',{patch:{[field]:value}})) input.defaultValue=input.value;
+      const payload=buildPayload(input.value);
+      if(payload === undefined) return;
+      if(requestForRenderedSettings(type,payload)) input.defaultValue=input.value;
     };
     input.addEventListener('change',commit);
     input.addEventListener('blur',commit);
+  };
+  const bindConnectionInput=function(id,field,parse){
+    bindSettingInput(document.getElementById(id),'settings.updateConnection',function(value){
+      const parsed=parse ? parse(value) : value;
+      return parsed === undefined ? undefined : {patch:{[field]:parsed}};
+    });
   };
   bindConnectionInput('set-base-url','baseUrl');
   bindConnectionInput('set-default-project','defaultProjectId');
   bindConnectionInput('set-request-timeout','requestTimeoutMs',function(value){ const number=Number(value); return Number.isFinite(number) && number > 0 ? number : undefined; });
   document.getElementById('set-ignore-ssl').addEventListener('change',function(){ requestForRenderedSettings('settings.updateConnection',{patch:{ignoreSSLErrors:this.checked}}); });
-  document.getElementById('set-ticket-limit').addEventListener('change',function(){ const value=Number(this.value); if(value >= 1 && value <= 500) requestForRenderedSettings('settings.updateGeneral',{patch:{ticketListLimit:value}}); }); document.getElementById('set-include-children').addEventListener('change',function(){ requestForRenderedSettings('settings.updateGeneral',{patch:{includeChildProjects:this.checked}}); }); document.getElementById('set-show-status').addEventListener('change',function(){ requestForRenderedSettings('settings.updateGeneral',{patch:{showStatus:this.checked}}); }); document.getElementById('set-show-due-date').addEventListener('change',function(){ requestForRenderedSettings('settings.updateGeneral',{patch:{showDueDate:this.checked}}); }); document.getElementById('set-show-tracker').addEventListener('change',function(){ requestForRenderedSettings('settings.updateGeneral',{patch:{showTracker:this.checked}}); }); document.getElementById('set-show-priority').addEventListener('change',function(){ requestForRenderedSettings('settings.updateGeneral',{patch:{showPriority:this.checked}}); }); document.getElementById('set-show-assignee').addEventListener('change',function(){ requestForRenderedSettings('settings.updateGeneral',{patch:{showAssignee:this.checked}}); }); document.getElementById('set-sync-mode').addEventListener('change',function(){ requestForRenderedSettings('settings.updateGeneral',{patch:{offlineSyncMode:this.value}}); });
-  document.getElementById('set-editor-storage').addEventListener('change',function(){ requestForRenderedSettings('settings.updateEditor',{patch:{editorStorageDirectory:this.value}}); }); document.querySelectorAll('[data-editor-default]').forEach(function(input){ input.addEventListener('change',function(){ requestForRenderedSettings('settings.updateEditorDefault',{field:this.dataset.editorDefault,value:this.value}); }); }); document.getElementById('reset-editor-defaults-btn').addEventListener('click',function(){ requestForRenderedSettings('settings.resetEditorDefaults',{fields:['subject','description','tracker','priority','status','due_date']}); });
+  bindSettingInput(document.getElementById('set-ticket-limit'),'settings.updateGeneral',function(value){ const number=Number(value); return number >= 1 && number <= 500 ? {patch:{ticketListLimit:number}} : undefined; });
+  document.getElementById('set-include-children').addEventListener('change',function(){ requestForRenderedSettings('settings.updateGeneral',{patch:{includeChildProjects:this.checked}}); }); document.getElementById('set-show-status').addEventListener('change',function(){ requestForRenderedSettings('settings.updateGeneral',{patch:{showStatus:this.checked}}); }); document.getElementById('set-show-due-date').addEventListener('change',function(){ requestForRenderedSettings('settings.updateGeneral',{patch:{showDueDate:this.checked}}); }); document.getElementById('set-show-tracker').addEventListener('change',function(){ requestForRenderedSettings('settings.updateGeneral',{patch:{showTracker:this.checked}}); }); document.getElementById('set-show-priority').addEventListener('change',function(){ requestForRenderedSettings('settings.updateGeneral',{patch:{showPriority:this.checked}}); }); document.getElementById('set-show-assignee').addEventListener('change',function(){ requestForRenderedSettings('settings.updateGeneral',{patch:{showAssignee:this.checked}}); }); document.getElementById('set-sync-mode').addEventListener('change',function(){ requestForRenderedSettings('settings.updateGeneral',{patch:{offlineSyncMode:this.value}}); });
+  bindSettingInput(document.getElementById('set-editor-storage'),'settings.updateEditor',function(value){ return {patch:{editorStorageDirectory:value}}; });
+  document.querySelectorAll('[data-editor-default]').forEach(function(input){ bindSettingInput(input,'settings.updateEditorDefault',function(value){ return {field:input.dataset.editorDefault,value:value}; }); });
+  document.getElementById('reset-editor-defaults-btn').addEventListener('click',function(){ requestForRenderedSettings('settings.resetEditorDefaults',{fields:['subject','description','tracker','priority','status','due_date']}); });
   document.getElementById('set-apikey-btn').addEventListener('click',function(){ requestForRenderedSettings('apiKey.set'); }); document.getElementById('clear-api-key-btn')?.addEventListener('click',function(){ requestForRenderedSettings('apiKey.clear'); }); document.getElementById('settings-reset-btn').onclick=function(){ requestForRenderedSettings('settings.reset'); };
   document.getElementById('dashboard-cache-reset-btn').addEventListener('click',function(){ req('dashboard.resetCache'); }); document.getElementById('settings-reset-view-btn').addEventListener('click',resetViewState);
 }
