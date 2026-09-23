@@ -14,7 +14,7 @@ const functions = extract("function flattenAll(", "// ── Operation feedback"
 
 interface TrayState {
   tickets: Array<{ id: number; syncState: string; children: unknown[] }>;
-  unsynced: { totalCount: number; items: Array<{ lifecycle?: string; key?: { kind?: string; ticketId?: number } }> };
+  unsynced: { totalCount: number; items: Array<{ lifecycle?: string; requiresReview?: boolean; key?: { kind?: string; ticketId?: number } }> };
 }
 interface FakeElement {
   textContent: string;
@@ -49,9 +49,9 @@ const present = (state: TrayState, clickLabel?: string): { text: string; buttons
   return { text: children[0].textContent, buttons: buttons.map((button) => button.textContent), actions };
 };
 
-const state = (syncState = "Synced", lifecycle?: string, count = 0, queuedTicketId?: number): TrayState => ({
+const state = (syncState = "Synced", lifecycle?: string, count = 0, queuedTicketId?: number, requiresReview = false): TrayState => ({
   tickets: [{ id: 10, syncState, children: [] }],
-  unsynced: { totalCount: count, items: lifecycle ? [{ lifecycle, ...(queuedTicketId === undefined ? {} : { key: { kind: "ticket", ticketId: queuedTicketId } }) }] : [] },
+  unsynced: { totalCount: count, items: lifecycle ? [{ lifecycle, requiresReview, ...(queuedTicketId === undefined ? {} : { key: { kind: "ticket", ticketId: queuedTicketId } }) }] : [] },
 });
 
 suite("Dashboard sync attention tray", () => {
@@ -62,9 +62,16 @@ suite("Dashboard sync attention tray", () => {
   });
 
   test("競合レビューは再同期せず既存の conflict-review request を送る", () => {
-    const result = present(state("Conflict", undefined, 1), "Review");
+    const result = present(state("Conflict", "queued", 1, undefined, true), "Review");
     assert.deepStrictEqual(result.buttons, ["Review", "Open Unsynced"]);
     assert.deepStrictEqual(result.actions, [{ type: "tab:tickets" }, { type: "ticket.reviewConflict", ticketId: 10 }]);
+  });
+
+  test("queued でも requiresReview があれば Sync All ではなく Unsynced を開く", () => {
+    const result = present(state("Queued", "queued", 1, undefined, true), "Open Unsynced");
+    assert.ok(result.text.includes("Attention"));
+    assert.deepStrictEqual(result.buttons, ["Open Unsynced"]);
+    assert.deepStrictEqual(result.actions, [{ type: "tab:unsynced" }]);
   });
 
   test("RecoveryPending と CommitUnknown は Open Unsynced へ誘導する", () => {

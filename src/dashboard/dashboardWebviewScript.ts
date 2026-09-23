@@ -123,7 +123,7 @@ function deriveSyncTrayState(){
   const count=state.unsynced.totalCount || 0;
   const conflict=all.find(function(ticket){ return ticket.syncState === 'Conflict' && Number.isSafeInteger(ticket.id) && ticket.id > 0; });
   if(conflict) return {kind:'conflict',ticketId:conflict.id,count:count};
-  const hasRecovery=all.some(function(ticket){ return ticket.syncState === 'RecoveryPending' || ticket.syncState === 'CommitUnknown'; }) || items.some(function(item){ return ['recovery_pending','commit_unknown'].includes(item.lifecycle); });
+  const hasRecovery=all.some(function(ticket){ return ticket.syncState === 'RecoveryPending' || ticket.syncState === 'CommitUnknown'; }) || items.some(function(item){ return item.requiresReview === true || ['recovery_pending','commit_unknown'].includes(item.lifecycle); });
   if(hasRecovery) return {kind:'recovery',count:count};
   const failed=all.find(function(ticket){ return ticket.syncState === 'Failed' && Number.isSafeInteger(ticket.id) && ticket.id > 0; });
   if(failed){
@@ -359,6 +359,11 @@ function quickFilterCapability(name){
   if(name === 'open') return state?.quickFilterCapabilities?.open || 'loading';
   return 'available';
 }
+function hasEffectiveQuickFilters(){
+  return quickFilters.has('overdue') || quickFilters.has('unsynced') ||
+    (quickFilters.has('mine') && quickFilterCapability('mine') === 'available') ||
+    (quickFilters.has('open') && quickFilterCapability('open') === 'available');
+}
 function matchesQuickFilters(ticket){
   if(quickFilters.has('mine') && quickFilterCapability('mine') === 'available' && ticket.assigneeId !== state.currentUserId) return false;
   if(quickFilters.has('open') && quickFilterCapability('open') === 'available'){
@@ -485,8 +490,9 @@ function renderTickets(){
   }
   if(!state.selectedProject && !state.tickets.length && !state.loading.tickets && !searchQuery){ list.innerHTML='<div class="state-msg">'+STRINGS.noProjectSelected+'</div>'; more.classList.add('hidden'); updateSyncButtonStates(); return; }
   if(state.loading.tickets){ list.innerHTML='<div class="state-msg loading-state" role="status">'+esc(STRINGS.loadingTickets)+'</div>'; more.classList.add('hidden'); updateSyncButtonStates(); return; }
-  const tickets = (searchQuery || quickFilters.size ? flattenAll(state.tickets) : flattenVisible(state.tickets)).filter(function(ticket){ return matchesSearch(ticket) && matchesQuickFilters(ticket); });
-  count.textContent = quickFilters.size ? STRINGS.shownLoadedTotal.replace('{0}',String(tickets.length)).replace('{1}',String(state.loadedTicketCount)).replace('{2}',String(state.totalTicketCount)) : STRINGS.ticketCountLabel.replace('{0}', String(tickets.length));
+  const hasActiveQuickFilter=hasEffectiveQuickFilters();
+  const tickets = (searchQuery || hasActiveQuickFilter ? flattenAll(state.tickets) : flattenVisible(state.tickets)).filter(function(ticket){ return matchesSearch(ticket) && matchesQuickFilters(ticket); });
+  count.textContent = hasActiveQuickFilter ? STRINGS.shownLoadedTotal.replace('{0}',String(tickets.length)).replace('{1}',String(state.loadedTicketCount)).replace('{2}',String(state.totalTicketCount)) : STRINGS.ticketCountLabel.replace('{0}', String(tickets.length));
   list.innerHTML = tickets.length ? tickets.map(renderTicketRow).join('') : '<div class="state-msg" role="status"><strong>'+esc(STRINGS.noTicketsFound)+'</strong><p>'+esc(STRINGS.searchEmptyHint)+'</p></div>';
   if(state.loadedTicketCount < state.totalTicketCount){ more.classList.remove('hidden'); more.textContent=STRINGS.loadMore+' ('+state.loadedTicketCount+' / '+state.totalTicketCount+')'; } else more.classList.add('hidden');
   list.querySelectorAll('.ticket-row').forEach(function(row){
