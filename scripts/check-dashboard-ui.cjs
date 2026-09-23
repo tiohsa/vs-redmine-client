@@ -53,6 +53,12 @@ async function key(key, code = key) {
   await call('Input.dispatchKeyEvent', { type: 'keyDown', key, code, text: key === 'Enter' ? '\r' : undefined, windowsVirtualKeyCode: key === 'Enter' ? 13 : undefined });
   await call('Input.dispatchKeyEvent', { type: 'keyUp', key, code });
 }
+async function typeText(value) {
+  for (const character of value) {
+    await call('Input.dispatchKeyEvent', { type: 'keyDown', key: character, text: character });
+    await call('Input.dispatchKeyEvent', { type: 'keyUp', key: character });
+  }
+}
 const state = new DashboardStateStore().getState();
 state.selectedProject = { id: 1, name: '検証プロジェクト' };
 state.projects = [{ id: 1, name: '検証プロジェクト', level: 0 }];
@@ -548,6 +554,51 @@ async function main() {
   assert.equal(await evaluate('window.messages.at(-1).type'), 'settings.updateConnection');
   await key('Tab');
   assert.equal(await evaluate('document.activeElement.id'), 'set-default-project');
+
+  // 実キー入力中に接続が変わっても、旧フォームの change を新接続へ送らない。
+  state.settings.baseUrl = 'https://settings-a.example.com';
+  state.settings.defaultProjectId = 'project-a';
+  await push();
+  await evaluate(`window.messages=[];document.getElementById('set-default-project').focus();document.getElementById('set-default-project').select()`);
+  await typeText('draft-in-a');
+  assert.equal(await evaluate(`document.getElementById('set-default-project').value`), 'draft-in-a');
+  state.settings.baseUrl = 'https://settings-b.example.com';
+  state.settings.defaultProjectId = 'project-b';
+  await push();
+  assert.equal(await evaluate(`window.messages.filter(m=>m.type==='settings.updateConnection').length`), 0);
+  assert.equal(await evaluate(`document.getElementById('set-default-project').value`), 'project-b');
+
+  await evaluate(`window.messages=[];document.getElementById('set-base-url').focus();document.getElementById('set-base-url').select()`);
+  await typeText('https://draft-in-b.example.com');
+  assert.equal(await evaluate(`document.getElementById('set-base-url').value`), 'https://draft-in-b.example.com');
+  state.settings.baseUrl = 'https://settings-c.example.com';
+  await push();
+  assert.equal(await evaluate(`window.messages.filter(m=>m.type==='settings.updateConnection').length`), 0);
+  assert.equal(await evaluate(`document.getElementById('set-base-url').value`), state.settings.baseUrl);
+
+  // 同一接続の背景再描画では未確定値を保持し、その後の Tab で一度だけ保存する。
+  await evaluate(`window.messages=[];document.getElementById('set-default-project').focus();document.getElementById('set-default-project').select()`);
+  await typeText('local-draft');
+  state.settings.ticketListLimit += 1;
+  await push();
+  assert.equal(await evaluate(`document.getElementById('set-default-project').value`), 'local-draft');
+  assert.equal(await evaluate(`window.messages.filter(m=>m.type==='settings.updateConnection').length`), 0);
+  await key('Tab');
+  assert.deepEqual(await evaluate(`window.messages.filter(m=>m.type==='settings.updateConnection').map(m=>m.patch)`), [{ defaultProjectId: 'local-draft' }]);
+
+  // 確定後はホストが trim した値へ追従する。
+  await evaluate(`window.messages=[];document.getElementById('set-default-project').focus();document.getElementById('set-default-project').select()`);
+  await typeText('  normalized-project  ');
+  await key('Enter');
+  assert.deepEqual(await evaluate(`window.messages.filter(m=>m.type==='settings.updateConnection').map(m=>m.patch)`), [{ defaultProjectId: '  normalized-project  ' }]);
+  state.settings.defaultProjectId = 'normalized-project';
+  await push();
+  assert.equal(await evaluate(`document.getElementById('set-default-project').value`), 'normalized-project');
+  assert.equal(await evaluate(`window.messages.filter(m=>m.type==='settings.updateConnection').length`), 1);
+  state.settings.baseUrl = previousBaseUrl;
+  state.settings.defaultProjectId = previousDefaultProjectId;
+  state.settings.ticketListLimit -= 1;
+  await push();
 
   // 日本語・テーマ・320/480/768/1200px で設定の横はみ出しを検証。
   for (const width of [320, 480, 768, 1200]) {

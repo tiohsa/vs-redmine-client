@@ -260,10 +260,10 @@ suite("Dashboard Webview 改善", () => {
     assert.ok(dashboardWebviewScript.includes('id="set-show-due-date"'));
     assert.ok(dashboardWebviewScript.includes('id="set-show-tracker"'));
     assert.ok(dashboardWebviewScript.includes('id="set-show-priority"'));
-    assert.ok(dashboardWebviewScript.includes("req('settings.updateGeneral',{patch:{showStatus:this.checked}})"));
-    assert.ok(dashboardWebviewScript.includes("req('settings.updateGeneral',{patch:{showDueDate:this.checked}})"));
-    assert.ok(dashboardWebviewScript.includes("req('settings.updateGeneral',{patch:{showTracker:this.checked}})"));
-    assert.ok(dashboardWebviewScript.includes("req('settings.updateGeneral',{patch:{showPriority:this.checked}})"));
+    assert.ok(dashboardWebviewScript.includes("requestForRenderedSettings('settings.updateGeneral',{patch:{showStatus:this.checked}})"));
+    assert.ok(dashboardWebviewScript.includes("requestForRenderedSettings('settings.updateGeneral',{patch:{showDueDate:this.checked}})"));
+    assert.ok(dashboardWebviewScript.includes("requestForRenderedSettings('settings.updateGeneral',{patch:{showTracker:this.checked}})"));
+    assert.ok(dashboardWebviewScript.includes("requestForRenderedSettings('settings.updateGeneral',{patch:{showPriority:this.checked}})"));
     assert.ok(dashboardWebviewScript.includes("const sections=new Map("));
     assert.ok(dashboardWebviewScript.includes("document.createElement('details')"));
     assert.ok(dashboardWebviewScript.includes("['tickets',STRINGS.sectionTickets"));
