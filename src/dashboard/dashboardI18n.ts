@@ -254,7 +254,7 @@ export const buildDashboardStrings = (): DashboardStrings => ({
   resetFilters: vscode.l10n.t("Reset ticket filters"),
   overview: vscode.l10n.t("Overview"),
   shownLoadedTotal: vscode.l10n.t("{0} shown · {1} loaded · {2} total"),
-  syncTrayAllClear: vscode.l10n.t("Everything synced"),
+  syncTrayAllClear: vscode.l10n.t("No unsynced items in sync queue"),
   syncTrayItems: vscode.l10n.t("{0} unsynced items"),
   syncTrayAttention: vscode.l10n.t("Sync attention required"),
   syncTrayReviewConflict: vscode.l10n.t("Review conflict"),

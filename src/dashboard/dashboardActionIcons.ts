@@ -7,6 +7,8 @@ export const dashboardActionPaths = {
   sync: "M20 8a8 8 0 0 0-14-2L3 9m0-6v6h6M4 16a8 8 0 0 0 14 2l3-3m0 6v-6h-6",
   refresh: "M20 8a8 8 0 1 0 0 8M20 3v5h-5",
   child: "M12 5v14M5 12h14",
+  filter: "M4 6h16M7 12h10M10 18h4",
+  layout: "M3 4h18v16H3V4Zm8 0v16",
 } as const;
 
 export const dashboardActionIcon = (name: keyof typeof dashboardActionPaths): string =>

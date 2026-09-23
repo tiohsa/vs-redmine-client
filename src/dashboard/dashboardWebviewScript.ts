@@ -17,11 +17,16 @@ let requestCounter = 0;
 let searchQuery = '';
 let searchTimer = null;
 let ticketDetailExpanded = false;
+let metadataExpanded = false;
+const expandedComments = new Set();
+let renderedDetailTicketId = null;
 let activeTicketActionMenuId = null;
 let activeTicketActionAnchorTop = null;
 let composerDraftKey = null;
 let composerDraftValues = null;
 let metadataEdit = null;
+let renderedSettingsBaseUrl = null;
+let settingsRenderGeneration = 0;
 const ticketSyncRequests = new Map();
 const expandedTicketIds = new Set();
 const collapsedTicketIds = new Set();
@@ -52,7 +57,7 @@ function captureFocus(root){
   if(!element || !root.contains(element)) return null;
   let selector=element.id ? '#'+CSS.escape(element.id) : null;
   if(!selector){
-    const attributes=['data-ticket-action-menu','data-ticket-action','data-expand','data-metadata-field','data-id'];
+    const attributes=['data-ticket-action-menu','data-ticket-action','data-expand','data-expand-comment','data-metadata-field','data-id'];
     const attribute=attributes.find(function(name){ return element.hasAttribute(name); });
     if(attribute) selector='['+attribute+'="'+CSS.escape(element.getAttribute(attribute))+'"]';
     const row=element.closest('.ticket-row');
@@ -136,7 +141,7 @@ function renderSyncTray(){
   if(!state) return;
   const tray=document.getElementById('sync-tray'); tray.replaceChildren();
   const model=deriveSyncTrayState();
-  const message=document.createElement('span'); message.className='sync-tray-message';
+  const message=document.createElement('span'); message.className='sync-tray-message'; message.setAttribute('role','status'); message.setAttribute('aria-live','polite');
   message.textContent=model.kind === 'failedTicket'
     ? '⚠ '+STRINGS.syncTrayAttention+' · '+STRINGS.syncTrayFailedTicket.replace('{0}',String(model.ticketId))
     : model.kind === 'clear'
@@ -201,16 +206,25 @@ document.getElementById('project-select').addEventListener('change', function(){
 const searchInput = document.getElementById('search-input');
 const searchClearButton = document.getElementById('search-clear-btn');
 const ticketLayoutSelect = document.getElementById('ticket-layout-mode');
+const layoutButton = document.getElementById('layout-btn');
+const layoutPopover = document.getElementById('layout-popover');
+function closeLayoutPopover(){ layoutPopover.classList.add('hidden'); layoutButton.setAttribute('aria-expanded','false'); }
+layoutButton.addEventListener('click',function(){ const opening=layoutPopover.classList.contains('hidden'); layoutPopover.classList.toggle('hidden',!opening); layoutButton.setAttribute('aria-expanded',String(opening)); if(opening){ const anchor=layoutButton.getBoundingClientRect(); const bounds=layoutPopover.getBoundingClientRect(); layoutPopover.style.left=Math.max(8,Math.min(anchor.right-bounds.width,window.innerWidth-bounds.width-8))+'px'; layoutPopover.style.top=Math.max(8,Math.min(anchor.bottom+4,window.innerHeight-bounds.height-8))+'px'; ticketLayoutSelect.focus(); } });
+document.addEventListener('click',function(event){ if(!isElement(event.target) || !event.target.closest('.layout-control,.layout-popover')) closeLayoutPopover(); });
+document.addEventListener('scroll',function(event){ if(!layoutPopover.classList.contains('hidden') && event.target !== layoutPopover) closeLayoutPopover(); },true);
+layoutPopover.addEventListener('keydown',function(event){ if(event.key === 'Escape'){ closeLayoutPopover(); layoutButton.focus(); event.preventDefault(); } });
 function applyTicketLayoutMode(){
   const layout=document.querySelector('.tickets-layout');
   layout.classList.toggle('layout-single',ticketLayoutMode === 'single');
   layout.classList.toggle('layout-split',ticketLayoutMode === 'split');
   ticketLayoutSelect.value=ticketLayoutMode;
+  updateCommentExpandButtons();
 }
 ticketLayoutSelect.addEventListener('change',function(){
   ticketLayoutMode=this.value;
   vscode.setState(Object.assign({},vscode.getState() || {},{ticketLayoutMode:ticketLayoutMode}));
   applyTicketLayoutMode();
+  closeLayoutPopover(); layoutButton.focus();
 });
 applyTicketLayoutMode();
 function updateSearchClearButton(){ searchClearButton.classList.toggle('hidden', !searchInput.value); }
@@ -462,16 +476,15 @@ function renderTicketRow(ticket){
   const hasChildren = !!(ticket.children && ticket.children.length);
   const expanded = expandedTicketIds.has(ticket.id);
   const sync = ticket.syncState && ticket.syncState !== 'Synced' && ticket.syncState !== 'Draft' ? syncBadge(ticket.syncState) : '';
-  const status = state.settings && state.settings.showStatus !== false && ticket.statusName ? badge(ticket.statusName,'ticket-status','•') : '';
+  const status = state.settings && state.settings.showStatus !== false && ticket.statusName ? '<span class="ticket-attribute" title="'+esc(STRINGS.sortStatus)+'">'+esc(ticket.statusName)+'</span>' : '';
   const due = dueBadge(ticket);
-  const tracker = state.settings && state.settings.showTracker !== false ? metadataBadge(ticket.trackerName,'ticket-tracker',STRINGS.sortTracker) : '';
-  const priority = state.settings && state.settings.showPriority !== false ? metadataBadge(ticket.priorityName,'ticket-priority',STRINGS.sortPriority) : '';
-  const metadata = tracker+priority;
+  const tracker = state.settings && state.settings.showTracker !== false && ticket.trackerName ? '<span class="ticket-attribute" title="'+esc(STRINGS.sortTracker)+'">'+esc(ticket.trackerName)+'</span>' : '';
+  const priority = state.settings && state.settings.showPriority !== false && ticket.priorityName ? '<span class="ticket-attribute" title="'+esc(STRINGS.sortPriority)+'">'+esc(ticket.priorityName)+'</span>' : '';
   const actionItems = [['open',STRINGS.openInEditor],['comment',STRINGS.addCommentAction],['browser',STRINGS.openInBrowser],['child',STRINGS.createChildTicket],['sync',STRINGS.syncToRedmine]].map(function(item){ return '<button type="button" role="menuitem" data-ticket-action="'+item[0]+'" data-ticket="'+ticket.id+'">'+actionIcon(item[0])+esc(item[1])+'</button>'; }).join('');
   const actionMenu = '<span class="ticket-actions"><button class="ticket-action-btn" type="button" data-ticket-action-menu="'+ticket.id+'" aria-haspopup="menu" aria-expanded="false" aria-controls="ticket-action-menu-'+ticket.id+'" aria-label="'+esc(STRINGS.ticketActionMenu)+'" title="'+esc(STRINGS.ticketActionMenu)+'"><span class="icon-more" aria-hidden="true">•••</span></button><span class="ticket-action-menu hidden" id="ticket-action-menu-'+ticket.id+'" role="menu">'+actionItems+'</span></span>';
   const expand = hasChildren ? '<button class="expand-btn" type="button" data-expand="'+ticket.id+'" aria-expanded="'+expanded+'" aria-label="'+esc(expanded ? STRINGS.collapseTitle : STRINGS.expandTitle)+'" title="'+esc(expanded ? STRINGS.collapseTitle : STRINGS.expandTitle)+'"><span class="expand-icon '+(expanded?'expanded':'collapsed')+'" aria-hidden="true"></span></button>' : '<span class="expand-placeholder" aria-hidden="true"></span>';
-  const assignee = state.settings.showAssignee !== false && hasAssignee(ticket.assigneeName) ? avatar(ticket.assigneeName,'ticket-avatar') : '';
-  return '<div class="ticket-row'+(ticket.level > 0 ? ' child-row' : '')+(selected ? ' selected' : '')+'" data-id="'+ticket.id+'" role="listitem" aria-current="'+selected+'" tabindex="0" data-level="'+esc(ticket.level || 0)+'">'+expand+'<span class="ticket-id">#'+ticket.id+'</span><span class="ticket-subject" title="'+esc(ticket.subject)+'">'+esc(ticket.subject)+'</span><span class="badges">'+metadata+status+due+sync+'</span>'+assignee+actionMenu+'</div>';
+  const assignee = state.settings.showAssignee !== false && hasAssignee(ticket.assigneeName) ? '<span class="ticket-attribute ticket-assignee" title="'+esc(STRINGS.sortAssignee)+'">'+esc(ticket.assigneeName)+'</span>' : '';
+  return '<div class="ticket-row'+(ticket.level > 0 ? ' child-row' : '')+(selected ? ' selected' : '')+'" data-id="'+ticket.id+'" role="listitem" aria-current="'+selected+'" tabindex="0" data-level="'+esc(ticket.level || 0)+'">'+expand+'<div class="ticket-row-content"><div class="ticket-row-main"><span class="ticket-id">#'+ticket.id+'</span><span class="ticket-subject" title="'+esc(ticket.subject)+'">'+esc(ticket.subject)+'</span></div><div class="ticket-row-meta">'+status+tracker+priority+assignee+due+sync+'</div></div>'+actionMenu+'</div>';
 }
 function isTicketActionTarget(target){ return isElement(target) && !!target.closest('.ticket-action-btn,.ticket-action-menu,.expand-btn'); }
 function renderTickets(){
@@ -492,7 +505,7 @@ function renderTickets(){
   if(state.loading.tickets){ list.innerHTML='<div class="state-msg loading-state" role="status">'+esc(STRINGS.loadingTickets)+'</div>'; more.classList.add('hidden'); updateSyncButtonStates(); return; }
   const hasActiveQuickFilter=hasEffectiveQuickFilters();
   const tickets = (searchQuery || hasActiveQuickFilter ? flattenAll(state.tickets) : flattenVisible(state.tickets)).filter(function(ticket){ return matchesSearch(ticket) && matchesQuickFilters(ticket); });
-  count.textContent = hasActiveQuickFilter ? STRINGS.shownLoadedTotal.replace('{0}',String(tickets.length)).replace('{1}',String(state.loadedTicketCount)).replace('{2}',String(state.totalTicketCount)) : STRINGS.ticketCountLabel.replace('{0}', String(tickets.length));
+  count.textContent = STRINGS.shownLoadedTotal.replace('{0}',String(tickets.length)).replace('{1}',String(state.loadedTicketCount)).replace('{2}',String(state.totalTicketCount));
   list.innerHTML = tickets.length ? tickets.map(renderTicketRow).join('') : '<div class="state-msg" role="status"><strong>'+esc(STRINGS.noTicketsFound)+'</strong><p>'+esc(STRINGS.searchEmptyHint)+'</p></div>';
   if(state.loadedTicketCount < state.totalTicketCount){ more.classList.remove('hidden'); more.textContent=STRINGS.loadMore+' ('+state.loadedTicketCount+' / '+state.totalTicketCount+')'; } else more.classList.add('hidden');
   list.querySelectorAll('.ticket-row').forEach(function(row){
@@ -528,6 +541,7 @@ function metadataPatch(){
   return patch;
 }
 function renderTicketDetailPanel(ticket){
+  if(renderedDetailTicketId !== ticket.id){ renderedDetailTicketId=ticket.id; metadataExpanded=metadataEdit?.ticketId === ticket.id; ticketDetailExpanded=false; }
   const card=document.getElementById('ticket-detail-card');
   const options=editOptionsFor(ticket.id);
   const ready=!!options && !options.loading && !options.error;
@@ -551,19 +565,20 @@ function renderTicketDetailPanel(ticket){
       +renderSelect('assignee',values.assignee,options?.assignees || [],STRINGS.sortAssignee,pending || !ready,true)
       +fields.slice(4).map(function(field){ return '<label class="detail-field"><span>'+esc(field[1])+'</span><input class="detail-input" type="date" data-metadata-field="'+field[0]+'" value="'+esc(values[field[0]])+'"'+(pending?' disabled':'')+'></label>'; }).join('')
     : fields.map(function(field){ const value=values[field[0]] || (field[0] === 'assignee' ? STRINGS.assigneeUnassigned : STRINGS.notSet); return '<div class="detail-meta"><span>'+esc(field[1])+'</span><strong>'+esc(value)+'</strong></div>'; }).join('');
-  const metadata='<section class="detail-section detail-expanded" aria-labelledby="metadata-heading"><div class="detail-section-head"><h3 id="metadata-heading">'+esc(STRINGS.ticketMetadata)+'</h3>'+(editing ? '' : '<button id="metadata-edit-btn" class="btn btn-secondary" type="button"'+(!canEdit?' disabled':'')+'>'+esc(STRINGS.editMetadata)+'</button>')+'</div><div class="detail-metadata-grid">'+metadataFields+'</div>'+loadingHint+errorHint+statusHint+(editing ? '<p class="detail-hint">'+esc(STRINGS.metadataApplyHint)+'</p><div class="metadata-actions"><button id="metadata-apply-btn" class="btn btn-primary" type="button"'+(pending || !canEdit || !Object.keys(metadataPatch()).length?' disabled':'')+'>'+esc(pending ? STRINGS.applyingMetadata : STRINGS.applyMetadata)+'</button><button id="metadata-cancel-btn" class="btn btn-secondary" type="button"'+(pending?' disabled':'')+'>'+esc(STRINGS.cancelAction)+'</button></div>' : '')+'</section>';
+  const metadata='<details class="detail-section detail-metadata" id="metadata-details"'+(metadataExpanded || editing?' open':'')+'><summary id="metadata-heading">'+esc(STRINGS.ticketMetadata)+'<span class="metadata-summary">'+esc(ticket.statusName || '')+(ticket.priorityName?' · '+esc(ticket.priorityName):'')+'</span></summary><div class="detail-section-head">'+(editing ? '' : '<button id="metadata-edit-btn" class="btn btn-secondary" type="button"'+(!canEdit?' disabled':'')+'>'+esc(STRINGS.editMetadata)+'</button>')+'</div><div class="detail-metadata-grid">'+metadataFields+'</div>'+loadingHint+errorHint+statusHint+(editing ? '<p class="detail-hint">'+esc(STRINGS.metadataApplyHint)+'</p><div class="metadata-actions"><button id="metadata-apply-btn" class="btn btn-primary" type="button"'+(pending || !canEdit || !Object.keys(metadataPatch()).length?' disabled':'')+'>'+esc(pending ? STRINGS.applyingMetadata : STRINGS.applyMetadata)+'</button><button id="metadata-cancel-btn" class="btn btn-secondary" type="button"'+(pending?' disabled':'')+'>'+esc(STRINGS.cancelAction)+'</button></div>' : '')+'</details>';
   const assigneeAvatar=hasAssignee(ticket.assigneeName) ? avatar(ticket.assigneeName,'detail-avatar') : '';
-  card.innerHTML='<div class="detail-head"><div class="detail-title"><span class="ticket-id">#'+ticket.id+'</span><span>'+esc(ticket.subject)+'</span></div><div class="detail-header-actions"><button class="btn btn-secondary detail-toggle" id="ticket-detail-toggle" type="button" title="'+esc(ticketDetailExpanded?STRINGS.closeDetail:STRINGS.openDetail)+'" aria-label="'+esc(ticketDetailExpanded?STRINGS.closeDetail:STRINGS.openDetail)+'" aria-expanded="'+ticketDetailExpanded+'">'+(ticketDetailExpanded?'⌃':'⌄')+'</button><button class="btn btn-secondary detail-toggle" id="detail-cancel-btn" type="button" title="'+esc(STRINGS.dismissDetail)+'" aria-label="'+esc(STRINGS.dismissDetail)+'">'+actionIcon('cancel')+'</button></div></div>'
+  card.innerHTML='<div class="detail-head"><div class="detail-title"><span class="ticket-id">#'+ticket.id+'</span><span>'+esc(ticket.subject)+'</span></div><div class="detail-header-actions"><button class="btn btn-secondary detail-toggle" id="detail-cancel-btn" type="button" title="'+esc(STRINGS.dismissDetail)+'" aria-label="'+esc(STRINGS.dismissDetail)+'">'+actionIcon('cancel')+'</button></div></div>'
     +'<div class="detail-project">'+esc(ticket.projectName || STRINGS.projectNone)+assigneeAvatar+'</div>'+parent
-    +'<div class="detail-chips">'+metadataBadge(ticket.statusName,'ticket-status',STRINGS.sortStatus)+metadataBadge(ticket.priorityName,'ticket-priority',STRINGS.sortPriority)+metadataBadge(ticket.trackerName,'ticket-tracker',STRINGS.sortTracker)+(ticket.dueDate ? badge(STRINGS.dueDateLabel+' '+ticket.dueDate,'','•') : '')+'</div>'
-    +'<div class="detail-actions"><button class="btn btn-primary" id="detail-open-btn" type="button" title="'+esc(STRINGS.openTicketTooltip)+'" aria-label="'+esc(STRINGS.openTicketTooltip)+'">'+actionIcon('open')+'<span>'+esc(STRINGS.openInEditor)+'</span></button><button class="btn btn-secondary" id="detail-comment-btn" type="button">'+actionIcon('comment')+'<span>'+esc(STRINGS.addCommentAction)+'</span></button><span class="ticket-actions detail-more"><button class="ticket-action-btn" id="detail-more-btn" type="button" aria-haspopup="menu" aria-expanded="false" aria-controls="detail-action-menu" aria-label="'+esc(STRINGS.ticketActionMenu)+'">•••</button><span class="ticket-action-menu hidden" id="detail-action-menu" role="menu"><button role="menuitem" data-detail-action="open" type="button">'+actionIcon('open')+esc(STRINGS.openInEditor)+'</button><button role="menuitem" data-detail-action="comment" type="button">'+actionIcon('comment')+esc(STRINGS.addCommentAction)+'</button><button role="menuitem" id="detail-browser-btn" data-detail-action="browser" type="button">'+actionIcon('browser')+esc(STRINGS.openInBrowser)+'</button><button role="menuitem" data-detail-action="child" type="button">'+actionIcon('child')+esc(STRINGS.createChildTicket)+'</button><button role="menuitem" class="detail-sync-button" id="detail-sync-btn" data-detail-action="sync" type="button">'+actionIcon('sync')+'<span>'+esc(STRINGS.syncToRedmine)+'</span></button></span></span></div>'
-    +'<section class="detail-section" aria-labelledby="editor-state-heading"><h3 id="editor-state-heading">'+esc(STRINGS.editingState)+'</h3><div id="detail-sync-state" role="status" aria-live="polite"></div></section>'
-    +metadata+'<div class="detail-tabs" role="tablist" aria-label="'+esc(STRINGS.tabTickets)+'"><button id="detail-tab-overview" role="tab" aria-selected="'+(detailTab === 'overview')+'" aria-controls="detail-overview" tabindex="'+(detailTab === 'overview'?'0':'-1')+'" type="button">'+esc(STRINGS.overview)+'</button><button id="detail-tab-comments" role="tab" aria-selected="'+(detailTab === 'comments')+'" aria-controls="detail-comments" tabindex="'+(detailTab === 'comments'?'0':'-1')+'" type="button">'+esc(STRINGS.tabComments)+' <span class="tab-badge">'+(state.comments.ticketId === ticket.id ? state.comments.items.length : 0)+'</span></button></div>'
-    +'<div id="detail-overview" role="tabpanel" aria-labelledby="detail-tab-overview"'+(detailTab === 'overview'?'':' hidden')+'><section class="detail-section" aria-labelledby="description-heading"><h3 id="description-heading">'+esc(STRINGS.remoteDescription)+'</h3>'+warning+description+'</section></div><div id="detail-comments" role="tabpanel" aria-labelledby="detail-tab-comments"'+(detailTab === 'comments'?'':' hidden')+'><div id="comments-list"></div></div>';
+    +'<div class="detail-sync-line"><span class="sr-only">'+esc(STRINGS.editingState)+'</span><span id="detail-sync-state" role="status" aria-live="polite"></span></div>'
+    +'<div class="detail-actions"><button class="btn btn-primary" id="detail-open-btn" type="button" title="'+esc(STRINGS.openTicketTooltip)+'">'+actionIcon('open')+'<span>'+esc(STRINGS.openInEditor)+'</span></button><button class="btn btn-secondary detail-sync-button" id="detail-sync-btn" type="button" title="'+esc(STRINGS.syncTicketTooltip)+'">'+actionIcon('sync')+'<span>'+esc(STRINGS.syncToRedmine)+'</span></button><button class="btn btn-secondary detail-icon-button" id="detail-comment-btn" type="button" title="'+esc(STRINGS.addCommentAction)+'" aria-label="'+esc(STRINGS.addCommentAction)+'">'+actionIcon('comment')+'</button><span class="ticket-actions detail-more"><button class="ticket-action-btn" id="detail-more-btn" type="button" aria-haspopup="menu" aria-expanded="false" aria-controls="detail-action-menu" aria-label="'+esc(STRINGS.ticketActionMenu)+'">•••</button><span class="ticket-action-menu hidden" id="detail-action-menu" role="menu"><button role="menuitem" id="detail-browser-btn" data-detail-action="browser" type="button">'+actionIcon('browser')+esc(STRINGS.openInBrowser)+'</button><button role="menuitem" data-detail-action="child" type="button">'+actionIcon('child')+esc(STRINGS.createChildTicket)+'</button></span></span></div>'
+    +'<div class="detail-tabs" role="tablist" aria-label="'+esc(STRINGS.tabTickets)+'"><button id="detail-tab-overview" role="tab" aria-selected="'+(detailTab === 'overview')+'" aria-controls="detail-overview" tabindex="'+(detailTab === 'overview'?'0':'-1')+'" type="button">'+esc(STRINGS.overview)+'</button><button id="detail-tab-comments" role="tab" aria-selected="'+(detailTab === 'comments')+'" aria-controls="detail-comments" tabindex="'+(detailTab === 'comments'?'0':'-1')+'" type="button">'+esc(STRINGS.tabComments)+' <span class="tab-badge">'+(state.comments.ticketId === ticket.id ? state.comments.items.length : 0)+'</span></button></div>'
+    +'<div id="detail-overview" role="tabpanel" aria-labelledby="detail-tab-overview"'+(detailTab === 'overview'?'':' hidden')+'>'+metadata+'<section class="detail-section" aria-labelledby="description-heading"><div class="detail-section-head"><h3 id="description-heading">'+esc(STRINGS.remoteDescription)+'</h3><button class="btn btn-secondary detail-toggle" id="ticket-detail-toggle" type="button" title="'+esc(ticketDetailExpanded?STRINGS.closeDetail:STRINGS.openDetail)+'" aria-label="'+esc(ticketDetailExpanded?STRINGS.closeDetail:STRINGS.openDetail)+'" aria-expanded="'+ticketDetailExpanded+'">'+(ticketDetailExpanded?'⌃':'⌄')+'</button></div>'+warning+description+'</section></div><div id="detail-comments" role="tabpanel" aria-labelledby="detail-tab-comments"'+(detailTab === 'comments'?'':' hidden')+'><div id="comments-list"></div></div>';
+  card.querySelector('#metadata-details').addEventListener('toggle',function(){ metadataExpanded=this.open; });
   card.querySelector('#ticket-detail-toggle').addEventListener('click',function(){ ticketDetailExpanded=!ticketDetailExpanded; renderTicketDetail(); document.getElementById('ticket-detail-toggle').focus(); });
   card.querySelector('#detail-cancel-btn').addEventListener('click',function(){ req('ticket.cancelDetail'); });
   card.querySelector('#detail-open-btn').addEventListener('click',function(){ req('ticket.openEditor',{ticketId:ticket.id}); });
   card.querySelector('#detail-comment-btn').addEventListener('click',function(){ req('comment.add',{ticketId:ticket.id}); });
+  card.querySelector('#detail-sync-btn').addEventListener('click',function(){ req('ticket.syncSelected',{ticketId:ticket.id}); });
   card.querySelector('#detail-more-btn').addEventListener('click',function(event){
     event.stopPropagation(); const menu=card.querySelector('#detail-action-menu'); const opening=menu.classList.contains('hidden'); closeTicketActionMenus();
     if(!opening) return; menu.classList.remove('hidden'); activeTicketActionMenuId='detail-action-menu';
@@ -572,11 +587,11 @@ function renderTicketDetailPanel(ticket){
     activeTicketActionAnchorTop=rect.top; menu.querySelector('[role="menuitem"]')?.focus();
   });
   card.querySelectorAll('[data-detail-action]').forEach(function(button){ button.addEventListener('click',function(event){ event.stopPropagation(); runTicketAction(button.dataset.detailAction,ticket.id); }); });
-  const switchDetailTab=function(name,focus){ detailTab=name; persistViewState(); card.querySelectorAll('.detail-tabs [role="tab"]').forEach(function(tab){ const selected=tab.id === 'detail-tab-'+name; tab.setAttribute('aria-selected',String(selected)); tab.tabIndex=selected?0:-1; }); card.querySelector('#detail-overview').hidden=name !== 'overview'; card.querySelector('#detail-comments').hidden=name !== 'comments'; if(focus) card.querySelector('#detail-tab-'+name).focus(); };
+  const switchDetailTab=function(name,focus){ detailTab=name; persistViewState(); card.querySelectorAll('.detail-tabs [role="tab"]').forEach(function(tab){ const selected=tab.id === 'detail-tab-'+name; tab.setAttribute('aria-selected',String(selected)); tab.tabIndex=selected?0:-1; }); card.querySelector('#detail-overview').hidden=name !== 'overview'; card.querySelector('#detail-comments').hidden=name !== 'comments'; if(name === 'comments') updateCommentExpandButtons(); if(focus) card.querySelector('#detail-tab-'+name).focus(); };
   card.querySelector('#detail-tab-overview').addEventListener('click',function(){ switchDetailTab('overview',false); });
   card.querySelector('#detail-tab-comments').addEventListener('click',function(){ switchDetailTab('comments',false); });
   card.querySelector('.detail-tabs').addEventListener('keydown',function(event){ const next=event.key === 'ArrowRight' || event.key === 'End' ? 'comments' : event.key === 'ArrowLeft' || event.key === 'Home' ? 'overview' : null; if(next){ switchDetailTab(next,true); event.preventDefault(); } });
-  card.querySelector('#metadata-edit-btn')?.addEventListener('click',function(){ const original=ticketMetadataValues(ticket); metadataEdit={ticketId:ticket.id,original:original,values:Object.assign({},original),requestId:null}; renderTicketDetail(); card.querySelector('[data-metadata-field]')?.focus(); });
+  card.querySelector('#metadata-edit-btn')?.addEventListener('click',function(){ const original=ticketMetadataValues(ticket); metadataExpanded=true; metadataEdit={ticketId:ticket.id,original:original,values:Object.assign({},original),requestId:null}; renderTicketDetail(); card.querySelector('[data-metadata-field]')?.focus(); });
   card.querySelector('#metadata-cancel-btn')?.addEventListener('click',function(){ metadataEdit=null; renderTicketDetail(); document.getElementById('metadata-edit-btn')?.focus(); });
   card.querySelector('#metadata-apply-btn')?.addEventListener('click',function(){
     if(!metadataEdit || metadataEdit.requestId) return;
@@ -615,7 +630,7 @@ function renderComposerPanel(panel){
 function renderTicketDetail(){
   if(!state) return; const card=document.getElementById('ticket-detail-card'); const panel=state.workPanel;
   document.getElementById('ticket-detail-empty').classList.toggle('hidden',!!(state.selectedTicket || panel));
-  if(!panel){ composerDraftKey=null; composerDraftValues=null; if(!state.selectedTicket){ card.classList.add('hidden'); card.innerHTML=''; return; } renderTicketDetailPanel(state.selectedTicket); return; }
+  if(!panel){ composerDraftKey=null; composerDraftValues=null; if(!state.selectedTicket){ renderedDetailTicketId=null; metadataExpanded=false; ticketDetailExpanded=false; card.classList.add('hidden'); card.innerHTML=''; return; } renderTicketDetailPanel(state.selectedTicket); return; }
   if(panel.mode === 'detail'){ composerDraftKey=null; composerDraftValues=null; if(state.selectedTicket && state.selectedTicket.id === panel.ticketId) renderTicketDetailPanel(state.selectedTicket); else { card.classList.add('hidden'); card.innerHTML=''; } return; }
   renderComposerPanel(panel);
 }
@@ -624,13 +639,11 @@ function renderTicketDetail(){
 function renderFilterChips(){
   if(!state) return;
   const filters=state.settings.filters;
-  const labels=[];
-  if(filters.subjectQuery) labels.push(STRINGS.filterSubjectPrefix+filters.subjectQuery);
-  if((filters.assigneeIds || []).length) labels.push(STRINGS.filterAssigneeCount+': '+filters.assigneeIds.length);
-  if(filters.includeUnassigned) labels.push(STRINGS.filterIncludeUnassigned);
-  if((filters.statusIds || []).length) labels.push(STRINGS.filterStatusCount+': '+filters.statusIds.length);
+  const count=Number(!!filters.subjectQuery)+(filters.assigneeIds || []).length+(filters.statusIds || []).length+(filters.priorityIds || []).length+(filters.trackerIds || []).length+Number(filters.includeUnassigned === false);
+  const badge=document.getElementById('advanced-filter-count'); badge.textContent=String(count); badge.classList.toggle('hidden',count === 0);
+  filterTrigger.setAttribute('aria-label',STRINGS.advancedFilters+(count ? ' '+count : ''));
   const element=document.getElementById('filter-chips');
-  if(element) element.innerHTML=labels.map(function(label){ return '<span class="filter-chip">'+esc(label)+'</span>'; }).join('');
+  if(element) element.textContent=count ? STRINGS.advancedFilters+' '+count : '';
 }
 
 // ── Unsynced ───────────────────────────────────────────────────────────────
@@ -650,9 +663,10 @@ function unsyncedKindLabel(kind){ return kind === 'ticket' ? STRINGS.unsyncedKin
 function renderUnsynced(){
   if(!state) return; const items=state.unsynced.items || []; const count=state.unsynced.totalCount || 0; const tabBadge=document.getElementById('unsynced-badge'); tabBadge.textContent=String(count); tabBadge.setAttribute('aria-label',String(count)); tabBadge.classList.toggle('hidden',count === 0);
   const countLabel=document.getElementById('unsynced-count-label'); countLabel.textContent=(STRINGS.unsyncedCountLabel || STRINGS.tabUnsynced).replace('{0}',String(count)); const syncAll=document.getElementById('sync-all-btn'); const requiresReview=items.some(function(item){ return resolveUnsyncedBadge(item).kind === 'review'; }); syncAll.classList.toggle('hidden',count === 0 || requiresReview); syncAll.onclick=function(){ req('unsynced.syncAll'); };
-  const queued=items.filter(function(item){ return resolveUnsyncedBadge(item).kind === 'queued'; }).length; const review=items.filter(function(item){ return resolveUnsyncedBadge(item).kind === 'review'; }).length; const conflict=items.filter(function(item){ return resolveUnsyncedBadge(item).kind === 'conflict'; }).length; const failed=items.filter(function(item){ return resolveUnsyncedBadge(item).kind === 'failed'; }).length; const summary=document.getElementById('unsynced-summary'); summary.innerHTML=(queued ? '<span class="summary-badge">'+esc(STRINGS.syncQueued)+' <strong>'+queued+'</strong></span>' : '')+(review ? '<span class="summary-badge">'+esc(STRINGS.syncReviewRequired || STRINGS.syncFailed)+' <strong>'+review+'</strong></span>' : '')+(conflict ? '<span class="summary-badge">'+esc(STRINGS.syncConflict)+' <strong>'+conflict+'</strong></span>' : '')+(failed ? '<span class="summary-badge">'+esc(STRINGS.syncFailed)+' <strong>'+failed+'</strong></span>' : '');
+  const queued=items.filter(function(item){ return resolveUnsyncedBadge(item).kind === 'queued'; }).length; const review=items.filter(function(item){ return resolveUnsyncedBadge(item).kind === 'review'; }).length; const conflict=items.filter(function(item){ return resolveUnsyncedBadge(item).kind === 'conflict'; }).length; const failed=items.filter(function(item){ return resolveUnsyncedBadge(item).kind === 'failed'; }).length; const summary=document.getElementById('unsynced-summary'); summary.innerHTML=(review ? '<span class="summary-badge">'+esc(STRINGS.syncReviewRequired || STRINGS.syncFailed)+' <strong>'+review+'</strong></span>' : '')+(queued ? '<span class="summary-badge">'+esc(STRINGS.syncQueued)+' <strong>'+queued+'</strong></span>' : '')+(conflict ? '<span class="summary-badge">'+esc(STRINGS.syncConflict)+' <strong>'+conflict+'</strong></span>' : '')+(failed ? '<span class="summary-badge">'+esc(STRINGS.syncFailed)+' <strong>'+failed+'</strong></span>' : '');
   const list=document.getElementById('unsynced-list'); if(!items.length){ list.innerHTML='<div class="state-msg">'+STRINGS.noUnsyncedChanges+'</div>'; updateSyncButtonStates(); return; }
-  list.innerHTML=items.map(function(item){ const status=resolveUnsyncedBadge(item); const open=item.documentUri ? '<button class="btn btn-secondary" type="button" data-uri="'+esc(item.documentUri)+'">'+actionIcon('open')+esc(STRINGS.openInEditor)+'</button>' : ''; const discardsLaterChanges=item.discardMode === 'nextIntent'; const discardLabel=discardsLaterChanges ? STRINGS.discardLaterChangesAction : STRINGS.discardAction; const discardTitle=discardsLaterChanges ? STRINGS.discardLaterChangesTitle : STRINGS.discardTitle; const discard=item.discardMode === 'none' || item.canDiscard === false ? '<button class="btn btn-secondary" type="button" disabled>'+esc(discardLabel)+'</button>' : '<button class="btn btn-secondary" type="button" data-discard-key="'+safeJson(item.key)+'" title="'+esc(discardTitle)+'">'+esc(discardLabel)+'</button>'; const requiresReview=status.requiresReview === true; const actionLabel=requiresReview ? STRINGS.resolveRecovery : STRINGS.syncToRedmine; const actionTitle=requiresReview ? ' title="'+esc(STRINGS.resolveRecoveryTooltip)+'"' : ''; const sync=item.canSync === false ? '<button class="btn btn-secondary" type="button" disabled>'+actionIcon('sync')+esc(actionLabel)+'</button>' : '<button class="btn btn-secondary" type="button" data-sync-key="'+safeJson(item.key)+'"'+actionTitle+'>'+actionIcon('sync')+esc(actionLabel)+'</button>'; const detail=item.detail || ''; return '<div class="unsynced-card" role="listitem"><span class="unsynced-kind-label">'+esc(unsyncedKindLabel(item.key.kind))+'</span><div class="unsynced-body"><div class="unsynced-label">'+esc(item.label)+'</div>'+(detail ? '<div class="unsynced-detail">'+esc(detail)+'</div>' : '')+'</div><div class="unsynced-state">'+badge(status.label,status.cls,status.icon)+'</div><div class="unsynced-actions">'+open+discard+sync+'</div></div>'; }).join('');
+  const ordered=items.slice().sort(function(a,b){ return Number(resolveUnsyncedBadge(b).kind === 'review')-Number(resolveUnsyncedBadge(a).kind === 'review'); });
+  list.innerHTML=ordered.map(function(item,index){ const status=resolveUnsyncedBadge(item); const group=index === 0 || resolveUnsyncedBadge(ordered[index-1]).kind === 'review' && status.kind !== 'review' ? '<h3 class="unsynced-group-title">'+esc(status.kind === 'review' ? STRINGS.syncReviewRequired : STRINGS.tabUnsynced)+'</h3>' : ''; const open=item.documentUri ? '<button class="btn btn-secondary" type="button" data-uri="'+esc(item.documentUri)+'">'+actionIcon('open')+esc(STRINGS.openInEditor)+'</button>' : ''; const discardsLaterChanges=item.discardMode === 'nextIntent'; const discardLabel=discardsLaterChanges ? STRINGS.discardLaterChangesAction : STRINGS.discardAction; const discardTitle=discardsLaterChanges ? STRINGS.discardLaterChangesTitle : STRINGS.discardTitle; const discard=item.discardMode === 'none' || item.canDiscard === false ? '<button class="btn btn-secondary" type="button" disabled>'+esc(discardLabel)+'</button>' : '<button class="btn btn-secondary" type="button" data-discard-key="'+safeJson(item.key)+'" title="'+esc(discardTitle)+'">'+esc(discardLabel)+'</button>'; const requiresReview=status.requiresReview === true; const actionLabel=requiresReview ? STRINGS.resolveRecovery : STRINGS.syncToRedmine; const actionTitle=requiresReview ? ' title="'+esc(STRINGS.resolveRecoveryTooltip)+'"' : ''; const sync=item.canSync === false ? '<button class="btn btn-secondary" type="button" disabled>'+actionIcon('sync')+esc(actionLabel)+'</button>' : '<button class="btn btn-secondary" type="button" data-sync-key="'+safeJson(item.key)+'"'+actionTitle+'>'+actionIcon('sync')+esc(actionLabel)+'</button>'; const detail=item.detail || ''; return group+'<div class="unsynced-card" role="listitem"><span class="unsynced-kind-label">'+esc(unsyncedKindLabel(item.key.kind))+'</span><div class="unsynced-body"><div class="unsynced-label">'+esc(item.label)+'</div>'+(detail ? '<div class="unsynced-detail">'+esc(detail)+'</div>' : '')+'</div><div class="unsynced-state">'+badge(status.label,status.cls,status.icon)+'</div><div class="unsynced-actions">'+open+discard+sync+'</div></div>'; }).join('');
   list.querySelectorAll('[data-uri]').forEach(function(button){ button.addEventListener('click',function(){ req('unsynced.openLocalFile',{documentUri:button.dataset.uri}); }); });
   list.querySelectorAll('[data-discard-key]').forEach(function(button){ button.addEventListener('click',function(){ try { req('unsynced.discardOne',{key:JSON.parse(button.getAttribute('data-discard-key'))}); } catch {} }); });
   list.querySelectorAll('[data-sync-key]').forEach(function(button){ button.addEventListener('click',function(){ try { req('unsynced.syncOne',{key:JSON.parse(button.getAttribute('data-sync-key'))}); } catch {} }); });
@@ -660,16 +674,40 @@ function renderUnsynced(){
 }
 
 // ── Comments ───────────────────────────────────────────────────────────────
+function updateCommentExpandButtons(){
+  document.querySelectorAll('.comment-card').forEach(function(card){
+    if(!card.getBoundingClientRect().width) return;
+    const body=card.querySelector('.comment-body-clamped');
+    const button=card.querySelector('.comment-expand');
+    if(body && button) button.classList.toggle('hidden',body.scrollHeight <= body.clientHeight+1);
+  });
+}
+window.addEventListener('resize',updateCommentExpandButtons);
 function renderComments(){
-  if(!state) return; const comments=state.comments; const list=document.getElementById('comments-list'); if(!list) return; const ticketId=state.selectedTicketId; list.setAttribute('aria-busy',String(comments.loading)); const firstLine=s=>String(s||'').split(/\r?\n/)[0];
+  if(!state) return; const comments=state.comments; const list=document.getElementById('comments-list'); if(!list) return; const ticketId=state.selectedTicketId; list.setAttribute('aria-busy',String(comments.loading));
   if(ticketId === undefined){ list.innerHTML='<div class="state-msg">'+STRINGS.noTicketSelected+'</div>'; return; }
   if(comments.ticketId !== ticketId){ list.innerHTML='<div class="state-msg">'+esc(STRINGS.loadingComments)+'</div>'; return; }
-  const header='<div class="comments-header"><span class="comments-header-label">'+esc(STRINGS.commentsForTicket)+' #'+ticketId+'</span><div class="comments-header-actions"><button class="btn btn-primary" id="add-comment-btn" type="button">'+actionIcon('comment')+esc(STRINGS.addCommentAction)+'</button><button class="btn btn-secondary" id="reload-comments-btn" type="button">'+actionIcon('refresh')+esc(STRINGS.reloadComments)+'</button></div></div>';
+  const header='<div class="comments-header"><span class="comments-header-label">'+esc(STRINGS.commentsForTicket)+' #'+ticketId+'</span><div class="comments-header-actions"><button class="btn btn-secondary" id="add-comment-btn" type="button">'+actionIcon('comment')+esc(STRINGS.addCommentAction)+'</button><button class="btn btn-secondary detail-icon-button" id="reload-comments-btn" type="button" title="'+esc(STRINGS.reloadComments)+'" aria-label="'+esc(STRINGS.reloadComments)+'">'+actionIcon('refresh')+'</button></div></div>';
   let content='';
-  if(comments.loading) content='<div class="state-msg">'+STRINGS.loadingComments+'</div>'; else if(comments.error) content='<div class="state-msg error-msg">'+esc(comments.error)+'</div>'; else if(!comments.items.length) content='<div class="state-msg">'+STRINGS.noComments+'</div>'; else content='<div class="comment-list" role="list">'+comments.items.map(function(cm){ const unsynced=cm.hasUnsyncedEdit ? badge(STRINGS.unsyncedEditBadge,'sync-dirty','•') : ''; const syncBtn=cm.syncKey?'<button class="btn btn-secondary" type="button" data-sync-comment-key="'+esc(JSON.stringify(cm.syncKey))+'">'+actionIcon('sync')+esc(STRINGS.syncToRedmine)+'</button>':''; const editBtn=cm.id&&cm.editableByCurrentUser?'<button class="btn btn-secondary" type="button" data-edit-comment="'+cm.id+'" data-ticket="'+ticketId+'" aria-label="'+esc(STRINGS.openInEditor)+'">'+actionIcon('open')+esc(STRINGS.openInEditor)+'</button>':''; const browserBtn=cm.id?'<button class="btn btn-secondary" type="button" data-open-comment="'+cm.id+'" data-ticket="'+ticketId+'" aria-label="'+esc(STRINGS.openInBrowser)+'">'+actionIcon('browser')+esc(STRINGS.openInBrowser)+'</button>':''; const journalId=cm.id?'<span class="comment-id">#'+cm.id+'</span>':''; return '<article class="comment-card" role="listitem"><div class="comment-header"><div class="comment-identity">'+avatar(cm.authorName,'comment-avatar')+'<div class="comment-meta"><span class="comment-author">'+esc(cm.authorName)+'</span>'+(cm.updatedAt?'<span class="comment-date">'+esc(cm.updatedAt.substring(0,10))+'</span>':'')+journalId+'</div></div><div class="comment-status">'+unsynced+'</div></div><div class="comment-body">'+esc(firstLine(cm.body))+'</div><div class="comment-actions">'+browserBtn+editBtn+syncBtn+'</div></article>'; }).join('')+'</div>';
-  list.innerHTML=header+content; list.querySelector('#add-comment-btn')?.addEventListener('click',function(){ req('comment.add',{ticketId:ticketId}); }); list.querySelector('#reload-comments-btn')?.addEventListener('click',function(){ req('comment.reload',{ticketId:ticketId}); });
+  if(comments.loading) content='<div class="state-msg">'+STRINGS.loadingComments+'</div>';
+  else if(comments.error) content='<div class="state-msg error-msg">'+esc(comments.error)+'</div>';
+  else if(!comments.items.length) content='<div class="state-msg">'+STRINGS.noComments+'</div>';
+  else content='<div class="comment-list" role="list">'+comments.items.map(function(cm,index){
+    const key=String(ticketId)+':'+String(cm.id || index);
+    const expanded=expandedComments.has(key);
+    const unsynced=cm.hasUnsyncedEdit ? badge(STRINGS.unsyncedEditBadge,'sync-dirty','•') : '';
+    const syncBtn=cm.syncKey?'<button class="btn btn-secondary" type="button" data-sync-comment-key="'+esc(JSON.stringify(cm.syncKey))+'">'+actionIcon('sync')+esc(STRINGS.syncToRedmine)+'</button>':'';
+    const editBtn=cm.id&&cm.editableByCurrentUser?'<button class="btn btn-secondary" type="button" data-edit-comment="'+cm.id+'" data-ticket="'+ticketId+'" aria-label="'+esc(STRINGS.openInEditor)+'">'+actionIcon('open')+esc(STRINGS.openInEditor)+'</button>':'';
+    const browserBtn=cm.id?'<button class="btn btn-secondary" type="button" data-open-comment="'+cm.id+'" data-ticket="'+ticketId+'" aria-label="'+esc(STRINGS.openInBrowser)+'">'+actionIcon('browser')+esc(STRINGS.openInBrowser)+'</button>':'';
+    const journalId=cm.id?'<span class="comment-id">#'+cm.id+'</span>':'';
+    const date=cm.updatedAt?'<time class="comment-date" title="'+esc(cm.updatedAt)+'">'+esc(cm.updatedAt.substring(0,16).replace('T',' '))+'</time>':'';
+    const expand=cm.body?'<button class="comment-expand" type="button" data-expand-comment="'+esc(key)+'" aria-expanded="'+expanded+'">'+esc(expanded?STRINGS.collapseTitle:STRINGS.expandTitle)+'</button>':'';
+    return '<article class="comment-card" role="listitem"><div class="comment-header"><div class="comment-meta"><span class="comment-author">'+esc(cm.authorName)+'</span>'+date+journalId+'</div><div class="comment-status">'+unsynced+'</div></div><div class="comment-body'+(expanded?'':' comment-body-clamped')+'">'+esc(cm.body)+'</div><div class="comment-actions">'+expand+browserBtn+editBtn+syncBtn+'</div></article>';
+  }).join('')+'</div>';
+  list.innerHTML=header+content; updateCommentExpandButtons(); list.querySelector('#add-comment-btn')?.addEventListener('click',function(){ req('comment.add',{ticketId:ticketId}); }); list.querySelector('#reload-comments-btn')?.addEventListener('click',function(){ req('comment.reload',{ticketId:ticketId}); });
   list.querySelectorAll('[data-edit-comment]').forEach(function(button){ button.addEventListener('click',function(){ req('comment.edit',{ticketId:Number(button.dataset.ticket),commentId:Number(button.dataset.editComment)}); }); }); list.querySelectorAll('[data-open-comment]').forEach(function(button){ button.addEventListener('click',function(){ req('comment.openBrowser',{ticketId:Number(button.dataset.ticket),commentId:Number(button.dataset.openComment)}); }); });
   list.querySelectorAll('[data-sync-comment-key]').forEach(function(btn){ btn.addEventListener('click',function(){ try { req('unsynced.syncOne',{key:JSON.parse(btn.getAttribute('data-sync-comment-key'))}); } catch {} }); });
+  list.querySelectorAll('[data-expand-comment]').forEach(function(button){ button.addEventListener('click',function(){ const key=button.dataset.expandComment; if(expandedComments.has(key)) expandedComments.delete(key); else expandedComments.add(key); renderComments(); list.querySelector('[data-expand-comment="'+CSS.escape(key)+'"]')?.focus(); }); });
   updateSyncButtonStates();
 }
 
@@ -681,15 +719,25 @@ function dueToggles(rule){ return [['set-dd-overdue','showOverdue',STRINGS.dueOv
 function renderSettingsBase(){
   if(!state) return;
   const settings=state.settings;
+  const settingsBaseUrl=settings.baseUrl;
+  const generation=++settingsRenderGeneration;
+  const requestForRenderedSettings=function(type,payload){
+    if(generation !== settingsRenderGeneration || settingsBaseUrl !== state?.settings?.baseUrl) return;
+    return req(type,payload);
+  };
   const defaults=settings.editorDefaults || {};
   const element=document.getElementById('settings-content');
-  element.innerHTML='<section class="settings-section"><h3>'+STRINGS.sectionConnection+'</h3>'+
+  const hadCategories=!!element.querySelector('.settings-category');
+  const openCategories=new Set(Array.from(element.querySelectorAll('.settings-category[open]')).map(function(category){ return category.dataset.category; }));
+  const active=document.activeElement;
+  const focused=renderedSettingsBaseUrl === settings.baseUrl && active && element.contains(active) && active.id && typeof active.defaultValue === 'string' && active.value !== active.defaultValue ? {id:active.id,value:active.value} : null;
+  element.innerHTML='<section class="settings-section" data-section="connection"><h3>'+STRINGS.sectionConnection+'</h3>'+
     '<label class="setting-row" for="set-base-url"><span class="setting-label">'+STRINGS.redmineUrlLabel+'</span><input class="setting-input" id="set-base-url" type="url" value="'+esc(settings.baseUrl)+'" autocomplete="url"></label>'+
     '<label class="setting-row" for="set-default-project"><span class="setting-label">'+STRINGS.defaultProjectLabel+'</span><input class="setting-input" id="set-default-project" type="text" value="'+esc(settings.defaultProjectId)+'"></label>'+
     '<label class="setting-row" for="set-request-timeout"><span class="setting-label">'+STRINGS.requestTimeoutLabel+'</span><input class="setting-input setting-input-num" id="set-request-timeout" type="number" min="1" step="1" value="'+esc(settings.requestTimeoutMs)+'"></label>'+
     '<label class="setting-row" for="set-ignore-ssl"><span class="setting-label">'+STRINGS.ignoreSSLErrorsLabel+'</span><input class="setting-check" id="set-ignore-ssl" type="checkbox"'+(settings.ignoreSSLErrors?' checked':'')+'></label><p class="setting-warning" role="note">'+esc(STRINGS.ignoreSSLErrorsWarning)+'</p>'+
     '<div class="setting-row"><span class="setting-label">'+STRINGS.sectionApiKey+'</span><span class="setting-value apikey-status apikey-status-'+(settings.apiKeyStatus === 'set'?'set':'notset')+'">'+(settings.apiKeyStatus === 'set'?STRINGS.apiKeyStatusSet:STRINGS.apiKeyStatusNotSet)+'</span></div><div class="apikey-actions"><button class="btn btn-secondary" id="set-apikey-btn" type="button">'+(settings.apiKeyStatus === 'set'?STRINGS.changeApiKeyBtn:STRINGS.setApiKeyBtn)+'</button>'+(settings.apiKeyStatus === 'set'?'<button class="btn btn-secondary" id="clear-api-key-btn" type="button">'+STRINGS.clearApiKeyBtn+'</button>':'')+'</div></section>'+
-    '<section class="settings-section"><h3>'+STRINGS.sectionTickets+'</h3>'+
+    '<section class="settings-section" data-section="tickets"><h3>'+STRINGS.sectionTickets+'</h3>'+
     '<label class="setting-row" for="set-ticket-limit"><span class="setting-label">'+STRINGS.ticketLimitLabel+'</span><input class="setting-input setting-input-num" id="set-ticket-limit" type="number" min="1" max="500" value="'+esc(settings.ticketListLimit)+'"></label>'+
     '<label class="setting-row" for="set-include-children"><span class="setting-label">'+STRINGS.includeChildProjectsLabel+'</span><input class="setting-check" id="set-include-children" type="checkbox"'+(settings.includeChildProjects?' checked':'')+'></label>'+
     '<label class="setting-row" for="set-show-status"><span class="setting-label">'+STRINGS.showStatusLabel+'</span><input class="setting-check" id="set-show-status" type="checkbox"'+(settings.showStatus?' checked':'')+'></label>'+
@@ -697,7 +745,7 @@ function renderSettingsBase(){
     '<label class="setting-row" for="set-show-tracker"><span class="setting-label">'+STRINGS.showTrackerLabel+'</span><input class="setting-check" id="set-show-tracker" type="checkbox"'+(settings.showTracker?' checked':'')+'></label>'+
     '<label class="setting-row" for="set-show-priority"><span class="setting-label">'+STRINGS.showPriorityLabel+'</span><input class="setting-check" id="set-show-priority" type="checkbox"'+(settings.showPriority?' checked':'')+'></label>'+
     '<label class="setting-row" for="set-show-assignee"><span class="setting-label">'+STRINGS.showAssigneeLabel+'</span><input class="setting-check" id="set-show-assignee" type="checkbox"'+(settings.showAssignee?' checked':'')+'></label></section>'+
-    '<section class="settings-section"><h3>'+STRINGS.sectionEditor+'</h3>'+
+    '<section class="settings-section" data-section="editor"><h3>'+STRINGS.sectionEditor+'</h3>'+
     '<label class="setting-row" for="set-editor-storage"><span class="setting-label">'+STRINGS.editorStorageDirectoryLabel+'</span><input class="setting-input" id="set-editor-storage" type="text" value="'+esc(settings.editorStorageDirectory)+'"></label>'+
     '<label class="setting-row" for="set-editor-subject"><span class="setting-label">'+STRINGS.defaultSubjectLabel+'</span><input class="setting-input" id="set-editor-subject" type="text" data-editor-default="subject" value="'+esc(defaults.subject)+'"></label>'+
     '<label class="setting-row setting-row-stacked" for="set-editor-description"><span class="setting-label">'+STRINGS.defaultDescriptionLabel+'</span><textarea class="setting-input" id="set-editor-description" data-editor-default="description" rows="3">'+esc(defaults.description)+'</textarea></label>'+
@@ -706,37 +754,62 @@ function renderSettingsBase(){
     '<label class="setting-row" for="set-editor-status"><span class="setting-label">'+STRINGS.defaultStatusLabel+'</span><input class="setting-input" id="set-editor-status" type="text" data-editor-default="status" value="'+esc(defaults.status)+'"></label>'+
     '<label class="setting-row" for="set-editor-due-date"><span class="setting-label">'+STRINGS.defaultDueDateLabel+'</span><input class="setting-input" id="set-editor-due-date" type="date" data-editor-default="due_date" value="'+esc(defaults.due_date)+'"></label>'+
     '<button class="btn btn-secondary" id="reset-editor-defaults-btn" type="button">'+STRINGS.resetEditorDefaults+'</button></section>'+
-    '<section class="settings-section"><h3>'+STRINGS.sectionTicketFilter+'</h3><div id="quick-filter-row"><label class="quick-filter-label" for="assignee-filter-select">'+STRINGS.filterAssigneeLabel+'</label><select id="assignee-filter-select" class="quick-filter-select" multiple size="4" aria-label="'+esc(STRINGS.filterAssigneeAria)+'"></select><label class="quick-filter-check"><input type="checkbox" id="assignee-unassigned-toggle"> '+STRINGS.filterIncludeUnassignedLabel+'</label><label class="quick-filter-label" for="status-filter-select">'+STRINGS.filterStatusLabel+'</label><select id="status-filter-select" class="quick-filter-select" multiple size="4" aria-label="'+esc(STRINGS.filterStatusAria)+'"></select></div></section>'+
-    '<section class="settings-section"><h3>'+STRINGS.sectionSort+'</h3><label class="setting-row"><span class="setting-label">'+STRINGS.sortFieldLabel+'</span><select class="setting-select" id="set-sort-field">'+selectOptions(sortFields(),settings.sort.field || '')+'</select></label><label class="setting-row"><span class="setting-label">'+STRINGS.sortDirectionLabel+'</span><select class="setting-select" id="set-sort-dir">'+selectOptions([['asc',STRINGS.sortAsc],['desc',STRINGS.sortDesc]],settings.sort.direction)+'</select></label></section>'+
-    '<section class="settings-section"><h3>'+STRINGS.sectionDueDate+'</h3>'+dueToggles(settings.dueDate)+'</section>'+
-    '<section class="settings-section"><h3>'+STRINGS.sectionSync+'</h3><label class="setting-row"><span class="setting-label">'+STRINGS.offlineSyncModeLabel+'</span><select class="setting-select" id="set-sync-mode">'+selectOptions([['auto',STRINGS.offlineSyncAuto],['manual',STRINGS.offlineSyncManual]],settings.offlineSyncMode)+'</select></label></section>';
-  element.insertAdjacentHTML('beforeend','<section class="settings-section"><h3>'+esc(STRINGS.sectionMaintenance)+'</h3>'+
+    '<section class="settings-section" data-section="ticket-filter"><h3>'+STRINGS.sectionTicketFilter+'</h3><div id="quick-filter-row"><label class="quick-filter-label" for="assignee-filter-select">'+STRINGS.filterAssigneeLabel+'</label><select id="assignee-filter-select" class="quick-filter-select" multiple size="4" aria-label="'+esc(STRINGS.filterAssigneeAria)+'"></select><label class="quick-filter-check"><input type="checkbox" id="assignee-unassigned-toggle"> '+STRINGS.filterIncludeUnassignedLabel+'</label><label class="quick-filter-label" for="status-filter-select">'+STRINGS.filterStatusLabel+'</label><select id="status-filter-select" class="quick-filter-select" multiple size="4" aria-label="'+esc(STRINGS.filterStatusAria)+'"></select></div></section>'+
+    '<section class="settings-section" data-section="sort"><h3>'+STRINGS.sectionSort+'</h3><label class="setting-row"><span class="setting-label">'+STRINGS.sortFieldLabel+'</span><select class="setting-select" id="set-sort-field">'+selectOptions(sortFields(),settings.sort.field || '')+'</select></label><label class="setting-row"><span class="setting-label">'+STRINGS.sortDirectionLabel+'</span><select class="setting-select" id="set-sort-dir">'+selectOptions([['asc',STRINGS.sortAsc],['desc',STRINGS.sortDesc]],settings.sort.direction)+'</select></label></section>'+
+    '<section class="settings-section" data-section="due-date"><h3>'+STRINGS.sectionDueDate+'</h3>'+dueToggles(settings.dueDate)+'</section>'+
+    '<section class="settings-section" data-section="sync"><h3>'+STRINGS.sectionSync+'</h3><label class="setting-row"><span class="setting-label">'+STRINGS.offlineSyncModeLabel+'</span><select class="setting-select" id="set-sync-mode">'+selectOptions([['auto',STRINGS.offlineSyncAuto],['manual',STRINGS.offlineSyncManual]],settings.offlineSyncMode)+'</select></label></section>';
+  element.insertAdjacentHTML('beforeend','<section class="settings-section" data-section="maintenance"><h3>'+esc(STRINGS.sectionMaintenance)+'</h3>'+
     '<h4 class="maintenance-heading">'+esc(STRINGS.dashboardCacheHeading)+'</h4><p class="maintenance-description">'+esc(STRINGS.dashboardCacheDescription)+'</p><button class="btn btn-secondary" id="dashboard-cache-reset-btn" type="button">'+esc(STRINGS.resetDashboardCache)+'</button>'+
     '<h4 class="maintenance-heading">'+esc(STRINGS.dashboardViewStateHeading)+'</h4><p class="maintenance-description">'+esc(STRINGS.dashboardViewStateDescription)+'</p><button class="btn btn-secondary" id="settings-reset-view-btn" type="button">'+esc(STRINGS.resetViewState)+'</button>'+
     '<p class="maintenance-safety-note" role="note">'+esc(STRINGS.maintenanceSafetyNote)+'</p></section>');
-  const sections=Array.from(element.children); element.replaceChildren();
-  [[STRINGS.sectionTickets,[1,3,4,5]],[STRINGS.sectionSync,[6]],[STRINGS.sectionEditor,[2]],[STRINGS.sectionConnection,[0]],[STRINGS.sectionMaintenance,[7]]].forEach(function(group){
-    const category=document.createElement('div'); category.className='settings-category';
-    const heading=document.createElement('h2'); heading.textContent=group[0]; category.appendChild(heading);
-    group[1].forEach(function(index){ category.appendChild(sections[index]); }); element.appendChild(category);
+  const sections=new Map(Array.from(element.children).map(function(section){ return [section.dataset.section,section]; })); element.replaceChildren();
+  [['tickets',STRINGS.sectionTickets,['tickets','ticket-filter','sort','due-date']],['sync',STRINGS.sectionSync,['sync']],['editor',STRINGS.sectionEditor,['editor']],['connection',STRINGS.sectionConnection,['connection']],['maintenance',STRINGS.sectionMaintenance,['maintenance']]].forEach(function(group){
+    const category=document.createElement('details'); category.className='settings-category'; category.dataset.category=group[0]; category.id='settings-'+group[0]; category.open=hadCategories ? openCategories.has(group[0]) : group[0] === 'tickets';
+    const heading=document.createElement('summary'); heading.id='settings-'+group[0]+'-summary'; heading.textContent=group[1]; category.appendChild(heading);
+    group[2].forEach(function(id){ const section=sections.get(id); if(section) category.appendChild(section); }); element.appendChild(category);
   });
+  if(focused){ const input=document.getElementById(focused.id); if(input && 'value' in input) input.value=focused.value; }
+  renderedSettingsBaseUrl=settings.baseUrl;
   const assignees=state.ticketFilterOptions.assignees || []; const statuses=state.ticketFilterOptions.statuses || []; const assigneeSelect=document.getElementById('assignee-filter-select'); const statusSelect=document.getElementById('status-filter-select'); assigneeSelect.innerHTML=assignees.map(function(item){ return '<option value="'+item.id+'"'+((settings.filters.assigneeIds || []).indexOf(item.id)>=0?' selected':'')+'>'+esc(item.name)+'</option>'; }).join(''); statusSelect.innerHTML=statuses.map(function(item){ return '<option value="'+item.id+'"'+((settings.filters.statusIds || []).indexOf(item.id)>=0?' selected':'')+'>'+esc(item.name)+'</option>'; }).join(''); assigneeSelect.disabled=!assignees.length; statusSelect.disabled=!statuses.length; document.getElementById('assignee-unassigned-toggle').checked=!!settings.filters.includeUnassigned;
-  const updateFilters=function(){ req('settings.update',{patch:{filters:Object.assign({},settings.filters,{assigneeIds:Array.from(assigneeSelect.selectedOptions).map(function(option){ return Number(option.value); }),statusIds:Array.from(statusSelect.selectedOptions).map(function(option){ return Number(option.value); }),includeUnassigned:document.getElementById('assignee-unassigned-toggle').checked})}}); }; assigneeSelect.addEventListener('change',updateFilters); statusSelect.addEventListener('change',updateFilters); document.getElementById('assignee-unassigned-toggle').addEventListener('change',updateFilters);
-  document.getElementById('set-sort-field').addEventListener('change',function(){ req('settings.update',{patch:{sort:{field:this.value || undefined,direction:settings.sort.direction}}}); }); document.getElementById('set-sort-dir').addEventListener('change',function(){ req('settings.update',{patch:{sort:{field:settings.sort.field,direction:this.value}}}); });
-  [['set-dd-overdue','showOverdue'],['set-dd-1d','showWithin1Day'],['set-dd-3d','showWithin3Days'],['set-dd-7d','showWithin7Days']].forEach(function(item){ document.getElementById(item[0]).addEventListener('change',function(){ const due=Object.assign({},settings.dueDate); due[item[1]]=this.checked; req('settings.update',{patch:{dueDate:due}}); }); });
-  document.getElementById('set-base-url').addEventListener('change',function(){ req('settings.updateConnection',{patch:{baseUrl:this.value}}); }); document.getElementById('set-default-project').addEventListener('change',function(){ req('settings.updateConnection',{patch:{defaultProjectId:this.value}}); }); document.getElementById('set-request-timeout').addEventListener('change',function(){ const value=Number(this.value); if(Number.isFinite(value) && value > 0) req('settings.updateConnection',{patch:{requestTimeoutMs:value}}); }); document.getElementById('set-ignore-ssl').addEventListener('change',function(){ req('settings.updateConnection',{patch:{ignoreSSLErrors:this.checked}}); });
-  document.getElementById('set-ticket-limit').addEventListener('change',function(){ const value=Number(this.value); if(value >= 1 && value <= 500) req('settings.updateGeneral',{patch:{ticketListLimit:value}}); }); document.getElementById('set-include-children').addEventListener('change',function(){ req('settings.updateGeneral',{patch:{includeChildProjects:this.checked}}); }); document.getElementById('set-show-status').addEventListener('change',function(){ req('settings.updateGeneral',{patch:{showStatus:this.checked}}); }); document.getElementById('set-show-due-date').addEventListener('change',function(){ req('settings.updateGeneral',{patch:{showDueDate:this.checked}}); }); document.getElementById('set-show-tracker').addEventListener('change',function(){ req('settings.updateGeneral',{patch:{showTracker:this.checked}}); }); document.getElementById('set-show-priority').addEventListener('change',function(){ req('settings.updateGeneral',{patch:{showPriority:this.checked}}); }); document.getElementById('set-show-assignee').addEventListener('change',function(){ req('settings.updateGeneral',{patch:{showAssignee:this.checked}}); }); document.getElementById('set-sync-mode').addEventListener('change',function(){ req('settings.updateGeneral',{patch:{offlineSyncMode:this.value}}); });
-  document.getElementById('set-editor-storage').addEventListener('change',function(){ req('settings.updateEditor',{patch:{editorStorageDirectory:this.value}}); }); document.querySelectorAll('[data-editor-default]').forEach(function(input){ input.addEventListener('change',function(){ req('settings.updateEditorDefault',{field:this.dataset.editorDefault,value:this.value}); }); }); document.getElementById('reset-editor-defaults-btn').addEventListener('click',function(){ req('settings.resetEditorDefaults',{fields:['subject','description','tracker','priority','status','due_date']}); });
-  document.getElementById('set-apikey-btn').addEventListener('click',function(){ req('apiKey.set'); }); document.getElementById('clear-api-key-btn')?.addEventListener('click',function(){ req('apiKey.clear'); }); document.getElementById('settings-reset-btn').onclick=function(){ req('settings.reset'); };
+  const updateFilters=function(){ requestForRenderedSettings('settings.update',{patch:{filters:Object.assign({},settings.filters,{assigneeIds:Array.from(assigneeSelect.selectedOptions).map(function(option){ return Number(option.value); }),statusIds:Array.from(statusSelect.selectedOptions).map(function(option){ return Number(option.value); }),includeUnassigned:document.getElementById('assignee-unassigned-toggle').checked})}}); }; assigneeSelect.addEventListener('change',updateFilters); statusSelect.addEventListener('change',updateFilters); document.getElementById('assignee-unassigned-toggle').addEventListener('change',updateFilters);
+  document.getElementById('set-sort-field').addEventListener('change',function(){ requestForRenderedSettings('settings.update',{patch:{sort:{field:this.value || undefined,direction:settings.sort.direction}}}); }); document.getElementById('set-sort-dir').addEventListener('change',function(){ requestForRenderedSettings('settings.update',{patch:{sort:{field:settings.sort.field,direction:this.value}}}); });
+  [['set-dd-overdue','showOverdue'],['set-dd-1d','showWithin1Day'],['set-dd-3d','showWithin3Days'],['set-dd-7d','showWithin7Days']].forEach(function(item){ document.getElementById(item[0]).addEventListener('change',function(){ const due=Object.assign({},settings.dueDate); due[item[1]]=this.checked; requestForRenderedSettings('settings.update',{patch:{dueDate:due}}); }); });
+  const bindSettingInput=function(input,type,buildPayload){
+    const commit=function(){
+      if(input.value === input.defaultValue) return;
+      const payload=buildPayload(input.value);
+      if(payload === undefined) return;
+      if(requestForRenderedSettings(type,payload)) input.defaultValue=input.value;
+    };
+    input.addEventListener('change',commit);
+    input.addEventListener('blur',commit);
+  };
+  const bindConnectionInput=function(id,field,parse){
+    bindSettingInput(document.getElementById(id),'settings.updateConnection',function(value){
+      const parsed=parse ? parse(value) : value;
+      return parsed === undefined ? undefined : {patch:{[field]:parsed}};
+    });
+  };
+  bindConnectionInput('set-base-url','baseUrl');
+  bindConnectionInput('set-default-project','defaultProjectId');
+  bindConnectionInput('set-request-timeout','requestTimeoutMs',function(value){ const number=Number(value); return Number.isFinite(number) && number > 0 ? number : undefined; });
+  document.getElementById('set-ignore-ssl').addEventListener('change',function(){ requestForRenderedSettings('settings.updateConnection',{patch:{ignoreSSLErrors:this.checked}}); });
+  bindSettingInput(document.getElementById('set-ticket-limit'),'settings.updateGeneral',function(value){ const number=Number(value); return number >= 1 && number <= 500 ? {patch:{ticketListLimit:number}} : undefined; });
+  document.getElementById('set-include-children').addEventListener('change',function(){ requestForRenderedSettings('settings.updateGeneral',{patch:{includeChildProjects:this.checked}}); }); document.getElementById('set-show-status').addEventListener('change',function(){ requestForRenderedSettings('settings.updateGeneral',{patch:{showStatus:this.checked}}); }); document.getElementById('set-show-due-date').addEventListener('change',function(){ requestForRenderedSettings('settings.updateGeneral',{patch:{showDueDate:this.checked}}); }); document.getElementById('set-show-tracker').addEventListener('change',function(){ requestForRenderedSettings('settings.updateGeneral',{patch:{showTracker:this.checked}}); }); document.getElementById('set-show-priority').addEventListener('change',function(){ requestForRenderedSettings('settings.updateGeneral',{patch:{showPriority:this.checked}}); }); document.getElementById('set-show-assignee').addEventListener('change',function(){ requestForRenderedSettings('settings.updateGeneral',{patch:{showAssignee:this.checked}}); }); document.getElementById('set-sync-mode').addEventListener('change',function(){ requestForRenderedSettings('settings.updateGeneral',{patch:{offlineSyncMode:this.value}}); });
+  bindSettingInput(document.getElementById('set-editor-storage'),'settings.updateEditor',function(value){ return {patch:{editorStorageDirectory:value}}; });
+  document.querySelectorAll('[data-editor-default]').forEach(function(input){ bindSettingInput(input,'settings.updateEditorDefault',function(value){ return {field:input.dataset.editorDefault,value:value}; }); });
+  document.getElementById('reset-editor-defaults-btn').addEventListener('click',function(){ requestForRenderedSettings('settings.resetEditorDefaults',{fields:['subject','description','tracker','priority','status','due_date']}); });
+  document.getElementById('set-apikey-btn').addEventListener('click',function(){ requestForRenderedSettings('apiKey.set'); }); document.getElementById('clear-api-key-btn')?.addEventListener('click',function(){ requestForRenderedSettings('apiKey.clear'); }); document.getElementById('settings-reset-btn').onclick=function(){ requestForRenderedSettings('settings.reset'); };
   document.getElementById('dashboard-cache-reset-btn').addEventListener('click',function(){ req('dashboard.resetCache'); }); document.getElementById('settings-reset-view-btn').addEventListener('click',resetViewState);
 }
 
 function resetViewState(){
   ticketLayoutMode='auto'; detailTab='overview'; quickFilters.clear();
-  expandedTicketIds.clear(); collapsedTicketIds.clear(); ticketDetailExpanded=false;
+  expandedTicketIds.clear(); collapsedTicketIds.clear(); expandedComments.clear(); ticketDetailExpanded=false; metadataExpanded=false;
   activeTicketActionMenuId=null; activeTicketActionAnchorTop=null; searchQuery='';
   if(searchTimer){ window.clearTimeout(searchTimer); searchTimer=null; }
-  searchInput.value=''; updateSearchClearButton(); filterDialog.classList.add('hidden');
+  searchInput.value=''; updateSearchClearButton(); filterDialog.classList.add('hidden'); closeLayoutPopover();
+  document.querySelectorAll('.settings-category').forEach(function(category){ category.open=category.dataset.category === 'tickets'; });
   vscode.setState(Object.assign({},vscode.getState() || {},{ticketLayoutMode:ticketLayoutMode,detailTab:detailTab,quickFilters:[]}));
   if(!state || !state.selectedProject) req('tickets.searchAllProjects',{query:''});
   render(); applyTicketLayoutMode(); showToast('success',STRINGS.viewStateReset);
@@ -751,6 +824,7 @@ function render(){
   if(!state) return; const focus=captureFocus(document); closeTicketActionMenus(); syncExpandedState(state.tickets);
   const select=document.getElementById('project-select'); while(select.options.length > 1) select.remove(1);
   (state.projects || []).forEach(function(project){ const option=document.createElement('option'); option.value=String(project.id); option.textContent='  '.repeat(project.level || 0)+(project.name || (STRINGS.projectLabel+' #'+project.id)); select.appendChild(option); }); if(state.selectedProject && state.selectedProject.id) select.value=String(state.selectedProject.id); else select.value='';
+  select.title=state.selectedProject?.name || STRINGS.selectProjectTitle;
   document.getElementById('include-children').checked=!!state.includeChildProjects; renderTickets(); renderTicketDetail(); renderFilterChips(); renderUnsynced(); renderComments(); renderSettings(); renderSyncTray(); updateSyncButtonStates(); restoreFocus(focus);
 }
 window.addEventListener('message',function(event){ const message=event.data || {}; if(message.type === 'dashboard.state'){

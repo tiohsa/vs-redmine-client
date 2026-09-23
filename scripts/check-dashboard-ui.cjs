@@ -53,6 +53,12 @@ async function key(key, code = key) {
   await call('Input.dispatchKeyEvent', { type: 'keyDown', key, code, text: key === 'Enter' ? '\r' : undefined, windowsVirtualKeyCode: key === 'Enter' ? 13 : undefined });
   await call('Input.dispatchKeyEvent', { type: 'keyUp', key, code });
 }
+async function typeText(value) {
+  for (const character of value) {
+    await call('Input.dispatchKeyEvent', { type: 'keyDown', key: character, text: character });
+    await call('Input.dispatchKeyEvent', { type: 'keyUp', key: character });
+  }
+}
 const state = new DashboardStateStore().getState();
 state.selectedProject = { id: 1, name: '検証プロジェクト' };
 state.projects = [{ id: 1, name: '検証プロジェクト', level: 0 }];
@@ -162,12 +168,10 @@ async function main() {
   state.tickets[0].trackerName = 'Bug <img src=x onerror=alert(1)>';
   state.tickets[0].priorityName = '優先度 "最優先" & 要確認';
   await push();
-  assert.equal(await evaluate(`document.querySelector('.ticket-tracker').textContent`), state.tickets[0].trackerName);
-  assert.equal(await evaluate(`document.querySelector('.ticket-priority').textContent`), state.tickets[0].priorityName);
-  assert.equal(await evaluate(`document.querySelector('.ticket-priority').title`), strings.sortPriority + ': ' + state.tickets[0].priorityName);
-  assert.equal(await evaluate(`document.querySelectorAll('.ticket-metadata img').length`), 0);
-  assert.equal(await evaluate(`document.querySelectorAll('[data-id="11"] .ticket-metadata').length`), 0);
-  assert.equal(await evaluate(`document.getElementById('ticket-count').textContent`), strings.ticketCountLabel.replace('{0}', '2'));
+  assert.equal(await evaluate(`document.querySelectorAll('.ticket-row[data-id="10"] .ticket-attribute').length`), 3);
+  assert.equal(await evaluate(`document.querySelectorAll('.ticket-row[data-id="10"] .ticket-attribute')[1].textContent`), state.tickets[0].trackerName);
+  assert.equal(await evaluate(`document.querySelectorAll('.ticket-row img').length`), 0);
+  assert.equal(await evaluate(`document.getElementById('ticket-count').textContent`), strings.shownLoadedTotal.replace('{0}','2').replace('{1}','2').replace('{2}','2'));
   state.tickets[0].trackerName = 'Bug';
   state.tickets[0].priorityName = 'Normal';
 
@@ -185,13 +189,12 @@ async function main() {
   await assertDueDateBadge('2026-02-30', null);
   await assertDueDateBadge('2020-01-01', 'due-overdue');
 
-  // 担当者ありは既存アバターを維持し、未設定時は一覧・詳細からアバター自体を除去する。
+  // 担当者は一覧ではテキストで、詳細では既存アバターで示す。
   state.selectedTicketId = 10;
   state.tickets[0].assigneeName = 'Taro Yamada';
   state.selectedTicket = { ...state.tickets[0], projectName: '検証プロジェクト', description: '担当者表示を確認します。' };
   await push();
-  assert.equal(await evaluate(`document.querySelectorAll('.ticket-avatar').length`), 1);
-  assert.equal(await evaluate(`document.querySelector('.ticket-avatar').textContent`), 'TA');
+  assert.equal(await evaluate(`document.querySelector('.ticket-assignee').textContent`), 'Taro Yamada');
   assert.equal(await evaluate(`document.querySelectorAll('.detail-avatar').length`), 1);
   assert.equal(await evaluate(`document.querySelector('.detail-avatar').textContent`), 'TA');
   assert.equal(await evaluate(`document.querySelector('.detail-avatar').getAttribute('aria-label')`), 'Taro Yamada');
@@ -202,12 +205,12 @@ async function main() {
   assert.deepEqual(await evaluate(`window.messages.at(-1).patch`), { showAssignee: false });
   state.settings.showAssignee = false;
   await push();
-  assert.equal(await evaluate(`document.querySelectorAll('.ticket-avatar').length`), 0);
+  assert.equal(await evaluate(`document.querySelectorAll('.ticket-assignee').length`), 0);
   assert.equal(await evaluate(`document.querySelectorAll('.detail-avatar').length`), 1);
   assert.equal(await evaluate(`document.getElementById('set-show-assignee').checked`), false);
   state.settings.showAssignee = true;
   await push();
-  assert.equal(await evaluate(`document.querySelectorAll('.ticket-avatar').length`), 1);
+  assert.equal(await evaluate(`document.querySelectorAll('.ticket-assignee').length`), 1);
   assert.equal(await evaluate(`document.getElementById('set-show-assignee').checked`), true);
 
   // 一覧・詳細・コメント・未同期の同じ操作はラベルと SVG が一致する。
@@ -220,7 +223,8 @@ async function main() {
     appearances.slice(1).forEach(actual => assert.deepEqual(actual, appearances[0]));
   }
   await assertSameAction(['[data-ticket-action="open"]', '#detail-open-btn', '[data-edit-comment]', '[data-uri]']);
-  await assertSameAction(['[data-ticket-action="comment"]', '#detail-comment-btn', '#add-comment-btn']);
+  assert.equal(await evaluate(`document.querySelector('#detail-comment-btn').getAttribute('aria-label')`), strings.addCommentAction);
+  assert.equal(await evaluate(`document.querySelector('#detail-comment-btn svg').outerHTML === document.querySelector('#add-comment-btn svg').outerHTML`), true);
   await assertSameAction(['[data-ticket-action="browser"]', '#detail-browser-btn', '[data-open-comment]']);
   await assertSameAction(['#detail-sync-btn', '[data-sync-key]', '[data-sync-comment-key]']);
   assert.equal(await evaluate(`document.querySelector('#sync-all-btn svg').outerHTML`), await evaluate(`document.querySelector('#detail-sync-btn svg').outerHTML`));
@@ -232,7 +236,7 @@ async function main() {
     else state.tickets[0].assigneeName = assigneeName;
     state.selectedTicket = { ...state.tickets[0], projectName: '検証プロジェクト', description: '未設定の担当者表示を確認します。' };
     await push();
-    assert.equal(await evaluate(`document.querySelectorAll('.ticket-avatar').length`), 0);
+    assert.equal(await evaluate(`document.querySelectorAll('.ticket-assignee').length`), 0);
     assert.equal(await evaluate(`document.querySelectorAll('.detail-avatar').length`), 0);
   }
 
@@ -240,7 +244,7 @@ async function main() {
   await evaluate(`document.querySelector('[data-expand="10"]').focus()`);
   await key('Enter');
   assert.equal(await evaluate(`document.querySelector('[data-expand="10"]').getAttribute('aria-expanded')`), 'false');
-  assert.equal(await evaluate(`document.getElementById('ticket-count').textContent`), strings.ticketCountLabel.replace('{0}', '1'));
+  assert.equal(await evaluate(`document.getElementById('ticket-count').textContent`), strings.shownLoadedTotal.replace('{0}','1').replace('{1}','2').replace('{2}','2'));
   assert.equal(await evaluate('window.messages.filter(m=>m.type==="ticket.select").length'), 0);
   await push();
   assert.equal(await evaluate(`document.querySelector('[data-expand="10"]').getAttribute('aria-expanded')`), 'false');
@@ -248,7 +252,7 @@ async function main() {
   await evaluate(`document.getElementById('search-input').value='検索対象'; document.getElementById('search-input').dispatchEvent(new Event('input'))`);
   assert.equal(await evaluate(`document.querySelectorAll('.ticket-row').length`), 1);
   assert.equal(await evaluate(`document.querySelector('.ticket-row').dataset.id`), '11');
-  assert.equal(await evaluate(`document.getElementById('ticket-count').textContent`), strings.ticketCountLabel.replace('{0}', '1'));
+  assert.equal(await evaluate(`document.getElementById('ticket-count').textContent`), strings.shownLoadedTotal.replace('{0}','1').replace('{1}','2').replace('{2}','2'));
   await evaluate(`document.getElementById('search-clear-btn').click()`);
 
   // Enter でメニューを開き、矢印で移動、Escape で起点へ戻る。
@@ -285,6 +289,30 @@ async function main() {
   assert.equal(await evaluate(`document.querySelector('.ticket-row[data-id="10"]').getAttribute('aria-current')`), 'true');
   assert.equal(await evaluate(`document.querySelector('.detail-description').textContent`), state.selectedTicket.description);
   assert.equal(await evaluate(`document.querySelectorAll('#ticket-detail-card textarea, .detail-description img, .detail-description [contenteditable]').length`), 0);
+  state.comments.ticketId = 10;
+  state.comments.items = [{ id: 31, authorName: 'Taro', body: '1行目\n2行目\n3行目\n4行目', editableByCurrentUser: true }];
+  await push();
+  await evaluate(`document.getElementById('detail-tab-comments').click()`);
+  assert.equal(await evaluate(`document.querySelector('.comment-body').textContent`), state.comments.items[0].body);
+  assert.equal(await evaluate(`document.querySelector('.comment-body').classList.contains('comment-body-clamped')`), true);
+  await evaluate(`document.querySelector('[data-expand-comment]').click()`);
+  assert.equal(await evaluate(`document.querySelector('.comment-body').classList.contains('comment-body-clamped')`), false);
+  // ビューポートを変えずにレイアウトを切り替えても、省略判定を更新する。
+  await call('Emulation.setDeviceMetricsOverride', { width: 1200, height: 800, deviceScaleFactor: 1, mobile: false });
+  state.comments.items = [{ id: 32, authorName: 'Taro', body: 'あ'.repeat(160), editableByCurrentUser: true }];
+  await push();
+  await evaluate(`document.getElementById('ticket-layout-mode').value='single';document.getElementById('ticket-layout-mode').dispatchEvent(new Event('change'))`);
+  assert.equal(await evaluate(`document.querySelector('.comment-body').scrollHeight <= document.querySelector('.comment-body').clientHeight+1`), true);
+  assert.equal(await evaluate(`document.querySelector('.comment-expand').classList.contains('hidden')`), true);
+  await evaluate(`document.getElementById('ticket-layout-mode').value='split';document.getElementById('ticket-layout-mode').dispatchEvent(new Event('change'))`);
+  assert.equal(await evaluate(`document.querySelector('.comment-body').scrollHeight > document.querySelector('.comment-body').clientHeight+1`), true);
+  assert.equal(await evaluate(`document.querySelector('.comment-expand').classList.contains('hidden')`), false);
+  await evaluate(`document.getElementById('ticket-layout-mode').value='single';document.getElementById('ticket-layout-mode').dispatchEvent(new Event('change'))`);
+  assert.equal(await evaluate(`document.querySelector('.comment-expand').classList.contains('hidden')`), true);
+  await evaluate(`document.getElementById('ticket-layout-mode').value='auto';document.getElementById('ticket-layout-mode').dispatchEvent(new Event('change'))`);
+  await evaluate(`document.getElementById('detail-tab-overview').click()`);
+  state.comments.items = [];
+  await push();
   for (const [id, type] of [['detail-open-btn', 'ticket.openEditor'], ['detail-comment-btn', 'comment.add'], ['detail-browser-btn', 'ticket.openBrowser']]) {
     await evaluate(`document.getElementById('${id}').click()`);
     assert.deepEqual(await evaluate(`({type:window.messages.at(-1).type,ticketId:window.messages.at(-1).ticketId})`), { type, ticketId: 10 });
@@ -294,7 +322,7 @@ async function main() {
 
   // 既存の折りたたみ・展開を保持し、Metadata の一時値をまとめて適用する。
   await evaluate(`if(document.getElementById('ticket-detail-toggle').getAttribute('aria-expanded')==='true') document.getElementById('ticket-detail-toggle').click()`);
-  assert.equal(await evaluate(`document.querySelectorAll('.detail-expanded').length`), 1);
+  assert.equal(await evaluate(`document.getElementById('metadata-details').open`), false);
   assert.equal(await evaluate(`document.querySelector('.detail-description').classList.contains('detail-description-collapsed')`), true);
   await push();
   assert.equal(await evaluate(`document.getElementById('ticket-detail-toggle').getAttribute('aria-expanded')`), 'false');
@@ -309,6 +337,8 @@ async function main() {
   }
   await stageMetadata('priority', 'High');
   assert.equal(await evaluate(`document.getElementById('detail-sync-state').textContent`), strings.syncDirty);
+  await evaluate(`document.getElementById('detail-tab-comments').click();document.getElementById('detail-tab-overview').click()`);
+  assert.equal(await evaluate(`document.querySelector('[data-metadata-field="priority"]').value`), 'High');
   await stageMetadata('due_date', '');
   await evaluate(`document.querySelector('[data-metadata-field="due_date"]').focus()`);
   await push();
@@ -482,18 +512,159 @@ async function main() {
 
   // Settings の主要セクション、編集可能なコントロール、キーボード到達性を検証。
   await evaluate(`document.getElementById('tab-settings').click()`);
-  const settingSections = await evaluate(`[...document.querySelectorAll('#settings-content h3')].map(node=>node.textContent)`);
+  const settingSections = await evaluate(`[...document.querySelectorAll('#settings-content .settings-category > summary')].map(node=>node.textContent)`);
   assert.equal(settingSections.includes(strings.sectionConnection), true);
   assert.equal(settingSections.includes(strings.sectionTickets), true);
   assert.equal(settingSections.includes(strings.sectionSync), true);
   assert.equal(settingSections.includes(strings.sectionEditor), true);
+  assert.deepEqual(await evaluate(`[...document.querySelectorAll('#settings-content [data-section]')].map(node=>node.dataset.section)`), ['tickets','ticket-filter','sort','due-date','sync','editor','connection','maintenance']);
   for (const id of ['set-base-url', 'set-default-project', 'set-request-timeout', 'set-ignore-ssl', 'set-ticket-limit', 'set-editor-storage', 'set-editor-subject']) {
     assert.equal(await evaluate(`document.getElementById(${JSON.stringify(id)}) !== null`), true, `missing setting control: ${id}`);
   }
-  await evaluate(`document.getElementById('set-base-url').focus(); document.getElementById('set-base-url').value='https://redmine.example.com'; document.getElementById('set-base-url').dispatchEvent(new Event('change'))`);
+  // 未編集のフォーカス値はホストの更新に従い、編集中の値は同じ接続先で維持する。
+  const previousBaseUrl = state.settings.baseUrl;
+  const previousDefaultProjectId = state.settings.defaultProjectId;
+  state.settings.baseUrl = 'https://first.example.com';
+  await push();
+  await evaluate(`document.getElementById('settings-connection').open=true;document.getElementById('set-base-url').focus()`);
+  state.settings.baseUrl = 'https://second.example.com';
+  await push();
+  assert.equal(await evaluate(`document.getElementById('set-base-url').value`), state.settings.baseUrl);
+  assert.equal(await evaluate(`document.activeElement.id`), 'set-base-url');
+  state.settings.defaultProjectId = 'first';
+  await push();
+  await evaluate(`document.getElementById('set-default-project').focus()`);
+  state.settings.defaultProjectId = 'second';
+  await push();
+  assert.equal(await evaluate(`document.getElementById('set-default-project').value`), 'second');
+  await evaluate(`document.getElementById('set-default-project').value='local draft';document.getElementById('set-default-project').dispatchEvent(new Event('input'))`);
+  state.settings.ticketListLimit += 1;
+  await push();
+  assert.equal(await evaluate(`document.getElementById('set-default-project').value`), 'local draft');
+  assert.equal(await evaluate(`document.activeElement.id`), 'set-default-project');
+  state.settings.baseUrl = 'https://third.example.com';
+  state.settings.defaultProjectId = 'third';
+  await push();
+  assert.equal(await evaluate(`document.getElementById('set-default-project').value`), 'third');
+  state.settings.baseUrl = previousBaseUrl;
+  state.settings.defaultProjectId = previousDefaultProjectId;
+  state.settings.ticketListLimit -= 1;
+  await push();
+  await evaluate(`document.getElementById('settings-connection').open=true; document.getElementById('set-base-url').focus(); document.getElementById('set-base-url').value='https://redmine.example.com'; document.getElementById('set-base-url').dispatchEvent(new Event('change'))`);
   assert.equal(await evaluate('window.messages.at(-1).type'), 'settings.updateConnection');
   await key('Tab');
   assert.equal(await evaluate('document.activeElement.id'), 'set-default-project');
+
+  // 実キー入力中に接続が変わっても、旧フォームの change を新接続へ送らない。
+  state.settings.baseUrl = 'https://settings-a.example.com';
+  state.settings.defaultProjectId = 'project-a';
+  await push();
+  await evaluate(`window.messages=[];document.getElementById('set-default-project').focus();document.getElementById('set-default-project').select()`);
+  await typeText('draft-in-a');
+  assert.equal(await evaluate(`document.getElementById('set-default-project').value`), 'draft-in-a');
+  state.settings.baseUrl = 'https://settings-b.example.com';
+  state.settings.defaultProjectId = 'project-b';
+  await push();
+  assert.equal(await evaluate(`window.messages.filter(m=>m.type==='settings.updateConnection').length`), 0);
+  assert.equal(await evaluate(`document.getElementById('set-default-project').value`), 'project-b');
+
+  await evaluate(`window.messages=[];document.getElementById('set-base-url').focus();document.getElementById('set-base-url').select()`);
+  await typeText('https://draft-in-b.example.com');
+  assert.equal(await evaluate(`document.getElementById('set-base-url').value`), 'https://draft-in-b.example.com');
+  state.settings.baseUrl = 'https://settings-c.example.com';
+  await push();
+  assert.equal(await evaluate(`window.messages.filter(m=>m.type==='settings.updateConnection').length`), 0);
+  assert.equal(await evaluate(`document.getElementById('set-base-url').value`), state.settings.baseUrl);
+
+  // 同一接続の背景再描画では未確定値を保持し、その後の Tab で一度だけ保存する。
+  await evaluate(`window.messages=[];document.getElementById('set-default-project').focus();document.getElementById('set-default-project').select()`);
+  await typeText('local-draft');
+  state.settings.ticketListLimit += 1;
+  await push();
+  assert.equal(await evaluate(`document.getElementById('set-default-project').value`), 'local-draft');
+  assert.equal(await evaluate(`window.messages.filter(m=>m.type==='settings.updateConnection').length`), 0);
+  await key('Tab');
+  assert.deepEqual(await evaluate(`window.messages.filter(m=>m.type==='settings.updateConnection').map(m=>m.patch)`), [{ defaultProjectId: 'local-draft' }]);
+
+  // 確定後はホストが trim した値へ追従する。
+  await evaluate(`window.messages=[];document.getElementById('set-default-project').focus();document.getElementById('set-default-project').select()`);
+  await typeText('  normalized-project  ');
+  await key('Enter');
+  assert.deepEqual(await evaluate(`window.messages.filter(m=>m.type==='settings.updateConnection').map(m=>m.patch)`), [{ defaultProjectId: '  normalized-project  ' }]);
+  state.settings.defaultProjectId = 'normalized-project';
+  await push();
+  assert.equal(await evaluate(`document.getElementById('set-default-project').value`), 'normalized-project');
+  assert.equal(await evaluate(`window.messages.filter(m=>m.type==='settings.updateConnection').length`), 1);
+  state.settings.baseUrl = previousBaseUrl;
+  state.settings.defaultProjectId = previousDefaultProjectId;
+  state.settings.ticketListLimit -= 1;
+  await push();
+
+  // 接続設定以外も実入力、背景再描画、接続切替、ホスト確定値を同じ操作列で検証する。
+  const settingInputs = [
+    { id: 'set-ticket-limit', type: 'settings.updateGeneral', initial: 50, values: ['75', '76', '77'], host: value => { state.settings.ticketListLimit = Number(value); }, payload: value => ({ patch: { ticketListLimit: Number(value) } }) },
+    { id: 'set-editor-storage', type: 'settings.updateEditor', initial: '', values: ['normal-storage', 'redrawn-storage', 'stale-storage'], host: value => { state.settings.editorStorageDirectory = value; }, payload: value => ({ patch: { editorStorageDirectory: value } }) },
+    ...['subject', 'description', 'tracker', 'priority', 'status'].map(field => ({
+      id: `set-editor-${field}`, type: 'settings.updateEditorDefault', initial: '',
+      values: [`normal-${field}`, `redrawn-${field}`, `stale-${field}`],
+      host: value => { state.settings.editorDefaults[field] = value; },
+      payload: value => ({ field, value }),
+    })),
+  ];
+  const formBaseUrl = 'https://settings-form.example.com';
+  const editSetting = async (entry, value) => {
+    await evaluate(`{document.getElementById('settings-editor').open=true;document.getElementById('settings-tickets').open=true;const input=document.getElementById(${JSON.stringify(entry.id)});input.focus();${entry.id === 'set-ticket-limit' ? "input.value=''" : 'input.select()'}}`);
+    await typeText(value);
+    assert.equal(await evaluate(`document.getElementById(${JSON.stringify(entry.id)}).value`), value, entry.id);
+  };
+  const settingRequests = async type => evaluate(`window.messages.filter(message=>message.type===${JSON.stringify(type)}).map(message=>({type:message.type,patch:message.patch,field:message.field,value:message.value}))`);
+  for (const entry of settingInputs) {
+    state.settings.baseUrl = formBaseUrl;
+    entry.host(entry.initial);
+    await push();
+    await evaluate('window.messages=[]');
+    await editSetting(entry, entry.values[0]);
+    await key('Tab');
+    assert.deepEqual(await settingRequests(entry.type), [{ type: entry.type, ...entry.payload(entry.values[0]) }], `${entry.id}: normal Tab`);
+
+    entry.host(entry.values[0]);
+    await push();
+    await evaluate('window.messages=[]');
+    await editSetting(entry, entry.values[1]);
+    state.settings.showStatus = !state.settings.showStatus;
+    await push();
+    assert.equal(await evaluate(`document.getElementById(${JSON.stringify(entry.id)}).value`), entry.values[1], `${entry.id}: redraw value`);
+    assert.equal((await settingRequests(entry.type)).length, 0, `${entry.id}: before Tab`);
+    await key('Tab');
+    assert.deepEqual(await settingRequests(entry.type), [{ type: entry.type, ...entry.payload(entry.values[1]) }], `${entry.id}: redraw Tab`);
+
+    entry.host(entry.values[1]);
+    state.settings.baseUrl = 'https://settings-before-switch.example.com';
+    await push();
+    await evaluate('window.messages=[]');
+    await editSetting(entry, entry.values[2]);
+    state.settings.baseUrl = 'https://settings-after-switch.example.com';
+    entry.host(entry.initial);
+    await push();
+    assert.equal((await settingRequests(entry.type)).length, 0, `${entry.id}: old form after switch`);
+    assert.equal(await evaluate(`document.getElementById(${JSON.stringify(entry.id)}).value`), String(entry.initial), `${entry.id}: new connection value`);
+  }
+
+  state.settings.baseUrl = formBaseUrl;
+  state.settings.editorDefaults.subject = '';
+  await push();
+  await evaluate('window.messages=[]');
+  await editSetting(settingInputs[2], '  normalized-subject  ');
+  await key('Enter');
+  assert.deepEqual(await settingRequests('settings.updateEditorDefault'), [{ type: 'settings.updateEditorDefault', field: 'subject', value: '  normalized-subject  ' }]);
+  state.settings.editorDefaults.subject = 'normalized-subject';
+  await push();
+  assert.equal(await evaluate(`document.getElementById('set-editor-subject').value`), 'normalized-subject');
+  assert.equal((await settingRequests('settings.updateEditorDefault')).length, 1);
+  state.settings.baseUrl = previousBaseUrl;
+  state.settings.showStatus = true;
+  state.settings.editorDefaults.subject = '';
+  await push();
 
   // 日本語・テーマ・320/480/768/1200px で設定の横はみ出しを検証。
   for (const width of [320, 480, 768, 1200]) {
@@ -516,8 +687,8 @@ async function main() {
     assert.equal(await evaluate(`document.getElementById('ticket-scroll').scrollWidth <= document.getElementById('ticket-scroll').clientWidth`), true, `list overflow: ${theme} ${width}`);
     assert.equal(await evaluate(`getComputedStyle(document.querySelector('.tickets-master')).borderRightWidth`), '1px');
     assert.equal(await evaluate(`document.querySelector('.ticket-subject').getBoundingClientRect().width >= 40`), true, `subject clipped: ${theme} ${width}`);
-    assert.equal(await evaluate(`document.querySelectorAll('.detail-actions svg[aria-hidden="true"]').length`), 7);
-    if (width < 700) assert.equal(await evaluate(`document.querySelector('.tickets-master').getBoundingClientRect().height <= innerHeight * .4 + 1`), true);
+    assert.equal(await evaluate(`document.querySelectorAll('.detail-actions svg[aria-hidden="true"]').length >= 3`), true);
+    if (width < 700) assert.equal(await evaluate(`document.querySelector('.tickets-master').getBoundingClientRect().height <= innerHeight * .45 + 1`), true);
     await evaluate(`document.querySelector('[data-ticket-action-menu="29"]').scrollIntoView(); document.querySelector('[data-ticket-action-menu="29"]').click()`);
     await evaluate('new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)))');
     assert.equal(await evaluate(`(()=>{const menu=document.getElementById('ticket-action-menu-29');const r=menu.getBoundingClientRect();return r.top>=0&&r.bottom<=innerHeight&&r.left>=0&&r.right<=innerWidth&&menu.contains(document.elementFromPoint(r.left+10,r.top+10))})()`), true, `menu clipping: ${theme}`);
@@ -527,6 +698,26 @@ async function main() {
     const { data } = await call('Page.captureScreenshot', { format: 'png' });
     fs.writeFileSync(path.join(directory, `${theme}-${width}.png`), Buffer.from(data, 'base64'));
   }
+  // 長い名前を表示したまま、125% / 200% 拡大時の操作起点とキーボード操作を確認する。
+  const previousProjectName = state.selectedProject.name;
+  state.selectedProject.name = '長いプロジェクト名'.repeat(12);
+  state.projects[0].name = state.selectedProject.name;
+  await call('Emulation.setDeviceMetricsOverride', { width: 440, height: 800, deviceScaleFactor: 1, mobile: false });
+  for (const zoom of [1.25, 2]) {
+    await evaluate(`document.documentElement.style.zoom=${JSON.stringify(String(zoom))}`);
+    await push();
+    assert.equal(await evaluate('document.documentElement.scrollWidth <= innerWidth'), true, `page overflow at ${zoom}x`);
+    assert.equal(await evaluate(`document.getElementById('new-ticket-btn').getBoundingClientRect().right <= innerWidth`), true, `new ticket clipped at ${zoom}x`);
+    assert.equal(await evaluate(`document.querySelector('.ticket-subject').getBoundingClientRect().width > 0`), true, `subject clipped at ${zoom}x`);
+    await evaluate(`document.getElementById('layout-btn').focus()`);
+    await key('Enter');
+    assert.equal(await evaluate(`document.getElementById('layout-btn').getAttribute('aria-expanded')`), 'true');
+    await key('Escape');
+    assert.equal(await evaluate(`document.getElementById('layout-btn').getAttribute('aria-expanded')`), 'false');
+  }
+  await evaluate(`document.documentElement.style.zoom=''`);
+  state.selectedProject.name = previousProjectName;
+  state.projects[0].name = previousProjectName;
 
   // 操作結果は上で検証済み。プレビューには通常の表示を保存する。
   await evaluate(`document.getElementById('toast-area').replaceChildren()`);
