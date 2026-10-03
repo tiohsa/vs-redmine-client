@@ -129,7 +129,11 @@ export const createSyncController = (deps: SyncControllerDeps): SyncController =
       return;
     }
 
-    scheduleSave(uriString, () => handleSyncOnSave(document));
+    scheduleSave(uriString, () => handleSyncOnSave(document), async (error, uri) => {
+      console.error("Save synchronization failed", uri, error);
+      // The queue observes this Promise independently of subsequent saves.
+      await vscode.window.showErrorMessage(vscode.l10n.t("Save synchronization failed."));
+    });
   };
 
   return { updateTicketListSubject, syncEditorAndNotify, syncOnSave };

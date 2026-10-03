@@ -1,5 +1,11 @@
 import * as assert from "assert";
 import * as vscode from "vscode";
+import * as fs from "fs";
+import * as os from "os";
+import * as path from "path";
+import { createSyncEngine } from "../app/syncEngine";
+import type { DocumentPort } from "../app/ticketSync/ports";
+import { createMutableEditorStub } from "./helpers/editorStubs";
 import { clearOfflineSyncQueueAsync, addOfflineNewTicketAsync, getOfflineSyncQueue, updateOfflineNewTicketAsync } from "../views/offlineSyncStore";
 import { clearTicketDrafts } from "../views/ticketDraftStore";
 import { buildTicketEditorContent, parseTicketEditorContent } from "../views/ticketEditorContent";
@@ -7,7 +13,6 @@ import { buildIssueMetadataFixture } from "./helpers/ticketMetadataFixtures";
 import {
   buildRegisteredDocumentContent,
   compareAndRewriteDocumentWithRegisteredFields,
-  rewriteDocumentWithRegisteredFields,
 } from "../views/editorDocumentRewrite";
 
 const buildNewTicketText = (): string =>
@@ -61,175 +66,141 @@ suite("syncUnsyncedFileNewTicket – buildRegisteredDocumentContent", () => {
   });
 });
 
-suite("syncUnsyncedFileNewTicket – rewriteDocumentWithRegisteredFields open document", () => {
+suite("syncUnsyncedFileNewTicket – CAS DocumentPort finalization", () => {
   const DOC_URI = "untitled:redmine-client-new-ticket.md";
 
-  test("rewrites open document via applyEdit and returns true", async () => {
+  test("open documentをexpected snapshotから登録済み内容に更新する", async () => {
     const text = buildNewTicketText();
-    const openDocument = {
-      uri: vscode.Uri.parse(DOC_URI),
-      getText: () => text,
-    } as vscode.TextDocument;
-
-    let appliedContent: string | undefined;
-    const rewriteDeps = {
-      textDocuments: [openDocument],
-      applyEdit: async (edit: vscode.WorkspaceEdit) => {
-        const entries = edit.entries();
-        if (entries.length > 0) {
-          appliedContent = entries[0][1][0].newText;
-        }
-        return true;
-      },
-    };
-
-    const success = await rewriteDocumentWithRegisteredFields(DOC_URI, 4242, rewriteDeps);
-
-    assert.strictEqual(success, true);
-    assert.ok(appliedContent, "content should have been applied");
-    const parsed = parseTicketEditorContent(appliedContent!);
+    const editor = createMutableEditorStub(vscode.Uri.parse(DOC_URI), text);
+    const result = await compareAndRewriteDocumentWithRegisteredFields({
+      documentUri: DOC_URI, ticketId: 4242, projectId: 33,
+      replacement: parseTicketEditorContent(text), expected: { content: text, operationRevision: 1 },
+      deps: { textDocuments: [editor.document], textEditors: [editor] },
+    });
+    assert.deepStrictEqual(result, { kind: "applied" });
+    const parsed = parseTicketEditorContent(editor.document.getText());
     assert.strictEqual(parsed.controlFields?.mode, "ticket-update");
     assert.strictEqual(parsed.controlFields?.issue_id, 4242);
+    assert.strictEqual(parsed.controlFields?.project_id, 33);
   });
 
-  test("applyEdit failure returns false", async () => {
+  test("editor.editが拒否された場合はwrite_failed", async () => {
     const text = buildNewTicketText();
-    const openDocument = {
-      uri: vscode.Uri.parse(DOC_URI),
-      getText: () => text,
-    } as vscode.TextDocument;
-
-    const rewriteDeps = {
-      textDocuments: [openDocument],
-      applyEdit: async () => false,
-    };
-
-    const success = await rewriteDocumentWithRegisteredFields(DOC_URI, 1, rewriteDeps);
-    assert.strictEqual(success, false);
-  });
-
-  test("document.save failure returns false", async () => {
-    const text = buildNewTicketText();
-    const openDocument = {
-      uri: vscode.Uri.parse(DOC_URI),
-      getText: () => text,
-      isDirty: true,
-    } as vscode.TextDocument;
-
-    const success = await rewriteDocumentWithRegisteredFields(DOC_URI, 1, {
-      textDocuments: [openDocument],
-      applyEdit: async () => true,
-      saveDocument: async () => false,
-    });
-
-    assert.strictEqual(success, false);
-  });
-});
-
-suite("syncUnsyncedFileNewTicket – compare-and-apply freshness", () => {
-  test("expected content より新しい open document は一文字も変更しない", async () => {
-    const expectedContent = buildNewTicketText();
-    const newerContent = `${expectedContent}\nnewer edit`;
-    const documentUri = "untitled:revision-fenced-ticket.md";
-    const openDocument = {
-      uri: vscode.Uri.parse(documentUri),
-      getText: () => newerContent,
-    } as vscode.TextDocument;
-    let applyCalls = 0;
-
+    const editor = createMutableEditorStub(vscode.Uri.parse(DOC_URI), text);
+    editor.edit = async () => false;
     const result = await compareAndRewriteDocumentWithRegisteredFields({
-      documentUri,
-      ticketId: 600,
-      replacement: parseTicketEditorContent(expectedContent),
-      expected: { content: expectedContent, operationRevision: 1 },
-      deps: {
-        textDocuments: [openDocument],
-        applyEdit: async () => {
-          applyCalls++;
-          return true;
-        },
-      },
+      documentUri: DOC_URI, ticketId: 1,
+      replacement: parseTicketEditorContent(text), expected: { content: text, operationRevision: 1 },
+      deps: { textDocuments: [editor.document], textEditors: [editor] },
     });
-
-    assert.deepStrictEqual(result, { kind: "stale_source" });
-    assert.strictEqual(applyCalls, 0);
-    assert.strictEqual(openDocument.getText(), newerContent);
+    assert.deepStrictEqual(result, { kind: "write_failed" });
+    assert.strictEqual(editor.document.getText(), text);
   });
-});
 
-suite("syncUnsyncedFileNewTicket – rewriteDocumentWithRegisteredFields closed file", () => {
-  test("rewrites closed file URI via writeFile and returns true", async () => {
+  test("document.saveが拒否された場合はsave_failed", async () => {
     const text = buildNewTicketText();
-    const fileUri = vscode.Uri.file("/tmp/redmine-client-new-ticket-test.md");
-    let writtenContent: string | undefined;
+    const editor = createMutableEditorStub(vscode.Uri.parse(DOC_URI), text);
+    Object.defineProperty(editor.document, "isDirty", { value: true });
+    const result = await compareAndRewriteDocumentWithRegisteredFields({
+      documentUri: DOC_URI, ticketId: 1,
+      replacement: parseTicketEditorContent(text), expected: { content: text, operationRevision: 1 },
+      deps: { textDocuments: [editor.document], textEditors: [editor], saveDocument: async () => false },
+    });
+    assert.deepStrictEqual(result, { kind: "save_failed" });
+  });
 
-    const rewriteDeps = {
-      textDocuments: [],
-      readFile: async () => Buffer.from(text, "utf8") as unknown as Uint8Array,
-      writeFile: async (_uri: vscode.Uri, content: Uint8Array) => {
-        writtenContent = Buffer.from(content).toString("utf8");
-      },
+  test("LF-01: finalization直前のdocument変更はstale_sourceで維持する", async () => {
+    const text = buildNewTicketText();
+    const newerText = `${text}\nnewer edit`;
+    const editor = createMutableEditorStub(vscode.Uri.parse(DOC_URI), text);
+    editor.edit = async () => {
+      editor.document.setText(newerText);
+      return false;
     };
-
-    const success = await rewriteDocumentWithRegisteredFields(
-      fileUri.toString(),
-      5555,
-      rewriteDeps,
-    );
-
-    assert.strictEqual(success, true);
-    assert.ok(writtenContent, "file should have been written");
-    const parsed = parseTicketEditorContent(writtenContent!);
-    assert.strictEqual(parsed.controlFields?.mode, "ticket-update");
-    assert.strictEqual(parsed.controlFields?.issue_id, 5555);
+    let saveCalls = 0;
+    const result = await compareAndRewriteDocumentWithRegisteredFields({
+      documentUri: DOC_URI, ticketId: 1,
+      replacement: parseTicketEditorContent(text), expected: { content: text, operationRevision: 1 },
+      deps: { textDocuments: [editor.document], textEditors: [editor], saveDocument: async () => { saveCalls++; return true; } },
+    });
+    assert.deepStrictEqual(result, { kind: "stale_source" });
+    assert.strictEqual(editor.document.getText(), newerText);
+    assert.strictEqual(saveCalls, 0);
   });
 
-  test("returns false for untitled: scheme when document not open", async () => {
-    const rewriteDeps = { textDocuments: [] };
-
-    const success = await rewriteDocumentWithRegisteredFields(
-      "untitled:some-file.md",
-      1,
-      rewriteDeps,
-    );
-
-    assert.strictEqual(success, false);
-  });
-});
-
-suite("syncUnsyncedFileNewTicket – queue management", () => {
-  const DOC_URI = "untitled:redmine-client-new-ticket-queue.md";
-
-  setup(async () => {
-    await clearOfflineSyncQueueAsync();
-    clearTicketDrafts();
+  test("expected contentより新しいdocumentにはeditor.editを呼ばない", async () => {
+    const text = buildNewTicketText();
+    const newerText = `${text}\nnewer edit`;
+    const editor = createMutableEditorStub(vscode.Uri.parse(DOC_URI), newerText);
+    let editCalls = 0;
+    editor.edit = async () => { editCalls++; return true; };
+    const result = await compareAndRewriteDocumentWithRegisteredFields({
+      documentUri: DOC_URI, ticketId: 1,
+      replacement: parseTicketEditorContent(text), expected: { content: text, operationRevision: 1 },
+      deps: { textDocuments: [editor.document], textEditors: [editor] },
+    });
+    assert.deepStrictEqual(result, { kind: "stale_source" });
+    assert.strictEqual(editCalls, 0);
+    assert.strictEqual(editor.document.getText(), newerText);
   });
 
-  teardown(async () => {
-    await clearOfflineSyncQueueAsync();
-    clearTicketDrafts();
+  test("LF-02: closed documentはnot_availableでfilesystemを上書きしない", async () => {
+    const directory = fs.mkdtempSync(path.join(os.tmpdir(), "redmine-finalization-"));
+    const filePath = path.join(directory, "ticket.md");
+    const text = buildNewTicketText();
+    fs.writeFileSync(filePath, text);
+    try {
+      const result = await compareAndRewriteDocumentWithRegisteredFields({
+        documentUri: vscode.Uri.file(filePath).toString(), ticketId: 5555,
+        replacement: parseTicketEditorContent(text), expected: { content: text, operationRevision: 1 },
+        deps: { textDocuments: [], textEditors: [] },
+      });
+      assert.deepStrictEqual(result, { kind: "not_available" });
+      assert.strictEqual(fs.readFileSync(filePath, "utf8"), text);
+    } finally {
+      fs.rmSync(directory, { recursive: true, force: true });
+    }
   });
 
-  test("queue entry remains when rewrite fails", async () => {
+  test("SyncEngineはclosed documentのremote identityとlocal_finalize_pendingを保持する", async () => {
     const text = buildNewTicketText();
     await addOfflineNewTicketAsync({ content: text, projectId: 5, documentUri: DOC_URI });
-
-    const openDocument = {
-      uri: vscode.Uri.parse(DOC_URI),
-      getText: () => text,
-    } as vscode.TextDocument;
-
-    const rewriteDeps = {
-      textDocuments: [openDocument],
-      applyEdit: async () => false,
+    const documents: DocumentPort = {
+      rewriteNewTicket: (input) => compareAndRewriteDocumentWithRegisteredFields({
+        ...input, deps: { textDocuments: [], textEditors: [] },
+      }),
+      rewriteTicket: (input) => compareAndRewriteDocumentWithRegisteredFields({
+        ...input, deps: { textDocuments: [], textEditors: [] },
+      }),
+      findOpenDocument: () => undefined,
     };
-
-    const success = await rewriteDocumentWithRegisteredFields(DOC_URI, 1, rewriteDeps);
-    assert.strictEqual(success, false);
-
-    const queue = getOfflineSyncQueue();
-    assert.strictEqual(queue.newTickets.length, 1, "entry should still be in queue");
+    let createCalls = 0;
+    const engine = createSyncEngine({ documents, tickets: {
+      createIssue: async () => { createCalls++; return 77; },
+      getIssueDetail: async () => ({ ticket: {
+        id: 77, subject: "Queued ticket", description: "Body", projectId: 5, updatedAt: "t1",
+      }, comments: [] }),
+      getProjectTrackers: async () => [{ id: 1, name: "Task" }],
+      listIssueStatuses: async () => [{ id: 2, name: "In Progress" }],
+      listIssuePriorities: async () => [{ id: 3, name: "Normal" }],
+    } });
+    try {
+      const key = { kind: "newTicket" as const, documentUri: DOC_URI };
+      const result = await engine.syncOne(key, { connectionScope: "" });
+      assert.strictEqual(result.kind, "remote_committed");
+      const entry = getOfflineSyncQueue().newTickets.find((item) => item.documentUri === DOC_URI);
+      assert.strictEqual(entry?.createdIssueId, 77);
+      assert.strictEqual(entry?.phase, "local_finalize_pending");
+      assert.strictEqual(entry?.effects?.find((effect) => effect.kind === "ticket_create")?.state, "committed");
+      await engine.syncOne(key, { connectionScope: "" });
+      assert.strictEqual(createCalls, 1);
+      assert.strictEqual(getOfflineSyncQueue().newTickets.find((item) => item.documentUri === DOC_URI)?.phase, "local_finalize_pending");
+    } finally {
+      await clearOfflineSyncQueueAsync();
+      clearTicketDrafts();
+    }
   });
+
 });
 
 suite("syncUnsyncedFileNewTicket – project_id preserved in rewrite", () => {
@@ -259,38 +230,7 @@ suite("syncUnsyncedFileNewTicket – project_id preserved in rewrite", () => {
     assert.strictEqual(parsed.controlFields?.project_id, 55);
   });
 
-  test("rewriteDocumentWithRegisteredFields passes projectId to frontmatter", async () => {
-    const DOC_URI_PROJ = "untitled:project-id-test.md";
-    const text = buildTicketEditorContent({
-      subject: "With project",
-      description: "body",
-      metadata: buildIssueMetadataFixture(),
-      controlFields: { mode: "new-ticket", issue_id: null },
-    });
-    const openDocument = {
-      uri: vscode.Uri.parse(DOC_URI_PROJ),
-      getText: () => text,
-    } as vscode.TextDocument;
 
-    let appliedContent: string | undefined;
-    const rewriteDeps = {
-      textDocuments: [openDocument],
-      applyEdit: async (edit: vscode.WorkspaceEdit) => {
-        const entries = edit.entries();
-        if (entries.length > 0) {
-          appliedContent = entries[0][1][0].newText;
-        }
-        return true;
-      },
-    };
-
-    const success = await rewriteDocumentWithRegisteredFields(DOC_URI_PROJ, 88, rewriteDeps, 33);
-    assert.strictEqual(success, true);
-    assert.ok(appliedContent);
-    const parsed = parseTicketEditorContent(appliedContent);
-    assert.strictEqual(parsed.controlFields?.project_id, 33);
-    assert.strictEqual(parsed.controlFields?.issue_id, 88);
-  });
 });
 
 suite("syncUnsyncedFileNewTicket – updateOfflineNewTicketAsync", () => {

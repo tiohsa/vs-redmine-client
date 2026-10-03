@@ -8,7 +8,7 @@ import {
   createTicketSyncService,
   type TicketSyncService,
 } from "./ticketSync/ticketSyncService";
-import type { SyncContext } from "./ticketSync/ports";
+import type { UploadSpoolStore, SyncContext } from "./ticketSync/ports";
 import type { TicketSyncOutcome, TicketSyncQueueKey } from "./ticketSync/ticketSyncOutcome";
 import type { CommentSaveDependencies } from "../views/commentSaveSync";
 import type { CommentConflictContext } from "../views/commentSaveTypes";
@@ -58,11 +58,13 @@ export interface SyncEngineDependencies {
   };
   comments?: Partial<CommentSaveDependencies>;
   coordinator?: SyncCoordinator;
+  uploadSpoolStore?: UploadSpoolStore;
   documents?: any;
 }
 
 export class SyncEngine {
   private readonly coordinator: SyncCoordinator;
+  private readonly uploadSpoolStore?: UploadSpoolStore;
   private readonly tickets: Pick<TicketSyncService, "syncQueueItem" | "syncAll" | "resolveCommitUnknown">;
   private readonly ticketEditorService: Pick<TicketSyncService, "syncEditor">;
   private readonly explicitTickets?: Pick<TicketSyncService, "syncQueueItem" | "syncAll" | "resolveCommitUnknown">;
@@ -71,6 +73,7 @@ export class SyncEngine {
   private readonly documents?: any;
 
   public constructor(deps: SyncEngineDependencies = {}) {
+    this.uploadSpoolStore = deps.uploadSpoolStore;
     const rawTickets = deps.tickets as any;
     const isServiceLike = rawTickets && typeof rawTickets.syncQueueItem === "function";
     this.documents = deps.documents ?? rawTickets?.rewrite;
@@ -87,13 +90,14 @@ export class SyncEngine {
         create: rawTickets,
         update: rawTickets,
         coordinator: this.coordinator,
+        uploadSpoolStore: this.uploadSpoolStore,
       });
       this.tickets = ticketService;
       this.ticketEditorService = ticketService;
     } else {
       this.coordinator = deps.coordinator ?? createSyncCoordinator();
       this.explicitTickets = isServiceLike ? rawTickets : undefined;
-      const ticketService = createTicketSyncService({ coordinator: this.coordinator });
+      const ticketService = createTicketSyncService({ coordinator: this.coordinator, uploadSpoolStore: this.uploadSpoolStore });
       this.tickets = (isServiceLike ? rawTickets : undefined) ?? ticketService;
       this.ticketEditorService = ticketService;
     }
@@ -144,6 +148,7 @@ export class SyncEngine {
       attemptGeneration: input.attemptGeneration ?? identity.attemptGeneration,
       resolution: input.resolution,
       deps: {
+        uploadSpoolStore: this.uploadSpoolStore,
         comment: this.comments,
       },
     });
@@ -170,6 +175,7 @@ export class SyncEngine {
       attemptGeneration: input.attemptGeneration ?? identity.attemptGeneration,
       resolution: input.resolution,
       deps: {
+        uploadSpoolStore: this.uploadSpoolStore,
         ticketCreate: this.rawTicketDeps,
         ticketUpdate: this.rawTicketDeps,
         comment: this.comments,
@@ -206,6 +212,7 @@ export class SyncEngine {
       context: input.context,
       resolution: input.resolution,
       deps: {
+        uploadSpoolStore: this.uploadSpoolStore,
         ticketCreate: this.rawTicketDeps,
         ticketUpdate: this.rawTicketDeps,
         comment: this.comments,
@@ -223,6 +230,7 @@ export class SyncEngine {
     }
     return this.coordinator.sync(key as any, context, {
       deps: {
+        uploadSpoolStore: this.uploadSpoolStore,
         ticketCreate: this.rawTicketDeps,
         ticketUpdate: this.rawTicketDeps,
         comment: this.comments,
@@ -239,6 +247,7 @@ export class SyncEngine {
     const outcome = await this.coordinator.syncAll(context, {
       shouldContinue: options?.shouldContinue,
       deps: {
+        uploadSpoolStore: this.uploadSpoolStore,
         comment: this.comments,
         ticketCreate: this.rawTicketDeps,
         ticketUpdate: this.rawTicketDeps,

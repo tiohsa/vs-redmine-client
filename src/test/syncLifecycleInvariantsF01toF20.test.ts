@@ -34,6 +34,7 @@ import type {
 } from "../app/ticketSync/syncOperationTypes";
 import {
   type DurableSyncEffect,
+  type UploadRequestSnapshot,
   restoreDurableSyncEffect,
 } from "../app/syncEffects";
 import {
@@ -432,7 +433,7 @@ suite("F-01 〜 F-20: Reproduction & Invariant Tests", () => {
     const memento = createTestMemento();
     initializeOfflineSyncStore(memento, SCOPE);
     const repo = createSyncOperationRepository();
-    let clipboardReadCount = 0;
+    const uploadedPaths: string[] = [];
 
     await vscode.env.clipboard.writeText("data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==");
 
@@ -481,8 +482,8 @@ suite("F-01 〜 F-20: Reproduction & Invariant Tests", () => {
         repository: repo,
         ticketCreate: {
           ...metadataDeps,
-          uploadClipboardImage: async () => {
-            clipboardReadCount++;
+          uploadFile: async (filePath: string) => {
+            uploadedPaths.push(filePath);
             return { token: "tok-clip-1", filename: "pasted.png", contentType: "image/png" };
           },
         } as any,
@@ -498,6 +499,10 @@ suite("F-01 〜 F-20: Reproduction & Invariant Tests", () => {
     const snap = clipEffect.requestSnapshot as any;
     assert.notStrictEqual(snap.contentHash, "clipboard", "F-13: contentHash は 'clipboard' 文字列ではなく実際のハッシュであること");
     assert.ok(snap.contentSize > 0, "F-13: contentSize は 0 より大きいこと");
+    assert.deepStrictEqual(uploadedPaths, [snap.spoolFilePath], "remote upload は frozen file を使用すること");
+    assert.deepStrictEqual(await computeFileHashAndSizeAsync(uploadedPaths[0]), {
+      contentHash: snap.contentHash, contentSize: snap.contentSize,
+    });
   });
 
   test("F-13b: File attachment は spool identity を保存し、元ファイル変更後も spool を retry する", async () => {
@@ -639,7 +644,8 @@ suite("F-01 〜 F-20: Reproduction & Invariant Tests", () => {
     if (fs.existsSync(snapshot.spoolFilePath)) { fs.unlinkSync(snapshot.spoolFilePath); }
   });
 
-  test("F-13d: File attachment の spool 消失時は元ファイルから再構築せず failure にする", async () => {
+  for (const spoolState of ["missing", "tampered"] as const) {
+  test(`F-13d: File attachment spool ${spoolState} は remote upload をせず identity を保持する`, async () => {
     const tmpFile = path.join(os.tmpdir(), `f13d-file-${Date.now()}.txt`);
     fs.writeFileSync(tmpFile, `F13d content ${Date.now()}`);
     const repo = createSyncOperationRepository();
@@ -678,8 +684,12 @@ suite("F-01 〜 F-20: Reproduction & Invariant Tests", () => {
     );
     const failed = repo.getOperation<TicketCreateIntent>(operation.key!, SCOPE)!;
     const effect = failed.effects?.find((entry) => entry.effectId.startsWith("attachment:file:"))!;
-    const snapshot = effect.requestSnapshot as any;
-    fs.unlinkSync(snapshot.spoolFilePath);
+    const frozenSnapshot = effect.requestSnapshot as UploadRequestSnapshot;
+    const storageKey = `redmine.offlineSyncQueue.${encodeURIComponent(SCOPE)}`;
+    const persistedBefore = structuredClone(memento.get<unknown>(storageKey));
+    const spoolFilePath = frozenSnapshot.spoolFilePath!;
+    if (spoolState === "missing") { fs.unlinkSync(spoolFilePath); }
+    else { fs.writeFileSync(spoolFilePath, Buffer.alloc(frozenSnapshot.contentSize, 120)); }
 
     const retry = await handler.resolveEffect({
       key: operation.key!,
@@ -691,9 +701,60 @@ suite("F-01 〜 F-20: Reproduction & Invariant Tests", () => {
     });
 
     assert.strictEqual(retry.kind, "failed_before_commit");
-    assert.strictEqual(uploadCalls, 1);
+    assert.strictEqual(uploadCalls, 1, "検証失敗後の remote upload 追加呼出は 0 回");
+    assert.deepStrictEqual(memento.get(storageKey), persistedBefore,
+      "検証失敗で snapshot・phase・effects は変更しない");
+    if (fs.existsSync(spoolFilePath)) { fs.unlinkSync(spoolFilePath); }
     assert.ok(fs.existsSync(tmpFile), "元ファイルは存在していても spool から再構築しないこと");
     fs.unlinkSync(tmpFile);
+  });
+
+  }
+
+  test("SP-10: 再初期化後のlegacy spoolを移動・再生成せず明示retryする", async () => {
+    const legacyRoot = fs.mkdtempSync(path.join(os.tmpdir(), "redmine-legacy-retry-"));
+    const spoolFilePath = path.join(legacyRoot, "vs-redmine-spool", "frozen.txt");
+    fs.mkdirSync(path.dirname(spoolFilePath));
+    fs.writeFileSync(spoolFilePath, "legacy authoritative bytes");
+    const identity = await computeFileHashAndSizeAsync(spoolFilePath);
+    assert.ok(identity);
+    const snapshot: UploadRequestSnapshot = {
+      kind: "upload", filePath: path.join(legacyRoot, "missing-source.txt"),
+      filename: "frozen.txt", contentType: "text/plain", spoolFilePath, ...identity,
+    };
+    const key = { kind: "newTicket" as const, queueId: "legacy-spool-retry" };
+    const repo = createSyncOperationRepository();
+    const operation: UnifiedSyncOperation<TicketCreateIntent> = {
+      operationId: key.queueId, key, kind: "ticket_create", connectionScope: SCOPE,
+      phase: "preparing", revision: 1, attemptGeneration: 1, persistenceVersion: 1,
+      intent: { projectId: 1, subject: "Legacy", description: "Body", metadata: {
+        tracker: "Feature", priority: "Normal", status: "New", due_date: "", children: [],
+      } },
+      effects: [{ effectId: "attachment:file:legacy", kind: "attachment_upload", operationRevision: 1,
+        attemptGeneration: 1, state: "commit_unknown", target: {}, requestSnapshot: snapshot }],
+    };
+    await repo.saveOperation(operation, SCOPE);
+    initializeOfflineSyncStore(memento, SCOPE);
+    const restored = repo.getOperation<TicketCreateIntent>(key, SCOPE);
+    assert.ok(restored);
+    const uploadedPaths: string[] = [];
+    try {
+      const outcome = await new TicketCreateHandler().resolveEffect({
+        key, operation: restored, effectId: "attachment:file:legacy", context: { connectionScope: SCOPE },
+        resolution: { kind: "retry_effect" }, deps: { repository: repo, ticketCreate: {
+          uploadFile: async (filePath) => {
+            uploadedPaths.push(filePath);
+            assert.strictEqual(fs.readFileSync(filePath, "utf8"), "legacy authoritative bytes");
+            return { token: "legacy-token", filename: "frozen.txt", contentType: "text/plain" };
+          },
+        } },
+      });
+      assert.strictEqual(outcome.kind, "remote_committed");
+      assert.deepStrictEqual(uploadedPaths, [spoolFilePath]);
+      assert.deepStrictEqual(repo.getOperation(key, SCOPE)?.effects?.[0].requestSnapshot, snapshot);
+      assert.ok(fs.existsSync(spoolFilePath));
+      assert.strictEqual(fs.existsSync(snapshot.filePath!), false);
+    } finally { fs.rmSync(legacyRoot, { recursive: true, force: true }); }
   });
 
   // F-15: Operation/Effect ownership separation

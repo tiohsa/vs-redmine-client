@@ -53,7 +53,6 @@ suite("syncEditorToRedmine — draft status management", () => {
       rewrite: {
         textDocuments: [editor.document],
         textEditors: [editor],
-        applyEdit: async () => true,
         saveDocument: async () => true,
       },
       deps: {
