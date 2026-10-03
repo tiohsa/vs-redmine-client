@@ -11,7 +11,7 @@ export const observeUploadSpoolCleanup = (input: {
   const warn = input.warn ?? ((error: unknown) => {
     console.warn("[vs-redmine-client] Upload spool cleanup failed", error);
   });
-  const cleanup = async (): Promise<void> => {
+  const cleanupPass = async (): Promise<void> => {
     try {
       await input.store.cleanupUnreferenced(() => getPersistedUploadSpoolReferences(input.storage));
     } catch (error) {
@@ -19,6 +19,28 @@ export const observeUploadSpoolCleanup = (input: {
       catch (warningError) { console.warn("[vs-redmine-client] Upload spool warning failed", warningError); }
     }
   };
-  const dispose = onOfflineSyncQueueChanged(() => { void cleanup(); });
-  return { dispose, cleanup };
+  let running: Promise<void> | undefined;
+  let dirty = false;
+  let disposed = false;
+  const cleanup = (): Promise<void> => {
+    if (disposed) { return Promise.resolve(); }
+    if (running) {
+      dirty = true;
+      return running;
+    }
+    running = Promise.resolve().then(async () => {
+      try {
+        do {
+          dirty = false;
+          await cleanupPass();
+        } while (dirty && !disposed);
+      } finally {
+        // 最後の dirty 判定と running 解除の間に別の microtask を挟まない。
+        running = undefined;
+      }
+    });
+    return running;
+  };
+  const unsubscribe = onOfflineSyncQueueChanged(() => { void cleanup(); });
+  return { dispose: () => { disposed = true; dirty = false; unsubscribe(); }, cleanup };
 };

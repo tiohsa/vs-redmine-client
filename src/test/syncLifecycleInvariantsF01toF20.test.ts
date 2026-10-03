@@ -3,6 +3,7 @@ import * as fs from "fs";
 import * as os from "os";
 import * as path from "path";
 import * as vscode from "vscode";
+import { DurableUploadSpoolStore } from "../app/ticketSync/uploadSpoolStore";
 import {
   initializeOfflineSyncStore,
   addOfflineTicketUpdateAsync,
@@ -43,6 +44,257 @@ import {
 } from "../utils/fileHash";
 
 const SCOPE = "https://redmine.example.org/f01-f20-suite";
+
+suite("Frozen upload metadata authority", () => {
+  let root: string;
+  let storage: vscode.Memento;
+  setup(async () => {
+    root = await fs.promises.mkdtemp(path.join(os.tmpdir(), "upload-metadata-"));
+    storage = createTestMemento();
+    initializeOfflineSyncStore(storage, SCOPE);
+  });
+  teardown(async () => {
+    initializeOfflineSyncStore(createTestMemento());
+    await fs.promises.rm(root, { recursive: true, force: true });
+  });
+
+  test("S-11: file streaming の partial write では remote upload を開始しない", async () => {
+    const source = path.join(root, "partial.txt");
+    await fs.promises.writeFile(source, "source bytes");
+    const repo = createSyncOperationRepository();
+    const operation: UnifiedSyncOperation<TicketCreateIntent> = {
+      operationId: "partial-file", kind: "ticket_create", phase: "queued", revision: 1,
+      persistenceVersion: 1, connectionScope: SCOPE, key: { kind: "newTicket", queueId: "partial-file" },
+      intent: { projectId: 1, subject: "Partial", description: "",
+        metadata: { tracker: "", priority: "", status: "", due_date: "", children: [] },
+        attachments: [{ kind: "file", filePath: source }] },
+    };
+    await repo.saveOperation(operation, SCOPE);
+    const store = new DurableUploadSpoolStore(root);
+    const handler = new TicketCreateHandler();
+    const prepared = { parsed: { subject: "Partial", description: "", metadata: operation.intent!.metadata },
+      projectId: 1, uploadTokens: [] };
+    let remoteUploads = 0;
+    const originalOpen = fs.promises.open;
+    fs.promises.open = async (...args: Parameters<typeof originalOpen>) => {
+      const handle = await originalOpen(...args);
+      if (args[1] === "wx") {
+        const write = handle.write.bind(handle);
+        handle.write = async () => {
+          await write(Buffer.from("partial"));
+          throw new Error("injected streaming write failure");
+        };
+      }
+      return handle;
+    };
+    try {
+      const failed = await handler.executeSecondaryEffects(operation, prepared, { connectionScope: SCOPE }, {
+        repository: repo, uploadSpoolStore: store,
+        ticketCreate: { uploadFile: async () => { remoteUploads++; return { token: "unexpected", filename: "partial.txt", contentType: "text/plain" }; } },
+      });
+      assert.strictEqual(failed.ok, false);
+      assert.strictEqual(remoteUploads, 0);
+      assert.deepStrictEqual(repo.getOperation(operation.key!, SCOPE)!.effects ?? [], []);
+      const directories = await fs.promises.readdir(path.join(root, "sync-spool"));
+      for (const directory of directories) {
+        assert.deepStrictEqual(await fs.promises.readdir(path.join(root, "sync-spool", directory)), []);
+      }
+    } finally { fs.promises.open = originalOpen; }
+  });
+
+  for (const explicit of [false, true]) {
+    test(`${explicit ? "U-04" : "U-01"}: file attachment の logical filename と MIME は transport 応答で変わらない`, async () => {
+      const source = path.join(root, "report.pdf");
+      await fs.promises.writeFile(source, "original PDF bytes");
+      const repo = createSyncOperationRepository();
+      const operation: UnifiedSyncOperation<TicketCreateIntent> = {
+        operationId: "metadata-file", kind: "ticket_create", phase: "queued", revision: 1,
+        persistenceVersion: 1, connectionScope: SCOPE,
+        key: { kind: "newTicket", queueId: "metadata-file" },
+        intent: { projectId: 1, subject: "Metadata", description: "Metadata",
+          metadata: { tracker: "", priority: "", status: "", due_date: "", children: [] },
+          attachments: [{ kind: "file", filePath: source,
+            ...(explicit ? { filename: "logical.pdf", contentType: "application/pdf" } : {}) }] },
+      };
+      await repo.saveOperation(operation, SCOPE);
+      const handler = new TicketCreateHandler();
+      const prepared = { parsed: { subject: "Metadata", description: "Metadata", metadata: operation.intent!.metadata }, projectId: 1, uploadTokens: [] };
+      const store = new DurableUploadSpoolStore(root);
+      const result = await handler.executeSecondaryEffects(operation, prepared, { connectionScope: SCOPE }, {
+        repository: repo, uploadSpoolStore: store,
+        ticketCreate: { uploadFile: async (filePath) => ({ token: "file-token",
+          filename: path.basename(filePath), contentType: "transport/type" }) },
+      });
+      assert.ok(result.ok);
+      const expected = { token: "file-token", filename: explicit ? "logical.pdf" : "report.pdf",
+        content_type: explicit ? "application/pdf" : "application/octet-stream" };
+      assert.deepStrictEqual(result.uploadTokens, [expected]);
+      initializeOfflineSyncStore(storage, SCOPE);
+      const restoredRepo = createSyncOperationRepository();
+      const restored = restoredRepo.getOperation<TicketCreateIntent>(operation.key!, SCOPE)!;
+      const reused = await handler.executeSecondaryEffects(restored, prepared, { connectionScope: SCOPE }, {
+        repository: restoredRepo, uploadSpoolStore: store,
+        ticketCreate: { uploadFile: async () => { throw new Error("committed upload was repeated"); } },
+      });
+      assert.ok(reused.ok);
+      assert.deepStrictEqual(reused.uploadTokens, [expected]);
+    });
+  }
+
+  for (const variant of ["source", "logical", "explicit"] as const) {
+    test(`file添付のMIMEはSnapshot作成時に${variant}のmetadataから確定する`, async () => {
+      const source = path.join(root, variant === "logical" ? "source.bin" : "source.png");
+      await fs.promises.writeFile(source, "PNG bytes");
+      const repo = createSyncOperationRepository();
+      const operation: UnifiedSyncOperation<TicketCreateIntent> = {
+        operationId: "png-file", kind: "ticket_create", phase: "preparing", revision: 1,
+        persistenceVersion: 1, connectionScope: SCOPE, key: { kind: "newTicket", queueId: "png-file" },
+        intent: { projectId: 1, subject: "PNG", description: "",
+          metadata: { tracker: "", priority: "", status: "", due_date: "", children: [] },
+          attachments: [{ kind: "file", filePath: source,
+            ...(variant === "logical" ? { filename: "logical.png" } : {}),
+            ...(variant === "explicit" ? { contentType: "custom/image" } : {}) }] },
+      };
+      await repo.saveOperation(operation, SCOPE);
+      const handler = new TicketCreateHandler();
+      const prepared = { parsed: { subject: "PNG", description: "", metadata: operation.intent!.metadata }, projectId: 1, uploadTokens: [] };
+      const result = await handler.executeSecondaryEffects(operation, prepared, { connectionScope: SCOPE }, {
+        repository: repo, uploadSpoolStore: new DurableUploadSpoolStore(root),
+        ticketCreate: { uploadFile: async () => ({ token: "png-token", filename: "transport.bin", contentType: "transport/type" }) },
+      });
+      assert.ok(result.ok);
+      const expected = { token: "png-token", filename: variant === "logical" ? "logical.png" : "source.png",
+        content_type: variant === "explicit" ? "custom/image" : "image/png" };
+      assert.deepStrictEqual(result.uploadTokens, [expected]);
+      initializeOfflineSyncStore(storage, SCOPE);
+      const restoredRepo = createSyncOperationRepository();
+      const restored = restoredRepo.getOperation<TicketCreateIntent>(operation.key!, SCOPE)!;
+      restored.intent!.attachments = [{ kind: "file", filePath: source, filename: "changed.bin", contentType: "changed/type" }];
+      const reused = await handler.executeSecondaryEffects(restored, prepared, { connectionScope: SCOPE }, {
+        repository: restoredRepo,
+        ticketCreate: { uploadFile: async () => { throw new Error("unexpected upload"); } },
+      });
+      assert.ok(reused.ok);
+      assert.deepStrictEqual(reused.uploadTokens, [expected]);
+    });
+  }
+
+  for (const explicit of [false, true]) {
+    test(`旧clipboard EffectはSnapshotなしでも${explicit ? "指定metadata" : "従来の既定値"}で再利用する`, async () => {
+      const repo = createSyncOperationRepository();
+      const operation: UnifiedSyncOperation<TicketCreateIntent> = {
+        operationId: "legacy-clipboard", kind: "ticket_create", phase: "preparing", revision: 1,
+        persistenceVersion: 1, connectionScope: SCOPE,
+        key: { kind: "newTicket", queueId: "legacy-clipboard" },
+        intent: { projectId: 1, subject: "Legacy", description: "",
+          metadata: { tracker: "", priority: "", status: "", due_date: "", children: [] },
+          attachments: [{ kind: "clipboard", ...(explicit ? { filename: "old.jpeg", contentType: "image/jpeg" } : {}) }] },
+        effects: [{ effectId: "attachment:clipboard:0", kind: "attachment_upload", operationRevision: 1,
+          state: "committed", token: "legacy-token", target: { filename: "ignored-target.png" } }],
+      };
+      await repo.saveOperation(operation, SCOPE);
+      initializeOfflineSyncStore(storage, SCOPE);
+      const restoredRepo = createSyncOperationRepository();
+      const restored = restoredRepo.getOperation<TicketCreateIntent>(operation.key!, SCOPE)!;
+      const handler = new TicketCreateHandler();
+      const prepared = { parsed: { subject: "Legacy", description: "", metadata: operation.intent!.metadata }, projectId: 1, uploadTokens: [] };
+      const reused = await handler.executeSecondaryEffects(restored, prepared, { connectionScope: SCOPE }, {
+        repository: restoredRepo,
+        ticketCreate: { uploadFile: async () => { throw new Error("legacy clipboard was uploaded again"); } },
+      });
+      assert.ok(reused.ok, !reused.ok ? reused.error.message : "");
+      assert.deepStrictEqual(reused.uploadTokens, [{ token: "legacy-token", filename: explicit ? "old.jpeg" : "clipboard.png",
+        content_type: explicit ? "image/jpeg" : "image/png" }]);
+    });
+  }
+
+  test("U-03: clipboard JPEG は restart・明示retry・committed再利用後も同じ metadata を使う", async () => {
+    const previousClipboard = await vscode.env.clipboard.readText();
+    try {
+      await vscode.env.clipboard.writeText("data:image/jpeg;base64,aGVsbG8=");
+      const repo = createSyncOperationRepository();
+      const operation: UnifiedSyncOperation<TicketCreateIntent> = {
+        operationId: "metadata-clipboard", kind: "ticket_create", phase: "queued", revision: 1,
+        persistenceVersion: 1, connectionScope: SCOPE,
+        key: { kind: "newTicket", queueId: "metadata-clipboard" },
+        intent: { projectId: 1, subject: "JPEG", description: "JPEG",
+          metadata: { tracker: "", priority: "", status: "", due_date: "", children: [] },
+          attachments: [{ kind: "clipboard" }] },
+      };
+      await repo.saveOperation(operation, SCOPE);
+      const handler = new TicketCreateHandler();
+      const prepared = { parsed: { subject: "JPEG", description: "JPEG", metadata: operation.intent!.metadata }, projectId: 1, uploadTokens: [] };
+      const store = new DurableUploadSpoolStore(root);
+      const failed = await handler.executeSecondaryEffects(operation, prepared, { connectionScope: SCOPE }, {
+        repository: repo, uploadSpoolStore: store,
+        ticketCreate: { uploadFile: async () => { throw new Error("network timeout"); } },
+      });
+      assert.strictEqual(failed.ok, false);
+      await vscode.env.clipboard.writeText("changed clipboard");
+      initializeOfflineSyncStore(storage, SCOPE);
+      const restoredRepo = createSyncOperationRepository();
+      const restored = restoredRepo.getOperation<TicketCreateIntent>(operation.key!, SCOPE)!;
+      const effect = restored.effects!.find((entry) => entry.kind === "attachment_upload")!;
+      assert.ok(effect.requestSnapshot?.kind === "upload");
+      assert.strictEqual(effect.requestSnapshot.filename, "clipboard-image.jpeg");
+      assert.strictEqual(effect.requestSnapshot.contentType, "image/jpeg");
+      const retry = await handler.resolveEffect({ key: operation.key!, effectId: effect.effectId,
+        operation: restored, context: { connectionScope: SCOPE }, resolution: { kind: "retry_effect" },
+        deps: { repository: restoredRepo, uploadSpoolStore: store,
+          ticketCreate: { uploadFile: async () => ({ token: "jpeg-token", filename: "internal.png", contentType: "image/png" }) } },
+      });
+      assert.strictEqual(retry.kind, "remote_committed");
+      const committed = restoredRepo.getOperation<TicketCreateIntent>(operation.key!, SCOPE)!;
+      assert.strictEqual(committed.effects!.find((entry) => entry.effectId === effect.effectId)!.target.filename, "clipboard-image.jpeg");
+      const reused = await handler.executeSecondaryEffects(committed, prepared, { connectionScope: SCOPE }, {
+        repository: restoredRepo, uploadSpoolStore: store,
+      });
+      assert.ok(reused.ok);
+      assert.deepStrictEqual(reused.uploadTokens, [{ token: "jpeg-token", filename: "clipboard-image.jpeg", content_type: "image/jpeg" }]);
+    } finally { await vscode.env.clipboard.writeText(previousClipboard); }
+  });
+
+  test("U-02: Markdown image は spool basename を本文へ書かず restart 後も logical metadata を使う", async () => {
+    const image = path.join(root, "test.png");
+    await fs.promises.writeFile(image, "image bytes");
+    const repo = createSyncOperationRepository();
+    const operation: UnifiedSyncOperation<TicketCreateIntent> = {
+      operationId: "metadata-markdown", kind: "ticket_create", phase: "queued", revision: 1,
+      persistenceVersion: 1, connectionScope: SCOPE,
+      key: { kind: "newTicket", queueId: "metadata-markdown" },
+      intent: { projectId: 1, subject: "Markdown", description: "![](images/test.png)",
+        metadata: { tracker: "", priority: "", status: "", due_date: "", children: [] } },
+    };
+    await repo.saveOperation(operation, SCOPE);
+    const handler = new TicketCreateHandler();
+    const prepare = () => ({ parsed: { subject: "Markdown", description: "![](images/test.png)", metadata: operation.intent!.metadata }, projectId: 1, uploadTokens: [],
+      imageLinks: [{ path: "images/test.png", range: { start: 4, end: 19 }, resolvedPath: image }] });
+    const prepared = prepare();
+    const store = new DurableUploadSpoolStore(root);
+    const first = await handler.executeSecondaryEffects(operation, prepared, { connectionScope: SCOPE }, {
+      repository: repo, uploadSpoolStore: store,
+      ticketCreate: { uploadFile: async (filePath) => ({ token: "image-token", filename: path.basename(filePath), contentType: "transport/type" }) },
+    });
+    assert.ok(first.ok);
+    assert.deepStrictEqual(first.uploadTokens, [{ token: "image-token", filename: "test.png", content_type: "image/png" }]);
+    assert.strictEqual(prepared.parsed.description, "![](test.png)");
+    const recorded = repo.getOperation<TicketCreateIntent>(operation.key!, SCOPE)!;
+    const recordedImage = recorded.effects!.find((effect) => effect.kind === "image_upload")!;
+    recordedImage.target.filename = "old-internal-spool-name.png";
+    await repo.saveOperation(recorded, SCOPE);
+    initializeOfflineSyncStore(storage, SCOPE);
+    await fs.promises.unlink(image);
+    const restoredRepo = createSyncOperationRepository();
+    const restored = restoredRepo.getOperation<TicketCreateIntent>(operation.key!, SCOPE)!;
+    const again = prepare();
+    const reused = await handler.executeSecondaryEffects(restored, again, { connectionScope: SCOPE }, {
+      repository: restoredRepo, uploadSpoolStore: store,
+    });
+    assert.ok(reused.ok);
+    assert.deepStrictEqual(reused.uploadTokens, first.uploadTokens);
+    assert.strictEqual(again.parsed.description, prepared.parsed.description);
+  });
+});
 
 suite("F-01 〜 F-20: Reproduction & Invariant Tests", () => {
   let memento: vscode.Memento;
