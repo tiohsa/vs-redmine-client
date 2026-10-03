@@ -10,9 +10,10 @@ import {
   addOfflineTicketUpdateAsync,
   clearOfflineSyncQueueAsync,
   getOfflineSyncQueue,
+  getActiveScope,
 } from "../views/offlineSyncStore";
 import { buildTicketEditorContent } from "../views/ticketEditorContent";
-import { applyQueuedTicketUpdate } from "../views/ticketSync/ticketQueueSync";
+import { createSyncEngine } from "../app/syncEngine";
 import { reloadTicketEditor, syncTicketDraft } from "../views/ticketSync/ticketUpdateSync";
 import { forceSaveLocal, mergeTicketContent } from "../views/conflictResolver";
 import { createTicketSyncService } from "../app/ticketSync";
@@ -124,11 +125,11 @@ suite("Ticket save sync", () => {
 
   test("queued no_change reconciles remote canonical state and clears dirty draft status", async () => {
     const metadata = buildIssueMetadataFixture();
-    initializeTicketDraft(101, "Title", "Body", metadata, "t1");
-    markDraftStatus(101, "Dirty");
+    const connectionScope = getActiveScope();
+    initializeTicketDraft(101, "Title", "Body", metadata, "t1", connectionScope);
+    markDraftStatus(101, "Dirty", connectionScope);
 
-    const result = await applyQueuedTicketUpdate({
-      update: {
+    await addOfflineTicketUpdateAsync(101, {
         ticketId: 101,
         baseSubject: "Title",
         baseDescription: "Body",
@@ -137,8 +138,9 @@ suite("Ticket save sync", () => {
         subject: "Title",
         description: "Body",
         metadata,
-      },
-      deps: {
+    });
+    const service = createTicketSyncService({
+      update: {
         getIssueDetail: async () => ({
           ticket: {
             id: 101,
@@ -166,8 +168,13 @@ suite("Ticket save sync", () => {
       },
     });
 
-    assert.strictEqual(result.status, "no_change");
-    assert.strictEqual(getTicketDraft(101)?.status, "Synced");
+    const result = await createSyncEngine({ tickets: service }).syncOne(
+      { kind: "ticket", ticketId: 101 },
+      { connectionScope },
+    );
+    assert.strictEqual(result.kind, "completed");
+    assert.strictEqual(getOfflineSyncQueue().tickets.has(101), false);
+    assert.strictEqual(getTicketDraft(101, connectionScope)?.status, "Synced");
   });
 
   test("returns conflict when remote updated", async () => {

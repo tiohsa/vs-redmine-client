@@ -1,5 +1,4 @@
 import * as fs from "fs";
-import * as os from "os";
 import * as path from "path";
 import * as vscode from "vscode";
 import type { IssueCreateInput, IssueUpdateInput, IssueUploadInput } from "../../redmine/issues";
@@ -53,7 +52,7 @@ import { validateComment } from "../../utils/commentValidation";
 import { resolveUploadSummary } from "../../views/ticketSync/ticketImageUploadSync";
 import { containsConflictMarkers } from "../../utils/threeWayMerge";
 import { computeNotesHash } from "../../utils/notesHash";
-import { computeBufferHashAndSize, computeFileHashAndSizeAsync } from "../../utils/fileHash";
+import { computeFileHashAndSizeAsync } from "../../utils/fileHash";
 import { classifyFailureDisposition } from "../../utils/redmineErrors";
 import type { TicketUpdateFields, UploadToken } from "../../redmine/types";
 import {
@@ -107,51 +106,28 @@ const resolveIntentBaseDir = (intent: {
   return resolveEditorBaseDir({ documentUri: vscode.Uri.parse(intent.documentUri) });
 };
 
-const createUploadSpool = async (
-  sourcePath: string,
-  identity: { contentHash: string; contentSize: number },
-): Promise<string> => {
-  const spoolDir = path.join(os.tmpdir(), "vs-redmine-spool");
-  await fs.promises.mkdir(spoolDir, { recursive: true });
-  const spoolFilePath = path.join(spoolDir, `${identity.contentHash}-${path.basename(sourcePath)}`);
+const frozenUploadLeases = new WeakMap<UploadRequestSnapshot, FrozenUpload>();
 
-  try {
-    await fs.promises.copyFile(sourcePath, spoolFilePath, fs.constants.COPYFILE_EXCL);
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code !== "EEXIST") {
-      throw error;
-    }
+const persistUploadSnapshot = async <T>(snapshot: UploadRequestSnapshot, persist: () => Promise<T>): Promise<T> => {
+  try { return await persist(); }
+  finally {
+    frozenUploadLeases.get(snapshot)?.release();
+    frozenUploadLeases.delete(snapshot);
   }
-
-  const spoolIdentity = await computeFileHashAndSizeAsync(spoolFilePath);
-  if (
-    !spoolIdentity ||
-    spoolIdentity.contentHash !== identity.contentHash ||
-    spoolIdentity.contentSize !== identity.contentSize
-  ) {
-    throw new Error(`Spool file identity mismatch: ${spoolFilePath}`);
-  }
-  return spoolFilePath;
 };
 
 const prepareMarkdownImageUpload = async (
   filePath: string,
-  existingEffect?: { requestSnapshot?: SyncEffectRequestSnapshot },
+  existingEffect: { requestSnapshot?: SyncEffectRequestSnapshot } | undefined,
+  connectionScope: string,
+  store: UploadSpoolStore,
 ): Promise<{ uploadFilePath: string; snapshot: UploadRequestSnapshot }> => {
   const existingSnapshot = existingEffect?.requestSnapshot?.kind === "upload"
     ? existingEffect.requestSnapshot as UploadRequestSnapshot
     : undefined;
 
   if (existingSnapshot?.spoolFilePath !== undefined) {
-    if (!fs.existsSync(existingSnapshot.spoolFilePath)) {
-      throw new Error(`Spool file not found for markdown image: ${filePath}`);
-    }
-    const spoolIdentity = await computeFileHashAndSizeAsync(existingSnapshot.spoolFilePath);
-    if (
-      !spoolIdentity ||
-      spoolIdentity.contentHash !== existingSnapshot.contentHash ||
-      spoolIdentity.contentSize !== existingSnapshot.contentSize
-    ) {
+    if (!await store.verify(existingSnapshot)) {
       throw new Error(`Spool file identity mismatch for markdown image: ${filePath}`);
     }
     return { uploadFilePath: existingSnapshot.spoolFilePath, snapshot: existingSnapshot };
@@ -170,16 +146,22 @@ const prepareMarkdownImageUpload = async (
   }
 
   const sourcePath = existingSnapshot?.filePath ?? filePath;
-  const spoolFilePath = await createUploadSpool(sourcePath, sourceIdentity);
+  if (existingSnapshot) {
+    return { uploadFilePath: sourcePath, snapshot: existingSnapshot };
+  }
+  const frozen = await store.freezeFile({ connectionScope, sourcePath,
+    filename: path.basename(sourcePath), expected: sourceIdentity });
+  const spoolFilePath = frozen.spoolFilePath;
   const snapshot: UploadRequestSnapshot = {
     kind: "upload",
     filePath: sourcePath,
     spoolFilePath,
-    filename: existingSnapshot?.filename ?? path.basename(sourcePath),
-    contentType: existingSnapshot?.contentType ?? getAttachmentContentType(path.basename(sourcePath)),
+    filename: path.basename(sourcePath),
+    contentType: getAttachmentContentType(path.basename(sourcePath)),
     contentHash: sourceIdentity.contentHash,
     contentSize: sourceIdentity.contentSize,
   };
+  frozenUploadLeases.set(snapshot, frozen);
   return { uploadFilePath: spoolFilePath, snapshot };
 };
 
@@ -209,6 +191,7 @@ const uploadMarkdownImageEffects = async (
   context: OperationHandlerContext,
   repo: SyncOperationRepository,
   uploadFile: typeof uploadFileAttachment,
+  uploadSpoolStore?: UploadSpoolStore,
 ): Promise<
   | { ok: true; resolvedMap: Map<string, UploadToken> }
   | { ok: false; error: Error; commitUnknown?: boolean }
@@ -253,12 +236,12 @@ const uploadMarkdownImageEffects = async (
     let uploadFilePath: string;
     let uploadSnapshot: UploadRequestSnapshot;
     try {
-      ({ uploadFilePath, snapshot: uploadSnapshot } = await prepareMarkdownImageUpload(filePath, existingEffect));
+      ({ uploadFilePath, snapshot: uploadSnapshot } = await prepareMarkdownImageUpload(filePath, existingEffect, context.connectionScope, uploadSpoolStore ?? getDefaultUploadSpoolStore()));
     } catch (error) {
       return { ok: false, error: error as Error };
     }
 
-    const planned = await repo.planEffect(
+    const planned = await persistUploadSnapshot(uploadSnapshot, () => repo.planEffect(
       opKey,
       {
         effectId,
@@ -271,7 +254,7 @@ const uploadMarkdownImageEffects = async (
       },
       context.connectionScope,
       revision,
-    );
+    ));
     if (!planned) {
       return { ok: false, error: new Error(`Failed to plan effect ${effectId}`) };
     }
@@ -463,7 +446,8 @@ export interface OperationHandlerContext {
   connectionScope: string;
 }
 
-import type { DocumentPort } from "./ports";
+import type { DocumentPort, FrozenUpload, UploadSpoolStore } from "./ports";
+import { getDefaultUploadSpoolStore } from "./uploadSpoolStore";
 
 export interface OperationHandlerDeps {
   ticketCreate?: Partial<TicketCreateDependencies>;
@@ -471,6 +455,7 @@ export interface OperationHandlerDeps {
   comment?: Partial<CommentSaveDependencies>;
   documents?: DocumentPort;
   repository?: SyncOperationRepository;
+  uploadSpoolStore?: UploadSpoolStore;
   localState?: any;
 }
 
@@ -859,18 +844,10 @@ export class TicketCreateHandler implements OperationHandler<TicketCreateIntent,
         if (existingEffect?.requestSnapshot) {
           uploadSnapshot = existingEffect.requestSnapshot as UploadRequestSnapshot;
           if (uploadSnapshot.spoolFilePath !== undefined) {
-            if (!uploadSnapshot.spoolFilePath || !fs.existsSync(uploadSnapshot.spoolFilePath)) {
-              return { ok: false, error: new Error(`Spool file not found for file attachment: ${effectId}`) };
-            }
-            uploadFilePath = uploadSnapshot.spoolFilePath;
-            const spoolIdentity = await computeFileHashAndSizeAsync(uploadFilePath);
-            if (
-              !spoolIdentity ||
-              spoolIdentity.contentHash !== uploadSnapshot.contentHash ||
-              spoolIdentity.contentSize !== uploadSnapshot.contentSize
-            ) {
+            if (!await (deps?.uploadSpoolStore ?? getDefaultUploadSpoolStore()).verify(uploadSnapshot)) {
               return { ok: false, error: new Error(`Spool file identity mismatch for file attachment: ${effectId}`) };
             }
+            uploadFilePath = uploadSnapshot.spoolFilePath;
           } else {
             uploadFilePath = uploadSnapshot.filePath ?? att.filePath;
             const fileId = await computeFileHashAndSizeAsync(uploadFilePath);
@@ -890,7 +867,11 @@ export class TicketCreateHandler implements OperationHandler<TicketCreateIntent,
             return { ok: false, error: new Error(`Failed to compute hash for file attachment: ${att.filePath}`) };
           }
           try {
-            const spoolFilePath = await createUploadSpool(att.filePath, fileId);
+            const frozen = await (deps?.uploadSpoolStore ?? getDefaultUploadSpoolStore()).freezeFile({
+              connectionScope: context.connectionScope, sourcePath: att.filePath,
+              filename: att.filename ?? path.basename(att.filePath), expected: fileId,
+            });
+            const spoolFilePath = frozen.spoolFilePath;
             uploadSnapshot = {
               kind: "upload",
               filePath: att.filePath,
@@ -900,13 +881,14 @@ export class TicketCreateHandler implements OperationHandler<TicketCreateIntent,
               contentHash: fileId.contentHash,
               contentSize: fileId.contentSize,
             };
+            frozenUploadLeases.set(uploadSnapshot, frozen);
             uploadFilePath = spoolFilePath;
           } catch (error) {
             return { ok: false, error: error as Error };
           }
         }
 
-        const planRes = await repo.planEffect(
+        const planRes = await persistUploadSnapshot(uploadSnapshot, () => repo.planEffect(
           opKey,
           {
             effectId,
@@ -918,7 +900,7 @@ export class TicketCreateHandler implements OperationHandler<TicketCreateIntent,
           },
           context.connectionScope,
           revision,
-        );
+        ));
         if (!planRes) {
           return { ok: false, error: new Error(`Failed to plan effect ${effectId}`) };
         }
@@ -983,18 +965,13 @@ export class TicketCreateHandler implements OperationHandler<TicketCreateIntent,
           continue;
         }
 
-        const spoolDir = path.join(os.tmpdir(), "vs-redmine-spool");
-        if (!fs.existsSync(spoolDir)) {
-          fs.mkdirSync(spoolDir, { recursive: true });
-        }
-
         let uploadSnapshot: UploadRequestSnapshot;
         let spoolFilePath: string | undefined;
 
         if (existingEffect?.requestSnapshot) {
           uploadSnapshot = existingEffect.requestSnapshot as UploadRequestSnapshot;
           spoolFilePath = uploadSnapshot.spoolFilePath;
-          if (!spoolFilePath || !fs.existsSync(spoolFilePath)) {
+          if (!await (deps?.uploadSpoolStore ?? getDefaultUploadSpoolStore()).verify(uploadSnapshot)) {
             return { ok: false, error: new Error(`Spool file not found for clipboard attachment: ${effectId}`) };
           }
         } else {
@@ -1010,21 +987,21 @@ export class TicketCreateHandler implements OperationHandler<TicketCreateIntent,
           } catch (err) {
             return { ok: false, error: new Error(`Failed to parse clipboard image data: ${(err as Error).message}`) };
           }
-          const bufferId = computeBufferHashAndSize(buffer);
-          spoolFilePath = path.join(spoolDir, `${bufferId.contentHash}.${contentType.split("/")[1] || "png"}`);
-          fs.writeFileSync(spoolFilePath, buffer);
-          uploadSnapshot = {
-            kind: "upload",
-            filePath: spoolFilePath,
-            filename,
-            contentType,
-            contentHash: bufferId.contentHash,
-            contentSize: bufferId.contentSize,
-            spoolFilePath,
-          };
+          try {
+            const frozen = await (deps?.uploadSpoolStore ?? getDefaultUploadSpoolStore()).freezeBuffer({
+              connectionScope: context.connectionScope, buffer, filename, contentType,
+            });
+            spoolFilePath = frozen.spoolFilePath;
+            uploadSnapshot = { kind: "upload", filePath: spoolFilePath,
+              filename, contentType, contentHash: frozen.contentHash,
+              contentSize: frozen.contentSize, spoolFilePath };
+            frozenUploadLeases.set(uploadSnapshot, frozen);
+          } catch (error) {
+            return { ok: false, error: error as Error };
+          }
         }
 
-        const planClipRes = await repo.planEffect(
+        const planClipRes = await persistUploadSnapshot(uploadSnapshot, () => repo.planEffect(
           opKey,
           {
             effectId,
@@ -1036,7 +1013,7 @@ export class TicketCreateHandler implements OperationHandler<TicketCreateIntent,
           },
           context.connectionScope,
           revision,
-        );
+        ));
         if (!planClipRes) {
           return { ok: false, error: new Error(`Failed to plan effect ${effectId}`) };
         }
@@ -1053,10 +1030,8 @@ export class TicketCreateHandler implements OperationHandler<TicketCreateIntent,
         }
 
         try {
-          const uploadFn = (createDeps as any).uploadClipboardImage;
-          const res = uploadFn
-            ? await uploadFn()
-            : await uploadFileAttachment(spoolFilePath!);
+          const uploadFn = createDeps.uploadFile ?? uploadFileAttachment;
+          const res = await uploadFn(spoolFilePath!);
           const commitClipRes = await repo.transitionEffect(
             opKey,
             effectId,
@@ -1098,7 +1073,7 @@ export class TicketCreateHandler implements OperationHandler<TicketCreateIntent,
     if (imageLinks.length > 0) {
       const uploaded = await uploadMarkdownImageEffects(
         operation, opKey, imageLinks.map((link) => link.resolvedPath),
-        context, repo, createDeps.uploadFile,
+        context, repo, createDeps.uploadFile, deps?.uploadSpoolStore,
       );
       if (!uploaded.ok) {
         return uploaded;
@@ -1875,15 +1850,7 @@ export class TicketCreateHandler implements OperationHandler<TicketCreateIntent,
         let contentHash = snapshot?.contentHash;
         let contentSize = snapshot?.contentSize;
         if (hasFrozenSpool) {
-          if (!uploadFilePath || !fs.existsSync(uploadFilePath)) {
-            return { kind: "failed_before_commit", error: new Error(`Spool file not found for attachment effect ${effectId}`) };
-          }
-          const spoolIdentity = await computeFileHashAndSizeAsync(uploadFilePath);
-          if (
-            !spoolIdentity ||
-            spoolIdentity.contentHash !== contentHash ||
-            spoolIdentity.contentSize !== contentSize
-          ) {
+          if (!snapshot || !await (deps.uploadSpoolStore ?? getDefaultUploadSpoolStore()).verify(snapshot)) {
             return { kind: "failed_before_commit", error: new Error(`Spool file identity mismatch for attachment effect ${effectId}`) };
           }
         } else {
@@ -1915,23 +1882,23 @@ export class TicketCreateHandler implements OperationHandler<TicketCreateIntent,
           };
         }
 
-        const uploadSnapshot: UploadRequestSnapshot = {
+        const uploadSnapshot: UploadRequestSnapshot = snapshot ?? {
           kind: "upload",
-          filePath: snapshot?.filePath ?? effect.target.filePath ?? uploadFilePath,
-          filename: effect.target.filename ?? snapshot?.filename ?? "attachment",
-          contentType: snapshot?.contentType ?? "application/octet-stream",
+          filePath: effect.target.filePath ?? uploadFilePath,
+          filename: effect.target.filename ?? "attachment",
+          contentType: "application/octet-stream",
           contentHash,
           contentSize,
-          spoolFilePath: snapshot?.spoolFilePath,
+          spoolFilePath: undefined,
         };
 
-        const started = await repo.transitionEffect(
+        const started = await persistUploadSnapshot(uploadSnapshot, () => repo.transitionEffect(
           key,
           effectId,
           { kind: "start_explicit_retry", requestSnapshot: uploadSnapshot },
           scope,
           { operationRevision: revision, sourceState: effect.state },
-        );
+        ));
         if (!started) {
           return { kind: "failed_before_commit", error: new Error(`Failed to start retry for effect ${effectId}`) };
         }
@@ -2608,7 +2575,7 @@ export class TicketUpdateHandler implements OperationHandler<TicketUpdateIntent,
     const opKey: SyncOperationKey = operation.key ?? { kind: "ticket", ticketId: prepared.ticketId };
     const uploaded = await uploadMarkdownImageEffects(
       operation, opKey, prepared.imageLinks.map((link) => link.resolvedPath),
-      context, repo, saveDeps.uploadFile,
+      context, repo, saveDeps.uploadFile, deps?.uploadSpoolStore,
     );
     if (!uploaded.ok) {
       return uploaded;
@@ -3220,18 +3187,18 @@ export class TicketUpdateHandler implements OperationHandler<TicketUpdateIntent,
         let uploadFilePath: string;
         let uploadSnapshot: UploadRequestSnapshot;
         try {
-          ({ uploadFilePath, snapshot: uploadSnapshot } = await prepareMarkdownImageUpload(filePath, effect));
+          ({ uploadFilePath, snapshot: uploadSnapshot } = await prepareMarkdownImageUpload(filePath, effect, context.connectionScope, deps.uploadSpoolStore ?? getDefaultUploadSpoolStore()));
         } catch (error) {
           return { kind: "failed_before_commit", error: error as Error };
         }
 
-        const started = await repo.transitionEffect(
+        const started = await persistUploadSnapshot(uploadSnapshot, () => repo.transitionEffect(
           key,
           effectId,
           { kind: "start_explicit_retry", requestSnapshot: uploadSnapshot },
           scope,
           { operationRevision: revision, sourceState: effect.state },
-        );
+        ));
         if (!started) {
           return { kind: "failed_before_commit", error: new Error(`Failed to start retry for effect ${effectId}`) };
         }
@@ -3740,12 +3707,12 @@ export class CommentCreateHandler implements OperationHandler<CommentCreateInten
       let uploadFilePath: string;
       let uploadSnapshot: UploadRequestSnapshot;
       try {
-        ({ uploadFilePath, snapshot: uploadSnapshot } = await prepareMarkdownImageUpload(filePath, existingEffect));
+        ({ uploadFilePath, snapshot: uploadSnapshot } = await prepareMarkdownImageUpload(filePath, existingEffect, context.connectionScope, deps?.uploadSpoolStore ?? getDefaultUploadSpoolStore()));
       } catch (error) {
         return { ok: false, error: error as Error };
       }
 
-      const planImg = await repo.planEffect(
+      const planImg = await persistUploadSnapshot(uploadSnapshot, () => repo.planEffect(
         opKey,
         {
           effectId,
@@ -3757,7 +3724,7 @@ export class CommentCreateHandler implements OperationHandler<CommentCreateInten
         },
         context.connectionScope,
         revision,
-      );
+      ));
       if (!planImg) {
         return { ok: false, error: new Error(`Failed to plan effect ${effectId}`) };
       }
@@ -4123,18 +4090,18 @@ export class CommentCreateHandler implements OperationHandler<CommentCreateInten
         let uploadFilePath: string;
         let uploadSnapshot: UploadRequestSnapshot;
         try {
-          ({ uploadFilePath, snapshot: uploadSnapshot } = await prepareMarkdownImageUpload(filePath, effect));
+          ({ uploadFilePath, snapshot: uploadSnapshot } = await prepareMarkdownImageUpload(filePath, effect, context.connectionScope, deps.uploadSpoolStore ?? getDefaultUploadSpoolStore()));
         } catch (error) {
           return { kind: "failed_before_commit", error: error as Error };
         }
 
-        const started = await repo.transitionEffect(
+        const started = await persistUploadSnapshot(uploadSnapshot, () => repo.transitionEffect(
           key,
           effectId,
           { kind: "start_explicit_retry", requestSnapshot: uploadSnapshot },
           scope,
           { operationRevision: revision, sourceState: effect.state },
-        );
+        ));
         if (!started) {
           return { kind: "failed_before_commit", error: new Error(`Failed to start retry for effect ${effectId}`) };
         }
@@ -4359,12 +4326,12 @@ export class CommentUpdateHandler implements OperationHandler<CommentUpdateInten
       let uploadFilePath: string;
       let uploadSnapshot: UploadRequestSnapshot;
       try {
-        ({ uploadFilePath, snapshot: uploadSnapshot } = await prepareMarkdownImageUpload(filePath, existingEffect));
+        ({ uploadFilePath, snapshot: uploadSnapshot } = await prepareMarkdownImageUpload(filePath, existingEffect, context.connectionScope, deps?.uploadSpoolStore ?? getDefaultUploadSpoolStore()));
       } catch (error) {
         return { ok: false, error: error as Error };
       }
 
-      const planImg = await repo.planEffect(
+      const planImg = await persistUploadSnapshot(uploadSnapshot, () => repo.planEffect(
         opKey,
         {
           effectId,
@@ -4376,7 +4343,7 @@ export class CommentUpdateHandler implements OperationHandler<CommentUpdateInten
         },
         context.connectionScope,
         revision,
-      );
+      ));
       if (!planImg) {
         return { ok: false, error: new Error(`Failed to plan effect ${effectId}`) };
       }
@@ -4934,18 +4901,18 @@ export class CommentUpdateHandler implements OperationHandler<CommentUpdateInten
         let uploadFilePath: string;
         let uploadSnapshot: UploadRequestSnapshot;
         try {
-          ({ uploadFilePath, snapshot: uploadSnapshot } = await prepareMarkdownImageUpload(filePath, effect));
+          ({ uploadFilePath, snapshot: uploadSnapshot } = await prepareMarkdownImageUpload(filePath, effect, context.connectionScope, deps.uploadSpoolStore ?? getDefaultUploadSpoolStore()));
         } catch (error) {
           return { kind: "failed_before_commit", error: error as Error };
         }
 
-        const started = await repo.transitionEffect(
+        const started = await persistUploadSnapshot(uploadSnapshot, () => repo.transitionEffect(
           key,
           effectId,
           { kind: "start_explicit_retry", requestSnapshot: uploadSnapshot },
           scope,
           { operationRevision: revision, sourceState: effect.state },
-        );
+        ));
         if (!started) {
           return { kind: "failed_before_commit", error: new Error(`Failed to start retry for effect ${effectId}`) };
         }

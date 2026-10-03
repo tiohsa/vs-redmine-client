@@ -183,7 +183,7 @@ suite("syncUnsyncedFileResult — 構造化戻り値", () => {
       description: "Updated body",
       metadata,
     });
-    // applyQueuedTicketUpdate は HTTP を呼ぶため失敗するが、
+    // SyncEngine は HTTP を呼ぶため失敗するが、
     // 結果オブジェクト (failed) が返ることを確認する
     const result = await syncUnsyncedFile({ syncKey: { kind: "ticket", ticketId: 1 } });
     assert.ok(result !== undefined, "undefined でなく結果を返すこと");

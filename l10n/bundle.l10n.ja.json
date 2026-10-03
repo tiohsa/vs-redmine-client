@@ -18,6 +18,7 @@
     "No unsynced items in sync queue": "同期キューに未同期なし",
     "{0} unsynced items": "未同期 {0} 件",
     "Sync attention required": "同期の確認が必要です",
+    "Save synchronization failed.": "保存時の同期に失敗しました。",
     "Review conflict": "競合を確認",
     "Open Unsynced": "未同期を開く",
     "Open in Editor": "エディターで開く",

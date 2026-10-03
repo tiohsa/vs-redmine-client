@@ -1709,6 +1709,25 @@ export const getOfflineSyncQueue = (scope = activeScope): OfflineSyncQueue => {
   return structuredClone(getQueue(scope));
 };
 
+/** 全接続先・旧形式・過去 attempt の永続 snapshot を cleanup から保護する。 */
+export const getPersistedUploadSpoolReferences = (storage: Memento): ReadonlySet<string> => {
+  const references = new Set<string>();
+  const visit = (value: unknown): void => {
+    if (value === null || typeof value !== "object") { return; }
+    if ("kind" in value && value.kind === "upload" &&
+        "spoolFilePath" in value && typeof value.spoolFilePath === "string") {
+      references.add(value.spoolFilePath);
+    }
+    for (const entry of Object.values(value)) { visit(entry); }
+  };
+  for (const key of storage.keys()) {
+    if (key === STORAGE_KEY || key.startsWith(`${STORAGE_KEY}.`)) {
+      visit(storage.get<unknown>(key));
+    }
+  }
+  return references;
+};
+
 type StoredOfflineOperation = OfflineNewTicket | OfflineTicketUpdate | OfflineCommentUpdate;
 
 const replaceStoredOperationInQueue = (

@@ -7,6 +7,8 @@ import { initializeDraftStore } from "./views/ticketDraftStore";
 import { createGlobalStateDraftStorage } from "./views/draftPersistence";
 import { initializeNewTicketDraftStore } from "./views/newTicketDraftStore";
 import { initializeOfflineSyncStore, switchOfflineSyncStore } from "./views/offlineSyncStore";
+import { observeUploadSpoolCleanup } from "./app/ticketSync/uploadSpoolCleanup";
+import { DurableUploadSpoolStore, resolveUploadSpoolOwner, setDefaultUploadSpoolStore } from "./app/ticketSync/uploadSpoolStore";
 import { initializeTicketListSettingsStore } from "./views/ticketListSettingsStore";
 import { isTicketEditor, refreshEditorConnectionScopes } from "./views/ticketEditorRegistry";
 import { setViewContext } from "./views/viewContext";
@@ -33,6 +35,12 @@ export async function activate(context: vscode.ExtensionContext) {
   );
   initializeNewTicketDraftStore(context.globalState);
   initializeOfflineSyncStore(context.workspaceState, activeBaseUrl);
+  const spoolOwner = await resolveUploadSpoolOwner(context.workspaceState, context.storageUri?.toString());
+  const uploadSpoolStore = new DurableUploadSpoolStore(context.globalStorageUri.fsPath, spoolOwner);
+  setDefaultUploadSpoolStore(uploadSpoolStore);
+  const spoolCleanup = observeUploadSpoolCleanup({ store: uploadSpoolStore, storage: context.workspaceState });
+  context.subscriptions.push(spoolCleanup);
+  void spoolCleanup.cleanup();
   initializeTicketListSettingsStore(context.workspaceState);
   await initializeApiKeyStore(context.secrets, context.subscriptions);
   registerConflictDiffProvider(context);
@@ -42,7 +50,7 @@ export async function activate(context: vscode.ExtensionContext) {
   }
 
   // ── 同期エンジン / ビュー登録 ────────────────────────────────────────────
-  const syncEngine = createSyncEngine();
+  const syncEngine = createSyncEngine({ uploadSpoolStore });
   const views = registerViews(context, { syncEngine });
 
   // ── 通知コントローラー ───────────────────────────────────────────────────

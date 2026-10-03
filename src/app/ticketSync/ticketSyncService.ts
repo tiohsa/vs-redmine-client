@@ -158,6 +158,7 @@ export class TicketSyncQueueItemNotFoundError extends Error {
 }
 
 export interface TicketSyncServiceDependencies {
+  uploadSpoolStore?: import("./ports").UploadSpoolStore;
   documents?: DocumentPort;
   create?: Partial<TicketCreateDependencies>;
   update?: Partial<TicketSaveDependencies>;
@@ -171,6 +172,7 @@ export interface TicketSyncServiceDependencies {
 }
 
 export class TicketSyncService {
+  private readonly uploadSpoolStore?: import("./ports").UploadSpoolStore;
   private readonly documents: DocumentPort;
   private readonly createDeps: TicketCreateDependencies;
   private readonly updateDeps: TicketSaveDependencies;
@@ -181,6 +183,7 @@ export class TicketSyncService {
   >;
 
   public constructor(deps: TicketSyncServiceDependencies = {}) {
+    this.uploadSpoolStore = deps.uploadSpoolStore;
     this.documents = deps.documents ?? defaultDocumentPort(deps.rewrite);
     this.createDeps = { ...defaultCreateDeps, ...deps.create };
     this.updateDeps = { ...defaultDeps, ...deps.update };
@@ -225,6 +228,7 @@ export class TicketSyncService {
       input.context,
       {
         deps: {
+        uploadSpoolStore: this.uploadSpoolStore,
           ticketCreate: this.createDeps,
           ticketUpdate: this.updateDeps,
           documents: this.documents,
@@ -316,6 +320,7 @@ export class TicketSyncService {
         input.context,
         {
           deps: {
+            uploadSpoolStore: this.uploadSpoolStore,
             ticketCreate: this.createDeps,
             documents: this.documents,
             localState: this.newTicketLocalState,
@@ -412,6 +417,7 @@ export class TicketSyncService {
       context,
       {
         deps: {
+        uploadSpoolStore: this.uploadSpoolStore,
           ticketCreate: this.createDeps,
           ticketUpdate: this.updateDeps,
           documents: this.documents,
@@ -450,6 +456,7 @@ export class TicketSyncService {
       attemptGeneration,
       resolution,
       deps: {
+        uploadSpoolStore: this.uploadSpoolStore,
         ticketCreate: this.createDeps,
         ticketUpdate: this.updateDeps,
         documents: this.documents,
@@ -466,6 +473,7 @@ export class TicketSyncService {
     const outcome = await this.coordinator.syncAll(context, {
       shouldContinue: options.shouldContinue,
       deps: {
+        uploadSpoolStore: this.uploadSpoolStore,
         ticketCreate: this.createDeps,
         ticketUpdate: this.updateDeps,
         documents: this.documents,

@@ -8,7 +8,9 @@ import {
   replaceOfflineSyncQueueAsync,
   clearOfflineSyncQueueAsync,
 } from "../views/offlineSyncStore";
-import { applyQueuedTicketUpdate } from "../views/ticketSync/ticketQueueSync";
+import { createSyncEngine } from "../app/syncEngine";
+import { createSyncCoordinator } from "../app/ticketSync/syncCoordinator";
+import { DefaultSyncOperationRepository } from "../app/ticketSync/syncRepository";
 import { applyQueuedCommentUpdate } from "../views/commentSaveSync";
 import { createTestMemento } from "./helpers/vscodeMemento";
 import { buildIssueMetadataFixture } from "./helpers/ticketMetadataFixtures";
@@ -32,104 +34,105 @@ suite("Offline Sync partial failure", () => {
     await clearOfflineSyncQueueAsync();
   });
 
-  // ── applyQueuedTicketUpdate ────────────────────────────────────────────────
-
-  test("applyQueuedTicketUpdate: 成功時に success を返す", async () => {
-    let updated = false;
-    const result = await applyQueuedTicketUpdate({
-      update: makeTicketUpdate(1),
-      deps: {
-        getIssueDetail: async () => ({
-          ticket: { id: 1, subject: "Updated", projectId: 1, updatedAt: "t2" },
-          comments: [],
-        }),
-        updateIssue: async () => {
-          updated = true;
-        },
-        listIssueStatuses: async () => [],
-        listTrackers: async () => [],
-        listIssuePriorities: async () => [],
-        searchUsers: async () => [],
-        getProjectTrackers: async () => [],
-      },
-    });
-    assert.strictEqual(result.status, "success");
-    assert.ok(updated);
-  });
-
-  test("applyQueuedTicketUpdate: updateIssue が 503 エラーのとき unreachable を返す", async () => {
-    const result = await applyQueuedTicketUpdate({
-      update: makeTicketUpdate(2),
-      deps: {
-        getIssueDetail: async () => ({
-          ticket: { id: 2, subject: "Updated", projectId: 1, updatedAt: "t2" },
-          comments: [],
-        }),
-        updateIssue: async () => {
-          throw new Error("Redmine request failed (503): Service Unavailable");
-        },
-        listIssueStatuses: async () => [],
-        listTrackers: async () => [],
-        listIssuePriorities: async () => [],
-        searchUsers: async () => [],
-      },
-    });
-    assert.strictEqual(result.status, "unreachable");
-  });
-
-  test("applyQueuedTicketUpdate: conflict 時に conflict を返す", async () => {
-    const result = await applyQueuedTicketUpdate({
-      update: { ...makeTicketUpdate(3), lastKnownRemoteUpdatedAt: "t1" },
-      deps: {
-        getIssueDetail: async () => ({
-          ticket: { id: 3, subject: "Updated remotely", projectId: 1, updatedAt: "t2" },
-          comments: [],
-        }),
-        updateIssue: async () => {
-          throw new Error("should not reach here");
-        },
-        listIssueStatuses: async () => [],
-        listTrackers: async () => [],
-        listIssuePriorities: async () => [],
-        searchUsers: async () => [],
-      },
-    });
-    assert.strictEqual(result.status, "conflict");
-  });
-
-  test("parent started checkpoint失敗はremote write未試行として分類する", async () => {
-    const update = {
-      ...makeTicketUpdate(14),
-      metadata: { ...buildIssueMetadataFixture(), children: ["Child"] },
-    };
+  test("SyncEngine: 成功時にprimary effectを完了しqueueから除去する", async () => {
+    await addOfflineTicketUpdateAsync(1, makeTicketUpdate(1));
     let updateCalls = 0;
+    const engine = createSyncEngine({ tickets: {
+      getIssueDetail: async () => ({ ticket: {
+        id: 1, subject: "Updated", description: "Updated body", projectId: 1, updatedAt: "t2",
+      }, comments: [] }),
+      updateIssue: async () => { updateCalls++; },
+    } });
+    const result = await engine.syncOne({ kind: "ticket", ticketId: 1 }, { connectionScope: "" });
+    assert.strictEqual(result.kind, "completed");
+    assert.strictEqual(updateCalls, 1);
+    assert.strictEqual(getOfflineSyncQueue().tickets.has(1), false);
+    const operation = engine.getRepository().getOperation({ kind: "ticket", ticketId: 1 }, "");
+    assert.strictEqual(operation?.phase, "completed");
+    assert.strictEqual(operation?.effects?.find((effect) => effect.kind === "ticket_update")?.state, "committed");
+  });
+
+  for (const failure of [
+    { message: "Redmine request failed (503): Service Unavailable", outcome: "failed_before_commit", state: "failed" },
+    { message: "network timeout", outcome: "commit_unknown", state: "commit_unknown" },
+  ] as const) {
+  test(`SyncEngine: ${failure.state} を保持し自動再送しない`, async () => {
+    await addOfflineTicketUpdateAsync(2, makeTicketUpdate(2));
+    let updateCalls = 0;
+    const engine = createSyncEngine({ tickets: {
+      getIssueDetail: async () => ({ ticket: { id: 2, subject: "Base", projectId: 1, updatedAt: "t1" }, comments: [] }),
+      updateIssue: async () => {
+        updateCalls++;
+        throw new Error(failure.message);
+      },
+    } });
+    const key = { kind: "ticket" as const, ticketId: 2 };
+    const result = await engine.syncOne(key, { connectionScope: "" });
+    assert.strictEqual(result.kind, failure.outcome);
+    const queued = getOfflineSyncQueue().tickets.get(2);
+    assert.ok(queued);
+    if (failure.state === "commit_unknown") { assert.strictEqual(queued.phase, "commit_unknown"); }
+    assert.strictEqual(queued.effects?.find((effect) => effect.kind === "ticket_update")?.state, failure.state);
+    await engine.syncOne(key, { connectionScope: "" });
+    assert.strictEqual(updateCalls, 1);
+  });
+  }
+
+  test("SyncEngine: conflict時はremote writeせずqueueを保持する", async () => {
+    await addOfflineTicketUpdateAsync(3, { ...makeTicketUpdate(3), lastKnownRemoteUpdatedAt: "t1" });
+    let updateCalls = 0;
+    const engine = createSyncEngine({ tickets: {
+      getIssueDetail: async () => ({ ticket: {
+        id: 3, subject: "Updated remotely", projectId: 1, updatedAt: "t2",
+      }, comments: [] }),
+      updateIssue: async () => { updateCalls++; },
+    } });
+    const result = await engine.syncOne({ kind: "ticket", ticketId: 3 }, { connectionScope: "" });
+    assert.strictEqual(result.kind, "conflict");
+    assert.strictEqual(updateCalls, 0);
+    assert.strictEqual(getOfflineSyncQueue().tickets.get(3)?.phase, "queued");
+  });
+
+  test("primary started checkpoint失敗では親も子もremote writeしない", async () => {
+    class RejectPrimaryStartRepository extends DefaultSyncOperationRepository {
+      public override async transitionPrimaryRemoteWrite(
+        ...args: Parameters<DefaultSyncOperationRepository["transitionPrimaryRemoteWrite"]>
+      ): ReturnType<DefaultSyncOperationRepository["transitionPrimaryRemoteWrite"]> {
+        if (args[1].kind === "start") { throw new Error("journal unavailable"); }
+        return super.transitionPrimaryRemoteWrite(...args);
+      }
+    }
+    await addOfflineTicketUpdateAsync(14, {
+      ...makeTicketUpdate(14), metadata: { ...buildIssueMetadataFixture(), children: ["Child"] },
+    });
+    let updateCalls = 0;
+    let createCalls = 0;
     let deleteCalls = 0;
-    const result = await applyQueuedTicketUpdate({
-      update,
-      deferReconciliation: true,
-      beforeRemoteWrite: async () => { throw new Error("journal unavailable"); },
-      deps: {
-        createIssue: async () => 1401,
+    const engine = createSyncEngine({
+      coordinator: createSyncCoordinator({ repository: new RejectPrimaryStartRepository() }),
+      tickets: {
+        createIssue: async () => { createCalls++; return 1401; },
         deleteIssue: async () => { deleteCalls++; },
         updateIssue: async () => { updateCalls++; },
-        getIssueDetail: async () => ({
-          ticket: { id: 14, subject: "Base", description: "Base body", projectId: 1 },
-          comments: [],
-        }),
+        getIssueDetail: async () => ({ ticket: {
+          id: 14, subject: "Base", description: "Base body", projectId: 1,
+        }, comments: [] }),
         listIssueStatuses: async () => [{ id: 1, name: "In Progress" }],
         listTrackers: async () => [{ id: 2, name: "Task" }],
         listIssuePriorities: async () => [{ id: 3, name: "Normal" }],
-        searchUsers: async () => [],
         getProjectTrackers: async () => [{ id: 2, name: "Task" }],
-        uploadFile: async () => ({ token: "t", filename: "f", contentType: "text/plain" }),
       },
     });
-
-    assert.strictEqual(result.status, "failed");
-    assert.strictEqual(result.remoteWriteAttempted, false, result.message);
-    assert.strictEqual(result.remoteCommitUnknown, false);
+    await assert.rejects(
+      engine.syncOne({ kind: "ticket", ticketId: 14 }, { connectionScope: "" }),
+      /journal unavailable/,
+    );
     assert.strictEqual(updateCalls, 0);
-    assert.strictEqual(deleteCalls, 1);
+    assert.strictEqual(createCalls, 0);
+    assert.strictEqual(deleteCalls, 0);
+    const queued = getOfflineSyncQueue().tickets.get(14);
+    assert.strictEqual(queued?.phase, "preparing");
+    assert.strictEqual(queued?.effects?.find((effect) => effect.kind === "ticket_update")?.state, "planned");
   });
 
   // ── applyQueuedCommentUpdate ──────────────────────────────────────────────

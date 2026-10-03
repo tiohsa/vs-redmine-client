@@ -16,6 +16,32 @@ import type {
   DurableSyncEffectAction,
   DurableSyncEffectState,
 } from "../syncEffects";
+import type { UploadRequestSnapshot } from "../syncEffects";
+
+export type FrozenUpload = {
+  spoolFilePath: string;
+  contentHash: string;
+  contentSize: number;
+  /** Snapshot の永続化が終了するまでファイルを cleanup から保護する。 */
+  release(): void;
+};
+
+export interface UploadSpoolStore {
+  freezeFile(input: {
+    connectionScope: string;
+    sourcePath: string;
+    filename: string;
+    expected?: { contentHash: string; contentSize: number };
+  }): Promise<FrozenUpload>;
+  freezeBuffer(input: {
+    connectionScope: string;
+    buffer: Uint8Array;
+    filename: string;
+    contentType: string;
+  }): Promise<FrozenUpload>;
+  verify(snapshot: UploadRequestSnapshot): Promise<boolean>;
+  cleanupUnreferenced(references: () => ReadonlySet<string>): Promise<void>;
+}
 
 export type DocumentFreshnessExpectation = {
   content: string;
