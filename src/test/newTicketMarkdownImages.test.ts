@@ -121,9 +121,9 @@ suite("新規チケットの Markdown 画像アップロード", () => {
             ticketId: -1, newTicket: true, manual: false, projectId: 12 });
         assert.strictEqual(uploadCalls, 1, "同じ画像の別表記も1回だけアップロードする");
         assert.strictEqual(createCalls, 1);
-        assert.strictEqual(request?.description, "![a](uploaded.png)\n![b](uploaded.png)");
+        assert.strictEqual(request?.description, "![a](screen.png)\n![b](screen.png)");
         assert.deepStrictEqual(request?.uploads, [
-          { token: "image-token", filename: "uploaded.png", content_type: "image/png" },
+          { token: "image-token", filename: "screen.png", content_type: "image/png" },
         ]);
         assert.strictEqual(first.kind, "remote_committed");
         const pending = getOfflineSyncQueue(scope).newTickets[0];
@@ -131,6 +131,8 @@ suite("新規チケットの Markdown 画像アップロード", () => {
         assert.strictEqual(image?.state, "committed");
         assert.strictEqual(image?.requestSnapshot?.kind, "upload");
         if (image?.requestSnapshot?.kind === "upload") {
+          assert.strictEqual(image.requestSnapshot.filename, "screen.png");
+          assert.strictEqual(image.requestSnapshot.contentType, "image/png");
           assert.ok(image.requestSnapshot.contentHash);
           assert.strictEqual(image.requestSnapshot.contentSize, 11);
           assert.ok(image.requestSnapshot.spoolFilePath);
@@ -145,7 +147,7 @@ suite("新規チケットの Markdown 画像アップロード", () => {
         assert.strictEqual(resumed.kind, "completed", JSON.stringify(resumed));
         assert.strictEqual(uploadCalls, 1);
         assert.strictEqual(createCalls, 1);
-        assert.ok(document.getText().includes("![a](uploaded.png)\r\n![b](uploaded.png)"));
+        assert.ok(document.getText().includes("![a](screen.png)\r\n![b](screen.png)"));
         assert.strictEqual(getOfflineSyncQueue(scope).newTickets.length, 0);
       } finally {
         await vscode.commands.executeCommand("workbench.action.revertAndCloseActiveEditor");

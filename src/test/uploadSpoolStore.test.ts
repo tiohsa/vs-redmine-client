@@ -55,7 +55,7 @@ suite("Durable upload spool store", () => {
     first.release(); second.release();
   });
 
-  test("SP-02: existing matching spool is verified without overwriting it", async () => {
+  test("S-13 / SP-02: existing matching spool is verified without overwriting it", async () => {
     const first = await freeze();
     const before = await fs.promises.stat(first.spoolFilePath);
     const second = await freeze();
@@ -64,6 +64,27 @@ suite("Durable upload spool store", () => {
     assert.strictEqual(before.ino, after.ino);
     assert.strictEqual(before.mtimeMs, after.mtimeMs);
     first.release(); second.release();
+  });
+
+  test("S-11 / S-12: partial write は final を公開せず temp を片付け、その後 refreeze できる", async () => {
+    const originalOpen = fs.promises.open;
+    fs.promises.open = async (...args: Parameters<typeof originalOpen>) => {
+      const handle = await originalOpen(...args);
+      if (args[1] === "wx") {
+        handle.writeFile = async () => {
+          await handle.write(bytes.subarray(0, 3));
+          throw new Error("injected partial write failure");
+        };
+      }
+      return handle;
+    };
+    try { await assert.rejects(freeze(), /injected partial write failure/); }
+    finally { fs.promises.open = originalOpen; }
+    const directory = path.join(root, "sync-spool", getConnectionScopeHash(scope));
+    assert.deepStrictEqual(await fs.promises.readdir(directory), [], "partial final / temp を残さない");
+    const frozen = await freeze();
+    assert.strictEqual(await store.verify(snapshot(frozen)), true);
+    frozen.release();
   });
 
   test("long source filenames leave room for storage ownership within NAME_MAX", async () => {
@@ -137,7 +158,7 @@ suite("Durable upload spool store", () => {
     }
   });
 
-  test("SP-03: tampered existing spool fails closed and is not overwritten", async () => {
+  test("S-14 / SP-03: tampered existing spool fails closed and is not overwritten", async () => {
     const frozen = await freeze();
     const corrupted = Buffer.alloc(bytes.length, 120);
     await fs.promises.writeFile(frozen.spoolFilePath, corrupted);
@@ -152,6 +173,24 @@ suite("Durable upload spool store", () => {
     await fs.promises.writeFile(source, "different bytes");
     await assert.rejects(store.freezeFile({ connectionScope: scope, sourcePath: source,
       filename: "image.png", expected: computeBufferHashAndSize(bytes) }), /changed/);
+  });
+
+  test("streaming freezeFile は readFile を使わず、大きい source を検証して同じ final を再利用する", async () => {
+    const source = path.join(root, "large.bin");
+    const content = Buffer.alloc(2 * 1024 * 1024 + 7, 37);
+    await fs.promises.writeFile(source, content);
+    const originalReadFile = fs.promises.readFile;
+    fs.promises.readFile = async () => { throw new Error("whole-file read is forbidden"); };
+    try {
+      const first = await store.freezeFile({ connectionScope: scope, sourcePath: source, filename: "large.bin",
+        expected: computeBufferHashAndSize(content) });
+      const before = await fs.promises.stat(first.spoolFilePath);
+      const second = await store.freezeFile({ connectionScope: scope, sourcePath: source, filename: "large.bin" });
+      assert.strictEqual(second.spoolFilePath, first.spoolFilePath);
+      assert.strictEqual((await fs.promises.stat(second.spoolFilePath)).ino, before.ino);
+      assert.strictEqual(await store.verify({ ...snapshot(first), ...computeBufferHashAndSize(content) }), true);
+      first.release(); second.release();
+    } finally { fs.promises.readFile = originalReadFile; }
   });
 
   test("buffer mutation after freeze starts cannot change frozen bytes", async () => {
@@ -200,6 +239,79 @@ suite("Durable upload spool store", () => {
     references.clear();
     await store.cleanupUnreferenced(() => references);
     assert.strictEqual(fs.existsSync(frozen.spoolFilePath), false);
+  });
+
+  test("G-01: 複数candidateのcleanupでもreferencesをpassにつき一度だけ取得する", async () => {
+    const first = await freeze();
+    const second = await store.freezeBuffer({ connectionScope: scope, buffer: Buffer.from("other bytes"),
+      filename: "other.png", contentType: "image/png" });
+    first.release(); second.release();
+    let calls = 0;
+    await store.cleanupUnreferenced(() => { calls++; return new Set([second.spoolFilePath]); });
+    assert.strictEqual(calls, 1);
+    assert.strictEqual(fs.existsSync(first.spoolFilePath), false);
+    assert.strictEqual(fs.existsSync(second.spoolFilePath), true);
+  });
+
+  test("G-03: references取得後に永続化してreleaseされた開始時leaseを保護する", async () => {
+    const frozen = await freeze();
+    const persisted = new Set<string>();
+    let calls = 0;
+    await store.cleanupUnreferenced(() => {
+      calls++;
+      const beforePersistence = new Set(persisted);
+      // reference snapshot と directory scan の間で queue 永続化が完了する。
+      queueMicrotask(() => { persisted.add(frozen.spoolFilePath); frozen.release(); });
+      return beforePersistence;
+    });
+    assert.strictEqual(calls, 1);
+    assert.strictEqual(await store.verify(snapshot(frozen)), true);
+    await store.cleanupUnreferenced(() => persisted);
+    assert.strictEqual(await store.verify(snapshot(frozen)), true);
+    persisted.clear();
+    await store.cleanupUnreferenced(() => persisted);
+    assert.strictEqual(fs.existsSync(frozen.spoolFilePath), false);
+  });
+
+  test("G-02: running中の10件queue変更をcurrent + 1 follow-upへcoalesceする", async () => {
+    const storage = memoryStorage();
+    initializeOfflineSyncStore(storage, scope);
+    let calls = 0;
+    let start: () => void = () => undefined;
+    let finish: () => void = () => undefined;
+    const started = new Promise<void>((resolve) => { start = resolve; });
+    const gate = new Promise<void>((resolve) => { finish = resolve; });
+    const originalCleanup = store.cleanupUnreferenced.bind(store);
+    store.cleanupUnreferenced = async (references) => {
+      calls++;
+      if (calls === 1) { start(); await gate; }
+      await originalCleanup(references);
+    };
+    const observer = observeUploadSpoolCleanup({ store, storage });
+    try {
+      const current = observer.cleanup();
+      await started;
+      const repository = createSyncOperationRepository();
+      for (let index = 0; index < 10; index++) {
+        await repository.saveOperation({ operationId: `cleanup-${index}`, kind: "ticket_create",
+          key: { kind: "newTicket", queueId: `cleanup-${index}` }, connectionScope: scope,
+          phase: "queued", revision: 1, persistenceVersion: 1,
+          intent: { projectId: 1, subject: "Coalesce", description: "",
+            metadata: { tracker: "", priority: "", status: "", due_date: "", children: [] } } }, scope);
+      }
+      assert.strictEqual(calls, 1);
+      const joined = observer.cleanup();
+      assert.strictEqual(joined, current);
+      finish();
+      await current;
+      assert.strictEqual(calls, 2);
+      observer.dispose();
+      await observer.cleanup();
+      assert.strictEqual(calls, 2);
+    } finally {
+      finish(); observer.dispose();
+      initializeOfflineSyncStore(memoryStorage());
+    }
   });
 
   test("SP-10: legacy temporary spool verifies unchanged and is outside cleanup ownership", async () => {

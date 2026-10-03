@@ -406,6 +406,8 @@
   "Redmine must use HTTPS because the API key is sent with every request.": "API キーをすべてのリクエストで送信するため、Redmine には HTTPS 接続が必要です。",
   "Redmine request URL must belong to the configured connection.": "Redmine のリクエスト URL は設定された接続先に属している必要があります。",
   "Markdown image operation is stale.": "画像の同期処理が古いため停止しました。",
+  "Saved Markdown images have the same filename: {0}": "保存済みのMarkdown画像に同じファイル名があります: {0}",
+  "Cannot determine a unique Markdown image filename: {0}": "Markdown画像の一意なファイル名を決定できません: {0}",
   "Relative image path cannot be resolved: {0}": "画像の相対パスを解決できません: {0}",
   "Invalid image path: {0}. {1}": "画像のパスが無効です: {0}。{1}",
     "Edit ticket Markdown in VS Code": "VS CodeでチケットのMarkdownを編集",

@@ -1,11 +1,12 @@
 import * as fs from "fs";
+import * as crypto from "crypto";
 import * as path from "path";
 import * as vscode from "vscode";
 import type { IssueCreateInput, IssueUpdateInput, IssueUploadInput } from "../../redmine/issues";
 import { createIssue, getIssueDetail, updateIssue } from "../../redmine/issues";
 import { addComment, updateComment } from "../../redmine/comments";
 import { getCurrentUserId } from "../../redmine/users";
-import { getAttachmentContentType, parseClipboardImageDataUri, uploadClipboardImage, uploadFileAttachment } from "../../redmine/attachments";
+import { getAttachmentContentType, parseClipboardImageDataUri, uploadFileAttachment } from "../../redmine/attachments";
 import { buildTicketEditorContent, parseTicketEditorContent, type TicketEditorContent } from "../../views/ticketEditorContent";
 import { editorContentFromTicket, metadataFromTicket } from "../../views/ticketSync/ticketRemoteContent";
 import {
@@ -71,6 +72,7 @@ import {
   type TicketCreateRequestSnapshot,
   type TicketUpdateRequestSnapshot,
   type UploadRequestSnapshot,
+  type DurableSyncEffect,
 } from "../syncEffects";
 import type {
   CommentCreateIntent,
@@ -121,6 +123,7 @@ const prepareMarkdownImageUpload = async (
   existingEffect: { requestSnapshot?: SyncEffectRequestSnapshot } | undefined,
   connectionScope: string,
   store: UploadSpoolStore,
+  filename = path.basename(filePath),
 ): Promise<{ uploadFilePath: string; snapshot: UploadRequestSnapshot }> => {
   const existingSnapshot = existingEffect?.requestSnapshot?.kind === "upload"
     ? existingEffect.requestSnapshot as UploadRequestSnapshot
@@ -133,40 +136,114 @@ const prepareMarkdownImageUpload = async (
     return { uploadFilePath: existingSnapshot.spoolFilePath, snapshot: existingSnapshot };
   }
 
-  const sourceIdentity = await computeFileHashAndSizeAsync(existingSnapshot?.filePath ?? filePath);
-  if (!sourceIdentity) {
-    throw new Error(`Failed to compute hash for image: ${filePath}`);
-  }
-  if (
-    existingSnapshot &&
-    (existingSnapshot.contentHash !== sourceIdentity.contentHash ||
-      existingSnapshot.contentSize !== sourceIdentity.contentSize)
-  ) {
-    throw new Error(`File content has changed since original snapshot: ${filePath}`);
-  }
-
   const sourcePath = existingSnapshot?.filePath ?? filePath;
   if (existingSnapshot) {
+    const sourceIdentity = await computeFileHashAndSizeAsync(sourcePath);
+    if (!sourceIdentity || existingSnapshot.contentHash !== sourceIdentity.contentHash ||
+        existingSnapshot.contentSize !== sourceIdentity.contentSize) {
+      throw new Error(`File content has changed since original snapshot: ${filePath}`);
+    }
     return { uploadFilePath: sourcePath, snapshot: existingSnapshot };
   }
-  const frozen = await store.freezeFile({ connectionScope, sourcePath,
-    filename: path.basename(sourcePath), expected: sourceIdentity });
+  const frozen = await store.freezeFile({ connectionScope, sourcePath, filename });
   const spoolFilePath = frozen.spoolFilePath;
   const snapshot: UploadRequestSnapshot = {
     kind: "upload",
     filePath: sourcePath,
     spoolFilePath,
-    filename: path.basename(sourcePath),
-    contentType: getAttachmentContentType(path.basename(sourcePath)),
-    contentHash: sourceIdentity.contentHash,
-    contentSize: sourceIdentity.contentSize,
+    filename,
+    contentType: getAttachmentContentType(filename),
+    contentHash: frozen.contentHash,
+    contentSize: frozen.contentSize,
   };
   frozenUploadLeases.set(snapshot, frozen);
   return { uploadFilePath: spoolFilePath, snapshot };
 };
 
+const findMarkdownImageEffect = (effects: DurableSyncEffect[], filePath: string): DurableSyncEffect | undefined => {
+  const matching = effects.filter((effect) => effect.effectId === `image:markdown:${filePath}` ||
+    (effect.kind === "image_upload" && effect.target.filePath === filePath));
+  return matching.find((effect) => effect.effectId === `image:markdown:${filePath}`)
+    ?? matching.find((effect) => effect.state === "committed")
+    ?? matching.find((effect) => effect.state === "planned");
+};
+
+// 旧committed Effectではtargetが実際にuploadした名前を保持している。
+const resolvePersistedMarkdownFilename = (
+  effect: DurableSyncEffect | undefined,
+  filePath: string,
+): string | undefined => {
+  if (!effect) { return undefined; }
+  const snapshot = effect.requestSnapshot?.kind === "upload" ? effect.requestSnapshot : undefined;
+  if (effect.state === "committed" && effect.target.filename && snapshot?.filename &&
+    effect.target.filename !== snapshot.filename) {
+    return effect.target.filename;
+  }
+  return snapshot?.filename ?? effect.target.filename ?? path.basename(filePath);
+};
+
+// 全候補名を予約してから名前を決め、保存済みのupload identityは変更しない。
+const resolveMarkdownImageFilenames = (
+  filePaths: string[],
+  operation: UnifiedSyncOperation,
+  selectEffect = (effects: DurableSyncEffect[], filePath: string): DurableSyncEffect | undefined => effects.find(
+    (effect) => effect.effectId === `image:markdown:${filePath}` || (effect.kind === "image_upload" && effect.target.filePath === filePath),
+  ),
+): Map<string, string> => {
+  const paths = Array.from(new Set(filePaths)).sort();
+  const effects = getEffectsForRevision(operation);
+  const names = new Map<string, string>();
+  const owners = new Map<string, string>();
+  const basenameCounts = new Map<string, number>();
+  for (const filePath of paths) {
+    const basename = path.basename(filePath);
+    basenameCounts.set(basename, (basenameCounts.get(basename) ?? 0) + 1);
+    const effect = selectEffect(effects, filePath);
+    const filename = resolvePersistedMarkdownFilename(effect, filePath);
+    if (filename !== undefined) {
+      if (owners.has(filename)) {
+        throw new Error(vscode.l10n.t("Saved Markdown images have the same filename: {0}", filename));
+      }
+      owners.set(filename, filePath);
+      names.set(filePath, filename);
+    }
+  }
+  // 一意のbasenameを、先に生成するhash付き候補に奪われないようにする。
+  const reserved = new Set([...owners.keys(), ...paths.map((filePath) => path.basename(filePath))]);
+  for (const filePath of paths) {
+    if (names.has(filePath)) { continue; }
+    const basename = path.basename(filePath);
+    let filename = basename;
+    if (basename.length > 255 || (basenameCounts.get(basename) ?? 0) > 1 || owners.has(basename)) {
+      const extension = path.extname(basename);
+      const stem = basename.slice(0, basename.length - extension.length);
+      const hash = crypto.createHash("sha256").update(path.normalize(filePath)).digest("hex");
+      let length = 12;
+      const candidate = (hashLength: number): string => {
+        const suffix = `-${hash.slice(0, hashLength)}${extension}`;
+        if (suffix.length > 255) {
+          throw new Error(vscode.l10n.t("Cannot determine a unique Markdown image filename: {0}", basename));
+        }
+        return `${stem.slice(0, Math.max(0, 255 - suffix.length))}${suffix}`;
+      };
+      filename = candidate(length);
+      while (reserved.has(filename)) {
+        if (length === hash.length) {
+          throw new Error(vscode.l10n.t("Cannot determine a unique Markdown image filename: {0}", basename));
+        }
+        length = Math.min(length + 4, hash.length);
+        filename = candidate(length);
+      }
+    }
+    names.set(filePath, filename);
+    owners.set(filename, filePath);
+    reserved.add(filename);
+  }
+  return names;
+};
+
 const getCommittedMarkdownImageUpload = (
-  effect: { token?: string; target: { filename?: string }; requestSnapshot?: SyncEffectRequestSnapshot },
+  effect: DurableSyncEffect,
   filePath: string,
 ): UploadToken | undefined => {
   if (!effect.token) {
@@ -175,7 +252,7 @@ const getCommittedMarkdownImageUpload = (
   const snapshot = effect.requestSnapshot?.kind === "upload"
     ? effect.requestSnapshot as UploadRequestSnapshot
     : undefined;
-  const filename = effect.target.filename ?? snapshot?.filename ?? path.basename(filePath);
+  const filename = resolvePersistedMarkdownFilename(effect, filePath) ?? path.basename(filePath);
   return {
     token: effect.token,
     filename,
@@ -206,6 +283,12 @@ const uploadMarkdownImageEffects = async (
   }
 
   const uniquePaths = Array.from(new Set(filePaths));
+  let filenames: Map<string, string>;
+  try {
+    filenames = resolveMarkdownImageFilenames(uniquePaths, repo.getOperation(opKey, context.connectionScope) ?? operation);
+  } catch (error) {
+    return { ok: false, error: error as Error };
+  }
   for (const filePath of uniquePaths) {
     const canonicalEffectId = `image:markdown:${filePath}`;
     const operationSnapshot = repo.getOperation(opKey, context.connectionScope) ?? operation;
@@ -236,7 +319,7 @@ const uploadMarkdownImageEffects = async (
     let uploadFilePath: string;
     let uploadSnapshot: UploadRequestSnapshot;
     try {
-      ({ uploadFilePath, snapshot: uploadSnapshot } = await prepareMarkdownImageUpload(filePath, existingEffect, context.connectionScope, uploadSpoolStore ?? getDefaultUploadSpoolStore()));
+      ({ uploadFilePath, snapshot: uploadSnapshot } = await prepareMarkdownImageUpload(filePath, existingEffect, context.connectionScope, uploadSpoolStore ?? getDefaultUploadSpoolStore(), filenames.get(filePath)));
     } catch (error) {
       return { ok: false, error: error as Error };
     }
@@ -249,7 +332,7 @@ const uploadMarkdownImageEffects = async (
         operationRevision: revision,
         attemptGeneration,
         state: "planned",
-        target: { filePath, filename: path.basename(filePath) },
+        target: { filePath, filename: uploadSnapshot.filename },
         requestSnapshot: uploadSnapshot,
       },
       context.connectionScope,
@@ -280,7 +363,7 @@ const uploadMarkdownImageEffects = async (
           {
             kind: "commit",
             token: upload.token,
-            target: { filePath, filename: upload.filename },
+            target: { filePath, filename: uploadSnapshot.filename },
             requestSnapshot: uploadSnapshot,
           },
           context.connectionScope,
@@ -309,8 +392,8 @@ const uploadMarkdownImageEffects = async (
       }
       resolvedMap.set(filePath, {
         token: upload.token,
-        filename: upload.filename,
-        content_type: upload.contentType,
+        filename: uploadSnapshot.filename,
+        content_type: uploadSnapshot.contentType,
       });
     } catch (error) {
       const commitUnknown = isRemoteCommitUnknownError(error);
@@ -821,6 +904,13 @@ export class TicketCreateHandler implements OperationHandler<TicketCreateIntent,
       await repo.saveOperation(operation, context.connectionScope);
     }
 
+    try {
+      resolveMarkdownImageFilenames((prepared.imageLinks ?? []).map((link) => link.resolvedPath),
+        repo.getOperation(opKey, context.connectionScope) ?? operation);
+    } catch (error) {
+      return { ok: false, error: error as Error };
+    }
+
     for (let i = 0; i < attachments.length; i++) {
       const att = attachments[i];
       if (att.kind === "token") {
@@ -834,7 +924,8 @@ export class TicketCreateHandler implements OperationHandler<TicketCreateIntent,
 
         if (existingEffect?.state === "committed" && existingEffect.token) {
           if (!tokens.some((t) => t.token === existingEffect.token)) {
-            tokens.push({ token: existingEffect.token, filename: att.filename ?? existingEffect.target?.filename ?? "attachment", content_type: att.contentType ?? "application/octet-stream" });
+            const snapshot = existingEffect.requestSnapshot?.kind === "upload" ? existingEffect.requestSnapshot : undefined;
+            tokens.push({ token: existingEffect.token, filename: snapshot?.filename ?? existingEffect.target.filename ?? att.filename ?? "attachment", content_type: snapshot?.contentType ?? att.contentType ?? "application/octet-stream" });
           }
           continue;
         }
@@ -862,14 +953,10 @@ export class TicketCreateHandler implements OperationHandler<TicketCreateIntent,
             }
           }
         } else {
-          const fileId = await computeFileHashAndSizeAsync(att.filePath);
-          if (!fileId) {
-            return { ok: false, error: new Error(`Failed to compute hash for file attachment: ${att.filePath}`) };
-          }
           try {
             const frozen = await (deps?.uploadSpoolStore ?? getDefaultUploadSpoolStore()).freezeFile({
               connectionScope: context.connectionScope, sourcePath: att.filePath,
-              filename: att.filename ?? path.basename(att.filePath), expected: fileId,
+              filename: att.filename ?? path.basename(att.filePath),
             });
             const spoolFilePath = frozen.spoolFilePath;
             uploadSnapshot = {
@@ -877,9 +964,9 @@ export class TicketCreateHandler implements OperationHandler<TicketCreateIntent,
               filePath: att.filePath,
               spoolFilePath,
               filename: att.filename ?? path.basename(att.filePath),
-              contentType: att.contentType ?? "application/octet-stream",
-              contentHash: fileId.contentHash,
-              contentSize: fileId.contentSize,
+              contentType: att.contentType ?? getAttachmentContentType(att.filename ?? path.basename(att.filePath)),
+              contentHash: frozen.contentHash,
+              contentSize: frozen.contentSize,
             };
             frozenUploadLeases.set(uploadSnapshot, frozen);
             uploadFilePath = spoolFilePath;
@@ -895,7 +982,7 @@ export class TicketCreateHandler implements OperationHandler<TicketCreateIntent,
             kind: "attachment_upload",
             operationRevision: revision,
             state: "planned",
-            target: { filePath: uploadSnapshot.filePath ?? att.filePath, filename: att.filename },
+            target: { filePath: uploadSnapshot.filePath ?? att.filePath, filename: uploadSnapshot.filename },
             requestSnapshot: uploadSnapshot,
           },
           context.connectionScope,
@@ -922,7 +1009,7 @@ export class TicketCreateHandler implements OperationHandler<TicketCreateIntent,
           const commitRes = await repo.transitionEffect(
             opKey,
             effectId,
-            { kind: "commit", token: res.token, target: { filePath: uploadSnapshot.filePath ?? att.filePath, filename: att.filename ?? res.filename }, requestSnapshot: uploadSnapshot },
+            { kind: "commit", token: res.token, target: { filePath: uploadSnapshot.filePath ?? att.filePath, filename: uploadSnapshot.filename }, requestSnapshot: uploadSnapshot },
             context.connectionScope,
             { operationRevision: revision, sourceState: "started" },
           );
@@ -940,7 +1027,7 @@ export class TicketCreateHandler implements OperationHandler<TicketCreateIntent,
             }
             return { ok: false, error: new Error(`Failed to commit effect ${effectId}`), commitUnknown: true };
           }
-          tokens.push({ token: res.token, filename: att.filename ?? res.filename, content_type: att.contentType ?? res.contentType });
+          tokens.push({ token: res.token, filename: uploadSnapshot.filename, content_type: uploadSnapshot.contentType });
         } catch (err) {
           const commitUnknown = isRemoteCommitUnknownError(err);
           const disposition = classifyFailureDisposition(err);
@@ -960,7 +1047,9 @@ export class TicketCreateHandler implements OperationHandler<TicketCreateIntent,
 
         if (existingEffect?.state === "committed" && existingEffect.token) {
           if (!tokens.some((t) => t.token === existingEffect.token)) {
-            tokens.push({ token: existingEffect.token, filename: att.filename ?? "clipboard.png", content_type: att.contentType ?? "image/png" });
+            const snapshot = existingEffect.requestSnapshot?.kind === "upload" ? existingEffect.requestSnapshot : undefined;
+            tokens.push({ token: existingEffect.token, filename: snapshot?.filename ?? att.filename ?? "clipboard.png",
+              content_type: snapshot?.contentType ?? att.contentType ?? "image/png" });
           }
           continue;
         }
@@ -1008,7 +1097,7 @@ export class TicketCreateHandler implements OperationHandler<TicketCreateIntent,
             kind: "attachment_upload",
             operationRevision: revision,
             state: "planned",
-            target: { filename: att.filename },
+            target: { filename: uploadSnapshot.filename },
             requestSnapshot: uploadSnapshot,
           },
           context.connectionScope,
@@ -1035,7 +1124,7 @@ export class TicketCreateHandler implements OperationHandler<TicketCreateIntent,
           const commitClipRes = await repo.transitionEffect(
             opKey,
             effectId,
-            { kind: "commit", token: res.token, target: { filename: att.filename ?? res.filename }, requestSnapshot: uploadSnapshot },
+            { kind: "commit", token: res.token, target: { filename: uploadSnapshot.filename }, requestSnapshot: uploadSnapshot },
             context.connectionScope,
             { operationRevision: revision, sourceState: "started" },
           );
@@ -1053,7 +1142,7 @@ export class TicketCreateHandler implements OperationHandler<TicketCreateIntent,
             }
             return { ok: false, error: new Error(`Failed to commit effect ${effectId}`), commitUnknown: true };
           }
-          tokens.push({ token: res.token, filename: att.filename ?? res.filename, content_type: att.contentType ?? res.contentType });
+          tokens.push({ token: res.token, filename: uploadSnapshot.filename, content_type: uploadSnapshot.contentType });
         } catch (err) {
           const commitUnknown = isRemoteCommitUnknownError(err);
           const disposition = classifyFailureDisposition(err);
@@ -1908,7 +1997,7 @@ export class TicketCreateHandler implements OperationHandler<TicketCreateIntent,
           const committed = await repo.transitionEffect(
             key,
             effectId,
-            { kind: "commit", token: res.token, target: { filePath: uploadSnapshot.filePath, filename: effect.target.filename ?? res.filename }, requestSnapshot: uploadSnapshot },
+            { kind: "commit", token: res.token, target: { filePath: uploadSnapshot.filePath, filename: uploadSnapshot.filename }, requestSnapshot: uploadSnapshot },
             scope,
             { operationRevision: revision, sourceState: "started" },
           );
@@ -3208,7 +3297,7 @@ export class TicketUpdateHandler implements OperationHandler<TicketUpdateIntent,
           const committed = await repo.transitionEffect(
             key,
             effectId,
-            { kind: "commit", token: res.token, target: { filePath: uploadSnapshot.filePath ?? filePath, filename: res.filename }, requestSnapshot: uploadSnapshot },
+            { kind: "commit", token: res.token, target: { filePath: uploadSnapshot.filePath ?? filePath, filename: uploadSnapshot.filename }, requestSnapshot: uploadSnapshot },
             scope,
             { operationRevision: revision, sourceState: "started" },
           );
@@ -3665,6 +3754,13 @@ export class CommentCreateHandler implements OperationHandler<CommentCreateInten
       ),
     );
 
+    let filenames: Map<string, string>;
+    try {
+      filenames = resolveMarkdownImageFilenames(uniquePaths, repo.getOperation(opKey, context.connectionScope) ?? operation, findMarkdownImageEffect);
+    } catch (error) {
+      return { ok: false, error: error as Error };
+    }
+
     for (const filePath of uniquePaths) {
       const canonicalEffectId = `image:markdown:${filePath}`;
       const currentOp = repo.getOperation(opKey, context.connectionScope) ?? operation;
@@ -3707,7 +3803,7 @@ export class CommentCreateHandler implements OperationHandler<CommentCreateInten
       let uploadFilePath: string;
       let uploadSnapshot: UploadRequestSnapshot;
       try {
-        ({ uploadFilePath, snapshot: uploadSnapshot } = await prepareMarkdownImageUpload(filePath, existingEffect, context.connectionScope, deps?.uploadSpoolStore ?? getDefaultUploadSpoolStore()));
+        ({ uploadFilePath, snapshot: uploadSnapshot } = await prepareMarkdownImageUpload(filePath, existingEffect, context.connectionScope, deps?.uploadSpoolStore ?? getDefaultUploadSpoolStore(), filenames.get(filePath)));
       } catch (error) {
         return { ok: false, error: error as Error };
       }
@@ -3719,7 +3815,7 @@ export class CommentCreateHandler implements OperationHandler<CommentCreateInten
           kind: "image_upload",
           operationRevision: revision,
           state: "planned",
-          target: { filePath, filename: path.basename(filePath) },
+          target: { filePath, filename: uploadSnapshot.filename },
           requestSnapshot: uploadSnapshot,
         },
         context.connectionScope,
@@ -3747,7 +3843,7 @@ export class CommentCreateHandler implements OperationHandler<CommentCreateInten
           commitImg = await repo.transitionEffect(
             opKey,
             effectId,
-            { kind: "commit", token: upload.token, target: { filePath, filename: upload.filename }, requestSnapshot: uploadSnapshot },
+            { kind: "commit", token: upload.token, target: { filePath, filename: uploadSnapshot.filename }, requestSnapshot: uploadSnapshot },
             context.connectionScope,
             { operationRevision: revision, sourceState: "started" },
           );
@@ -3770,8 +3866,8 @@ export class CommentCreateHandler implements OperationHandler<CommentCreateInten
         }
         resolvedMap.set(filePath, {
           token: upload.token,
-          filename: upload.filename,
-          content_type: upload.contentType,
+          filename: uploadSnapshot.filename,
+          content_type: uploadSnapshot.contentType,
         });
       } catch (err) {
         const commitUnknown = isRemoteCommitUnknownError(err);
@@ -4110,7 +4206,7 @@ export class CommentCreateHandler implements OperationHandler<CommentCreateInten
           const committed = await repo.transitionEffect(
             key,
             effectId,
-            { kind: "commit", token: upload.token, target: { filePath: uploadSnapshot.filePath ?? filePath, filename: upload.filename }, requestSnapshot: uploadSnapshot },
+            { kind: "commit", token: upload.token, target: { filePath: uploadSnapshot.filePath ?? filePath, filename: uploadSnapshot.filename }, requestSnapshot: uploadSnapshot },
             scope,
             { operationRevision: revision, sourceState: "started" },
           );
@@ -4284,6 +4380,13 @@ export class CommentUpdateHandler implements OperationHandler<CommentUpdateInten
       ),
     );
 
+    let filenames: Map<string, string>;
+    try {
+      filenames = resolveMarkdownImageFilenames(uniquePaths, repo.getOperation(opKey, context.connectionScope) ?? operation, findMarkdownImageEffect);
+    } catch (error) {
+      return { ok: false, error: error as Error };
+    }
+
     for (const filePath of uniquePaths) {
       const canonicalEffectId = `image:markdown:${filePath}`;
       const currentOp = repo.getOperation(opKey, context.connectionScope) ?? operation;
@@ -4326,7 +4429,7 @@ export class CommentUpdateHandler implements OperationHandler<CommentUpdateInten
       let uploadFilePath: string;
       let uploadSnapshot: UploadRequestSnapshot;
       try {
-        ({ uploadFilePath, snapshot: uploadSnapshot } = await prepareMarkdownImageUpload(filePath, existingEffect, context.connectionScope, deps?.uploadSpoolStore ?? getDefaultUploadSpoolStore()));
+        ({ uploadFilePath, snapshot: uploadSnapshot } = await prepareMarkdownImageUpload(filePath, existingEffect, context.connectionScope, deps?.uploadSpoolStore ?? getDefaultUploadSpoolStore(), filenames.get(filePath)));
       } catch (error) {
         return { ok: false, error: error as Error };
       }
@@ -4338,7 +4441,7 @@ export class CommentUpdateHandler implements OperationHandler<CommentUpdateInten
           kind: "image_upload",
           operationRevision: revision,
           state: "planned",
-          target: { filePath, filename: path.basename(filePath) },
+          target: { filePath, filename: uploadSnapshot.filename },
           requestSnapshot: uploadSnapshot,
         },
         context.connectionScope,
@@ -4366,7 +4469,7 @@ export class CommentUpdateHandler implements OperationHandler<CommentUpdateInten
           commitImg = await repo.transitionEffect(
             opKey,
             effectId,
-            { kind: "commit", token: upload.token, target: { filePath, filename: upload.filename }, requestSnapshot: uploadSnapshot },
+            { kind: "commit", token: upload.token, target: { filePath, filename: uploadSnapshot.filename }, requestSnapshot: uploadSnapshot },
             context.connectionScope,
             { operationRevision: revision, sourceState: "started" },
           );
@@ -4389,8 +4492,8 @@ export class CommentUpdateHandler implements OperationHandler<CommentUpdateInten
         }
         resolvedMap.set(filePath, {
           token: upload.token,
-          filename: upload.filename,
-          content_type: upload.contentType,
+          filename: uploadSnapshot.filename,
+          content_type: uploadSnapshot.contentType,
         });
       } catch (err) {
         const commitUnknown = isRemoteCommitUnknownError(err);
@@ -4921,7 +5024,7 @@ export class CommentUpdateHandler implements OperationHandler<CommentUpdateInten
           const committed = await repo.transitionEffect(
             key,
             effectId,
-            { kind: "commit", token: upload.token, target: { filePath: uploadSnapshot.filePath ?? filePath, filename: upload.filename }, requestSnapshot: uploadSnapshot },
+            { kind: "commit", token: upload.token, target: { filePath: uploadSnapshot.filePath ?? filePath, filename: uploadSnapshot.filename }, requestSnapshot: uploadSnapshot },
             scope,
             { operationRevision: revision, sourceState: "started" },
           );

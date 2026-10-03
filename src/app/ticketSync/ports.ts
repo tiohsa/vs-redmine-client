@@ -40,6 +40,7 @@ export interface UploadSpoolStore {
     contentType: string;
   }): Promise<FrozenUpload>;
   verify(snapshot: UploadRequestSnapshot): Promise<boolean>;
+  /** serialization 内の pass 開始時に references を一度取得し、開始時 lease と共に保護する。 */
   cleanupUnreferenced(references: () => ReadonlySet<string>): Promise<void>;
 }
 

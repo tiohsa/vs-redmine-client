@@ -31,6 +31,14 @@ const createEditor = (filePath: string, initialContent: string): vscode.TextEdit
   } as unknown as vscode.TextEditor;
 };
 
+const assertFrozenImageMetadata = (scope: string, ticketId: number): void => {
+  const image = getOfflineSyncQueue(scope).tickets.get(ticketId)?.effects?.find((effect) => effect.kind === "image_upload");
+  assert.ok(image?.requestSnapshot?.kind === "upload");
+  assert.strictEqual(image.requestSnapshot.filename, "screen.png");
+  assert.strictEqual(image.requestSnapshot.contentType, "image/png");
+  assert.strictEqual(image.target.filename, image.requestSnapshot.filename);
+};
+
 suite("TicketSyncService Markdown image uploads", () => {
   for (const { eol, resume, userEdit } of [
     { eol: "\n", resume: false, userEdit: false },
@@ -73,6 +81,7 @@ suite("TicketSyncService Markdown image uploads", () => {
           }),
           uploadFile: async () => {
             uploadCalls++;
+            assertFrozenImageMetadata(scope, 903);
             return { token: "image-token", filename: "remote.png", contentType: "image/png" };
           },
           updateIssue: async ({ fields }) => {
@@ -112,7 +121,7 @@ suite("TicketSyncService Markdown image uploads", () => {
         assert.strictEqual(outcome.kind, "completed", JSON.stringify(outcome));
         assert.strictEqual(uploadCalls, 1);
         assert.strictEqual(updateCalls, 1);
-        assert.ok(document.getText().includes("![image](remote.png)"));
+        assert.ok(document.getText().includes("![image](screen.png)"));
         assert.strictEqual(document.eol, eol === "\n" ? vscode.EndOfLine.LF : vscode.EndOfLine.CRLF);
         assert.strictEqual(getOfflineSyncQueue(scope).tickets.size, 0);
         assert.strictEqual(fs.readFileSync(uri.fsPath, "utf8"), document.getText());
@@ -168,6 +177,7 @@ suite("TicketSyncService Markdown image uploads", () => {
         },
         uploadFile: async () => {
           uploadCalls++;
+          assertFrozenImageMetadata(scope, 900);
           return {
             token: "screen-token",
             filename: "screen-redmine.png",
@@ -195,10 +205,10 @@ suite("TicketSyncService Markdown image uploads", () => {
     assert.strictEqual(updateCalls, 1);
     assert.strictEqual(
       updateFields?.description,
-      "![a](screen-redmine.png)\n![b](screen-redmine.png)",
+      "![a](screen.png)\n![b](screen.png)",
     );
     assert.deepStrictEqual(updateFields?.uploads, [
-      { token: "screen-token", filename: "screen-redmine.png", content_type: "image/png" },
+      { token: "screen-token", filename: "screen.png", content_type: "image/png" },
     ]);
     assert.strictEqual(getOfflineSyncQueue(scope).tickets.size, 0);
   });
@@ -238,6 +248,7 @@ suite("TicketSyncService Markdown image uploads", () => {
     let uploadCalls = 0;
     const uploadFile = async () => {
       uploadCalls++;
+      assertFrozenImageMetadata(scope, 901);
       return { token: "restart-token", filename: "screen-redmine.png", contentType: "image/png" };
     };
     const handler = new TicketUpdateHandler();
@@ -251,13 +262,14 @@ suite("TicketSyncService Markdown image uploads", () => {
     assert.strictEqual(secondary1.ok, true);
 
     const afterRestart = repository.getOperation<TicketUpdateIntent>(key, scope)!;
+    assertFrozenImageMetadata(scope, 901);
     const prepared2 = await handler.prepare(afterRestart, context, deps);
     assert.strictEqual(prepared2.ok, true);
     const secondary2 = await handler.executeSecondaryEffects!(afterRestart, prepared2.ok ? prepared2.prepared : undefined!, context, deps);
     assert.strictEqual(secondary2.ok, true);
     assert.strictEqual(uploadCalls, 1);
     assert.deepStrictEqual(secondary2.ok ? secondary2.uploadTokens : undefined, [
-      { token: "restart-token", filename: "screen-redmine.png", content_type: "image/png" },
+      { token: "restart-token", filename: "screen.png", content_type: "image/png" },
     ]);
   });
 
