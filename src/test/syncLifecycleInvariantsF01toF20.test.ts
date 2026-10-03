@@ -280,8 +280,9 @@ suite("Frozen upload metadata authority", () => {
     assert.strictEqual(prepared.parsed.description, "![](test.png)");
     const recorded = repo.getOperation<TicketCreateIntent>(operation.key!, SCOPE)!;
     const recordedImage = recorded.effects!.find((effect) => effect.kind === "image_upload")!;
-    recordedImage.target.filename = "old-internal-spool-name.png";
-    await repo.saveOperation(recorded, SCOPE);
+    assert.ok(recordedImage.requestSnapshot?.kind === "upload");
+    assert.strictEqual(recordedImage.requestSnapshot.filename, "test.png");
+    assert.strictEqual(recordedImage.target.filename, recordedImage.requestSnapshot.filename);
     initializeOfflineSyncStore(storage, SCOPE);
     await fs.promises.unlink(image);
     const restoredRepo = createSyncOperationRepository();

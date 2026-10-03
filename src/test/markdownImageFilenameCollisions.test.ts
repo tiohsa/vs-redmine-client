@@ -122,18 +122,27 @@ suite("Markdown画像のlogical filename衝突", () => {
       assert.deepStrictEqual(reused.result.uploadTokens, uploads);
     });
 
-    test(`${kind}: 旧Snapshot同士の同名競合をremote mutation前に拒否する`, async () => {
-      const body = "![](first/logo.png)\n![](second/logo.png)\n![](unique.png)";
+    test(`${kind}: 旧committed画像を既存のlogical filenameで再利用する`, async () => {
+      const body = "![](first/logo.png)\n![](second/logo.png)";
       const operation = makeOperation(body);
       operation.effects = ["first", "second"].map((directory): DurableSyncEffect => ({
         effectId: `image:markdown:${path.join(root, directory, "logo.png")}`, kind: "image_upload",
         operationRevision: 1, attemptGeneration: 1, state: "committed", token: `old-${directory}`,
-        target: { filePath: path.join(root, directory, "logo.png"), filename: "logo.png" },
+        target: { filePath: path.join(root, directory, "logo.png"), filename: `old-${directory}-logo.png` },
         requestSnapshot: { kind: "upload", filePath: path.join(root, directory, "logo.png"), filename: "logo.png",
           contentType: "image/png", contentHash: directory, contentSize: directory.length },
       }));
       const repo = createSyncOperationRepository();
       await repo.saveOperation(operation, SCOPE);
+      if (kind === "comment_update") {
+        operation.effects!.push({ effectId: "attachment-link", kind: "attachment_link", operationRevision: 1,
+          attemptGeneration: 1, state: "committed", target: { ticketId: 10 },
+          requestSnapshot: { kind: "attachment_link", request: { issueId: 10, fields: { uploads: [
+            { token: "old-first", filename: "old-first-logo.png", content_type: "image/png" },
+            { token: "old-second", filename: "old-second-logo.png", content_type: "image/png" },
+          ] } } } });
+        await repo.saveOperation(operation, SCOPE);
+      }
       const before = repo.getOperation(operation.key!, SCOPE)!;
       const beforeQueue = getOfflineSyncQueue(SCOPE);
       const originalUpdate = storage.update;
@@ -145,9 +154,14 @@ suite("Markdown画像のlogical filename衝突", () => {
       let calls = 0;
       const uploadFile = async () => { calls++; return { token: "unexpected", filename: "unique.png", contentType: "image/png" }; };
       try {
-        const failed = await execute(before, body, { repository: repo, uploadSpoolStore: new DurableUploadSpoolStore(root),
+        const resumed = await execute(before, body, { repository: repo, uploadSpoolStore: new DurableUploadSpoolStore(root),
           ticketCreate: { uploadFile }, ticketUpdate: { uploadFile }, comment: { uploadFile, updateIssue: async () => { calls++; } } });
-        assert.strictEqual(failed.result.ok, false);
+        assert.ok(resumed.result.ok, !resumed.result.ok ? resumed.result.error.message : "");
+        assert.strictEqual(resumed.body, "![](old-first-logo.png)\n![](old-second-logo.png)");
+        assert.deepStrictEqual(resumed.result.uploadTokens, [
+          { token: "old-first", filename: "old-first-logo.png", content_type: "image/png" },
+          { token: "old-second", filename: "old-second-logo.png", content_type: "image/png" },
+        ]);
         assert.strictEqual(calls, 0);
         assert.strictEqual(persistenceWrites, 0);
         // 旧commentのcreatedAt欠落時はgetOperationがDate.now()で補完するため、永続状態で比較する。
@@ -166,7 +180,7 @@ suite("Markdown画像のlogical filename衝突", () => {
         const operation = makeOperation(body);
         const filePath = path.join(root, "first/logo.png");
         operation.effects = [{ effectId: `image:markdown:${filePath}`, kind: "image_upload", operationRevision: 1,
-          attemptGeneration: 1, state: "committed", token: "old-token", target: { filePath, filename: snapshot ? "wrong-target.png" : "unique.png" },
+          attemptGeneration: 1, state: "committed", token: "old-token", target: { filePath, filename: "unique.png" },
           ...(snapshot ? { requestSnapshot: { kind: "upload" as const, filePath, filename: "unique.png", contentType: "saved/type",
             contentHash: "old-content", contentSize: 5 } } : {}) }];
         const repo = createSyncOperationRepository();
@@ -183,6 +197,43 @@ suite("Markdown画像のlogical filename衝突", () => {
         assert.notStrictEqual(added.filename, "unique.png");
         assert.strictEqual(result.body, `![](unique.png)\n![](${added.filename})`);
         assert.deepStrictEqual(repo.getOperation(operation.key!, SCOPE)!.effects!.find((entry) => entry.effectId === operation.effects![0].effectId), operation.effects![0]);
+      });
+    }
+
+    for (const extension of [".png", ".jpeg"]) {
+      test(`${kind}: 255文字の画像名は拡張子を保ち入力順によらず衝突解決する (${extension})`, async () => {
+        const basename = `${"x".repeat(255 - extension.length)}${extension}`;
+        for (const directory of ["first", "second"]) {
+          await fs.promises.writeFile(path.join(root, directory, basename), directory);
+        }
+        const firstPath = path.join(root, "first", basename);
+        const hash = crypto.createHash("sha256").update(path.normalize(firstPath)).digest("hex");
+        const naturalName = `${"x".repeat(255 - extension.length - 13)}-${hash.slice(0, 12)}${extension}`;
+        await fs.promises.writeFile(path.join(root, naturalName), "natural");
+        const paths = [`first/${basename}`, `second/${basename}`, naturalName];
+        const run = async (links: string[]) => {
+          initializeOfflineSyncStore(createTestMemento(), SCOPE);
+          const body = links.map((link) => `![](${link})`).join("\n");
+          const operation = makeOperation(body);
+          const repo = createSyncOperationRepository();
+          await repo.saveOperation(operation, SCOPE);
+          const uploadFile = async (filePath: string) => ({ token: fs.readFileSync(filePath, "utf8"),
+            filename: "transport.png", contentType: "transport/type" });
+          const result = await execute(operation, body, { repository: repo, uploadSpoolStore: new DurableUploadSpoolStore(root),
+            ticketCreate: { uploadFile }, ticketUpdate: { uploadFile }, comment: { uploadFile, updateIssue: async () => undefined } });
+          assert.ok(result.result.ok, !result.result.ok ? result.result.error.message : "");
+          const uploads = result.result.uploadTokens!;
+          assert.strictEqual(new Set(uploads.map((entry) => entry.filename)).size, 3);
+          assert.strictEqual(uploads.find((entry) => entry.token === "natural")!.filename, naturalName);
+          assert.ok(uploads.find((entry) => entry.token === "first")!.filename.endsWith(`-${hash.slice(0, 16)}${extension}`));
+          for (const entry of uploads) {
+            assert.ok(entry.filename.length <= 255);
+            assert.ok(entry.filename.endsWith(extension));
+            assert.ok(result.body!.includes(`![](${entry.filename})`));
+          }
+          return Object.fromEntries(uploads.map((entry) => [entry.token, entry.filename]));
+        };
+        assert.deepStrictEqual(await run(paths), await run([...paths].reverse()));
       });
     }
 

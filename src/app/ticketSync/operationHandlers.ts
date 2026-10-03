@@ -168,6 +168,20 @@ const findMarkdownImageEffect = (effects: DurableSyncEffect[], filePath: string)
     ?? matching.find((effect) => effect.state === "planned");
 };
 
+// 旧committed Effectではtargetが実際にuploadした名前を保持している。
+const resolvePersistedMarkdownFilename = (
+  effect: DurableSyncEffect | undefined,
+  filePath: string,
+): string | undefined => {
+  if (!effect) { return undefined; }
+  const snapshot = effect.requestSnapshot?.kind === "upload" ? effect.requestSnapshot : undefined;
+  if (effect.state === "committed" && effect.target.filename && snapshot?.filename &&
+    effect.target.filename !== snapshot.filename) {
+    return effect.target.filename;
+  }
+  return snapshot?.filename ?? effect.target.filename ?? path.basename(filePath);
+};
+
 // 全候補名を予約してから名前を決め、保存済みのupload identityは変更しない。
 const resolveMarkdownImageFilenames = (
   filePaths: string[],
@@ -185,8 +199,7 @@ const resolveMarkdownImageFilenames = (
     const basename = path.basename(filePath);
     basenameCounts.set(basename, (basenameCounts.get(basename) ?? 0) + 1);
     const effect = selectEffect(effects, filePath);
-    const snapshot = effect?.requestSnapshot?.kind === "upload" ? effect.requestSnapshot : undefined;
-    const filename = snapshot?.filename ?? (effect?.state === "committed" ? effect.target.filename ?? basename : undefined);
+    const filename = resolvePersistedMarkdownFilename(effect, filePath);
     if (filename !== undefined) {
       if (owners.has(filename)) {
         throw new Error(vscode.l10n.t("Saved Markdown images have the same filename: {0}", filename));
@@ -201,18 +214,25 @@ const resolveMarkdownImageFilenames = (
     if (names.has(filePath)) { continue; }
     const basename = path.basename(filePath);
     let filename = basename;
-    if ((basenameCounts.get(basename) ?? 0) > 1 || owners.has(basename)) {
+    if (basename.length > 255 || (basenameCounts.get(basename) ?? 0) > 1 || owners.has(basename)) {
       const extension = path.extname(basename);
       const stem = basename.slice(0, basename.length - extension.length);
       const hash = crypto.createHash("sha256").update(path.normalize(filePath)).digest("hex");
       let length = 12;
-      filename = `${stem}-${hash.slice(0, length)}${extension}`;
+      const candidate = (hashLength: number): string => {
+        const suffix = `-${hash.slice(0, hashLength)}${extension}`;
+        if (suffix.length > 255) {
+          throw new Error(vscode.l10n.t("Cannot determine a unique Markdown image filename: {0}", basename));
+        }
+        return `${stem.slice(0, Math.max(0, 255 - suffix.length))}${suffix}`;
+      };
+      filename = candidate(length);
       while (reserved.has(filename)) {
         if (length === hash.length) {
           throw new Error(vscode.l10n.t("Cannot determine a unique Markdown image filename: {0}", basename));
         }
         length = Math.min(length + 4, hash.length);
-        filename = `${stem}-${hash.slice(0, length)}${extension}`;
+        filename = candidate(length);
       }
     }
     names.set(filePath, filename);
@@ -223,7 +243,7 @@ const resolveMarkdownImageFilenames = (
 };
 
 const getCommittedMarkdownImageUpload = (
-  effect: { token?: string; target: { filename?: string }; requestSnapshot?: SyncEffectRequestSnapshot },
+  effect: DurableSyncEffect,
   filePath: string,
 ): UploadToken | undefined => {
   if (!effect.token) {
@@ -232,7 +252,7 @@ const getCommittedMarkdownImageUpload = (
   const snapshot = effect.requestSnapshot?.kind === "upload"
     ? effect.requestSnapshot as UploadRequestSnapshot
     : undefined;
-  const filename = snapshot?.filename ?? effect.target.filename ?? path.basename(filePath);
+  const filename = resolvePersistedMarkdownFilename(effect, filePath) ?? path.basename(filePath);
   return {
     token: effect.token,
     filename,

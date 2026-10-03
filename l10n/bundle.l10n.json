@@ -405,6 +405,8 @@
   "Redmine must use HTTPS because the API key is sent with every request.": "Redmine must use HTTPS because the API key is sent with every request.",
   "Redmine request URL must belong to the configured connection.": "Redmine request URL must belong to the configured connection.",
   "Markdown image operation is stale.": "Markdown image operation is stale.",
+  "Saved Markdown images have the same filename: {0}": "Saved Markdown images have the same filename: {0}",
+  "Cannot determine a unique Markdown image filename: {0}": "Cannot determine a unique Markdown image filename: {0}",
   "Relative image path cannot be resolved: {0}": "Relative image path cannot be resolved: {0}",
   "Invalid image path: {0}. {1}": "Invalid image path: {0}. {1}",
     "Edit ticket Markdown in VS Code": "Edit ticket Markdown in VS Code",
