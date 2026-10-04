@@ -17,7 +17,7 @@ ${dashboardStyles}
 <body>
 <header id="header" class="dashboard-header">
   <div id="header-row" class="header-row">
-    <div class="project-field"><label class="field-label sr-only" for="project-select">${strings.selectProjectTitle}</label><select class="project-select" id="project-select" title="${strings.selectProjectTitle}"><option value="">${strings.selectProjectPlaceholder}</option></select></div>
+    <div class="project-field"><label class="field-label sr-only" for="project-search-input">${strings.projectSearchPlaceholder}</label><div class="project-search-control"><input class="project-search-input" id="project-search-input" type="search" placeholder="${strings.projectSearchPlaceholder}" aria-label="${strings.projectSearchPlaceholder}" autocomplete="off"><button class="project-search-clear" id="project-search-clear-btn" type="button" title="${strings.clearProjectSearch}" aria-label="${strings.clearProjectSearch}" hidden>×</button></div><label class="field-label sr-only" for="project-select">${strings.selectProjectTitle}</label><select class="project-select" id="project-select" title="${strings.selectProjectTitle}"><option value="">${strings.selectProjectPlaceholder}</option></select><p class="project-search-empty" id="project-search-empty" role="status" hidden>${strings.noMatchingProjects}</p></div>
     <label class="toggle-children" for="include-children"><input type="checkbox" id="include-children"><span>${strings.includeChildren}</span></label>
     <div class="header-actions">
       <button class="btn btn-secondary btn-icon-label" id="refresh-btn" type="button" title="${strings.refresh}" aria-label="${strings.refresh}">${dashboardActionIcon("refresh")}<span class="btn-label">${strings.refresh}</span></button>

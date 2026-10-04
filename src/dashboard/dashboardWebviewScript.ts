@@ -15,6 +15,7 @@ const quickFilters = new Set(Array.isArray(persistedUiState.quickFilters) ? pers
 let state = null;
 let requestCounter = 0;
 let searchQuery = '';
+let projectSearchQuery = '';
 let searchTimer = null;
 let ticketDetailExpanded = false;
 let metadataExpanded = false;
@@ -203,6 +204,10 @@ document.getElementById('refresh-btn').addEventListener('click', function(){ req
 document.getElementById('new-ticket-btn').addEventListener('click', function(){ activateTab('tickets'); req('ticket.create'); });
 document.getElementById('include-children').addEventListener('change', function(){ req('project.toggleChildren',{includeChildProjects:this.checked}); });
 document.getElementById('project-select').addEventListener('change', function(){ if(this.value) req('project.select',{projectId:Number(this.value)}); });
+const projectSearchInput = document.getElementById('project-search-input');
+const projectSearchClearButton = document.getElementById('project-search-clear-btn');
+projectSearchInput.addEventListener('input',function(){ projectSearchQuery=this.value; renderProjectSelect(); });
+projectSearchClearButton.addEventListener('click',function(){ projectSearchQuery=''; projectSearchInput.value=''; renderProjectSelect(); projectSearchInput.focus(); });
 const searchInput = document.getElementById('search-input');
 const searchClearButton = document.getElementById('search-clear-btn');
 const ticketLayoutSelect = document.getElementById('ticket-layout-mode');
@@ -821,7 +826,7 @@ function renderSettingsBase(){
 function resetViewState(){
   ticketLayoutMode='auto'; detailTab='overview'; quickFilters.clear();
   expandedTicketIds.clear(); collapsedTicketIds.clear(); expandedComments.clear(); ticketDetailExpanded=false; metadataExpanded=false;
-  activeTicketActionMenuId=null; activeTicketActionAnchorTop=null; searchQuery='';
+  activeTicketActionMenuId=null; activeTicketActionAnchorTop=null; searchQuery=''; projectSearchQuery=''; projectSearchInput.value='';
   if(searchTimer){ window.clearTimeout(searchTimer); searchTimer=null; }
   searchInput.value=''; updateSearchClearButton(); filterDialog.classList.add('hidden'); closeLayoutPopover();
   document.querySelectorAll('.settings-category').forEach(function(category){ category.open=category.dataset.category === 'tickets'; });
@@ -835,11 +840,46 @@ function renderSettings(){
 }
 
 // ── Render and extension messages ─────────────────────────────────────────
+function normalizeProjectSearch(value){ return String(value ?? '').normalize('NFKC').toLowerCase().trim(); }
+function deriveVisibleProjects(projects){
+  const projectById=new Map(projects.map(function(project){ return [project.id,project]; }));
+  const query=normalizeProjectSearch(projectSearchQuery);
+  const visibleIds=new Set();
+  const walkedAncestors=new Set();
+  let matchingCount=0;
+  function includeProjectAndAncestors(project){
+    let current=project;
+    while(current && !walkedAncestors.has(current.id)){
+      walkedAncestors.add(current.id);
+      visibleIds.add(current.id);
+      current=current.parentId === undefined ? undefined : projectById.get(current.parentId);
+    }
+  }
+  if(!query){ projects.forEach(function(project){ visibleIds.add(project.id); }); matchingCount=projects.length; }
+  else {
+    projects.forEach(function(project){
+      const searchable=normalizeProjectSearch((project.name || '')+' '+(project.identifier || ''));
+      if(searchable.includes(query)){ matchingCount++; includeProjectAndAncestors(project); }
+    });
+  }
+  const selectedId=state?.selectedProject?.id;
+  if(selectedId !== undefined){ const selectedProject=projectById.get(selectedId); if(selectedProject) includeProjectAndAncestors(selectedProject); }
+  return { projects:projects.filter(function(project){ return visibleIds.has(project.id); }), matchingCount:matchingCount };
+}
+function renderProjectSelect(){
+  const projects=state?.projects || [];
+  const projection=deriveVisibleProjects(projects);
+  const select=document.getElementById('project-select');
+  while(select.options.length > 1) select.remove(1);
+  projection.projects.forEach(function(project){ const option=document.createElement('option'); option.value=String(project.id); option.textContent='  '.repeat(project.level || 0)+(project.name || (STRINGS.projectLabel+' #'+project.id)); select.appendChild(option); });
+  if(state?.selectedProject?.id) select.value=String(state.selectedProject.id); else select.value='';
+  select.title=state?.selectedProject?.name || STRINGS.selectProjectTitle;
+  projectSearchClearButton.hidden=projectSearchQuery.length===0;
+  document.getElementById('project-search-empty').hidden=projectSearchQuery.length===0 || projection.matchingCount>0;
+}
 function render(){
   if(!state) return; const focus=captureFocus(document); closeTicketActionMenus(); syncExpandedState(state.tickets);
-  const select=document.getElementById('project-select'); while(select.options.length > 1) select.remove(1);
-  (state.projects || []).forEach(function(project){ const option=document.createElement('option'); option.value=String(project.id); option.textContent='  '.repeat(project.level || 0)+(project.name || (STRINGS.projectLabel+' #'+project.id)); select.appendChild(option); }); if(state.selectedProject && state.selectedProject.id) select.value=String(state.selectedProject.id); else select.value='';
-  select.title=state.selectedProject?.name || STRINGS.selectProjectTitle;
+  renderProjectSelect();
   document.getElementById('include-children').checked=!!state.includeChildProjects; renderTickets(); renderTicketDetail(); renderFilterChips(); renderUnsynced(); renderComments(); renderSettings(); renderSyncTray(); updateSyncButtonStates(); restoreFocus(focus);
 }
 window.addEventListener('message',function(event){ const message=event.data || {}; if(message.type === 'dashboard.state'){
@@ -847,6 +887,7 @@ window.addEventListener('message',function(event){ const message=event.data || {
     const projectChanged=previous?.selectedProject?.id !== message.state.selectedProject?.id;
     if(projectChanged){ expandedTicketIds.clear(); collapsedTicketIds.clear(); }
     const connectionChanged=previous?.settings?.baseUrl !== message.state.settings?.baseUrl;
+    if(connectionChanged){ projectSearchQuery=''; projectSearchInput.value=''; }
     const ticketChanged=previous?.selectedTicketId !== message.state.selectedTicketId;
     const leavingDetail=message.state.workPanel && message.state.workPanel.mode !== 'detail';
     if(projectChanged || connectionChanged || ticketChanged || leavingDetail || !message.state.selectedTicket) metadataEdit=null;

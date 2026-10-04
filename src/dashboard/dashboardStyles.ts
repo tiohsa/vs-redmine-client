@@ -66,6 +66,12 @@ button:disabled, input:disabled, select:disabled, textarea:disabled { cursor: no
 .header-row { display: flex; align-items: flex-end; gap: 10px; min-width: 0; }
 .project-field { display: flex; min-width: 0; flex: 1 1 220px; max-width: 360px; flex-direction: column; gap: 4px; }
 .field-label { color: var(--app-text-secondary); font-size: 11px; font-weight: 600; }
+.project-search-control { display: flex; min-width: 0; height: 30px; border: 1px solid var(--vscode-dropdown-border, var(--app-border)); border-radius: var(--app-radius-md); background: var(--vscode-dropdown-background, var(--app-surface)); }
+.project-search-input { min-width: 0; width: 100%; padding: 0 8px; border: 0; outline: 0; background: transparent; color: var(--vscode-dropdown-foreground, var(--app-text)); font: inherit; }
+.project-search-input:focus-visible { outline: 2px solid var(--app-focus); outline-offset: -2px; border-radius: var(--app-radius-md); }
+.project-search-clear { flex: 0 0 28px; border: 0; background: transparent; color: var(--app-text-secondary); cursor: pointer; font: inherit; font-size: 18px; }
+.project-search-clear[hidden], .project-search-empty[hidden] { display: none; }
+.project-search-empty { margin: 0; color: var(--app-text-secondary); font-size: 11px; }
 .project-select {
   min-width: 0;
   height: 32px;

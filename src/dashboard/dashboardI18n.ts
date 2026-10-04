@@ -18,6 +18,9 @@ export interface DashboardStrings {
   // Header
   selectProjectPlaceholder: string;
   selectProjectTitle: string;
+  projectSearchPlaceholder: string;
+  clearProjectSearch: string;
+  noMatchingProjects: string;
   includeChildren: string;
   refresh: string;
   newTicket: string;
@@ -231,6 +234,9 @@ export const buildDashboardStrings = (): DashboardStrings => ({
   // Header
   selectProjectPlaceholder: vscode.l10n.t("— Select project —"),
   selectProjectTitle: vscode.l10n.t("Select project"),
+  projectSearchPlaceholder: vscode.l10n.t("Search projects…"),
+  clearProjectSearch: vscode.l10n.t("Clear project search"),
+  noMatchingProjects: vscode.l10n.t("No matching projects"),
   includeChildren: vscode.l10n.t("Include children"),
   refresh: vscode.l10n.t("Refresh dashboard"),
   newTicket: vscode.l10n.t("New ticket"),

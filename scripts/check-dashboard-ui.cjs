@@ -104,6 +104,64 @@ async function main() {
   assert.equal(await evaluate('document.documentElement.lang'), 'ja');
   await push();
   assert.equal(await evaluate(`document.getElementById('search-input').type`), 'text');
+  // Project search is a Webview-local projection of the canonical hierarchy.
+  const originalProjectsForProjectSearch = state.projects;
+  const originalSelectedProjectForProjectSearch = state.selectedProject;
+  state.projects = [
+    { id: 1, name: 'Production', identifier: 'production', level: 0 },
+    { id: 2, name: 'Japan', identifier: 'japan', parentId: 1, level: 1 },
+    { id: 3, name: 'Nagoya Plant', identifier: 'plant-n6', parentId: 2, level: 2 },
+    { id: 4, name: 'Tokyo Plant', identifier: 'tokyo', parentId: 2, level: 2 },
+    { id: 5, name: 'USA', identifier: 'usa', parentId: 1, level: 1 },
+    { id: 6, name: 'Development', identifier: 'development', level: 0 },
+  ];
+  state.selectedProject = { id: 5, name: 'USA' };
+  await push();
+  const projectNames = () => evaluate(`[...document.querySelectorAll('#project-select option')].slice(1).map(option=>option.textContent.trim())`);
+  assert.deepEqual(await projectNames(), ['Production', 'Japan', 'Nagoya Plant', 'Tokyo Plant', 'USA', 'Development']);
+  await evaluate(`window.messages.length=0;document.getElementById('project-search-input').value='nagoya';document.getElementById('project-search-input').dispatchEvent(new Event('input',{bubbles:true}))`);
+  assert.deepEqual(await projectNames(), ['Production', 'Japan', 'Nagoya Plant', 'USA']);
+  assert.equal(await evaluate(`document.getElementById('project-select').value`), '5');
+  assert.equal(await evaluate(`window.messages.length`), 0, 'project search must not post any message');
+  assert.equal(await evaluate(`document.getElementById('project-select').value`), '5', 'search preserves selected project');
+  for (const query of ['NAGOYA', 'ｎａｇｏｙａ']) {
+    await evaluate(`document.getElementById('project-search-input').value=${JSON.stringify(query)};document.getElementById('project-search-input').dispatchEvent(new Event('input',{bubbles:true}))`);
+    assert.deepEqual(await projectNames(), ['Production', 'Japan', 'Nagoya Plant', 'USA']);
+  }
+  await evaluate(`document.getElementById('project-search-input').value='tokyo';document.getElementById('project-search-input').dispatchEvent(new Event('input',{bubbles:true}))`);
+  assert.deepEqual(await projectNames(), ['Production', 'Japan', 'Tokyo Plant', 'USA']);
+  await evaluate(`document.getElementById('project-select').value='4';document.getElementById('project-select').dispatchEvent(new Event('change',{bubbles:true}))`);
+  assert.deepEqual(await evaluate(`window.messages.filter(message=>message.type==='project.select').map(({type,projectId})=>({type,projectId}))`), [{ type: 'project.select', projectId: 4 }]);
+  await evaluate(`document.getElementById('project-search-input').value='plant-n6';document.getElementById('project-search-input').dispatchEvent(new Event('input',{bubbles:true}))`);
+  assert.deepEqual(await projectNames(), ['Production', 'Japan', 'Nagoya Plant', 'USA']);
+  const messagesBeforeProjectSearchClear = await evaluate(`window.messages.length`);
+  await evaluate(`document.getElementById('project-search-clear-btn').click()`);
+  assert.equal(await evaluate(`window.messages.length`), messagesBeforeProjectSearchClear, 'clearing project search stays local');
+  assert.deepEqual(await projectNames(), ['Production', 'Japan', 'Nagoya Plant', 'Tokyo Plant', 'USA', 'Development']);
+  await evaluate(`document.getElementById('project-search-input').value='no-such-project';document.getElementById('project-search-input').dispatchEvent(new Event('input',{bubbles:true}))`);
+  assert.deepEqual(await projectNames(), ['Production', 'USA']);
+  assert.equal(await evaluate(`document.getElementById('project-search-empty').textContent`), strings.noMatchingProjects);
+  assert.equal(await evaluate(`document.getElementById('project-search-empty').hidden`), false);
+  state.selectedProject = undefined;
+  await push();
+  assert.deepEqual(await projectNames(), []);
+  assert.equal(await evaluate(`document.getElementById('project-select').value`), '');
+  await evaluate(`document.getElementById('project-search-input').value='tokyo';document.getElementById('project-search-input').dispatchEvent(new Event('input',{bubbles:true}))`);
+  assert.deepEqual(await projectNames(), ['Production', 'Japan', 'Tokyo Plant']);
+  const priorBaseUrlForProjectSearch = state.settings.baseUrl;
+  state.settings.baseUrl = 'https://project-search-switch.example.com';
+  await push();
+  assert.equal(await evaluate(`document.getElementById('project-search-input').value`), '');
+  assert.deepEqual(await projectNames(), ['Production', 'Japan', 'Nagoya Plant', 'Tokyo Plant', 'USA', 'Development']);
+  state.settings.baseUrl = priorBaseUrlForProjectSearch;
+  await push();
+  await evaluate(`document.getElementById('project-search-input').value='nagoya';document.getElementById('project-search-input').dispatchEvent(new Event('input',{bubbles:true}));document.getElementById('tab-settings').click();document.getElementById('settings-connection').open=true;document.getElementById('settings-reset-view-btn').click()`);
+  assert.equal(await evaluate(`document.getElementById('project-search-input').value`), '');
+  assert.deepEqual(await projectNames(), ['Production', 'Japan', 'Nagoya Plant', 'Tokyo Plant', 'USA', 'Development']);
+  state.projects = originalProjectsForProjectSearch;
+  state.selectedProject = originalSelectedProjectForProjectSearch;
+  await push();
+  await evaluate(`document.getElementById('tab-tickets').click()`);
   assert.deepEqual(await evaluate(`Array.from(document.querySelectorAll('#tabs [role="tab"]')).map(tab=>tab.dataset.tab)`), ['tickets','unsynced','settings']);
   assert.equal(await evaluate(`document.getElementById('tab-comments')`), null);
   assert.ok(await evaluate(`document.getElementById('sync-tray') !== null`));

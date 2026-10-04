@@ -451,12 +451,15 @@ suite("Dashboard maintenance", () => {
     let renderCount = 0;
     let toastMessage = "";
     const searchInput = { value: "filtered" };
+    const projectSearchInput = { value: "nagoya" };
     const filterDialog = { classList: { add: () => undefined } };
     const snapshot = runInNewContext(`${source}\nresetViewState(); JSON.stringify({
       ticketLayoutMode, detailTab, quickFilters: Array.from(quickFilters),
       expanded: Array.from(expandedTicketIds), collapsed: Array.from(collapsedTicketIds),
       expandedComments: Array.from(expandedComments), ticketDetailExpanded, metadataExpanded,
       searchQuery, searchValue: searchInput.value, searchTimer,
+      projectSearchQuery, projectSearchValue: projectSearchInput.value,
+      selectedProjectId: state.selectedProject.id,
     });`, {
       ticketLayoutMode: "split",
       detailTab: "comments",
@@ -469,8 +472,10 @@ suite("Dashboard maintenance", () => {
       activeTicketActionMenuId: "menu-410",
       activeTicketActionAnchorTop: 22,
       searchQuery: "filtered",
+      projectSearchQuery: "nagoya",
       searchTimer: 99,
       searchInput,
+      projectSearchInput,
       filterDialog,
       state: { selectedProject: { id: 1 } },
       vscode: {
@@ -500,6 +505,9 @@ suite("Dashboard maintenance", () => {
       searchQuery: "",
       searchValue: "",
       searchTimer: null,
+      projectSearchQuery: "",
+      projectSearchValue: "",
+      selectedProjectId: 1,
     });
     assert.deepStrictEqual(JSON.parse(JSON.stringify(savedState)), {
       ticketLayoutMode: "auto",
