@@ -104,6 +104,8 @@ async function main() {
   assert.equal(await evaluate('document.documentElement.lang'), 'ja');
   await push();
   assert.equal(await evaluate(`document.getElementById('search-input').type`), 'text');
+  assert.equal(await evaluate(`document.getElementById('project-search-input').type`), 'text');
+  assert.equal(await evaluate(`document.getElementById('project-search-input').getAttribute('role')`), 'searchbox');
   // Project search is a Webview-local projection of the canonical hierarchy.
   const originalProjectsForProjectSearch = state.projects;
   const originalSelectedProjectForProjectSearch = state.selectedProject;
@@ -120,6 +122,7 @@ async function main() {
   const projectNames = () => evaluate(`[...document.querySelectorAll('#project-select option')].slice(1).map(option=>option.textContent.trim())`);
   assert.deepEqual(await projectNames(), ['Production', 'Japan', 'Nagoya Plant', 'Tokyo Plant', 'USA', 'Development']);
   await evaluate(`window.messages.length=0;document.getElementById('project-search-input').value='nagoya';document.getElementById('project-search-input').dispatchEvent(new Event('input',{bubbles:true}))`);
+  assert.equal(await evaluate(`document.getElementById('project-search-clear-btn').hidden`), false, 'custom project search clear button appears with a query');
   assert.deepEqual(await projectNames(), ['Production', 'Japan', 'Nagoya Plant', 'USA']);
   assert.equal(await evaluate(`document.getElementById('project-select').value`), '5');
   assert.equal(await evaluate(`window.messages.length`), 0, 'project search must not post any message');
@@ -137,6 +140,7 @@ async function main() {
   const messagesBeforeProjectSearchClear = await evaluate(`window.messages.length`);
   await evaluate(`document.getElementById('project-search-clear-btn').click()`);
   assert.equal(await evaluate(`window.messages.length`), messagesBeforeProjectSearchClear, 'clearing project search stays local');
+  assert.equal(await evaluate(`document.getElementById('project-search-clear-btn').hidden`), true, 'custom project search clear button hides after clearing');
   assert.deepEqual(await projectNames(), ['Production', 'Japan', 'Nagoya Plant', 'Tokyo Plant', 'USA', 'Development']);
   await evaluate(`document.getElementById('project-search-input').value='no-such-project';document.getElementById('project-search-input').dispatchEvent(new Event('input',{bubbles:true}))`);
   assert.deepEqual(await projectNames(), ['Production', 'USA']);
