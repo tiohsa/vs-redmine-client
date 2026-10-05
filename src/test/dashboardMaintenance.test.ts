@@ -440,7 +440,10 @@ suite("Dashboard maintenance", () => {
     const functionStart = dashboardWebviewScript.indexOf("function resetViewState(){");
     const functionEnd = dashboardWebviewScript.indexOf("\nfunction renderSettings()", functionStart);
     assert.ok(functionStart >= 0 && functionEnd > functionStart);
-    const source = dashboardWebviewScript.slice(functionStart, functionEnd);
+    const closeStart = dashboardWebviewScript.indexOf("function closeProjectPicker(returnFocus){");
+    const closeEnd = dashboardWebviewScript.indexOf("\nfunction openProjectPicker()", closeStart);
+    assert.ok(closeStart >= 0 && closeEnd > closeStart);
+    const source = `${dashboardWebviewScript.slice(closeStart, closeEnd)}\n${dashboardWebviewScript.slice(functionStart, functionEnd)}`;
 
     let savedState: Record<string, unknown> = {
       ticketLayoutMode: "split",
@@ -451,7 +454,8 @@ suite("Dashboard maintenance", () => {
     let renderCount = 0;
     let toastMessage = "";
     const searchInput = { value: "filtered" };
-    const projectSearchInput = { value: "nagoya" };
+    const projectSearchInput = { value: "nagoya", setAttribute: () => undefined, removeAttribute: () => undefined };
+    const projectPickerPopup = { hidden: false };
     const filterDialog = { classList: { add: () => undefined } };
     const snapshot = runInNewContext(`${source}\nresetViewState(); JSON.stringify({
       ticketLayoutMode, detailTab, quickFilters: Array.from(quickFilters),
@@ -459,6 +463,7 @@ suite("Dashboard maintenance", () => {
       expandedComments: Array.from(expandedComments), ticketDetailExpanded, metadataExpanded,
       searchQuery, searchValue: searchInput.value, searchTimer,
       projectSearchQuery, projectSearchValue: projectSearchInput.value,
+      projectPickerOpen, projectPickerHidden: projectPickerPopup.hidden, projectSearchComposing,
       selectedProjectId: state.selectedProject.id,
     });`, {
       ticketLayoutMode: "split",
@@ -476,6 +481,12 @@ suite("Dashboard maintenance", () => {
       searchTimer: 99,
       searchInput,
       projectSearchInput,
+      projectPickerOpen: true,
+      projectPickerPopup,
+      projectSelectTrigger: { setAttribute: () => undefined },
+      projectSearchComposing: true,
+      activeProjectId: 3,
+      renderProjectSelect: () => undefined,
       filterDialog,
       state: { selectedProject: { id: 1 } },
       vscode: {
@@ -507,6 +518,9 @@ suite("Dashboard maintenance", () => {
       searchTimer: null,
       projectSearchQuery: "",
       projectSearchValue: "",
+      projectPickerOpen: false,
+      projectPickerHidden: true,
+      projectSearchComposing: false,
       selectedProjectId: 1,
     });
     assert.deepStrictEqual(JSON.parse(JSON.stringify(savedState)), {
