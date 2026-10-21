@@ -1,3 +1,4 @@
+import { extractHttpStatusCode } from "../redmine/httpError";
 export type RedmineErrorType =
   | "auth_failure"
   | "permission_denied"
@@ -39,19 +40,7 @@ export const getUserMessage = (type: RedmineErrorType): string =>
 
 import type { FailureDisposition } from "../app/syncEffects";
 
-export const extractStatusCode = (error: unknown): number | undefined => {
-  if (error && typeof error === "object") {
-    if ("status" in error && typeof (error as any).status === "number") {
-      return (error as any).status;
-    }
-    if ("statusCode" in error && typeof (error as any).statusCode === "number") {
-      return (error as any).statusCode;
-    }
-  }
-  const message = error instanceof Error ? error.message : String(error);
-  const match = message.match(/(?:HTTP|status|code|\()?\s*(\d{3})\b/i);
-  return match ? Number(match[1]) : undefined;
-};
+export const extractStatusCode = extractHttpStatusCode;
 
 export const classifyFailureDisposition = (error: unknown): FailureDisposition => {
   const code = extractStatusCode(error);

@@ -1432,7 +1432,7 @@ suite("F-01 〜 F-20: Reproduction & Invariant Tests", () => {
       },
     });
 
-    // 1. Initial attempt fails with retryable error (503 Service Unavailable)
+    // 1. Initial attempt fails with retryable error (500 Service Unavailable)
     const outcome1 = await coordinator.sync(
       { kind: "newTicket", queueId: "f09-op" },
       { connectionScope: SCOPE },
@@ -1442,7 +1442,7 @@ suite("F-01 〜 F-20: Reproduction & Invariant Tests", () => {
             ...metadataDeps,
             createIssue: async () => {
               createCalls++;
-              throw new Error("503 Service Unavailable");
+              throw new Error("500 Service Unavailable");
             },
           },
         },

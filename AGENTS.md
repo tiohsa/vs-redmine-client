@@ -56,18 +56,16 @@ Run only the checks relevant to your change:
 
 ```bash
 # Type Check & Lint
-npm run compile
-npm run lint
+pnpm exec tsc --noEmit
+pnpm run lint
 
-# Webpack Build
-npm run build
+# テスト用コンパイル / Webpack Build
+pnpm run compile-tests
+pnpm run compile
 
-# Unit / Integration Tests
-npm test
+# Extension Host Tests
+pnpm test
 
-# Focused Unit Test
-npx mocha out/test/unit/<path-to-test>.js
-
-# Extension Host Tests (when VS Code runtime integration is affected)
-npm run test:extension
+# Dashboard UI
+pnpm run test:dashboard-ui
 ```

@@ -226,6 +226,7 @@ export interface DashboardState {
   tickets: DashboardTicketNode[];
   totalTicketCount: number;
   loadedTicketCount: number;
+  hasMoreTickets: boolean;
   ticketFilterOptions: DashboardTicketFilterOptions;
   selectedTicketId?: number;
   selectedTicket?: DashboardTicketDetail;

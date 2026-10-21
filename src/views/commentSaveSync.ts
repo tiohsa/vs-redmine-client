@@ -1,3 +1,4 @@
+import { extractHttpStatusCode } from "../redmine/httpError";
 import * as vscode from "vscode";
 import { addComment, updateComment } from "../redmine/comments";
 import { getIssueDetail, updateIssue } from "../redmine/issues";
@@ -91,8 +92,7 @@ export const shouldRefreshComments = (status: CommentSaveResult["status"]): bool
 
 const mapErrorToResult = (error: unknown): CommentSaveResult => {
   const message = error instanceof Error ? error.message : "Unknown error.";
-  const match = message.match(/\((\d{3})\)/);
-  const statusCode = match ? Number(match[1]) : undefined;
+  const statusCode = extractHttpStatusCode(error);
 
   if (statusCode === 409) {
     return buildResult("conflict", "Remote changes detected. Refresh before saving.");
@@ -263,7 +263,10 @@ const detectUpdatedAtConflict = async (input: {
   try {
     const detail = await input.deps.getIssueDetail(input.ticketId);
     const remoteComment = detail.comments.find((c) => c.id === input.commentId);
-    if (remoteComment && remoteComment.updatedAt !== input.lastKnownRemoteUpdatedAt) {
+    if (detail.ticket.id !== input.ticketId || !remoteComment) {
+      return buildResult("not_found", vscode.l10n.t("Comment not found in Redmine."));
+    }
+    if (remoteComment.updatedAt !== input.lastKnownRemoteUpdatedAt) {
       return buildConflictResult({
         message: "Remote changes detected. Refresh before saving.",
         commentId: input.commentId,
@@ -274,8 +277,8 @@ const detectUpdatedAtConflict = async (input: {
         remoteComment,
       });
     }
-  } catch {
-    // Fetch failure is non-fatal here — fall through to save attempt.
+  } catch (error) {
+    return mapErrorToResult(error);
   }
   return undefined;
 };

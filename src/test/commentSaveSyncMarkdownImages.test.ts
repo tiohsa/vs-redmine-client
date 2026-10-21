@@ -108,7 +108,7 @@ suite("Comment markdown image upload", () => {
         getCurrentUserId: async () => 9,
         getIssueDetail: async () => ({
           ticket: { id: 10, subject: "T", projectId: 4 },
-          comments: [],
+          comments: [{ id: 101, ticketId: 10, body: "Old", authorId: 9, authorName: "Tester", updatedAt: "2024-01-01T00:00:00Z", editableByCurrentUser: true }],
         }),
         uploadFile: async () => ({
           token: "token",

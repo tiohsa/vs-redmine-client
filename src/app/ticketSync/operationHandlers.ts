@@ -3703,6 +3703,7 @@ export interface PreparedCommentData {
   imageLinks: Array<{ path: string; range: { start: number; end: number }; resolvedPath?: string }>;
   uploads: UploadToken[];
   uploadSummary?: any;
+  alreadyApplied?: boolean;
 }
 
 export class CommentCreateHandler implements OperationHandler<CommentCreateIntent, PreparedCommentData> {
@@ -4324,22 +4325,6 @@ export class CommentUpdateHandler implements OperationHandler<CommentUpdateInten
       return { ok: false, outcome: { kind: "failed_before_commit", error: new Error("Missing CommentUpdateIntent") } };
     }
 
-    const primary = getPrimaryEffectForRevision(operation);
-    const snapshot = primary?.requestSnapshot;
-    if (primary && canRetryFailedCommentEffect(primary) && snapshot?.kind === "comment_update") {
-      return {
-        ok: true,
-        prepared: {
-          ticketId,
-          commentId: snapshot.request.commentId,
-          rawBody: intent.body,
-          body: snapshot.request.notes,
-          uploads: snapshot.request.uploads ?? [],
-          imageLinks: [],
-        },
-      };
-    }
-
     const commentDeps = { ...defaultCommentDeps, ...deps?.comment };
     const nextContent = intent.body ?? "";
 
@@ -4351,18 +4336,29 @@ export class CommentUpdateHandler implements OperationHandler<CommentUpdateInten
       return { ok: false, outcome: { kind: "no_change", ticketId, commentId } };
     }
 
-    // コンフリクト検出
-    if (intent.sourceNotesHash || intent.lastKnownRemoteUpdatedAt) {
+    const retrySnapshot = getPrimaryEffectForRevision(operation)?.requestSnapshot;
+    const retrying = retrySnapshot?.kind === "comment_update";
+    let alreadyApplied = false;
+    // 再送時も保存済み基準値で検証し、送信内容は再生成しない。
+    if (retrying || intent.sourceNotesHash !== undefined || intent.lastKnownRemoteUpdatedAt !== undefined) {
       try {
         const detail = await commentDeps.getIssueDetail(ticketId);
         const remoteComment = detail.comments.find((c) => c.id === commentId);
-        if (remoteComment) {
+        if (detail.ticket.id !== ticketId || !remoteComment) {
+          throw new Error(vscode.l10n.t("Comment not found in Redmine."));
+        }
+        alreadyApplied = retrying && normalizeCommentBody(remoteComment.body) === normalizeCommentBody(retrySnapshot.request.notes);
+        if (!alreadyApplied) {
           const remoteHash = computeNotesHash(remoteComment.body);
           const hashChanged = intent.sourceNotesHash !== undefined &&
             remoteHash !== intent.sourceNotesHash;
           const timestampChanged = intent.lastKnownRemoteUpdatedAt !== undefined &&
             remoteComment.updatedAt !== intent.lastKnownRemoteUpdatedAt;
-          const remoteChanged = hashChanged || timestampChanged;
+          const baselineMissing = retrying && intent.sourceNotesHash === undefined &&
+            intent.lastKnownRemoteUpdatedAt === undefined && intent.baseBody === undefined;
+          const bodyChanged = intent.baseBody !== undefined &&
+            normalizeCommentBody(remoteComment.body) !== normalizeCommentBody(intent.baseBody);
+          const remoteChanged = hashChanged || timestampChanged || bodyChanged || baselineMissing;
           if (remoteChanged) {
             return {
               ok: false,
@@ -4385,9 +4381,27 @@ export class CommentUpdateHandler implements OperationHandler<CommentUpdateInten
             };
           }
         }
-      } catch {
-        // non-fatal
+      } catch (error) {
+        return { ok: false, outcome: { kind: "failed_before_commit", ticketId, commentId,
+          error: error instanceof Error ? error : new Error(String(error)) } };
       }
+    }
+
+    const primary = getPrimaryEffectForRevision(operation);
+    const snapshot = primary?.requestSnapshot;
+    if (primary && canRetryFailedCommentEffect(primary) && snapshot?.kind === "comment_update") {
+      return {
+        ok: true,
+        prepared: {
+          ticketId,
+          commentId: snapshot.request.commentId,
+          rawBody: intent.body,
+          body: snapshot.request.notes,
+          uploads: snapshot.request.uploads ?? [],
+          imageLinks: [],
+          alreadyApplied,
+        },
+      };
     }
 
     // Markdown 画像リンクのローカル解析のみ実行 (リモート mutation は prepare で行わない)
@@ -4781,11 +4795,13 @@ export class CommentUpdateHandler implements OperationHandler<CommentUpdateInten
 
     try {
       const uploads = requestSnapshot.request?.uploads;
-      await commentDeps.updateComment(
-        requestSnapshot.request?.commentId ?? prepared.commentId!,
-        requestSnapshot.request?.notes ?? prepared.body,
-        uploads,
-      );
+      if (!prepared.alreadyApplied) {
+        await commentDeps.updateComment(
+          requestSnapshot.request?.commentId ?? prepared.commentId!,
+          requestSnapshot.request?.notes ?? prepared.body,
+          uploads,
+        );
+      }
 
       const committed = await repo.transitionPrimaryRemoteWrite(
         opKey,
@@ -4874,7 +4890,7 @@ export class CommentUpdateHandler implements OperationHandler<CommentUpdateInten
         ?? operation.intent?.body
         ?? "";
 
-      if (operation.phase === "commit_unknown" && normalizeCommentBody(remoteComment.body) !== normalizeCommentBody(expectedBody)) {
+      if ((operation.phase === "commit_unknown" || primaryEffect?.state === "failed") && normalizeCommentBody(remoteComment.body) !== normalizeCommentBody(expectedBody)) {
         return { ok: false, message: "Remote comment body does not match intended update" };
       }
     return {

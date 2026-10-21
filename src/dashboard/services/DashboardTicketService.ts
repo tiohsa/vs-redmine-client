@@ -11,6 +11,7 @@ import type { ResolvedProject } from "../resolveProject";
 
 export class DashboardTicketService {
   private ticketLoadGeneration = 0;
+  private projectIssueOffset?: number;
   private allProjectsSearchQuery = "";
   private allProjectsSearchIssueOffset = 0;
   private allProjectsSearchExtraCount = 0;
@@ -34,6 +35,7 @@ export class DashboardTicketService {
 
   async loadTickets(throwOnError = false): Promise<void> {
     const generation = ++this.ticketLoadGeneration;
+    this.projectIssueOffset = undefined;
     this.allProjectsSearchQuery = "";
     this.allProjectsSearchIssueOffset = 0;
     this.allProjectsSearchExtraCount = 0;
@@ -69,7 +71,8 @@ export class DashboardTicketService {
       if (generation !== this.ticketLoadGeneration) {
         return;
       }
-      this.deps.setTickets(result.tickets);
+      this.projectIssueOffset = result.offset + result.tickets.length;
+      this.deps.setTickets(mergeTicketsById([], result.tickets));
       this.deps.setTotalCount(result.totalCount);
       rememberTicketSummaries(result.tickets);
       this.deps.refreshUnsynced();
@@ -93,14 +96,15 @@ export class DashboardTicketService {
   loadMoreTickets(): Promise<void> {
     const generation = this.ticketLoadGeneration;
     const tickets = this.deps.getTickets();
-    if (tickets.length >= this.deps.getTotalCount()) {
+    const offset = this.allProjectsSearchQuery ? this.allProjectsSearchIssueOffset : (this.projectIssueOffset ?? tickets.length);
+    if (!this.hasMoreTickets()) {
       return Promise.resolve();
     }
     const project = this.deps.getResolvedProject();
     const key = [
       generation,
       this.allProjectsSearchQuery,
-      this.allProjectsSearchQuery ? this.allProjectsSearchIssueOffset : tickets.length,
+      offset,
       project?.id ?? "all",
     ].join(":");
     if (this.loadMoreFlight?.key === key) {
@@ -117,6 +121,7 @@ export class DashboardTicketService {
 
   invalidate(): void {
     this.ticketLoadGeneration++;
+    this.projectIssueOffset = undefined;
     this.allProjectsSearchQuery = "";
     this.allProjectsSearchIssueOffset = 0;
     this.allProjectsSearchExtraCount = 0;
@@ -167,12 +172,18 @@ export class DashboardTicketService {
         projectId: project.id,
         includeChildProjects: getIncludeChildProjects(),
         limit: getTicketListLimit(),
-        offset: tickets.length,
+        offset: this.projectIssueOffset ?? tickets.length,
       });
       if (generation !== this.ticketLoadGeneration) {
         return;
       }
-      this.deps.setTickets([...tickets, ...result.tickets]);
+      // 件数変化でoffset境界が動いた場合は先頭から読み直す。
+      if (result.totalCount !== this.deps.getTotalCount()) {
+        await this.loadTickets();
+        return;
+      }
+      this.projectIssueOffset = result.offset + result.tickets.length;
+      this.deps.setTickets(mergeTicketsById(tickets, result.tickets));
       this.deps.setTotalCount(result.totalCount);
       rememberTicketSummaries(result.tickets);
       store.updateNested("errors", { tickets: undefined });
@@ -188,6 +199,7 @@ export class DashboardTicketService {
 
   async searchAllProjects(rawQuery: string): Promise<void> {
     const generation = ++this.ticketLoadGeneration;
+    this.projectIssueOffset = undefined;
     const { store } = this.deps.context;
     const query = rawQuery.trim();
     this.allProjectsSearchQuery = query;
@@ -303,6 +315,7 @@ export class DashboardTicketService {
       tickets: nodes,
       totalTicketCount: this.deps.getTotalCount(),
       loadedTicketCount: tickets.length,
+      hasMoreTickets: this.hasMoreTickets(),
       ticketFilterOptions: {
         assignees: toSortedAssigneeOptions(assignees),
         statuses: globalStatuses,
@@ -324,6 +337,14 @@ export class DashboardTicketService {
             },
           }),
     });
+  }
+
+  private hasMoreTickets(): boolean {
+    const offset = this.allProjectsSearchQuery
+      ? this.allProjectsSearchIssueOffset
+      : (this.projectIssueOffset ?? this.deps.getTickets().length);
+    const total = this.deps.getTotalCount() - (this.allProjectsSearchQuery ? this.allProjectsSearchExtraCount : 0);
+    return offset < total;
   }
 
   private async searchTicketById(query: string): Promise<Ticket | undefined> {

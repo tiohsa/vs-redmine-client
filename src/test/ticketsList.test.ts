@@ -17,6 +17,7 @@ suite("Ticket list query", () => {
       include_children: true,
       limit: 50,
       offset: 0,
+      sort: "id:asc",
       status_id: "1,2",
       assigned_to_id: "5",
     });
@@ -35,6 +36,7 @@ suite("Ticket list query", () => {
       include_children: false,
       limit: 25,
       offset: 0,
+      sort: "id:asc",
       status_id: "*",
     });
   });
@@ -53,6 +55,7 @@ suite("Ticket list query", () => {
       include_children: false,
       limit: 25,
       offset: 0,
+      sort: "id:asc",
       status_id: "*",
     });
   });
@@ -67,6 +70,7 @@ suite("Ticket list query", () => {
     assert.deepStrictEqual(query, {
       limit: 25,
       offset: 0,
+      sort: "id:asc",
       status_id: "*",
     });
   });
@@ -86,6 +90,7 @@ suite("Ticket list query", () => {
       "f[]": "subject",
       "op[subject]": "~",
       "v[subject][]": "login bug",
+      sort: "id:asc",
       status_id: "*",
     });
   });

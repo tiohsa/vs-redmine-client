@@ -27,6 +27,7 @@ export const buildIssuesListQuery = (input: IssuesListInput): Record<string, str
   const query: Record<string, string | number | boolean> = {
     limit: input.limit,
     offset: input.offset,
+    sort: "id:asc",
   };
 
   if (input.projectId !== undefined) {

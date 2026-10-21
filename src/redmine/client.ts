@@ -1,3 +1,4 @@
+import { RedmineHttpError } from "./httpError";
 import * as https from "https";
 import * as http from "http";
 import { getBaseUrl, getIgnoreSSLErrors, getRequestTimeoutMs } from "../config/settings";
@@ -195,7 +196,8 @@ export const requestJson = async <T>(options: RequestOptions): Promise<T> => {
   const response = await performRequest(url, options, headers);
 
   if (response.statusCode < 200 || response.statusCode >= 300) {
-    throw new Error(
+    throw new RedmineHttpError(
+      response.statusCode,
       `Redmine request failed (${response.statusCode}): ${response.body || response.statusText}`,
     );
   }
@@ -229,7 +231,8 @@ export const requestText = async (options: RequestOptions): Promise<string> => {
   const response = await performRequest(url, textOptions, headers);
 
   if (response.statusCode < 200 || response.statusCode >= 300) {
-    throw new Error(
+    throw new RedmineHttpError(
+      response.statusCode,
       `Redmine request failed (${response.statusCode}): ${response.body || response.statusText}`,
     );
   }

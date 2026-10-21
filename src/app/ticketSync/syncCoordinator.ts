@@ -809,13 +809,11 @@ export class SyncCoordinator {
 
         const prepResult = await handler.prepare(freshOp, handlerCtx, depsWithRepo);
         if (!prepResult.ok) {
-          return {
-            kind: "commit_unknown",
-            operationId: freshOp.operationId,
-            ticketId: freshOp.ticketId,
-            commentId: freshOp.commentId,
-            message: "Preflight preparation failed",
-          };
+          if (isComment) {
+            return prepResult.outcome;
+          }
+          return { kind: "commit_unknown", operationId: freshOp.operationId,
+            ticketId: freshOp.ticketId, message: "Preflight preparation failed" };
         }
 
         const remoteResult = await handler.executeRemoteWrite(freshOp, prepResult.prepared, handlerCtx, depsWithRepo);
