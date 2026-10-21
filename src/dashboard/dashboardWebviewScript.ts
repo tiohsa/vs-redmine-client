@@ -555,7 +555,7 @@ function renderTickets(){
   const tickets = (searchQuery || hasActiveQuickFilter ? flattenAll(state.tickets) : flattenVisible(state.tickets)).filter(function(ticket){ return matchesSearch(ticket) && matchesQuickFilters(ticket); });
   count.textContent = STRINGS.shownLoadedTotal.replace('{0}',String(tickets.length)).replace('{1}',String(state.loadedTicketCount)).replace('{2}',String(state.totalTicketCount));
   list.innerHTML = tickets.length ? tickets.map(renderTicketRow).join('') : '<div class="state-msg" role="status"><strong>'+esc(STRINGS.noTicketsFound)+'</strong><p>'+esc(STRINGS.searchEmptyHint)+'</p></div>';
-  if(state.loadedTicketCount < state.totalTicketCount){ more.classList.remove('hidden'); more.textContent=STRINGS.loadMore+' ('+state.loadedTicketCount+' / '+state.totalTicketCount+')'; } else more.classList.add('hidden');
+  if(state.hasMoreTickets){ more.classList.remove('hidden'); more.textContent=STRINGS.loadMore+' ('+state.loadedTicketCount+' / '+state.totalTicketCount+')'; } else more.classList.add('hidden');
   list.querySelectorAll('.ticket-row').forEach(function(row){
     row.style.paddingLeft=(12 + Math.max(0,Number(row.dataset.level) || 0) * 14)+'px';
     row.addEventListener('click',function(event){ if(isTicketActionTarget(event.target)) return; const id=Number(row.dataset.id); if(state.selectedTicketId === id){ ticketDetailExpanded=true; renderTicketDetail(); } req('ticket.select',{ticketId:id}); });

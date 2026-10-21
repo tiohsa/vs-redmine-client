@@ -1,3 +1,4 @@
+import { extractHttpStatusCode } from "../../redmine/httpError";
 import type { TicketSaveResult } from "../ticketSaveTypes";
 
 export const buildResult = (
@@ -12,8 +13,7 @@ export const buildResult = (
 
 export const mapErrorToResult = (error: unknown): TicketSaveResult => {
   const message = error instanceof Error ? error.message : "Unknown error.";
-  const match = message.match(/\((\d{3})\)/);
-  const statusCode = match ? Number(match[1]) : undefined;
+  const statusCode = extractHttpStatusCode(error);
 
   if (statusCode === 409) {
     return buildResult("conflict", "Remote changes detected. Refresh before saving.");
@@ -32,47 +32,11 @@ export const mapErrorToResult = (error: unknown): TicketSaveResult => {
 };
 
 export const isRemoteCommitUnknownError = (error: unknown): boolean => {
-  const message = error instanceof Error ? error.message : String(error);
-  const lower = message.toLowerCase();
-
-  // 1. トランスポートレベルのタイムアウト・ソケット切断・ネットワーク切断は常に unknown
-  if (
-    lower.includes("timeout") ||
-    lower.includes("timed out") ||
-    lower.includes("econnrefused") ||
-    lower.includes("econnreset") ||
-    lower.includes("etimedout") ||
-    lower.includes("socket") ||
-    lower.includes("network")
-  ) {
-    return true;
+  const statusCode = extractHttpStatusCode(error);
+  if (statusCode !== undefined) {
+    // 書き込み後にproxyがエラー応答した場合、未実行とは断定できない。
+    return statusCode === 408 || statusCode === 502 || statusCode === 503 || statusCode === 504;
   }
-
-  // 2. HTTP ステータスコード判定
-  let statusCode: number | undefined;
-  const match =
-    message.match(/\((\d{3})\)/) ??
-    message.match(/HTTP\s*(\d{3})/i) ??
-    message.match(/status\s*code\s*(\d{3})/i) ??
-    message.match(/\b(400|401|403|404|408|409|422|500|502|503|504)\b/);
-  if (match) {
-    statusCode = Number(match[1]);
-  } else if (error && typeof error === "object" && "status" in error && typeof (error as any).status === "number") {
-    statusCode = (error as any).status;
-  }
-
-  if (statusCode === 408 || statusCode === 504) {
-    return true;
-  }
-
-  // 3. 4xx および 5xx で明示的レスポンスがある場合は known failure (commit_unknown = false)
-  if (statusCode !== undefined && statusCode >= 400 && statusCode <= 599) {
-    return false;
-  }
-
-  if (lower.includes("400") || lower.includes("401") || lower.includes("403") || lower.includes("404") || lower.includes("409") || lower.includes("422") || lower.includes("validation")) {
-    return false;
-  }
-
+  // HTTP応答のない例外では書き込み結果を証明できない。
   return true;
 };

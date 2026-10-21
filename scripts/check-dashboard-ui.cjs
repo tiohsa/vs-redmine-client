@@ -102,6 +102,15 @@ async function main() {
   await call('Page.navigate', { url: 'file://' + fixture });
   await evaluate(`new Promise(resolve=>{if(document.readyState==='complete')resolve();else window.addEventListener('load',resolve,{once:true})})`);
   assert.equal(await evaluate('document.documentElement.lang'), 'ja');
+  // 重複排除で表示件数が総件数未満でも、API取得完了なら追加ボタンを隠す。
+  state.totalTicketCount = 3;
+  state.hasMoreTickets = true;
+  await push();
+  assert.equal(await evaluate(`document.getElementById('load-more-row').classList.contains('hidden')`), false);
+  state.hasMoreTickets = false;
+  await push();
+  assert.equal(await evaluate(`document.getElementById('load-more-row').classList.contains('hidden')`), true);
+  state.totalTicketCount = 2;
   await push();
   assert.equal(await evaluate(`document.getElementById('search-input').type`), 'text');
   assert.equal(await evaluate(`document.getElementById('project-select-trigger').tagName`), 'BUTTON');

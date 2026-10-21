@@ -53,7 +53,7 @@ suite("Offline Sync partial failure", () => {
   });
 
   for (const failure of [
-    { message: "Redmine request failed (503): Service Unavailable", outcome: "failed_before_commit", state: "failed" },
+    { message: "Redmine request failed (503): Service Unavailable", outcome: "commit_unknown", state: "commit_unknown" },
     { message: "network timeout", outcome: "commit_unknown", state: "commit_unknown" },
   ] as const) {
   test(`SyncEngine: ${failure.state} を保持し自動再送しない`, async () => {

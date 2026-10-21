@@ -1,3 +1,4 @@
+import { extractHttpStatusCode } from "../redmine/httpError";
 import type { IssueCreateInput, IssueUpdateInput, IssueUploadInput } from "../redmine/issues";
 import type { UploadToken } from "../redmine/types";
 
@@ -546,6 +547,11 @@ export const canRetryEffect = (effect: DurableSyncEffect): boolean => {
 // コメントは既知の失敗だけを明示再送する。結果不明なら journal の照合を優先する。
 export const canRetryFailedCommentEffect = (effect: DurableSyncEffect): boolean => {
   if (effect.state !== "failed" || effect.failure?.disposition !== "retryable") {
+    return false;
+  }
+  // 旧版がfailedとして保存したproxyエラーも、未実行とは扱わない。
+  const code = extractHttpStatusCode(effect.failure?.detail);
+  if (code === 408 || code === 502 || code === 503 || code === 504) {
     return false;
   }
   const snapshot = effect.requestSnapshot;

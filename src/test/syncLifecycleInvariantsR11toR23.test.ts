@@ -60,8 +60,8 @@ suite("R11 〜 R23: Invariant & Lifecycle Recovery Tests", () => {
             childCreateCalls++;
             if (failChildOnce) {
               failChildOnce = false;
-              const err: any = new Error("503 Service Unavailable");
-              err.status = 503;
+              const err: any = new Error("500 Service Unavailable");
+              err.status = 500;
               throw err;
             }
             return 8001; // Child issue ID
@@ -80,7 +80,7 @@ suite("R11 〜 R23: Invariant & Lifecycle Recovery Tests", () => {
       },
     });
 
-    // 1回目の同期: 親は成功、子は 503 で失敗
+    // 1回目の同期: 親は成功、子は 500 で失敗
     const firstOutcome = await engine.syncOne(
       { kind: "newTicket", queueId: newTicket.queueId },
       { connectionScope: SCOPE },
@@ -526,7 +526,7 @@ suite("R11 〜 R23: Invariant & Lifecycle Recovery Tests", () => {
         createIssue: async (input: any) => {
           if (input.parentId) {
             childCalls++;
-            throw new Error("503");
+            throw new Error("500");
           }
           return 7006;
         },
@@ -583,7 +583,7 @@ suite("R11 〜 R23: Invariant & Lifecycle Recovery Tests", () => {
         createIssue: async (input: any) => {
           if (input.parentId) {
             childCalls++;
-            throw new Error("503");
+            throw new Error("500");
           }
           return 7007;
         },
@@ -779,7 +779,7 @@ suite("R11 〜 R23: Invariant & Lifecycle Recovery Tests", () => {
             submittedChildSubject = input.subject;
             if (failChildOnce) {
               failChildOnce = false;
-              throw new Error("503");
+              throw new Error("500");
             }
             return 8005;
           }
@@ -905,7 +905,7 @@ suite("R11 〜 R23: Invariant & Lifecycle Recovery Tests", () => {
             childCreateCalls++;
             if (failOnce) {
               failOnce = false;
-              throw new Error("503");
+              throw new Error("500");
             }
             // 少し待機して並行性をテスト
             await new Promise((resolve) => setTimeout(resolve, 50));

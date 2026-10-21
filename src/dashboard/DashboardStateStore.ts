@@ -9,6 +9,7 @@ const DEFAULT_STATE: DashboardState = {
   tickets: [],
   totalTicketCount: 0,
   loadedTicketCount: 0,
+  hasMoreTickets: false,
   ticketFilterOptions: {
     assignees: [],
     statuses: [],

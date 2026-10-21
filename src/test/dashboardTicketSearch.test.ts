@@ -312,4 +312,55 @@ suite("DashboardTicketService all-project search", () => {
     assert.deepStrictEqual(tickets, []);
     assert.strictEqual(totalCount, 0);
   });
+  test("プロジェクト一覧は重複排除後もAPI取得位置を進める", async () => {
+    const store = new DashboardStateStore();
+    let tickets: Ticket[] = [];
+    let totalCount = 0;
+    const offsets: number[] = [];
+    const service = new DashboardTicketService({
+      context: makeContext(store), getResolvedProject: () => ({ id: 1, name: "Project" }),
+      getTickets: () => tickets, setTickets: (next) => { tickets = next; },
+      getTotalCount: () => totalCount, setTotalCount: (next) => { totalCount = next; },
+      getSettings: () => DEFAULT_TICKET_LIST_SETTINGS, loadComments: async () => undefined,
+      refreshUnsynced: () => undefined,
+      listIssues: async (input) => {
+        offsets.push(input.offset);
+        const ids = input.offset === 0 ? [1, 2] : input.offset === 2 ? [2, 3] : [4];
+        return { tickets: ids.map((id) => makeTicket(id, String(id))), totalCount: 5, offset: input.offset, limit: 2 };
+      },
+    });
+    await service.loadTickets();
+    assert.strictEqual(store.getState().hasMoreTickets, true);
+    await service.loadMoreTickets();
+    await service.loadMoreTickets();
+    await service.loadMoreTickets();
+    assert.strictEqual(store.getState().hasMoreTickets, false);
+    assert.strictEqual(store.getState().loadedTicketCount, 4);
+    assert.strictEqual(store.getState().totalTicketCount, 5);
+    assert.deepStrictEqual(offsets, [0, 2, 4]);
+    assert.deepStrictEqual(tickets.map((ticket) => ticket.id), [1, 2, 3, 4]);
+  });
+
+  test("プロジェクト一覧の件数変化を検出したら先頭から再取得する", async () => {
+    const store = new DashboardStateStore();
+    let tickets: Ticket[] = [];
+    let totalCount = 0;
+    const offsets: number[] = [];
+    const service = new DashboardTicketService({
+      context: makeContext(store), getResolvedProject: () => ({ id: 1, name: "Project" }),
+      getTickets: () => tickets, setTickets: (next) => { tickets = next; },
+      getTotalCount: () => totalCount, setTotalCount: (next) => { totalCount = next; },
+      getSettings: () => DEFAULT_TICKET_LIST_SETTINGS, loadComments: async () => undefined,
+      refreshUnsynced: () => undefined,
+      listIssues: async (input) => {
+        offsets.push(input.offset);
+        return { tickets: [makeTicket(offsets.length === 1 ? 1 : 2, "Ticket")], totalCount: offsets.length === 1 ? 3 : 2, offset: input.offset, limit: 1 };
+      },
+    });
+    await service.loadTickets();
+    await service.loadMoreTickets();
+    assert.deepStrictEqual(offsets, [0, 1, 0]);
+    assert.deepStrictEqual(tickets.map((ticket) => ticket.id), [2]);
+  });
+
 });
