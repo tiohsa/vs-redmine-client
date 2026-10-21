@@ -77,9 +77,6 @@ const resolveCommitUnknownInteractive = async (
 ): Promise<TicketSyncOutcome | undefined> => {
   const syncContext = { connectionScope: operationScope };
   const items = engine.getRecoveryItems(key, syncContext);
-  if (showManualRepairRequired(items)) {
-    return undefined;
-  }
   const primaryItem = items.find((item) => isPrimaryEffectKind(item.effectKind));
   const actions = primaryItem?.allowedActions ?? [];
 
@@ -100,6 +97,10 @@ const resolveCommitUnknownInteractive = async (
         resolution: { kind: "reconcile_compensation" },
       });
     }
+    return undefined;
+  }
+
+  if (showManualRepairRequired(items)) {
     return undefined;
   }
 
@@ -194,18 +195,32 @@ const resolveCommentCommitUnknownInteractive = async (
   const actions = primaryItem?.allowedActions ?? [];
   const reconcileLabel = vscode.l10n.t("Reconcile from Redmine");
   const linkLabel = vscode.l10n.t("Link comment journal");
+  const retryLabel = vscode.l10n.t("Retry remote write");
   const choices = [
     ...(actions.includes("reconcile_remote") ? [reconcileLabel] : []),
     ...(actions.includes("link_remote_comment") ? [linkLabel] : []),
+    ...(actions.includes("retry_remote_write") ? [retryLabel] : []),
   ];
   if (choices.length === 0 || !primaryItem) {
     return undefined;
   }
   const choice = await vscode.window.showWarningMessage(
-    vscode.l10n.t("The previous comment write may have reached Redmine. Check Redmine for one uniquely matching journal without sending the comment again."),
+    actions.includes("retry_remote_write")
+      ? vscode.l10n.t("The previous comment write failed. Retry the saved request, or reconcile from Redmine.")
+      : vscode.l10n.t("The previous comment write may have reached Redmine. Check Redmine for one uniquely matching journal without sending the comment again."),
     { modal: true },
     ...choices,
   );
+  if (choice === retryLabel) {
+    return engine.resolveCommentCommitUnknown({
+      key,
+      context: { connectionScope: operationScope },
+      operationId: primaryItem.operationId,
+      operationRevision: primaryItem.operationRevision,
+      attemptGeneration: primaryItem.attemptGeneration,
+      resolution: { kind: "retry_remote_write" },
+    });
+  }
   if (choice === linkLabel) {
     const rawCommentId = await vscode.window.showInputBox({
       prompt: vscode.l10n.t("Enter the Redmine comment journal ID to verify and link."),
@@ -505,13 +520,16 @@ const syncUnsyncedFileAtScope = async (
     if (
       (outcome.kind === "commit_unknown" &&
         (previousPhase === "commit_unknown" || previousPhase === "remote_write_started")) ||
-      (outcome.kind === "failed_before_commit" && hasPrimaryRecovery)
+      (outcome.kind === "failed_before_commit" && hasPrimaryRecovery) ||
+      (outcome.kind === "remote_committed" && recoveryItems.some((item) =>
+        isPrimaryEffectKind(item.effectKind) && item.allowedActions.includes("reconcile_compensation")))
     ) {
       const resolved = await resolveCommitUnknownInteractive(engine.ticketService(), engine, syncKey, operationScope);
-      if (resolved) {
-        outcome = resolved;
-        primaryResolved = true;
+      if (!resolved) {
+        return undefined;
       }
+      outcome = resolved;
+      primaryResolved = true;
     }
     if (!hasPrimaryRecovery || primaryResolved) {
       if (outcome.kind === "failed_before_commit" || outcome.kind === "remote_committed" || outcome.kind === "commit_unknown") {

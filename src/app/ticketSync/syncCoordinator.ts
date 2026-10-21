@@ -27,6 +27,7 @@ import {
 } from "./syncOperationTypes";
 import {
   canRetryEffect,
+  canRetryFailedCommentEffect,
   DurableSyncEffectState,
   evaluateAttemptClosure,
   getAttemptGeneration,
@@ -752,12 +753,21 @@ export class SyncCoordinator {
       }
 
       if (input.resolution?.kind === "retry_remote_write") {
+        const isComment = freshOp.kind === "comment_create" || freshOp.kind === "comment_update";
+        if (isComment && (!freshPrimaryEffect || freshPrimaryEffect.kind !== freshOp.kind || !canRetryFailedCommentEffect(freshPrimaryEffect))) {
+          return {
+            kind: "failed_before_commit",
+            ticketId: freshOp.ticketId,
+            commentId: freshOp.commentId,
+            error: new Error(vscode.l10n.t("Only retryable comment failures with a saved request can be retried.")),
+          };
+        }
         // INV-N03, INV-N04: 未解決の Prerequisite Effect (attachment, image) があれば Primary retry を拒絶
         const activeEffects = getEffectsForRevision(freshOp, freshRevision);
         const hasUnresolvedPrereq = activeEffects.some(
           (e) =>
             (e.kind === "attachment_upload" || e.kind === "attachment_link" || e.kind === "image_upload" || (typeof e.effectId === "string" && (e.effectId.startsWith("attachment") || e.effectId.startsWith("image")))) &&
-            (e.state === "started" || e.state === "commit_unknown" || e.state === "compensation_started" || e.state === "compensation_unknown" || e.state === "planned"),
+            (e.state === "started" || e.state === "failed" || e.state === "commit_unknown" || e.state === "compensation_started" || e.state === "compensation_unknown" || e.state === "planned"),
         );
         if (hasUnresolvedPrereq) {
           return {
@@ -828,40 +838,8 @@ export class SyncCoordinator {
         }
 
         const committedOp = repository.getOperation(input.key, scope) ?? freshOp;
-
-        const reconciled = await handler.reconcileRemote(committedOp, handlerCtx, depsWithRepo);
-        if (!reconciled.ok) {
-          return {
-            kind: "remote_committed",
-            ticketId: committedOp.createdRemoteId ?? committedOp.ticketId ?? 0,
-            pending: "remote_reconcile",
-            message: reconciled.message,
-          };
-        }
-
-        const fin = await handler.finalizeLocal(committedOp, reconciled.canonical, handlerCtx, depsWithRepo);
-        if (fin.ok) {
-          const compOp = await repository.completeOperation(input.key, scope, committedOp.intentRevision ?? committedOp.revision ?? 1, { canonical: reconciled.canonical, remoteUpdatedAt: committedOp.remoteUpdatedAt }, getAttemptGeneration(committedOp));
-          if (compOp) {
-            return {
-              kind: "completed",
-              ticketId: committedOp.createdRemoteId ?? committedOp.ticketId ?? 0,
-              commentId: committedOp.commentId,
-            };
-          }
-          return {
-            kind: "remote_committed",
-            ticketId: committedOp.createdRemoteId ?? committedOp.ticketId ?? 0,
-            pending: "local_finalize",
-            message: "Failed to persist complete state",
-          };
-        }
-        return {
-          kind: "remote_committed",
-          ticketId: committedOp.createdRemoteId ?? 0,
-          pending: "local_finalize",
-          message: fin.message,
-        };
+        // 再送後も通常経路と同じ照合・identity checkpoint・ローカル確定を通す。
+        return this.executeSyncLifecycle(committedOp, input.context, { deps: depsWithRepo });
       }
 
       if (input.resolution?.kind === "link_remote_ticket" || input.resolution?.kind === "link_remote_comment") {

@@ -543,6 +543,23 @@ export const canRetryEffect = (effect: DurableSyncEffect): boolean => {
   return false;
 };
 
+// コメントは既知の失敗だけを明示再送する。結果不明なら journal の照合を優先する。
+export const canRetryFailedCommentEffect = (effect: DurableSyncEffect): boolean => {
+  if (effect.state !== "failed" || effect.failure?.disposition !== "retryable") {
+    return false;
+  }
+  const snapshot = effect.requestSnapshot;
+  if (effect.kind === "comment_create" && snapshot?.kind === "comment_create") {
+    return Number.isInteger(snapshot.request?.ticketId) && snapshot.request.ticketId > 0 &&
+      typeof snapshot.request.notes === "string";
+  }
+  if (effect.kind === "comment_update" && snapshot?.kind === "comment_update") {
+    return Number.isInteger(snapshot.request?.commentId) && snapshot.request.commentId > 0 &&
+      typeof snapshot.request.notes === "string";
+  }
+  return false;
+};
+
 export const isEffectBlockingNormalSync = (effect: DurableSyncEffect): boolean => {
   if (
     effect.state === "started" ||
@@ -755,6 +772,9 @@ export const getRecoveryItemsForOperation = (
         } else if (operation.kind === "comment_create" || operation.kind === "comment_update") {
           allowedActions.push("reconcile_remote");
           allowedActions.push("link_remote_comment");
+          if (effect.kind === operation.kind && canRetryFailedCommentEffect(effect)) {
+            allowedActions.push("retry_remote_write");
+          }
         } else {
           allowedActions.push("assume_update_committed");
           allowedActions.push("reconcile_remote");

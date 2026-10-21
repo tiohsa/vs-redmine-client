@@ -1,4 +1,7 @@
 {
+    "Only retryable comment failures with a saved request can be retried.": "保存済みのリクエストがあり、再試行可能な失敗となったコメントだけを再送できます。",
+    "The previous comment write failed. Retry the saved request, or reconcile from Redmine.": "前回のコメント送信に失敗しました。保存済みのリクエストを再送するか、Redmine と照合してください。",
+    "Remote ticket #{0} does not match the saved update.": "Redmine のチケット #{0} が保存済みの更新内容と一致しません。",
     "Quick filters": "クイックフィルター",
     "Ticket List": "チケット一覧",
     "My Issues": "自分のチケット",
