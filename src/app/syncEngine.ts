@@ -137,7 +137,7 @@ export class SyncEngine {
     operationId?: string;
     operationRevision?: number;
     attemptGeneration?: number;
-    resolution?: { kind: "reconcile_remote" } | { kind: "link_remote_comment"; commentId: number };
+    resolution?: { kind: "reconcile_remote" } | { kind: "link_remote_comment"; commentId: number } | { kind: "retry_remote_write" };
   }): Promise<SyncEngineOutcome> {
     const identity = this.currentRecoveryIdentity(input.key, input.context);
     return this.coordinator.resolveCommitUnknown({

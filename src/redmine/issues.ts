@@ -245,6 +245,7 @@ export const getIssueDetail = async (issueId: number): Promise<IssueDetailResult
     dueDate: issue.due_date,
     startDate: issue.start_date,
     doneRatio: issue.done_ratio,
+    estimatedHours: issue.estimated_hours,
     // authorId removed
   };
 

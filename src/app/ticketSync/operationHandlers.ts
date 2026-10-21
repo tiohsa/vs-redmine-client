@@ -61,6 +61,7 @@ import {
   getEffectsForRevision,
   getOperationRecoveryMode,
   getPrimaryEffectForRevision,
+  canRetryFailedCommentEffect,
   isEffectBlockingNormalSync,
   isPrimaryEffectKind,
   type ChildTicketCreateRequestSnapshot,
@@ -166,6 +167,30 @@ const findMarkdownImageEffect = (effects: DurableSyncEffect[], filePath: string)
   return matching.find((effect) => effect.effectId === `image:markdown:${filePath}`)
     ?? matching.find((effect) => effect.state === "committed")
     ?? matching.find((effect) => effect.state === "planned");
+};
+
+// 元画像が消えても、現在の Attempt が保持する token / spool を使用できる。
+// spool の hash / size 検証は送信直前の prepareMarkdownImageUpload が所有する。
+const resolvePersistedMarkdownImagePath = async (
+  operation: UnifiedSyncOperation,
+  imagePath: string,
+  baseDir?: string,
+): Promise<string | undefined> => {
+  const effects = getEffectsForRevision(operation);
+  if (effects.length === 0) { return undefined; }
+  const paths = await Promise.all([
+    resolveLocalPath(imagePath, baseDir),
+    resolveFallbackImagePath(imagePath, baseDir),
+  ]);
+  for (const filePath of paths) {
+    if (!filePath) { continue; }
+    const effect = findMarkdownImageEffect(effects, filePath);
+    if ((effect?.state === "committed" && effect.token) ||
+        (effect?.requestSnapshot?.kind === "upload" && effect.requestSnapshot.spoolFilePath)) {
+      return filePath;
+    }
+  }
+  return undefined;
 };
 
 // 旧committed Effectではtargetが実際にuploadした名前を保持している。
@@ -752,6 +777,11 @@ export class TicketCreateHandler implements OperationHandler<TicketCreateIntent,
       const baseDir = resolveIntentBaseDir(intent);
       for (const link of extractMarkdownImageLinks(parsed.description)) {
         if (isExternalMarkdownImagePath(link.path)) {
+          continue;
+        }
+        const persistedPath = await resolvePersistedMarkdownImagePath(operation, link.path, baseDir);
+        if (persistedPath) {
+          imageLinks.push({ path: link.path, range: link.range, resolvedPath: persistedPath });
           continue;
         }
         let resolvedPath = await resolveLocalPath(link.path, baseDir);
@@ -2409,7 +2439,9 @@ export class TicketUpdateHandler implements OperationHandler<TicketUpdateIntent,
 
     let request: IssueUpdateInput;
     let changes: TicketUpdateFields;
-    let uniqueChildren: string[] = [];
+    const uniqueChildren = Array.from(new Set(
+      (intent.metadata?.children ?? []).map((child) => child.trim()).filter((child) => child.length > 0),
+    ));
     let imageLinks: PreparedTicketUpdate["imageLinks"] = [];
     const baseDir = resolveIntentBaseDir(intent);
     let projectId = operation.projectId;
@@ -2425,9 +2457,10 @@ export class TicketUpdateHandler implements OperationHandler<TicketUpdateIntent,
     if (isRetry && primaryEffect?.requestSnapshot && (primaryEffect.requestSnapshot as TicketUpdateRequestSnapshot).request) {
       request = (primaryEffect.requestSnapshot as TicketUpdateRequestSnapshot).request;
       changes = request.fields;
-      if (deps?.ticketUpdate?.getIssueDetail && typeof deps.ticketUpdate.getIssueDetail === "function") {
+      if (deps?.ticketUpdate?.getIssueDetail || (uniqueChildren.length > 0 && !projectId)) {
         try {
-          await ensureRemoteDetail();
+          const remote = await ensureRemoteDetail();
+          projectId ??= remote?.ticket?.projectId;
         } catch (err) {
           return { ok: false, outcome: { kind: "failed_before_commit", ticketId, error: err as Error } };
         }
@@ -2443,6 +2476,12 @@ export class TicketUpdateHandler implements OperationHandler<TicketUpdateIntent,
       const links = extractMarkdownImageLinks(intent.description);
       for (const link of links) {
         if (isExternalMarkdownImagePath(link.path) || syncedImageNames.has(link.path)) {
+          continue;
+        }
+
+        const persistedPath = await resolvePersistedMarkdownImagePath(operation, link.path, baseDir);
+        if (persistedPath) {
+          imageLinks.push({ path: link.path, range: link.range, resolvedPath: persistedPath });
           continue;
         }
 
@@ -2509,9 +2548,6 @@ export class TicketUpdateHandler implements OperationHandler<TicketUpdateIntent,
         : (intent.metadata ? computeMetadataChanges({ tracker: "", priority: "", status: "", due_date: "", children: [] }, intent.metadata) : {});
 
       // 2. メタデータの解決 (IDマッピング) & projectId 確定
-      const children = intent.metadata?.children ?? [];
-      uniqueChildren = Array.from(new Set(children.map((c) => c.trim()).filter((c) => c.length > 0)));
-
       if (!projectId && (Object.keys(metadataChanges).length > 0 || uniqueChildren.length > 0)) {
         try {
           const remote = await ensureRemoteDetail();
@@ -2519,18 +2555,6 @@ export class TicketUpdateHandler implements OperationHandler<TicketUpdateIntent,
         } catch {
           // non-fatal for general metadata discovery if not required
         }
-      }
-
-      // INV-08: Primary write 前に child 作成に必要な prerequisite (projectId) を確定
-      if (uniqueChildren.length > 0 && (!projectId || projectId <= 0)) {
-        return {
-          ok: false,
-          outcome: {
-            kind: "failed_before_commit",
-            ticketId,
-            error: new Error(`Project ID could not be determined for child ticket creation on ticket #${ticketId}`),
-          },
-        };
       }
 
       let resolvedMetadataFields: any = {};
@@ -2594,6 +2618,18 @@ export class TicketUpdateHandler implements OperationHandler<TicketUpdateIntent,
       request = {
         issueId: ticketId,
         fields: changes,
+      };
+    }
+
+    // 明示再送でも active intent の子作成と projectId を保持する。
+    if (uniqueChildren.length > 0 && (!projectId || projectId <= 0)) {
+      return {
+        ok: false,
+        outcome: {
+          kind: "failed_before_commit",
+          ticketId,
+          error: new Error(`Project ID could not be determined for child ticket creation on ticket #${ticketId}`),
+        },
       };
     }
 
@@ -2970,17 +3006,19 @@ export class TicketUpdateHandler implements OperationHandler<TicketUpdateIntent,
       const intent = operation.intent;
 
       if (operation.phase === "commit_unknown" && intent) {
-        // commit_unknown からの recovery 時のみ、意図した変更デルタが反映されているかを厳密に検証
-        const contentChanges = computeChanges(
+        // 画像リンクの変換を含む実際の送信内容を照合する。旧記録のみ intent にフォールバック。
+        const snapshot = getPrimaryEffectForRevision(operation)?.requestSnapshot;
+        const frozenFields = snapshot?.kind === "ticket_update" ? snapshot.request?.fields : undefined;
+        const contentChanges = frozenFields ?? computeChanges(
           intent.baseSubject ?? "",
           intent.baseDescription ?? "",
           intent.subject ?? "",
           intent.description ?? "",
         );
-        if (intent.baseSubject === undefined && intent.subject !== undefined) {
+        if (!frozenFields && intent.baseSubject === undefined && intent.subject !== undefined) {
           contentChanges.subject = intent.subject;
         }
-        if (intent.baseDescription === undefined && intent.description !== undefined) {
+        if (!frozenFields && intent.baseDescription === undefined && intent.description !== undefined) {
           contentChanges.description = intent.description;
         }
 
@@ -3004,8 +3042,26 @@ export class TicketUpdateHandler implements OperationHandler<TicketUpdateIntent,
           }
         }
 
-        // 3. metadata 変更の検証
-        if (intent.metadata) {
+        // ID / 日付も再解決せず、送信済みの値で照合する。
+        if (frozenFields) {
+          const values: Array<[number | string | null | undefined, number | string | undefined]> = [
+            [frozenFields.trackerId, ticket.trackerId],
+            [frozenFields.statusId, ticket.statusId],
+            [frozenFields.priorityId, ticket.priorityId],
+            [frozenFields.assigneeId, ticket.assigneeId],
+            [frozenFields.assignedToId, ticket.assigneeId ?? ""],
+            [frozenFields.dueDate === null ? "" : frozenFields.dueDate, ticket.dueDate ?? ""],
+            [frozenFields.startDate === null ? "" : frozenFields.startDate, ticket.startDate ?? ""],
+            [frozenFields.doneRatio, ticket.doneRatio],
+            [frozenFields.estimatedHours, ticket.estimatedHours],
+          ];
+          if (values.some(([expected, actual]) => expected !== undefined && expected !== actual)) {
+            return { ok: false, message: vscode.l10n.t("Remote ticket #{0} does not match the saved update.", ticketId) };
+          }
+        }
+
+        // 旧 snapshot 互換: 解決済み request がなければ intent の metadata を照合する。
+        if (!frozenFields && intent.metadata) {
           const metadataChanges = intent.baseMetadata
             ? computeMetadataChanges(intent.baseMetadata, intent.metadata)
             : computeMetadataChanges({ tracker: "", priority: "", status: "", due_date: "", children: [] }, intent.metadata);
@@ -3661,6 +3717,21 @@ export class CommentCreateHandler implements OperationHandler<CommentCreateInten
       return { ok: false, outcome: { kind: "failed_before_commit", error: new Error("Missing CommentCreateIntent") } };
     }
 
+    const primary = getPrimaryEffectForRevision(operation);
+    const snapshot = primary?.requestSnapshot;
+    if (primary && canRetryFailedCommentEffect(primary) && snapshot?.kind === "comment_create") {
+      return {
+        ok: true,
+        prepared: {
+          ticketId: snapshot.request.ticketId,
+          rawBody: intent.body,
+          body: snapshot.request.notes,
+          uploads: snapshot.request.uploads ?? [],
+          imageLinks: [],
+        },
+      };
+    }
+
     const rawBody = intent.body ?? "";
 
     if (containsConflictMarkers(rawBody)) {
@@ -3679,6 +3750,11 @@ export class CommentCreateHandler implements OperationHandler<CommentCreateInten
 
     for (const link of links) {
       if (isExternalMarkdownImagePath(link.path)) {
+        continue;
+      }
+      const persistedPath = await resolvePersistedMarkdownImagePath(operation, link.path, baseDir);
+      if (persistedPath) {
+        imageLinks.push({ path: link.path, range: link.range, resolvedPath: persistedPath });
         continue;
       }
       let resolvedPath = await resolveLocalPath(link.path, baseDir);
@@ -4248,6 +4324,22 @@ export class CommentUpdateHandler implements OperationHandler<CommentUpdateInten
       return { ok: false, outcome: { kind: "failed_before_commit", error: new Error("Missing CommentUpdateIntent") } };
     }
 
+    const primary = getPrimaryEffectForRevision(operation);
+    const snapshot = primary?.requestSnapshot;
+    if (primary && canRetryFailedCommentEffect(primary) && snapshot?.kind === "comment_update") {
+      return {
+        ok: true,
+        prepared: {
+          ticketId,
+          commentId: snapshot.request.commentId,
+          rawBody: intent.body,
+          body: snapshot.request.notes,
+          uploads: snapshot.request.uploads ?? [],
+          imageLinks: [],
+        },
+      };
+    }
+
     const commentDeps = { ...defaultCommentDeps, ...deps?.comment };
     const nextContent = intent.body ?? "";
 
@@ -4305,6 +4397,11 @@ export class CommentUpdateHandler implements OperationHandler<CommentUpdateInten
 
     for (const link of links) {
       if (isExternalMarkdownImagePath(link.path)) {
+        continue;
+      }
+      const persistedPath = await resolvePersistedMarkdownImagePath(operation, link.path, baseDir);
+      if (persistedPath) {
+        imageLinks.push({ path: link.path, range: link.range, resolvedPath: persistedPath });
         continue;
       }
       let resolvedPath = await resolveLocalPath(link.path, baseDir);
