@@ -83,7 +83,7 @@ const renderUnsynced = (
   toggleAbandoned = false,
 ) => {
   const elements: Record<string, UnsyncedElement> = {};
-  for (const id of ["unsynced-badge", "unsynced-count-label", "sync-all-btn", "unsynced-summary", "unsynced-list", "abandoned-toggle", "abandoned-list"]) {
+  for (const id of ["unsynced-badge", "unsynced-count-label", "sync-all-btn", "unsynced-summary", "unsynced-list", "abandoned-toggle", "abandoned-list", "forget-all-abandoned-btn"]) {
     const element: UnsyncedElement = {
       textContent: "",
       innerHTML: "",
@@ -107,6 +107,7 @@ const renderUnsynced = (
       discardLaterChangesTitle: "Discard later changes", discardTitle: "Discard",
       showAbandoned: "Show abandoned", hideAbandoned: "Hide abandoned", abandonedCount: "Abandoned: {0}",
       processingRecord: "Processing record", startNewTicketEdit: "Load latest and start new edit",
+      deleteRetainedRecord: "Delete retained record",
     },
     esc: (value: unknown) => String(value ?? ""),
     safeJson: (value: unknown) => JSON.stringify(value),
@@ -124,6 +125,7 @@ const renderUnsynced = (
     abandonedHidden: elements["abandoned-list"].hidden,
     abandonedToggleHidden: elements["abandoned-toggle"].hidden,
     abandonedToggleText: elements["abandoned-toggle"].textContent,
+    forgetAllAbandonedHidden: elements["forget-all-abandoned-btn"].hidden,
   };
 };
 
@@ -170,6 +172,7 @@ suite("Dashboard sync attention tray", () => {
   test("中止済み0件では切替を隠す", () => {
     const result = renderUnsynced([]);
     assert.equal(result.abandonedToggleHidden, true);
+    assert.equal(result.forgetAllAbandonedHidden, true);
     assert.equal(result.abandonedHtml, "");
   });
 
@@ -177,12 +180,15 @@ suite("Dashboard sync attention tray", () => {
     const abandoned = [{ key: { kind: "ticket", ticketId: 10 }, label: "Old ticket update", processingRecord: "old-operation" }];
     const closed = renderUnsynced([], abandoned);
     assert.equal(closed.abandonedToggleHidden, false);
+    assert.equal(closed.forgetAllAbandonedHidden, false);
     assert.equal(closed.abandonedHidden, true);
     assert.ok(closed.abandonedToggleText.includes("Abandoned: 1"));
     const opened = renderUnsynced([], abandoned, true);
     assert.equal(opened.abandonedHidden, false);
+    assert.equal(opened.forgetAllAbandonedHidden, false);
     assert.ok(opened.abandonedHtml.includes("old-operation"));
     assert.ok(opened.abandonedHtml.includes("Load latest and start new edit"));
+    assert.ok(opened.abandonedHtml.includes("Delete retained record"));
   });
 
   test("通常項目と中止済み項目の混在時は通常項目だけを同期数に含める", () => {
