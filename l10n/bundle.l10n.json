@@ -456,5 +456,15 @@
     "Expand detail area": "Expand detail area",
     "Discard is unavailable for this synchronization state. Review the saved state before continuing.": "Discard is unavailable for this synchronization state. Review the saved state before continuing.",
     "Synchronization is unavailable for this item. Review its synchronization state.": "Synchronization is unavailable for this item. Review its synchronization state.",
-    "Review recovery": "Review recovery"
+    "Delete retained record": "Delete retained record",
+    "Delete this abandoned sync record permanently?": "Delete this abandoned sync record permanently?",
+    "The local processing record will be deleted. The local Markdown file and any changes already applied to Redmine will remain.": "The local processing record will be deleted. The local Markdown file and any changes already applied to Redmine will remain.",
+    "Abandoned sync record deleted.": "Abandoned sync record deleted.",
+    "Review recovery": "Review recovery",
+    "Delete all abandoned records": "Delete all abandoned records",
+    "Permanently delete {0} abandoned sync records?": "Permanently delete {0} abandoned sync records?",
+    "No abandoned sync records to delete.": "No abandoned sync records to delete.",
+    "Deleted {0} abandoned sync records.": "Deleted {0} abandoned sync records.",
+    "Could not delete the records. All records were retained.": "Could not delete the records. All records were retained.",
+    "The abandoned records changed. Nothing was deleted. Refresh and try again.": "The abandoned records changed. Nothing was deleted. Refresh and try again."
 }

@@ -49,7 +49,10 @@ export const buildUnsyncedDashboardItems = (abandoned = false): DashboardUnsynce
     const subject = getTicketSummary(ticketId);
     const policy = evaluateOfflineSyncPolicy(update);
     items.push({
-      key: { kind: "ticket", ticketId },
+      key: { kind: "ticket", ticketId, ...(abandoned ? {
+        ...(update.operationId ? { operationId: update.operationId } : {}),
+        ...(update.disposition ? { abandonedAt: update.disposition.abandonedAt } : {}),
+      } : {}) },
       label: `${formatTicketLabel(ticketId)} ${vscode.l10n.t("Ticket update")}`,
       detail: [subject, describeOfflineSync(update).detail].filter(Boolean).join(" · "),
       documentUri: undefined,

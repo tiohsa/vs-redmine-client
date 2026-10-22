@@ -421,6 +421,23 @@ async function main() {
   assert.equal(await evaluate(`document.querySelector('[data-sync-key]').disabled`), false);
   assert.equal(await evaluate(`document.querySelector('#unsynced-feedback').classList.contains('info')`), true);
   assert.equal(await evaluate(`document.querySelectorAll('#toast-area .toast').length`), 0, 'visible inline feedback does not duplicate a toast');
+  // 中止済み記録は一括削除を一度だけ要求し、キャンセル後も操作を続けられる。
+  assert.equal(await evaluate(`document.getElementById('forget-all-abandoned-btn').classList.contains('hidden')`), true);
+  state.unsynced.abandonedItems = [
+    { key: { kind: 'ticket', ticketId: 90 }, label: '中止済みチケット', abandonedAt: 1 },
+    { key: { kind: 'newTicket', queueId: 'old-new' }, label: '中止済み新規チケット', abandonedAt: 2 },
+  ];
+  await push();
+  assert.equal(await evaluate(`document.getElementById('forget-all-abandoned-btn').classList.contains('hidden')`), false);
+  await evaluate(`window.messages.length=0;document.getElementById('forget-all-abandoned-btn').click();document.getElementById('forget-all-abandoned-btn').click()`);
+  assert.equal(await evaluate(`window.messages.filter(m=>m.type==='unsynced.forgetAllAbandoned').length`), 1);
+  assert.equal(await evaluate(`document.getElementById('forget-all-abandoned-btn').disabled`), true);
+  const deleteRequest = await evaluate(`window.messages.at(-1).requestId`);
+  await evaluate(`window.dispatchEvent(new MessageEvent('message',{data:{type:'operation.success',requestId:${JSON.stringify(deleteRequest)},message:'削除キャンセル',level:'info'}}))`);
+  assert.equal(await evaluate(`document.getElementById('forget-all-abandoned-btn').disabled`), false);
+  state.unsynced.abandonedItems = [];
+  await push();
+  assert.equal(await evaluate(`document.getElementById('forget-all-abandoned-btn').classList.contains('hidden')`), true);
   state.unsynced.items[0].lifecycle = 'commit_unknown';
   state.unsynced.items[0].requiresReview = true;
   state.unsynced.items[0].canDiscard = false;

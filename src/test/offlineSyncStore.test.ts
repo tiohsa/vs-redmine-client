@@ -23,6 +23,8 @@ import {
   removeOfflineCommentEntryAsync,
   prepareOfflineAbandon,
   commitOfflineAbandonAsync,
+  prepareOfflineForgetAbandoned,
+  commitOfflineForgetAbandonedAsync,
   beginActiveSync,
   isAbandoned,
   beginFreshTicketEdit,
@@ -58,6 +60,29 @@ suite("offlineSyncStore — workspaceState 永続化", () => {
     assert.strictEqual(q.tickets.size, 0);
     assert.strictEqual(q.comments.length, 0);
     assert.strictEqual(q.newTickets.length, 0);
+  });
+
+  test("中止済みの同期記録だけを完全削除し、通常の未同期項目は保持する", async () => {
+    await addOfflineTicketUpdateAsync(123, {
+      ...ticketUpdate(123),
+      operationId: "abandoned-operation",
+      effects: [{ effectId: "primary", kind: "ticket_update", operationRevision: 1,
+        attemptGeneration: 1, state: "commit_unknown", target: {} }],
+      phase: "commit_unknown",
+    });
+    await addOfflineTicketUpdateAsync(124, { ...ticketUpdate(124), subject: "Keep" });
+    const abandon = prepareOfflineAbandon({ kind: "ticket", ticketId: 123 }, "");
+    assert.strictEqual(await commitOfflineAbandonAsync(abandon), "abandoned");
+    const abandoned = getOfflineSyncQueue().abandonedTickets?.[0];
+    assert.ok(abandoned?.disposition);
+
+    const plan = prepareOfflineForgetAbandoned({ kind: "ticket", ticketId: 123,
+      operationId: abandoned?.operationId, abandonedAt: abandoned?.disposition?.abandonedAt }, "");
+    assert.strictEqual(await commitOfflineForgetAbandonedAsync(plan), "removed");
+    const queue = getOfflineSyncQueue();
+    assert.strictEqual(queue.abandonedTickets?.length, 0);
+    assert.strictEqual(queue.tickets.get(124)?.subject, "Keep");
+    assert.strictEqual(queue.tickets.has(123), false);
   });
 
   test("チケット更新を追加後に同じ memento で再初期化するとデータが復元される", async () => {

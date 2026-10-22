@@ -491,5 +491,15 @@
     "Expand detail area": "詳細を広く表示",
     "Discard is unavailable for this synchronization state. Review the saved state before continuing.": "現在の同期状態では破棄できません。保存されている状態を確認してください。",
     "Synchronization is unavailable for this item. Review its synchronization state.": "この項目は現在同期できません。同期状態を確認してください。",
-    "Review recovery": "復旧内容を確認"
+    "Delete retained record": "保持した記録を削除",
+    "Delete this abandoned sync record permanently?": "中止済みの同期記録を完全に削除しますか？",
+    "The local processing record will be deleted. The local Markdown file and any changes already applied to Redmine will remain.": "ローカルの処理記録を削除します。Markdown ファイルと Redmine に反映済みの変更は残ります。",
+    "Abandoned sync record deleted.": "中止済みの同期記録を削除しました。",
+    "Review recovery": "復旧内容を確認",
+    "Delete all abandoned records": "中止済みを一括削除",
+    "Permanently delete {0} abandoned sync records?": "中止済みの同期記録 {0} 件を完全に削除しますか？",
+    "No abandoned sync records to delete.": "削除する中止済みの同期記録はありません。",
+    "Deleted {0} abandoned sync records.": "中止済みの同期記録を {0} 件削除しました。",
+    "Could not delete the records. All records were retained.": "記録を削除できませんでした。すべての記録を保持しました。",
+    "The abandoned records changed. Nothing was deleted. Refresh and try again.": "中止済みの記録が変更されたため、削除しませんでした。更新して再試行してください。"
 }

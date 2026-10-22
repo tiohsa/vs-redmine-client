@@ -10,6 +10,10 @@ import {
   commitOfflineDiscardAsync,
   prepareOfflineAbandon,
   commitOfflineAbandonAsync,
+  prepareOfflineForgetAbandoned,
+  commitOfflineForgetAbandonedAsync,
+  prepareOfflineForgetAllAbandoned,
+  commitOfflineForgetAllAbandonedAsync,
   isAbandoned,
   beginFreshTicketEdit,
 } from "../../views/offlineSyncStore";
@@ -159,6 +163,77 @@ export class DashboardUnsyncedService {
         : result === "persistence_failed"
           ? vscode.l10n.t("Could not save the abandoned state. The item remains available for sync.")
           : vscode.l10n.t("The unsynced item changed. Refresh and try again."));
+    }
+  }
+
+  async handleForgetAbandoned(requestId: string, key: DashboardUnsyncedKey): Promise<void> {
+    const scope = getCurrentConnectionScope();
+    const plan = prepareOfflineForgetAbandoned(key, scope);
+    if (!plan.expectation || !isAbandoned(plan.expectation)) {
+      this.refreshUnsynced();
+      this.deps.context.notifyError(requestId, vscode.l10n.t("The abandoned item changed. Refresh and try again."));
+      return;
+    }
+    const label = buildUnsyncedDashboardItems(true).find((item) =>
+      JSON.stringify(item.key) === JSON.stringify(key))?.label ?? vscode.l10n.t("Unsynced item");
+    const removeLabel = vscode.l10n.t("Delete retained record");
+    const selected = await vscode.window.showWarningMessage(
+      vscode.l10n.t("Delete this abandoned sync record permanently?"),
+      {
+        modal: true,
+        detail: `${vscode.l10n.t("Connection: {0}", scope)}\n${vscode.l10n.t("Target: {0}", label)}\n${vscode.l10n.t("The local processing record will be deleted. The local Markdown file and any changes already applied to Redmine will remain.")}`,
+      },
+      removeLabel,
+    );
+    if (selected !== removeLabel) {
+      this.deps.context.notifySuccess(requestId, vscode.l10n.t("Operation cancelled. Saved changes were retained."), "info");
+      return;
+    }
+    const result = await commitOfflineForgetAbandonedAsync(plan);
+    this.refreshUnsynced();
+    this.deps.refreshTicketPresentation();
+    if (result === "removed") {
+      this.deps.context.notifySuccess(requestId, vscode.l10n.t("Abandoned sync record deleted."));
+    } else {
+      this.deps.context.notifyError(requestId, result === "busy"
+        ? vscode.l10n.t("This item is being synced. Wait for the current operation to finish and try again.")
+        : vscode.l10n.t("The abandoned item changed. Refresh and try again."));
+    }
+  }
+
+  async handleForgetAllAbandoned(requestId: string): Promise<void> {
+    const scope = getCurrentConnectionScope();
+    const plan = prepareOfflineForgetAllAbandoned(scope);
+    if (!plan.items.length) {
+      this.refreshUnsynced();
+      this.deps.context.notifySuccess(requestId, vscode.l10n.t("No abandoned sync records to delete."), "info");
+      return;
+    }
+    const removeLabel = vscode.l10n.t("Delete all abandoned records");
+    const selected = await vscode.window.showWarningMessage(
+      vscode.l10n.t("Permanently delete {0} abandoned sync records?", plan.items.length),
+      { modal: true, detail: `${vscode.l10n.t("Connection: {0}", scope)}\n${vscode.l10n.t("The local processing record will be deleted. The local Markdown file and any changes already applied to Redmine will remain.")}` },
+      removeLabel,
+    );
+    if (selected !== removeLabel) {
+      this.deps.context.notifySuccess(requestId, vscode.l10n.t("Operation cancelled. Saved changes were retained."), "info");
+      return;
+    }
+    if (getCurrentConnectionScope() !== scope) {
+      this.deps.context.notifyError(requestId, vscode.l10n.t("The connection changed. Try again."));
+      return;
+    }
+    const result = await commitOfflineForgetAllAbandonedAsync(plan);
+    this.refreshUnsynced();
+    this.deps.refreshTicketPresentation();
+    if (result === "removed") {
+      this.deps.context.notifySuccess(requestId, vscode.l10n.t("Deleted {0} abandoned sync records.", plan.items.length));
+    } else {
+      this.deps.context.notifyError(requestId, result === "busy"
+        ? vscode.l10n.t("This item is being synced. Wait for the current operation to finish and try again.")
+        : result === "persistence_failed"
+          ? vscode.l10n.t("Could not delete the records. All records were retained.")
+          : vscode.l10n.t("The abandoned records changed. Nothing was deleted. Refresh and try again."));
     }
   }
 

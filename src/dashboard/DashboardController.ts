@@ -483,6 +483,12 @@ export class DashboardController {
       case "unsynced.abandonOne":
         await this.unsyncedService.handleAbandonOne(req.requestId, req.key);
         break;
+      case "unsynced.forgetAbandoned":
+        await this.unsyncedService.handleForgetAbandoned(req.requestId, req.key);
+        break;
+      case "unsynced.forgetAllAbandoned":
+        await this.unsyncedService.handleForgetAllAbandoned(req.requestId);
+        break;
       case "unsynced.startNewTicketEdit":
         await this.unsyncedService.handleStartNewTicketEdit(req.requestId, req.ticketId);
         break;

@@ -197,7 +197,7 @@ export type OfflineDiscardResult =
   | "stale";
 
 export type OfflineDiscardKey =
-  | { kind: "ticket"; ticketId: number }
+  | { kind: "ticket"; ticketId: number; operationId?: string; abandonedAt?: number }
   | { kind: "newTicket"; queueId?: string; documentUri?: string }
   | { kind: "comment"; ticketId: number; commentId?: number; documentUri?: string; operationId?: string };
 
@@ -210,6 +210,12 @@ export type OfflineDiscardPlan = {
 
 export type OfflineAbandonPlan = Pick<OfflineDiscardPlan, "key" | "scope" | "expectation">;
 export type OfflineAbandonResult = "abandoned" | "not_found" | "stale" | "busy" | "persistence_failed";
+export type OfflineForgetAbandonedPlan = Pick<OfflineDiscardPlan, "key" | "scope" | "expectation">;
+export type OfflineForgetAbandonedResult = "removed" | "not_found" | "stale" | "busy" | "persistence_failed";
+export type OfflineForgetAllAbandonedPlan = {
+  readonly scope: string;
+  readonly items: readonly OfflineForgetAbandonedPlan[];
+};
 
 export type QueuedTicketCancellationExpectation = {
   operationId?: string;
@@ -2079,6 +2085,109 @@ export const commitOfflineAbandonAsync = async (plan: OfflineAbandonPlan): Promi
         replaceStoredOperationInQueue(queue, operation, abandoned);
       }
       return commitQueueMutation("abandoned" as const);
+    });
+  } catch {
+    return "persistence_failed";
+  }
+};
+
+/** 中止済みの処理記録を、確認後にキューから完全削除するための計画を作る。 */
+export const prepareOfflineForgetAbandoned = (
+  key: OfflineDiscardKey,
+  scope: string,
+): OfflineForgetAbandonedPlan => {
+  const queue = getQueue(scope);
+  const candidates: Array<OfflineNewTicket | OfflineTicketUpdate | OfflineCommentUpdate> = key.kind === "ticket"
+    ? (queue.abandonedTickets ?? []).filter((item) => item.ticketId === key.ticketId &&
+      (key.operationId === undefined || item.operationId === key.operationId) &&
+      (key.abandonedAt === undefined || item.disposition?.abandonedAt === key.abandonedAt))
+    : key.kind === "newTicket"
+      ? queue.newTickets.filter((item) => isAbandoned(item) &&
+        (key.queueId === undefined || item.queueId === key.queueId) &&
+        (key.documentUri === undefined || sameDocumentIdentity(item.documentUri, key.documentUri)))
+      : queue.comments.filter((item) => isAbandoned(item) && item.ticketId === key.ticketId &&
+        (key.commentId === undefined || item.commentId === key.commentId) &&
+        (key.operationId === undefined || item.operationId === key.operationId) &&
+        (key.documentUri === undefined || item.documentUri === key.documentUri));
+  return {
+    key: structuredClone(key),
+    scope,
+    expectation: candidates.length === 1 ? structuredClone(candidates[0]) : undefined,
+  };
+};
+
+/** 確認対象を固定する。確認後に追加された中止済み記録は一括削除に含めない。 */
+export const prepareOfflineForgetAllAbandoned = (scope: string): OfflineForgetAllAbandonedPlan => {
+  const queue = getQueue(scope);
+  const items: OfflineForgetAbandonedPlan[] = [];
+  for (const operation of queue.abandonedTickets ?? []) {
+    if (isAbandoned(operation)) {
+      items.push({ scope, key: { kind: "ticket", ticketId: operation.ticketId }, expectation: operation });
+    }
+  }
+  for (const operation of queue.newTickets) {
+    if (isAbandoned(operation)) {
+      items.push({ scope, key: { kind: "newTicket", queueId: operation.queueId }, expectation: operation });
+    }
+  }
+  for (const operation of queue.comments) {
+    if (isAbandoned(operation)) {
+      items.push({ scope, key: { kind: "comment", ticketId: operation.ticketId, operationId: operation.operationId }, expectation: operation });
+    }
+  }
+  return { scope, items: structuredClone(items) };
+};
+
+const forgetAbandonedInQueue = (
+  queue: OfflineSyncQueue,
+  plan: OfflineForgetAbandonedPlan,
+): OfflineForgetAbandonedResult => {
+  if (!plan.expectation) { return "not_found"; }
+  if (!isAbandoned(plan.expectation) ||
+      (plan.expectation.connectionScope !== undefined && plan.expectation.connectionScope !== plan.scope)) {
+    return "stale";
+  }
+  const list = plan.key.kind === "ticket"
+    ? queue.abandonedTickets ?? []
+    : plan.key.kind === "newTicket" ? queue.newTickets : queue.comments;
+  const index = list.findIndex((item) => isAbandoned(item) && isDeepStrictEqual(item, plan.expectation));
+  if (index < 0) { return "stale"; }
+  const operation = list[index];
+  if (activeSyncs.has(activeSyncKey(plan.scope, operation.operationId ??
+      ("queueId" in operation ? operation.queueId : `ticket:${operation.ticketId}`)))) {
+    return "busy";
+  }
+  list.splice(index, 1);
+  return "removed";
+};
+
+/** 一件でも変更・同期中なら全件を保持し、成功時は一度の永続化で削除する。 */
+export const commitOfflineForgetAllAbandonedAsync = async (
+  plan: OfflineForgetAllAbandonedPlan,
+): Promise<OfflineForgetAbandonedResult> => {
+  try {
+    return await mutateQueueAsync(plan.scope, (queue) => {
+      if (!plan.items.length) { return skipQueueMutation("not_found" as const); }
+      for (const item of plan.items) {
+        if (item.scope !== plan.scope) { return skipQueueMutation("stale" as const); }
+        const result = forgetAbandonedInQueue(queue, item);
+        if (result !== "removed") { return skipQueueMutation(result); }
+      }
+      return commitQueueMutation("removed" as const);
+    });
+  } catch {
+    return "persistence_failed";
+  }
+};
+
+/** 中止済みの処理記録だけを削除し、通常の未同期項目や Redmine 上のデータには触れない。 */
+export const commitOfflineForgetAbandonedAsync = async (
+  plan: OfflineForgetAbandonedPlan,
+): Promise<OfflineForgetAbandonedResult> => {
+  try {
+    return await mutateQueueAsync(plan.scope, (queue) => {
+      const result = forgetAbandonedInQueue(queue, plan);
+      return result === "removed" ? commitQueueMutation(result) : skipQueueMutation(result);
     });
   } catch {
     return "persistence_failed";

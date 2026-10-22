@@ -38,7 +38,7 @@ const unsyncedFeedbackRequests = new Set();
 function esc(value){ return String(value ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
 function send(message){ vscode.postMessage(message); }
 function req(type, extra){
-  const queueAction = ['unsynced.syncOne','unsynced.syncAll','unsynced.discardOne','unsynced.abandonOne','unsynced.startNewTicketEdit'].includes(type);
+  const queueAction = ['unsynced.syncOne','unsynced.syncAll','unsynced.discardOne','unsynced.abandonOne','unsynced.forgetAbandoned','unsynced.forgetAllAbandoned','unsynced.startNewTicketEdit'].includes(type);
   const ticketAction = type === 'ticket.syncSelected' || type === 'ticket.reviewConflict';
   if((queueAction || ticketAction) && activeSyncRequests.size) return;
   if(ticketAction && (state?.selectedTicket?.syncState === 'Syncing' || metadataEdit?.requestId)) return;
@@ -115,7 +115,7 @@ function showToast(level, message){
 }
 function updateSyncButtonStates(){
   const busy = activeSyncRequests.size > 0;
-  document.querySelectorAll('[data-sync-key],[data-discard-key],[data-sync-comment-key],[data-abandon-key],[data-start-ticket],[data-ticket-action="sync"]').forEach(function(button){ button.disabled = busy; });
+  document.querySelectorAll('[data-sync-key],[data-discard-key],[data-sync-comment-key],[data-abandon-key],[data-forget-key],#forget-all-abandoned-btn,[data-start-ticket],[data-ticket-action="sync"]').forEach(function(button){ button.disabled = busy; });
   const detailSync = document.getElementById('detail-sync-btn');
   const selectedSyncing = state?.selectedTicket?.syncState === 'Syncing' || Array.from(ticketSyncRequests.values()).includes(state?.selectedTicket?.id);
   if(detailSync){
@@ -747,10 +747,14 @@ function renderAbandoned(){
   toggle.classList.toggle('hidden',items.length === 0);
   toggle.setAttribute('aria-expanded',String(abandonedVisible));
   toggle.textContent=(abandonedVisible ? STRINGS.hideAbandoned : STRINGS.showAbandoned)+' · '+STRINGS.abandonedCount.replace('{0}',String(items.length));
-  toggle.onclick=function(){ abandonedVisible=!abandonedVisible; renderAbandoned(); };
+  toggle.onclick=function(){ abandonedVisible=!abandonedVisible; renderAbandoned(); updateSyncButtonStates(); };
+  const removeAll=document.getElementById('forget-all-abandoned-btn');
+  removeAll.classList.toggle('hidden',items.length === 0);
+  removeAll.onclick=function(){ req('unsynced.forgetAllAbandoned'); };
   list.classList.toggle('hidden',!abandonedVisible || items.length === 0);
-  list.innerHTML=abandonedVisible ? items.map(function(item){ const start=item.key.kind === 'ticket' && !(state.unsynced.items || []).some(function(active){ return active.key.kind === 'ticket' && active.key.ticketId === item.key.ticketId; }) ? '<button class="btn btn-secondary" type="button" data-start-ticket="'+esc(item.key.ticketId)+'">'+esc(STRINGS.startNewTicketEdit)+'</button>' : ''; return '<div class="unsynced-card" role="listitem"><span class="unsynced-kind-label">'+esc(unsyncedKindLabel(item.key.kind))+'</span><div class="unsynced-body"><div class="unsynced-label">'+esc(item.label)+'</div><div class="unsynced-detail">'+esc(item.detail || '')+'</div><details><summary>'+esc(STRINGS.processingRecord)+'</summary><pre>'+esc(item.processingRecord || '')+'</pre></details>'+start+'</div></div>'; }).join('') : '';
+  list.innerHTML=abandonedVisible ? items.map(function(item){ const start=item.key.kind === 'ticket' && !(state.unsynced.items || []).some(function(active){ return active.key.kind === 'ticket' && active.key.ticketId === item.key.ticketId; }) ? '<button class="btn btn-secondary" type="button" data-start-ticket="'+esc(item.key.ticketId)+'">'+esc(STRINGS.startNewTicketEdit)+'</button>' : ''; const key=safeJson(item.key); const remove='<button class="btn btn-secondary btn-danger" type="button" data-forget-key="'+key+'">'+esc(STRINGS.deleteRetainedRecord)+'</button>'; return '<div class="unsynced-card" role="listitem"><span class="unsynced-kind-label">'+esc(unsyncedKindLabel(item.key.kind))+'</span><div class="unsynced-body"><div class="unsynced-label">'+esc(item.label)+'</div><div class="unsynced-detail">'+esc(item.detail || '')+'</div><details><summary>'+esc(STRINGS.processingRecord)+'</summary><pre>'+esc(item.processingRecord || '')+'</pre></details>'+start+remove+'</div></div>'; }).join('') : '';
   list.querySelectorAll('[data-start-ticket]').forEach(function(button){ button.addEventListener('click',function(){ req('unsynced.startNewTicketEdit',{ticketId:Number(button.getAttribute('data-start-ticket'))}); }); });
+  list.querySelectorAll('[data-forget-key]').forEach(function(button){ button.addEventListener('click',function(){ try { req('unsynced.forgetAbandoned',{key:JSON.parse(button.getAttribute('data-forget-key'))}); } catch {} }); });
 }
 function renderUnsynced(){
   if(!state) return; renderAbandoned(); const items=state.unsynced.items || []; const count=state.unsynced.totalCount || 0; const tabBadge=document.getElementById('unsynced-badge'); tabBadge.textContent=String(count); tabBadge.setAttribute('aria-label',String(count)); tabBadge.classList.toggle('hidden',count === 0);
