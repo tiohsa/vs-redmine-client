@@ -108,6 +108,24 @@ export const performSyncOnSave = async (
         operationScope,
         deps.syncEngine,
       );
+      switch (result.status) {
+        case "created":
+        case "success":
+        case "no_change":
+          markDraftStatus(key.ticketId, "Synced", operationScope);
+          break;
+        case "merged":
+          markDraftStatus(key.ticketId, "Dirty", operationScope);
+          break;
+        case "queued":
+          markDraftStatus(key.ticketId, "Queued", operationScope);
+          break;
+        case "conflict":
+          markDraftStatus(key.ticketId, "Conflict", operationScope);
+          break;
+        default:
+          markDraftStatus(key.ticketId, "Failed", operationScope);
+      }
       notifications.notifyTicketSaveResult(result);
       if (result.status === "created") {
         ticketsPresentation.refresh();
@@ -166,11 +184,6 @@ export const performSyncOnSave = async (
         const outcome = await deps.syncEngine.syncOne(key, { connectionScope: operationScope });
         const conflictHandled = await resolveAutoConflict(key, outcome);
         if (!conflictHandled) {
-          presenter.present(outcome, {
-            ticketId: key.kind === "ticket" ? key.ticketId : (key.kind === "comment" ? key.ticketId : undefined),
-            commentId: key.kind === "comment" ? key.commentId : undefined,
-            isAuto: true,
-          });
           if (key.kind === "ticket") {
             switch (outcome.kind) {
               case "completed":
@@ -190,6 +203,11 @@ export const performSyncOnSave = async (
                 break;
             }
           }
+          presenter.present(outcome, {
+            ticketId: key.kind === "ticket" ? key.ticketId : (key.kind === "comment" ? key.ticketId : undefined),
+            commentId: key.kind === "comment" ? key.commentId : undefined,
+            isAuto: true,
+          });
         }
       } catch (error) {
         if (key.kind === "ticket") {

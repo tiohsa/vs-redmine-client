@@ -29,14 +29,17 @@ const summarizeFailures = (
   return parts.join(", ");
 };
 
-export type OfflineSyncRunResult =
+export type OfflineSyncRunResult = { remainingChanges?: number } & (
   | { status: "nothing_to_sync"; total: 0; synced: 0; failed: 0; conflicts: 0 }
   | { status: "success"; total: number; synced: number; failed: 0; conflicts: 0 }
   | { status: "partial_failure"; total: number; synced: number; failed: number; conflicts: number }
   | { status: "cancelled"; total: number; synced: number; failed: number; conflicts: number }
-  | { status: "failed"; total: number; synced: number; failed: number; conflicts: number };
+  | { status: "failed"; total: number; synced: number; failed: number; conflicts: number }
+  | { status: "recovery_pending"; total: number; synced: number; failed: number; conflicts: number }
+);
 
 type OfflineSyncDependencies = {
+  suppressResultNotifications?: boolean;
   createSyncEngine?: () => Pick<SyncEngine, "syncAll">;
   /** @deprecated Test and extension compatibility while callers move to SyncEngine. */
   createTicketSyncService?: () => Pick<TicketSyncService, "syncAll">;
@@ -61,18 +64,18 @@ const runOfflineSyncAtScope = async (
   operationScope: string,
   deps: OfflineSyncDependencies,
 ): Promise<OfflineSyncRunResult> => {
+  const info = (message: string): void => { if (!deps.suppressResultNotifications) { showInfo(message); } };
+  const warning = (message: string): void => { if (!deps.suppressResultNotifications) { showWarning(message); } };
   const queue = getOfflineSyncQueue(operationScope);
-  const syncEngine = deps.createSyncEngine?.() ?? {
-    syncAll: (context: { connectionScope: string }, options: { shouldContinue?: () => boolean }) =>
-      deps.createTicketSyncService!().syncAll(context, options),
-  };
+  const legacyService = deps.createTicketSyncService?.();
+  const syncEngine = deps.createSyncEngine?.() ?? legacyService ?? createSyncEngine();
   const ticketUpdates = Array.from(queue.tickets.values()).filter((item) => !isAbandoned(item));
   const totalItems =
     queue.newTickets.filter((item) => !isAbandoned(item)).length + ticketUpdates.length +
     queue.comments.filter((item) => !isAbandoned(item)).length;
 
   if (totalItems === 0) {
-    showInfo(vscode.l10n.t("No local changes to sync."));
+    info(vscode.l10n.t("No local changes to sync."));
     return { status: "nothing_to_sync", total: 0, synced: 0, failed: 0, conflicts: 0 };
   }
 
@@ -83,6 +86,7 @@ const runOfflineSyncAtScope = async (
   let synced = 0;
   let conflicts = 0;
   let wasCancelled = false;
+  let recoveryPending = false;
 
   await vscode.window.withProgress(
     {
@@ -110,6 +114,7 @@ const runOfflineSyncAtScope = async (
       for (const result of syncAllOutcome.results) {
         const key = result.key;
         const outcome = result.outcome;
+        if (outcome.kind === "commit_unknown" || outcome.kind === "remote_committed" || outcome.kind === "queued") { recoveryPending = true; }
         if (outcome.kind === "completed" || outcome.kind === "no_change") {
           synced++;
         } else if (outcome.kind === "conflict") {
@@ -172,7 +177,7 @@ const runOfflineSyncAtScope = async (
     if (synced > 0) { parts.push(vscode.l10n.t("Synced: {0}", synced)); }
     if (conflicts > 0) { parts.push(vscode.l10n.t("Conflicts: {0}", conflicts)); }
     if (failed - conflicts > 0) { parts.push(vscode.l10n.t("Failed: {0}", failed - conflicts)); }
-    showWarning(
+    warning(
       vscode.l10n.t(
         "Sync completed with issues. {0}. Remaining: {1}",
         parts.join(", "),
@@ -182,12 +187,19 @@ const runOfflineSyncAtScope = async (
     if (wasCancelled) {
       return { status: "cancelled", total: totalItems, synced, failed, conflicts };
     }
+    if (recoveryPending) {
+      return { status: "recovery_pending", total: totalItems, synced, failed, conflicts };
+    }
     if (synced === 0) {
       return { status: "failed", total: totalItems, synced, failed, conflicts };
     }
     return { status: "partial_failure", total: totalItems, synced, failed, conflicts };
   }
 
-  showInfo(vscode.l10n.t("Sync completed. Synced: {0}.", synced));
-  return { status: "success", total: totalItems, synced, failed: 0, conflicts: 0 };
+  const remaining = getOfflineSyncQueue(operationScope);
+  const remainingChanges = [...remaining.tickets.values(), ...remaining.comments, ...remaining.newTickets].filter((item) => !isAbandoned(item)).length;
+  info(remainingChanges > 0
+    ? vscode.l10n.t("Sync completed. Synced: {0}; local changes remaining: {1}.", synced, remainingChanges)
+    : vscode.l10n.t("Sync completed. Synced: {0}.", synced));
+  return { status: "success", total: totalItems, synced, failed: 0, conflicts: 0, ...(remainingChanges > 0 ? { remainingChanges } : {}) };
 };

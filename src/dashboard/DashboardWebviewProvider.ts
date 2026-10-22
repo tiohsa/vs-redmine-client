@@ -34,8 +34,8 @@ export class DashboardWebviewProvider
       notifyOperationStarted: (requestId, label) => {
         this.send({ type: "operation.started", requestId, label });
       },
-      notifySuccess: (requestId, msg) => {
-        this.send({ type: "operation.success", requestId, message: msg });
+      notifySuccess: (requestId, msg, level) => {
+        this.send({ type: "operation.success", requestId, message: msg, level });
       },
       notifyError: (requestId, msg) => {
         this.send({ type: "operation.error", requestId, message: msg });

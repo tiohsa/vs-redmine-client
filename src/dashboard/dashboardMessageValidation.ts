@@ -42,7 +42,11 @@ export const validateDashboardUnsyncedKey = (v: unknown): v is DashboardUnsynced
   if (!isObject(v)) { return false; }
   const kind = v["kind"];
   if (!isString(kind) || !UNSYNCED_KINDS.has(kind)) { return false; }
-  if (kind === "ticket" && !isPositiveInt(v["ticketId"])) { return false; }
+  if (kind === "ticket") {
+    if (!isPositiveInt(v["ticketId"])) { return false; }
+    if ("operationId" in v && !isNonEmptyString(v["operationId"])) { return false; }
+    if ("abandonedAt" in v && (!isNumber(v["abandonedAt"]) || v["abandonedAt"] < 0)) { return false; }
+  }
   if (kind === "newTicket") {
     if ("queueId" in v && !isNonEmptyString(v["queueId"])) { return false; }
     if ("documentUri" in v && !isNonEmptyString(v["documentUri"])) { return false; }
@@ -366,7 +370,8 @@ export const validateDashboardMessage = (raw: unknown): ValidationResult => {
 
     case "unsynced.syncOne":
     case "unsynced.discardOne":
-    case "unsynced.abandonOne": {
+    case "unsynced.abandonOne":
+    case "unsynced.forgetAbandoned": {
       const key = raw["key"];
       if (!validateDashboardUnsyncedKey(key)) {
         return { ok: false, reason: `${type}: key is invalid` };
@@ -375,6 +380,7 @@ export const validateDashboardMessage = (raw: unknown): ValidationResult => {
     }
 
     case "unsynced.syncAll":
+    case "unsynced.forgetAllAbandoned":
       return { ok: true, request: { type, requestId } };
 
     case "unsynced.startNewTicketEdit": {

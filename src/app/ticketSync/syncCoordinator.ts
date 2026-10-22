@@ -44,6 +44,11 @@ import { beginActiveSync } from "../../views/offlineSyncStore";
 
 export type SyncAllStopReason = "completed" | "user_cancelled" | "blocked_by_recovery" | "failed";
 
+const getOutcomeTicketId = (operation: UnifiedSyncOperation, remoteId?: number): number =>
+  operation.kind === "comment_create" || operation.kind === "comment_update"
+    ? operation.ticketId ?? 0
+    : remoteId ?? operation.createdRemoteId ?? operation.ticketId ?? 0;
+
 export interface SyncCoordinatorOptions {
   deps?: OperationHandlerDeps;
   applyContent?: (editor: vscode.TextEditor, content: string) => Promise<void>;
@@ -201,7 +206,7 @@ export class SyncCoordinator {
     );
 
     if (hasUnresolvedChildEffect && isParentCommitted) {
-      const committedParentId = operation.createdRemoteId ?? primary?.remoteId ?? operation.ticketId ?? 0;
+      const committedParentId = getOutcomeTicketId(operation, operation.createdRemoteId ?? primary?.remoteId);
       return {
         kind: "remote_committed",
         ticketId: committedParentId,
@@ -304,7 +309,35 @@ export class SyncCoordinator {
 
     // 0. Phase チェック
     if (currentOp.phase === "completed") {
-      return { kind: "no_change", ticketId: currentOp.ticketId ?? 0 };
+      const unresolved = getEffectsForRevision(currentOp).some(
+        (effect) => effect.state !== "committed" && effect.state !== "compensated",
+      );
+      let completion: Parameters<SyncOperationRepository["completeOperation"]>[3];
+      if (!unresolved && currentOp.nextIntent) {
+        // 後続編集の基準を古いbaseへ戻さず、read-backした値で昇格する。
+        const reconciled = await handler.reconcileRemote(currentOp, handlerCtx, depsWithRepo);
+        if (!reconciled.ok) {
+          return {
+            kind: "remote_committed", ticketId: getOutcomeTicketId(currentOp),
+            commentId: currentOp.commentId, pending: "remote_reconcile", message: reconciled.message,
+          };
+        }
+        completion = { canonical: reconciled.canonical, remoteUpdatedAt: reconciled.remoteUpdatedAt ?? currentOp.remoteUpdatedAt };
+      }
+      if (!unresolved && await repository.completeOperation(
+        getOpKey(currentOp), scope, currentOp.intentRevision ?? currentOp.revision ?? 1,
+        completion,
+        getAttemptGeneration(currentOp),
+      )) {
+        return { kind: "no_change", ticketId: getOutcomeTicketId(currentOp), commentId: currentOp.commentId };
+      }
+      return {
+        kind: "remote_committed",
+        ticketId: getOutcomeTicketId(currentOp),
+        commentId: currentOp.commentId,
+        pending: "local_finalize",
+        message: "Failed to complete operation persistence",
+      };
     }
 
     // Step A: Preparation & Remote Write (queued / preparing の場合のみ)
@@ -326,6 +359,23 @@ export class SyncCoordinator {
       // 2. handler.prepare
       prepResult = await handler.prepare(currentOp, handlerCtx, depsWithRepo);
       if (!prepResult.ok) {
+        if (prepResult.outcome.kind === "no_change" && (currentOp.effects?.length ?? 0) === 0) {
+          // 送信不要でも永続キューを完了させる。後続編集の昇格と世代フェンスは通常完了と共通。
+          const completed = await repository.completeOperation(
+            getOpKey(currentOp),
+            scope,
+            currentOp.intentRevision ?? currentOp.revision ?? 1,
+            undefined,
+            getAttemptGeneration(currentOp),
+          );
+          if (completed) { return prepResult.outcome; }
+          return {
+            kind: "failed_before_commit",
+            ticketId: currentOp.ticketId,
+            commentId: currentOp.commentId,
+            error: new Error("Failed to complete operation persistence"),
+          };
+        }
         if (currentOp.phase === "preparing") {
           await repository.transitionOperation(
             getOpKey(currentOp),
@@ -397,7 +447,7 @@ export class SyncCoordinator {
           );
           return {
             kind: "remote_committed",
-            ticketId: committedId > 0 ? committedId : (currentOp.ticketId ?? 0),
+            ticketId: getOutcomeTicketId(currentOp, committedId > 0 ? committedId : undefined),
             commentId: currentOp.commentId,
             pending: "remote_reconcile",
             message: remoteResult.error?.message ?? "Secondary child/attachment effects require explicit recovery",
@@ -439,7 +489,7 @@ export class SyncCoordinator {
       if (!committedOp) {
         return {
           kind: "remote_committed",
-          ticketId: remoteResult.createdRemoteId ?? currentOp.ticketId ?? 0,
+          ticketId: getOutcomeTicketId(currentOp, remoteResult.createdRemoteId),
           commentId: currentOp.commentId,
           pending: "remote_reconcile",
           message: "Remote committed but failed to record checkpoint",
@@ -459,7 +509,7 @@ export class SyncCoordinator {
       if (hasUnresolvedChildEffects) {
         return {
           kind: "remote_committed",
-          ticketId: currentOp.createdRemoteId ?? currentOp.ticketId ?? 0,
+          ticketId: getOutcomeTicketId(currentOp),
           pending: "remote_reconcile",
           message: "Unresolved child effects require explicit recovery",
         };
@@ -479,7 +529,7 @@ export class SyncCoordinator {
       if (!reconcileResult.ok) {
         return {
           kind: "remote_committed",
-          ticketId: currentOp.createdRemoteId ?? currentOp.ticketId ?? 0,
+          ticketId: getOutcomeTicketId(currentOp),
           commentId: currentOp.commentId,
           pending: "remote_reconcile",
           message: reconcileResult.message,
@@ -505,7 +555,7 @@ export class SyncCoordinator {
         // INV-N10: Reconciliation→Finalize間のcheckpointが失敗したら completed を返さない
         return {
           kind: "remote_committed",
-          ticketId: currentOp.createdRemoteId ?? currentOp.ticketId ?? 0,
+          ticketId: getOutcomeTicketId(currentOp),
           commentId: currentOp.commentId,
           pending: "remote_reconcile",
           message: "Failed to persist reconciliation checkpoint (record_reconciled_identity or mark_local_finalize_pending)",
@@ -521,7 +571,7 @@ export class SyncCoordinator {
       if (!finalizeResult.ok) {
         return {
           kind: "remote_committed",
-          ticketId: currentOp.createdRemoteId ?? currentOp.ticketId ?? 0,
+          ticketId: getOutcomeTicketId(currentOp),
           commentId: currentOp.commentId,
           pending: "local_finalize",
           message: finalizeResult.message,
@@ -539,7 +589,7 @@ export class SyncCoordinator {
       if (!compRes) {
         return {
           kind: "remote_committed",
-          ticketId: currentOp.createdRemoteId ?? currentOp.ticketId ?? 0,
+          ticketId: getOutcomeTicketId(currentOp),
           commentId: currentOp.commentId,
           pending: "local_finalize",
           message: "Failed to complete operation persistence",
@@ -548,7 +598,7 @@ export class SyncCoordinator {
 
       return {
         kind: "completed",
-        ticketId: currentOp.createdRemoteId ?? currentOp.ticketId ?? 0,
+        ticketId: getOutcomeTicketId(currentOp),
         commentId: currentOp.commentId,
       };
     }
@@ -556,7 +606,7 @@ export class SyncCoordinator {
     // INV-N10: どのphaseにも到達しなかった場合はsafe-sideへ倒す（completed は絶対に返さない）
     return {
       kind: "remote_committed",
-      ticketId: currentOp.createdRemoteId ?? currentOp.ticketId ?? 0,
+      ticketId: getOutcomeTicketId(currentOp),
       commentId: currentOp.commentId,
       pending: "remote_reconcile",
       message: `Unexpected phase after sync lifecycle: ${currentOp.phase}`,
@@ -579,6 +629,11 @@ export class SyncCoordinator {
       | { kind: "reconcile_compensation" };
     deps?: OperationHandlerDeps;
   }): Promise<SyncOutcome> {
+    if (input.resolution?.kind === "link_created_ticket") {
+      input = { ...input, resolution: {
+        kind: "link_remote_ticket", ticketId: input.resolution.ticketId, explicitLink: true,
+      } };
+    }
     const scope = input.context.connectionScope;
     if (!input.operationId || !Number.isInteger(input.operationRevision) || input.operationRevision <= 0) {
       return {
@@ -790,7 +845,7 @@ export class SyncCoordinator {
         if (isPrimaryCommitted) {
           return {
             kind: "remote_committed",
-            ticketId: freshOp.createdRemoteId ?? freshOp.ticketId ?? 0,
+            ticketId: getOutcomeTicketId(freshOp),
             commentId: freshOp.commentId,
             pending: "remote_reconcile",
             message: "Primary mutation is already committed. Use effect-specific recovery for remaining secondary effects.",
@@ -848,11 +903,16 @@ export class SyncCoordinator {
         let linkedProjectId: number | undefined;
         if (isComment) {
           const commentDeps = { ...defaultCommentDeps, ...input.deps?.comment };
+          const primarySnapshot = freshPrimaryEffect?.requestSnapshot;
+          const submittedBody =
+            primarySnapshot?.kind === "comment_create" || primarySnapshot?.kind === "comment_update"
+              ? primarySnapshot.request?.notes ?? primarySnapshot.submittedBody
+              : undefined;
           const verified = await reconcileCommentCommitUnknown(
             {
               ticketId: freshOp.ticketId ?? (freshOp.intent as any)?.ticketId ?? 0,
               commentId: freshOp.commentId,
-              body: (freshOp.intent as any)?.body ?? "",
+              body: submittedBody ?? freshPrimaryEffect?.target?.submittedBody ?? (freshOp.intent as any)?.body ?? "",
               documentUri: freshOp.documentUri,
               operationId: freshOp.operationId,
               phase: freshOp.phase as any,
@@ -938,13 +998,13 @@ export class SyncCoordinator {
           if (compOp) {
             return {
               kind: "completed",
-              ticketId: transitioned.createdRemoteId ?? transitioned.ticketId ?? 0,
+              ticketId: getOutcomeTicketId(transitioned),
               commentId: isComment ? remoteId : undefined,
             };
           }
-          return { kind: "remote_committed", ticketId: transitioned.createdRemoteId ?? 0, commentId: isComment ? remoteId : undefined, pending: "local_finalize", message: "Failed to persist complete state" };
+          return { kind: "remote_committed", ticketId: getOutcomeTicketId(transitioned), commentId: isComment ? remoteId : undefined, pending: "local_finalize", message: "Failed to persist complete state" };
         }
-        return { kind: "remote_committed", ticketId: transitioned.createdRemoteId ?? 0, commentId: isComment ? remoteId : undefined, pending: "local_finalize", message: fin.message };
+        return { kind: "remote_committed", ticketId: getOutcomeTicketId(transitioned), commentId: isComment ? remoteId : undefined, pending: "local_finalize", message: fin.message };
       }
 
       if ((input.resolution as any)?.kind === "assume_remote_commit" || (input.resolution as any)?.kind === "assume_update_committed") {
@@ -967,7 +1027,7 @@ export class SyncCoordinator {
         if (!reconciled.ok) {
           return {
             kind: "remote_committed",
-            ticketId: assumed.createdRemoteId ?? assumed.ticketId ?? 0,
+            ticketId: getOutcomeTicketId(assumed),
             commentId: assumed.commentId,
             pending: "remote_reconcile",
             message: reconciled.message,
@@ -979,20 +1039,20 @@ export class SyncCoordinator {
           if (compOp) {
             return {
               kind: "completed",
-              ticketId: assumed.createdRemoteId ?? assumed.ticketId ?? 0,
+              ticketId: getOutcomeTicketId(assumed),
               commentId: assumed.commentId,
             };
           }
           return {
             kind: "remote_committed",
-            ticketId: assumed.createdRemoteId ?? assumed.ticketId ?? 0,
+            ticketId: getOutcomeTicketId(assumed),
             pending: "local_finalize",
             message: "Failed to persist complete state",
           };
         }
         return {
           kind: "remote_committed",
-          ticketId: assumed.createdRemoteId ?? assumed.ticketId ?? 0,
+          ticketId: getOutcomeTicketId(assumed),
           pending: "local_finalize",
           message: fin.message,
         };
@@ -1016,13 +1076,13 @@ export class SyncCoordinator {
           if (compOp) {
             return {
               kind: "completed",
-              ticketId: transitioned.createdRemoteId ?? transitioned.ticketId ?? 0,
+              ticketId: getOutcomeTicketId(transitioned),
               commentId: transitioned.createdRemoteId ?? transitioned.commentId,
             };
           }
           return {
             kind: "remote_committed",
-            ticketId: transitioned.createdRemoteId ?? 0,
+            ticketId: getOutcomeTicketId(transitioned),
             commentId: transitioned.createdRemoteId ?? transitioned.commentId,
             pending: "local_finalize",
             message: "Failed to persist complete state",
@@ -1030,7 +1090,7 @@ export class SyncCoordinator {
         }
         return {
           kind: "remote_committed",
-          ticketId: transitioned.createdRemoteId ?? 0,
+          ticketId: getOutcomeTicketId(transitioned),
           commentId: transitioned.createdRemoteId ?? transitioned.commentId,
           pending: "local_finalize",
           message: fin.message,
@@ -1205,7 +1265,7 @@ export class SyncCoordinator {
     }
 
     const endActiveSync = beginActiveSync(scope, op.operationId);
-    const flightPromise: Promise<SyncOutcome> = (async (): Promise<SyncOutcome> => {
+    const flightPromise: Promise<SyncOutcome> = runWithConnectionScope(scope, async (): Promise<SyncOutcome> => {
       const handler = this.handlers[op.kind];
       const handlerCtx: OperationHandlerContext = { connectionScope: scope };
       const repository = withAttemptGenerationFence(this.repository, currentAttemptGeneration);
@@ -1226,7 +1286,7 @@ export class SyncCoordinator {
         kind: "failed_before_commit",
         error: new Error(`Handler for "${op.kind}" does not support effect-specific recovery for effectId "${input.effectId}"`),
       };
-    })();
+    });
 
     this.inFlight.set(flightKey, flightPromise);
     try {

@@ -16,7 +16,7 @@ import { MemorySecretStorage } from "./helpers/secretStorage";
 import { createTestMemento, type TestMemento } from "./helpers/vscodeMemento";
 
 type RemoteState = {
-  estimatedHours?: number;
+  estimatedHours?: number | null;
   appliedHours?: number;
   updates: string[];
 };
@@ -82,11 +82,11 @@ const withIssueServer = async (
 };
 
 suite("予定工数の詳細取得と結果不明更新の照合", () => {
-  for (const value of [0, 4.5, undefined]) {
-    test(`getIssueDetail は estimated_hours=${String(value)} をそのまま取り込む`, async () => {
+  for (const value of [0, 4.5, undefined, null]) {
+    test(`getIssueDetail は estimated_hours=${String(value)} の未設定値を正規化する`, async () => {
       await withIssueServer(async (_scope, state) => {
         state.estimatedHours = value;
-        assert.strictEqual((await getIssueDetail(501)).ticket.estimatedHours, value);
+        assert.strictEqual((await getIssueDetail(501)).ticket.estimatedHours, value ?? undefined);
       });
     });
   }

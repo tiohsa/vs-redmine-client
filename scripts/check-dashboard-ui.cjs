@@ -156,6 +156,7 @@ async function main() {
   await evaluate(`window.messages.length=0;document.getElementById('project-select-trigger').click();document.getElementById('project-search-input').value='nagoya';document.getElementById('project-search-input').dispatchEvent(new Event('input',{bubbles:true}))`);
   assert.equal(await evaluate(`document.getElementById('project-search-clear-btn').hidden`), false, 'custom project search clear button appears with a query');
   assert.deepEqual(await projectNames(), ['Production', 'Japan', 'Nagoya Plant', 'USA']);
+  assert.deepEqual(await evaluate(`Array.from(document.querySelectorAll('.project-group-label')).map(x=>x.textContent)`), [strings.projectSearchResults, strings.projectSelectedOutsideSearch]);
   assert.equal(await evaluate(`document.getElementById('project-select-label').textContent`), 'USA');
   assert.equal(await evaluate(`window.messages.length`), 0, 'project search must not post any message');
   assert.equal(await evaluate(`document.querySelector('#project-listbox [data-project-id="5"]').getAttribute('aria-selected')`), 'true');
@@ -372,6 +373,24 @@ async function main() {
   const discardCount = await evaluate(`window.messages.filter(m=>m.type==='unsynced.discardOne').length`);
   await evaluate(`document.querySelectorAll('#unsynced-list button:disabled').forEach(button=>button.click())`);
   assert.equal(await evaluate(`window.messages.filter(m=>m.type==='unsynced.discardOne').length`), discardCount);
+  assert.equal(await evaluate(`document.querySelectorAll('#unsynced-list [data-unsynced-action="sync"].btn-primary').length`), 3);
+  assert.equal(await evaluate(`document.querySelectorAll('#unsynced-list .unsynced-more button:disabled[aria-describedby]').length`), 3);
+  // 更新しても同じ操作、消えた場合は隣の行にフォーカスを戻す。
+  await evaluate(`document.querySelector('[data-sync-key]').focus()`);
+  await push();
+  assert.equal(await evaluate(`document.activeElement.dataset.unsyncedAction`), 'sync');
+  const focusItem=state.unsynced.items.shift(); state.unsynced.totalCount--;
+  await push();
+  assert.equal(await evaluate(`document.activeElement.dataset.queueKey`), JSON.stringify(state.unsynced.items[0].key));
+  state.unsynced.items.unshift(focusItem); state.unsynced.totalCount++;
+  await push();
+  await evaluate(`const menu=document.querySelector('.unsynced-more');menu.open=true;menu.querySelector('[data-abandon-key]').focus()`);
+  await push();
+  assert.equal(await evaluate(`document.activeElement.dataset.unsyncedAction`), 'abandon');
+  assert.equal(await evaluate(`document.querySelector('.unsynced-more').open`), true);
+  await key('Escape');
+  assert.equal(await evaluate(`document.activeElement.dataset.unsyncedAction`), 'more');
+  assert.equal(await evaluate(`document.querySelector('.unsynced-more').open`), false);
   // nextIntent のみ破棄可能なら同じ queued 表示でも操作が有効になる。
   state.unsynced.items.forEach(item => { item.canDiscard = true; item.discardMode = 'nextIntent'; });
   await push();
@@ -380,14 +399,73 @@ async function main() {
   assert.equal(await evaluate(`document.querySelector('#unsynced-list [data-discard-key]').getAttribute('title')`), strings.discardLaterChangesTitle);
   await evaluate(`document.querySelector('#unsynced-list [data-discard-key]').click()`);
   assert.equal(await evaluate(`window.messages.at(-1).type`), 'unsynced.discardOne');
+  await evaluate(`window.dispatchEvent(new MessageEvent('message',{data:{type:'operation.success',requestId:window.messages.at(-1).requestId,message:'キャンセル',level:'info'}}))`);
   state.unsynced = { totalCount: 1, items: [
     { key: { kind: 'ticket', ticketId: 10 }, label: 'Ticket', lifecycle: 'queued', canDiscard: true, discardMode: 'active', canSync: true },
   ] };
   await push();
   assert.equal(await evaluate(`document.querySelector('#unsynced-list [data-discard-key]').textContent.trim()`), strings.discardAction);
   assert.equal(await evaluate(`document.querySelector('#unsynced-list [data-discard-key]').getAttribute('title')`), strings.discardTitle);
+  await evaluate(`document.getElementById('toast-area').replaceChildren()`);
+  // Extension Host の応答前にも連打・別入口の同期を抑止する。
+  await evaluate(`window.messages.length=0;document.querySelector('[data-sync-key]').focus()`);
+  await key('Enter');
+  await evaluate(`document.querySelector('[data-sync-key]').click();document.getElementById('sync-all-btn').click()`);
+  assert.equal(await evaluate(`window.messages.filter(m=>m.type.startsWith('unsynced.sync')).length`), 1);
+  const lockedRequest = await evaluate(`window.messages.at(-1).requestId`);
+  assert.equal(await evaluate(`document.querySelector('[data-sync-key]').disabled`), true);
+  assert.equal(await evaluate(`document.querySelector('[data-abandon-key]').disabled`), true);
+  await push();
+  assert.equal(await evaluate(`document.querySelector('[data-sync-key]').disabled`), true, 'rerender keeps the request locked');
+  await evaluate(`window.dispatchEvent(new MessageEvent('message',{data:{type:'operation.success',requestId:${JSON.stringify(lockedRequest)},message:'復旧キャンセル',level:'info'}}))`);
+  assert.equal(await evaluate(`document.querySelector('[data-sync-key]').disabled`), false);
+  assert.equal(await evaluate(`document.querySelector('#unsynced-feedback').classList.contains('info')`), true);
+  assert.equal(await evaluate(`document.querySelectorAll('#toast-area .toast').length`), 0, 'visible inline feedback does not duplicate a toast');
+  // 中止済み記録は一括削除を一度だけ要求し、キャンセル後も操作を続けられる。
+  assert.equal(await evaluate(`document.getElementById('forget-all-abandoned-btn').classList.contains('hidden')`), true);
+  state.unsynced.abandonedItems = [
+    { key: { kind: 'ticket', ticketId: 90 }, label: '中止済みチケット', abandonedAt: 1 },
+    { key: { kind: 'newTicket', queueId: 'old-new' }, label: '中止済み新規チケット', abandonedAt: 2 },
+  ];
+  await push();
+  assert.equal(await evaluate(`document.getElementById('forget-all-abandoned-btn').classList.contains('hidden')`), false);
+  await evaluate(`window.messages.length=0;document.getElementById('forget-all-abandoned-btn').click();document.getElementById('forget-all-abandoned-btn').click()`);
+  assert.equal(await evaluate(`window.messages.filter(m=>m.type==='unsynced.forgetAllAbandoned').length`), 1);
+  assert.equal(await evaluate(`document.getElementById('forget-all-abandoned-btn').disabled`), true);
+  const deleteRequest = await evaluate(`window.messages.at(-1).requestId`);
+  await evaluate(`window.dispatchEvent(new MessageEvent('message',{data:{type:'operation.success',requestId:${JSON.stringify(deleteRequest)},message:'削除キャンセル',level:'info'}}))`);
+  assert.equal(await evaluate(`document.getElementById('forget-all-abandoned-btn').disabled`), false);
+  state.unsynced.abandonedItems = [];
+  await push();
+  assert.equal(await evaluate(`document.getElementById('forget-all-abandoned-btn').classList.contains('hidden')`), true);
+  state.unsynced.items[0].lifecycle = 'commit_unknown';
+  state.unsynced.items[0].requiresReview = true;
+  state.unsynced.items[0].canDiscard = false;
+  state.unsynced.items[0].discardMode = 'none';
+  state.unsynced.items[0].canSync = false;
+  await push();
+  assert.ok(await evaluate(`document.querySelector('.unsynced-state').textContent.includes(${JSON.stringify(strings.syncOutcomeUnknown)})`));
+  await evaluate(`window.dispatchEvent(new MessageEvent('message',{data:{type:'operation.success',requestId:'unrelated',message:'完了'}}))`);
+  assert.equal(await evaluate(`document.querySelectorAll('#unsynced-list .unsynced-actions button:disabled').length`), 2, 'policy-disabled buttons stay disabled after completion');
+  assert.ok(await evaluate(`document.querySelector('.unsynced-state .badge').classList.contains('sync-review')`));
+  const queueViewport=await evaluate(`({width:innerWidth,height:innerHeight,theme:document.body.className})`);
+  for(const width of [320,440,768]){
+    await call('Emulation.setDeviceMetricsOverride', {width,height:800,deviceScaleFactor:1,mobile:false});
+    for(const theme of ['vscode-light','vscode-dark']){
+      await evaluate(`document.body.className=${JSON.stringify(theme)};document.querySelector('.unsynced-more').open=true;document.getElementById('toast-area').replaceChildren()`);
+      await settleViewport();
+      assert.equal(await evaluate(`document.querySelector('.unsynced-more-actions').getBoundingClientRect().right <= innerWidth`), true);
+      assert.equal(await evaluate(`document.querySelector('[data-unsynced-action="sync"]').getBoundingClientRect().height < 64`), true, 'expanded menu must not stretch the primary action');
+      const screenshot=await call('Page.captureScreenshot',{format:'png'});
+      fs.writeFileSync(path.join(directory,'unsynced-'+width+'-'+theme+'.png'),Buffer.from(screenshot.data,'base64'));
+    }
+  }
+  await call('Emulation.setDeviceMetricsOverride', {width:queueViewport.width,height:queueViewport.height,deviceScaleFactor:1,mobile:false});
+  await evaluate(`document.body.className=${JSON.stringify(queueViewport.theme)};document.getElementById('unsynced-feedback').classList.add('hidden');document.querySelector('.unsynced-more summary').focus()`);
+
   state.unsynced = { totalCount: 0, items: [] };
   await push();
+  assert.equal(await evaluate(`document.activeElement.id`), 'unsynced-list', 'empty queue keeps focus even before result feedback arrives');
   assert.ok(await evaluate(`document.getElementById('sync-tray').textContent.includes(${JSON.stringify(strings.syncTrayAllClear)})`));
   await evaluate(`document.getElementById('tab-tickets').click()`);
   assert.equal(await evaluate(`document.querySelectorAll('#search-clear-btn').length`), 1);
@@ -631,7 +709,7 @@ async function main() {
   await evaluate(`window.dispatchEvent(new MessageEvent('message',{data:{type:'operation.error',requestId:'${failedSync}',message:'同期に失敗しました'}}))`);
   assert.equal(await evaluate(`document.getElementById('detail-sync-btn').disabled`), false);
   assert.equal(await evaluate(`document.querySelector('.toast-error:last-child').textContent`), '同期に失敗しました');
-  for (const [syncState, label] of [['Synced', strings.synced], ['Draft', strings.draft], ['Dirty', strings.syncDirty], ['Queued', strings.syncQueued], ['Syncing', strings.syncSyncing], ['Failed', strings.syncFailed], ['Conflict', strings.syncConflict], ['RecoveryPending', strings.syncReviewRequired], ['CommitUnknown', strings.syncReviewRequired]]) {
+  for (const [syncState, label] of [['Synced', strings.synced], ['Draft', strings.draft], ['Dirty', strings.syncDirty], ['Queued', strings.syncQueued], ['Syncing', strings.syncSyncing], ['Failed', strings.syncFailed], ['Conflict', strings.syncConflict], ['RecoveryPending', strings.syncRecoveryPending], ['CommitUnknown', strings.syncOutcomeUnknown]]) {
     state.selectedTicket.syncState = syncState;
     await push();
     assert.equal(await evaluate(`document.getElementById('detail-sync-state').textContent`), label);
@@ -965,6 +1043,20 @@ async function main() {
   await push();
   await evaluate(`if(document.getElementById('ticket-detail-toggle').getAttribute('aria-expanded')==='false') document.getElementById('ticket-detail-toggle').click(); document.querySelector('.tickets-layout').scrollTop=0; document.getElementById('ticket-scroll').scrollTop=0`);
   await evaluate('new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)))');
+  assert.equal(await evaluate(`parseFloat(getComputedStyle(document.querySelector('.ticket-subject')).fontSize)`), 13);
+  await evaluate(`document.documentElement.style.setProperty('--vscode-font-size','16px')`);
+  assert.equal(await evaluate(`parseFloat(getComputedStyle(document.querySelector('.ticket-subject')).fontSize)`), 16);
+  await evaluate(`document.documentElement.style.removeProperty('--vscode-font-size');document.getElementById('detail-focus-toggle').click()`);
+  assert.equal(await evaluate(`getComputedStyle(document.querySelector('.tickets-master')).display`), 'none');
+  assert.equal(await evaluate(`window.acquireVsCodeApi().getState().detailFocus`), true);
+  await push();
+  assert.equal(await evaluate(`getComputedStyle(document.querySelector('.tickets-master')).display`), 'none');
+  await evaluate(`document.getElementById('detail-focus-toggle').click()`);
+  assert.notEqual(await evaluate(`getComputedStyle(document.querySelector('.tickets-master')).display`), 'none');
+  await evaluate(`window.dispatchEvent(new MessageEvent('message',{data:{type:'toast',level:'info',message:'位置確認'}}))`);
+  await evaluate('new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)))');
+  assert.equal(await evaluate(`document.getElementById('toast-area').getBoundingClientRect().bottom < document.getElementById('sync-tray').getBoundingClientRect().top`), true);
+  await evaluate(`document.getElementById('toast-area').replaceChildren()`);
   const preview = await call('Page.captureScreenshot', { format: 'png' });
   fs.writeFileSync(path.join(directory, 'dashboard-preview.png'), Buffer.from(preview.data, 'base64'));
   await evaluate(`document.getElementById('ticket-detail-card').scrollIntoView();document.getElementById('metadata-edit-btn').click()`);

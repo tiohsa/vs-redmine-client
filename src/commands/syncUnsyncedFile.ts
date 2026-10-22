@@ -34,19 +34,24 @@ export type SyncFailureReason =
   | "unknown";
 
 export type SyncUnsyncedFileResult =
-  | { status: "success"; kind: "ticket" | "newTicket" | "comment"; id?: number }
+  | { status: "success"; kind: "ticket" | "newTicket" | "comment"; id?: number; hasRemainingChanges?: boolean }
   | { status: "queued"; kind: "ticket" | "newTicket" | "comment"; id?: number }
-  | { status: "no_change"; kind: "ticket" | "newTicket" | "comment"; id?: number }
+  | { status: "no_change"; kind: "ticket" | "newTicket" | "comment"; id?: number; hasRemainingChanges?: boolean }
+  | { status: "commit_unknown" | "recovery_pending"; kind: "ticket" | "newTicket" | "comment"; message: string }
+  | { status: "cancelled"; kind: "ticket" | "newTicket" | "comment" }
   | { status: "conflict"; kind: "ticket"; id: number; conflictContext?: ConflictContext }
   | { status: "conflict"; kind: "comment"; id?: number; commentConflictContext?: CommentConflictContext }
   | { status: "failed"; kind: "ticket" | "newTicket" | "comment"; message?: string; reason?: SyncFailureReason };
 
 type SyncUnsyncedFileOptions = {
+  suppressResultNotifications?: boolean;
   onTicketCreated?: () => void;
   onSubjectUpdated?: (ticketId: number, subject: string) => void;
   createTicketSyncService?: typeof createTicketSyncService;
   createSyncEngine?: typeof createSyncEngine;
 };
+
+type RecoveryCancelled = { kind: "cancelled" };
 
 const normalizeNewTicketSyncFailureMessage = (message?: string): string => {
   if (message === "Ticket subject is required.") {
@@ -74,7 +79,7 @@ const resolveCommitUnknownInteractive = async (
   engine: ReturnType<typeof createSyncEngine>,
   key: TicketSyncQueueKey,
   operationScope: string,
-): Promise<TicketSyncOutcome | undefined> => {
+): Promise<TicketSyncOutcome | RecoveryCancelled | undefined> => {
   const syncContext = { connectionScope: operationScope };
   const items = engine.getRecoveryItems(key, syncContext);
   const primaryItem = items.find((item) => isPrimaryEffectKind(item.effectKind));
@@ -97,7 +102,7 @@ const resolveCommitUnknownInteractive = async (
         resolution: { kind: "reconcile_compensation" },
       });
     }
-    return undefined;
+    return { kind: "cancelled" };
   }
 
   if (showManualRepairRequired(items)) {
@@ -110,6 +115,7 @@ const resolveCommitUnknownInteractive = async (
       ...(actions.includes("link_created_ticket") ? [linkLabel] : []),
       ...(actions.includes("retry_remote_write") ? [retryLabel] : []),
     ];
+    if (createChoices.length === 0) { return undefined; }
     const choice = await vscode.window.showWarningMessage(
       vscode.l10n.t("The previous ticket creation may have reached Redmine. Link the created ticket ID, or retry only after confirming that no ticket was created."),
       { modal: true },
@@ -123,7 +129,7 @@ const resolveCommitUnknownInteractive = async (
           : vscode.l10n.t("Enter a positive ticket ID."),
       });
       if (!rawTicketId) {
-        return undefined;
+        return { kind: "cancelled" };
       }
       return service.resolveCommitUnknown({
         key,
@@ -140,7 +146,7 @@ const resolveCommitUnknownInteractive = async (
         resolution: { kind: "retry_remote_write" },
       });
     }
-    return undefined;
+    return { kind: "cancelled" };
   }
 
   const committedLabel = vscode.l10n.t("Treat as committed");
@@ -150,6 +156,7 @@ const resolveCommitUnknownInteractive = async (
     ...(actions.includes("assume_update_committed") ? [committedLabel] : []),
     ...(actions.includes("retry_remote_write") ? [retryLabel] : []),
   ];
+  if (updateChoices.length === 0) { return undefined; }
   const choice = await vscode.window.showWarningMessage(
     vscode.l10n.t("The previous ticket update may have reached Redmine. Reconcile from Redmine, or retry only after confirming that the update was not applied."),
     { modal: true },
@@ -179,14 +186,14 @@ const resolveCommitUnknownInteractive = async (
       resolution: { kind: "reconcile_remote" },
     });
   }
-  return undefined;
+  return { kind: "cancelled" };
 };
 
 const resolveCommentCommitUnknownInteractive = async (
   engine: ReturnType<typeof createSyncEngine>,
   key: Extract<UnsyncedFileSyncKey, { kind: "comment" }>,
   operationScope: string,
-): Promise<Awaited<ReturnType<typeof engine.syncOne>> | undefined> => {
+): Promise<Awaited<ReturnType<typeof engine.syncOne>> | RecoveryCancelled | undefined> => {
   const recoveryItems = engine.getRecoveryItems(key, { connectionScope: operationScope });
   if (showManualRepairRequired(recoveryItems)) {
     return undefined;
@@ -228,7 +235,7 @@ const resolveCommentCommitUnknownInteractive = async (
         ? undefined
         : vscode.l10n.t("Enter a positive comment journal ID."),
     });
-    if (!rawCommentId) { return undefined; }
+    if (!rawCommentId) { return { kind: "cancelled" }; }
     return engine.resolveCommentCommitUnknown({
       key,
       context: { connectionScope: operationScope },
@@ -238,7 +245,7 @@ const resolveCommentCommitUnknownInteractive = async (
       resolution: { kind: "link_remote_comment", commentId: Number(rawCommentId) },
     });
   }
-  if (choice !== reconcileLabel) { return undefined; }
+  if (choice !== reconcileLabel) { return { kind: "cancelled" }; }
   return engine.resolveCommentCommitUnknown({
     key,
     context: { connectionScope: operationScope },
@@ -253,7 +260,7 @@ const resolveSecondaryEffectsInteractive = async (
   engine: ReturnType<typeof createSyncEngine>,
   key: UnsyncedFileSyncKey,
   operationScope: string,
-): Promise<Awaited<ReturnType<typeof engine.syncOne>> | undefined> => {
+): Promise<Awaited<ReturnType<typeof engine.syncOne>> | RecoveryCancelled | undefined> => {
   const syncContext = { connectionScope: operationScope };
   const items = engine.getRecoveryItems(key, syncContext);
   if (showManualRepairRequired(items)) {
@@ -291,6 +298,7 @@ const resolveSecondaryEffectsInteractive = async (
         { modal: true },
         compLabel,
       );
+      if (choice !== compLabel) { return { kind: "cancelled" }; }
       if (choice === compLabel) {
         const outcome = await engine.resolveEffect({
           key,
@@ -320,11 +328,13 @@ const resolveSecondaryEffectsInteractive = async (
         { modal: true },
         ...choices,
       );
+      if (choice !== linkLabel && choice !== retryLabel) { return { kind: "cancelled" }; }
       if (choice === linkLabel) {
         const rawId = await vscode.window.showInputBox({
           prompt: vscode.l10n.t("Enter the Redmine child ticket ID."),
           validateInput: (val) => /^\d+$/.test(val) && Number(val) > 0 ? undefined : vscode.l10n.t("Enter a positive ticket ID."),
         });
+        if (!rawId) { return { kind: "cancelled" }; }
         if (rawId) {
           const outcome = await engine.resolveEffect({
             key,
@@ -371,6 +381,7 @@ const resolveSecondaryEffectsInteractive = async (
         { modal: true },
         retryLabel,
       );
+      if (choice !== retryLabel) { return { kind: "cancelled" }; }
       if (choice === retryLabel) {
         const outcome = await engine.resolveEffect({
           key,
@@ -417,7 +428,23 @@ const syncUnsyncedFileAtScope = async (
   rewriteDeps: RewriteDocumentDeps,
   operationScope: string,
 ): Promise<SyncUnsyncedFileResult | undefined> => {
+  const showInfoResult = (message: string): void => { if (!options.suppressResultNotifications) { showInfo(message); } };
+  const showWarningResult = (message: string): void => { if (!options.suppressResultNotifications) { showWarning(message); } };
   const { syncKey } = item;
+  const cancelled = (): SyncUnsyncedFileResult => ({ status: "cancelled", kind: syncKey.kind });
+  const hasRemainingChanges = (): boolean => {
+    const remaining = resolveStoredOfflineOperation(getOfflineSyncQueue(operationScope), syncKey)?.value;
+    return !!remaining && !isAbandoned(remaining);
+  };
+  const pendingResult = (outcome: { kind: "commit_unknown" | "remote_committed"; message?: string; pending?: string }): SyncUnsyncedFileResult => {
+    const message = outcome.kind === "commit_unknown"
+      ? vscode.l10n.t("The Redmine write outcome is unknown. Open recovery to check before retrying.")
+      : outcome.pending === "local_finalize"
+        ? vscode.l10n.t("Changes are on Redmine. Resume recovery to finish updating the local file.")
+        : vscode.l10n.t("The Redmine write was recorded. Resume recovery to verify the result and finish synchronization.");
+    showWarningResult(message);
+    return { status: outcome.kind === "commit_unknown" ? "commit_unknown" : "recovery_pending", kind: syncKey.kind, message };
+  };
   const queue = getOfflineSyncQueue(operationScope);
   const stored = resolveStoredOfflineOperation(queue, syncKey)?.value;
   if (stored && isAbandoned(stored)) {
@@ -446,6 +473,7 @@ const syncUnsyncedFileAtScope = async (
         (previousPhase === "remote_committed" || previousPhase === "reconciliation_pending"))
     ) {
       const resolved = await resolveCommitUnknownInteractive(engine.ticketService(), engine, syncKey, operationScope);
+      if (resolved?.kind === "cancelled") { return cancelled(); }
       if (resolved) {
         outcome = resolved;
         primaryResolved = true;
@@ -454,11 +482,13 @@ const syncUnsyncedFileAtScope = async (
     if (!hasPrimaryRecovery || primaryResolved) {
       if (outcome.kind === "failed_before_commit" || outcome.kind === "remote_committed" || outcome.kind === "commit_unknown") {
         const secOutcome = await resolveSecondaryEffectsInteractive(engine, syncKey, operationScope);
+        if (secOutcome?.kind === "cancelled") { return cancelled(); }
         if (secOutcome) {
           outcome = secOutcome;
         }
       }
     }
+    if (outcome.kind === "commit_unknown" || outcome.kind === "remote_committed") { return pendingResult(outcome); }
     if (outcome.kind === "completed" || outcome.kind === "no_change") {
       if (options.onSubjectUpdated && outcome.kind === "completed") {
         const canonicalSubject = getTicketDraft(
@@ -469,17 +499,20 @@ const syncUnsyncedFileAtScope = async (
           options.onSubjectUpdated(syncKey.ticketId, canonicalSubject);
         }
       }
-      showInfo(vscode.l10n.t("Ticket update synced."));
+      showInfoResult(hasRemainingChanges()
+        ? vscode.l10n.t("This sync completed. Later local changes are still waiting to sync.")
+        : vscode.l10n.t("Ticket update synced."));
       return {
         status: outcome.kind === "no_change" ? "no_change" : "success",
         kind: "ticket",
         id: syncKey.ticketId,
+        ...(hasRemainingChanges() ? { hasRemainingChanges: true } : {}),
       };
     } else if (outcome.kind === "queued") {
-      showInfo(vscode.l10n.t("Recovery completed. The item is queued for synchronization."));
+      showInfoResult(vscode.l10n.t("Recovery completed. The item is queued for synchronization."));
       return { status: "queued", kind: "ticket", id: syncKey.ticketId };
     } else if (outcome.kind === "conflict") {
-      showWarning(vscode.l10n.t("Conflicts with remote changes detected. Open the file to review."));
+      showWarningResult(vscode.l10n.t("Conflicts with remote changes detected. Open the file to review."));
       return {
         status: "conflict",
         kind: "ticket",
@@ -492,17 +525,13 @@ const syncUnsyncedFileAtScope = async (
         (outcome.error instanceof TicketSyncQueueItemNotFoundError ||
           outcome.error.message.includes("Queue entry for this ticket update not found"))
       ) {
-        showWarning(vscode.l10n.t("Queue entry for this ticket update not found."));
+        showWarningResult(vscode.l10n.t("Queue entry for this ticket update not found."));
         return undefined;
       }
-      const message = outcome.kind === "remote_committed"
-        ? outcome.message
-        : outcome.kind === "commit_unknown"
-          ? outcome.message
-        : outcome.kind === "failed_before_commit"
+      const message = outcome.kind === "failed_before_commit"
           ? outcome.error.message
           : vscode.l10n.t("Unknown error");
-      showWarning(vscode.l10n.t("Sync failed: {0}", message ?? vscode.l10n.t("Unknown error")));
+      showWarningResult(vscode.l10n.t("Sync failed: {0}", message ?? vscode.l10n.t("Unknown error")));
       return { status: "failed", kind: "ticket", message };
     }
   }
@@ -525,15 +554,16 @@ const syncUnsyncedFileAtScope = async (
         isPrimaryEffectKind(item.effectKind) && item.allowedActions.includes("reconcile_compensation")))
     ) {
       const resolved = await resolveCommitUnknownInteractive(engine.ticketService(), engine, syncKey, operationScope);
-      if (!resolved) {
-        return undefined;
+      if (resolved?.kind === "cancelled") { return cancelled(); }
+      if (resolved) {
+        outcome = resolved;
+        primaryResolved = true;
       }
-      outcome = resolved;
-      primaryResolved = true;
     }
     if (!hasPrimaryRecovery || primaryResolved) {
       if (outcome.kind === "failed_before_commit" || outcome.kind === "remote_committed" || outcome.kind === "commit_unknown") {
         const secOutcome = await resolveSecondaryEffectsInteractive(engine, syncKey, operationScope);
+        if (secOutcome?.kind === "cancelled") { return cancelled(); }
         if (secOutcome) {
           outcome = secOutcome;
         }
@@ -541,47 +571,28 @@ const syncUnsyncedFileAtScope = async (
     }
     if (outcome.kind === "completed") {
       options.onTicketCreated?.();
-      showInfo(vscode.l10n.t("New ticket created."));
-      return { status: "success", kind: "newTicket", id: outcome.ticketId };
+      showInfoResult(hasRemainingChanges()
+        ? vscode.l10n.t("This sync completed. Later local changes are still waiting to sync.")
+        : vscode.l10n.t("New ticket created."));
+      return { status: "success", kind: "newTicket", id: outcome.ticketId, ...(hasRemainingChanges() ? { hasRemainingChanges: true } : {}) };
     }
     if (outcome.kind === "queued") {
-      showInfo(vscode.l10n.t("Recovery completed. The item is queued for synchronization."));
+      showInfoResult(vscode.l10n.t("Recovery completed. The item is queued for synchronization."));
       return { status: "queued", kind: "newTicket" };
     }
-    if (outcome.kind === "remote_committed") {
-      const message = outcome.message ?? vscode.l10n.t(
-        "Ticket #{0} was created, but local finalization is pending.",
-        outcome.ticketId,
-      );
-      showWarning(message);
-      return {
-        status: "failed",
-        kind: "newTicket",
-        message,
-        reason: outcome.pending === "local_finalize" ? "file_rewrite_failed" : "api_error",
-      };
-    }
-    if (outcome.kind === "commit_unknown") {
-      showWarning(outcome.message);
-      return {
-        status: "failed",
-        kind: "newTicket",
-        message: outcome.message,
-        reason: "api_error",
-      };
-    }
+    if (outcome.kind === "commit_unknown" || outcome.kind === "remote_committed") { return pendingResult(outcome); }
     if (
       outcome.kind === "failed_before_commit" &&
       (outcome.error instanceof TicketSyncQueueItemNotFoundError ||
         outcome.error.message.includes("Queue entry for this new ticket not found"))
     ) {
-      showWarning(vscode.l10n.t("Queue entry for this new ticket not found."));
+      showWarningResult(vscode.l10n.t("Queue entry for this new ticket not found."));
       return undefined;
     }
     const message = normalizeNewTicketSyncFailureMessage(
       outcome.kind === "failed_before_commit" ? outcome.error.message : undefined,
     );
-    showWarning(vscode.l10n.t("Sync failed: {0}", message));
+    showWarningResult(vscode.l10n.t("Sync failed: {0}", message));
     return { status: "failed", kind: "newTicket", message, reason: "api_error" };
   }
 
@@ -598,33 +609,40 @@ const syncUnsyncedFileAtScope = async (
       outcome.kind === "failed_before_commit" ||
       (outcome.kind === "remote_committed" && outcome.pending === "remote_reconcile")
     )) {
-      outcome = await resolveCommentCommitUnknownInteractive(
+      const resolved = await resolveCommentCommitUnknownInteractive(
         engine,
         syncKey,
         operationScope,
-      ) ?? outcome;
+      );
+      if (resolved?.kind === "cancelled") { return cancelled(); }
+      outcome = resolved ?? outcome;
     }
     if (outcome.kind === "failed_before_commit" || outcome.kind === "remote_committed") {
       const secOutcome = await resolveSecondaryEffectsInteractive(engine, syncKey, operationScope);
+      if (secOutcome?.kind === "cancelled") { return cancelled(); }
       if (secOutcome) {
         outcome = secOutcome;
       }
     }
+    if (outcome.kind === "commit_unknown" || outcome.kind === "remote_committed") { return pendingResult(outcome); }
     if (outcome.kind === "completed" || outcome.kind === "no_change") {
-      showInfo(vscode.l10n.t("Comment synced."));
+      showInfoResult(hasRemainingChanges()
+        ? vscode.l10n.t("This sync completed. Later local changes are still waiting to sync.")
+        : vscode.l10n.t("Comment synced."));
       if (outcome.kind === "no_change") {
-        return { status: "no_change", kind: "comment" };
+        return { status: "no_change", kind: "comment", ...(hasRemainingChanges() ? { hasRemainingChanges: true } : {}) };
       }
       return {
         status: "success",
         kind: "comment",
-        id: (outcome as { commentId?: number }).commentId,
+        id: "commentId" in outcome ? outcome.commentId : undefined,
+        ...(hasRemainingChanges() ? { hasRemainingChanges: true } : {}),
       };
     } else if (outcome.kind === "queued") {
-      showInfo(vscode.l10n.t("Recovery completed. The item is queued for synchronization."));
+      showInfoResult(vscode.l10n.t("Recovery completed. The item is queued for synchronization."));
       return { status: "queued", kind: "comment" };
     } else if (outcome.kind === "conflict") {
-      showWarning(vscode.l10n.t("Conflicts with remote changes detected. Open the file to review."));
+      showWarningResult(vscode.l10n.t("Conflicts with remote changes detected. Open the file to review."));
       return {
         status: "conflict",
         kind: "comment",
@@ -634,14 +652,12 @@ const syncUnsyncedFileAtScope = async (
     } else {
       const message = outcome.kind === "failed_before_commit"
         ? outcome.error.message
-        : outcome.kind === "commit_unknown" || outcome.kind === "remote_committed"
-          ? outcome.message
         : vscode.l10n.t("Unknown error");
       if (message === "Queue entry for this comment update not found.") {
-        showWarning(vscode.l10n.t("Queue entry for this comment update not found."));
+        showWarningResult(vscode.l10n.t("Queue entry for this comment update not found."));
         return undefined;
       }
-      showWarning(vscode.l10n.t("Sync failed: {0}", message ?? vscode.l10n.t("Unknown error")));
+      showWarningResult(vscode.l10n.t("Sync failed: {0}", message ?? vscode.l10n.t("Unknown error")));
       return { status: "failed", kind: "comment", message };
     }
   }

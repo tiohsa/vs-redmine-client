@@ -104,7 +104,7 @@ export type QuickFilterCapability = "loading" | "available" | "unavailable";
 export type DashboardUnsyncedKind = "ticket" | "newTicket" | "comment";
 
 export type DashboardUnsyncedKey =
-  | { kind: "ticket"; ticketId: number }
+  | { kind: "ticket"; ticketId: number; operationId?: string; abandonedAt?: number }
   | { kind: "newTicket"; queueId?: string; documentUri?: string }
   | { kind: "comment"; ticketId: number; commentId?: number; documentUri?: string; operationId?: string };
 
@@ -332,6 +332,8 @@ export type DashboardRequest =
   | { type: "unsynced.syncOne"; requestId: string; key: DashboardUnsyncedKey }
   | { type: "unsynced.discardOne"; requestId: string; key: DashboardUnsyncedKey }
   | { type: "unsynced.abandonOne"; requestId: string; key: DashboardUnsyncedKey }
+  | { type: "unsynced.forgetAbandoned"; requestId: string; key: DashboardUnsyncedKey }
+  | { type: "unsynced.forgetAllAbandoned"; requestId: string }
   | { type: "unsynced.startNewTicketEdit"; requestId: string; ticketId: number }
   | { type: "unsynced.syncAll"; requestId: string }
   | { type: "settings.update"; requestId: string; patch: DashboardSettingsPatch }
@@ -347,7 +349,7 @@ export type DashboardRequest =
 export type DashboardEvent =
   | { type: "dashboard.state"; state: DashboardState }
   | { type: "operation.started"; requestId: string; label?: string }
-  | { type: "operation.success"; requestId: string; message: string }
+  | { type: "operation.success"; requestId: string; message: string; level?: "success" | "info" | "warning" }
   | { type: "operation.error"; requestId: string; message: string }
   | { type: "toast"; level: "info" | "warning" | "error" | "success"; message: string };
 

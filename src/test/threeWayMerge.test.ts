@@ -2,6 +2,11 @@ import * as assert from "assert";
 import { containsConflictMarkers, mergeThreeWay } from "../utils/threeWayMerge";
 
 suite("threeWayMerge", () => {
+  test("RedmineのCRLFとeditorのLFを同じ行として統合する", () => {
+    assert.deepStrictEqual(mergeThreeWay("one\r\ntwo\r\nthree", "local one\ntwo\nthree", "one\r\ntwo\r\nremote three"), {
+      content: "local one\ntwo\nremote three", hasConflicts: false,
+    });
+  });
   test("片側だけの変更を採用する", () => {
     const result = mergeThreeWay("one\ntwo", "one\nlocal", "one\ntwo");
 

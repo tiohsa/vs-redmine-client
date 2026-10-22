@@ -59,7 +59,7 @@ export interface ComposerSyncTestHooks {
 export interface DashboardControllerOptions {
   store: DashboardStateStore;
   notifyOperationStarted: (requestId: string, label?: string) => void;
-  notifySuccess: (requestId: string, msg: string) => void;
+  notifySuccess: (requestId: string, msg: string, level?: "success" | "info" | "warning") => void;
   notifyError: (requestId: string, msg: string) => void;
   notifyToast: (level: "info" | "warning" | "error" | "success", msg: string) => void;
   onTicketsRefreshed: () => void;
@@ -482,6 +482,12 @@ export class DashboardController {
         break;
       case "unsynced.abandonOne":
         await this.unsyncedService.handleAbandonOne(req.requestId, req.key);
+        break;
+      case "unsynced.forgetAbandoned":
+        await this.unsyncedService.handleForgetAbandoned(req.requestId, req.key);
+        break;
+      case "unsynced.forgetAllAbandoned":
+        await this.unsyncedService.handleForgetAllAbandoned(req.requestId);
         break;
       case "unsynced.startNewTicketEdit":
         await this.unsyncedService.handleStartNewTicketEdit(req.requestId, req.ticketId);

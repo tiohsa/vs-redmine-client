@@ -22,6 +22,7 @@ import {
   DurableSyncEffectState,
   EffectFailureInfo,
   getAttemptGeneration,
+  getPrimaryEffectForRevision,
   normalizeAttemptGeneration,
   isPrimaryEffectKind,
   evaluateAttemptClosure,
@@ -92,6 +93,18 @@ export type PrimaryRemoteTransition =
   | {
       kind: "commit_unknown";
       detail?: string;
+    }
+  | {
+      kind: "reconcile";
+      remoteId: number;
+      projectId?: number;
+      remoteUpdatedAt?: string;
+    }
+  | {
+      kind: "assume_committed";
+      remoteId?: number;
+      projectId?: number;
+      remoteUpdatedAt?: string;
     }
   | {
       kind: "failed";
@@ -202,6 +215,9 @@ export const toUnifiedOperationFromTicket = (
     description: ticket.nextIntent.description,
     content: ticket.nextIntent.content,
     metadata: ticket.nextIntent.metadata,
+    attachments: ticket.nextIntent.attachments,
+    uploadTokens: ticket.nextIntent.uploadTokens,
+    childTickets: ticket.nextIntent.childTickets,
     revision: ticket.nextIntent.revision,
     layout: ticket.nextIntent.layout ?? ticket.layout,
     metadataBlock: ticket.nextIntent.metadataBlock ?? ticket.metadataBlock,
@@ -310,9 +326,18 @@ export const toUnifiedOperationFromNewTicket = (
 export const toUnifiedOperationFromComment = (
   comment: OfflineCommentUpdate,
   scope: string,
-): UnifiedSyncOperation<CommentCreateIntent | CommentUpdateIntent> => ({
+): UnifiedSyncOperation<CommentCreateIntent | CommentUpdateIntent> => {
+  const primary = getPrimaryEffectForRevision(comment);
+  const kind = primary?.kind === "comment_create" || primary?.kind === "comment_update"
+    ? primary.kind
+    : comment.commentId !== undefined ? "comment_update" : "comment_create";
+  const persistedRemoteId = "createdRemoteId" in comment && typeof comment.createdRemoteId === "number"
+    ? comment.createdRemoteId
+    : undefined;
+
+  return ({
   operationId: comment.operationId ?? `${scope}:comment:${comment.ticketId}:${comment.commentId ?? comment.documentUri}`,
-  kind: comment.commentId !== undefined ? "comment_update" : "comment_create",
+  kind,
   key: { kind: "comment", ticketId: comment.ticketId, commentId: comment.commentId, documentUri: comment.documentUri, operationId: comment.operationId },
   connectionScope: scope,
   phase: (comment.phase ?? "queued") as GenericSyncPhase,
@@ -324,10 +349,12 @@ export const toUnifiedOperationFromComment = (
   ticketId: comment.ticketId,
   commentId: comment.commentId,
   documentUri: comment.documentUri,
-  createdRemoteId: undefined,
+  createdRemoteId: kind === "comment_create"
+    ? persistedRemoteId ?? primary?.remoteId ?? comment.commentId
+    : undefined,
   projectId: comment.remoteProjectId,
   effects: comment.effects,
-  intent: (comment.commentId !== undefined ? {
+  intent: (kind === "comment_update" ? {
     ticketId: comment.ticketId,
     commentId: comment.commentId,
     baseBody: comment.baseBody,
@@ -345,7 +372,7 @@ export const toUnifiedOperationFromComment = (
     sourceNotesHash: comment.sourceNotesHash,
     finalizeDraft: comment.finalizeDraft,
   }) as any,
-  nextIntent: comment.nextIntent ? (comment.commentId !== undefined ? {
+  nextIntent: comment.nextIntent ? (kind === "comment_update" ? {
     ticketId: comment.ticketId,
     commentId: comment.commentId,
     baseBody: comment.baseBody,
@@ -363,7 +390,8 @@ export const toUnifiedOperationFromComment = (
   }) as any : undefined,
   createdAt: comment.createdAt ?? Date.now(),
   updatedAt: comment.createdAt ?? Date.now(),
-});
+  });
+};
 
 const toUnifiedOperationFromStored = (
   stored: ResolvedStoredOperation,
@@ -525,6 +553,9 @@ export class DefaultSyncOperationRepository implements SyncOperationRepository {
         baseDescription: intent?.baseDescription ?? nextQueue.tickets.get(operation.ticketId)?.baseDescription ?? "",
         subject: intent?.subject,
         description: intent?.description,
+        attachments: intent?.attachments,
+        uploadTokens: intent?.uploadTokens,
+        childTickets: intent?.childTickets,
         createdChildIds: operation.createdChildIds,
         effects: operation.effects ?? nextQueue.tickets.get(operation.ticketId)?.effects,
         metadata: intent?.metadata ?? { tracker: "", priority: "", status: "", due_date: "", children: [] },
@@ -541,6 +572,9 @@ export class DefaultSyncOperationRepository implements SyncOperationRepository {
           description: nextIntent.description,
           content: nextIntent.content ?? nextIntent.description,
           metadata: nextIntent.metadata,
+          attachments: nextIntent.attachments,
+          uploadTokens: nextIntent.uploadTokens,
+          childTickets: nextIntent.childTickets,
           layout: nextIntent.layout,
           metadataBlock: nextIntent.metadataBlock,
           controlFields: nextIntent.controlFields,
@@ -636,6 +670,7 @@ export class DefaultSyncOperationRepository implements SyncOperationRepository {
         baseDir: intentObj?.baseDir,
         documentUri: operation.documentUri ?? intentObj?.documentUri,
         createdRemoteId: operation.createdRemoteId,
+        remoteProjectId: operation.projectId,
         finalizeDraft: (intentObj as any)?.finalizeDraft ?? (operation as any).finalizeDraft,
         sourceNotesHash: (intentObj as any)?.sourceNotesHash ?? (operation as any).sourceNotesHash,
         lastKnownRemoteUpdatedAt: (intentObj as any)?.lastKnownRemoteUpdatedAt ?? operation.remoteUpdatedAt,
@@ -709,6 +744,14 @@ export class DefaultSyncOperationRepository implements SyncOperationRepository {
         return undefined;
       }
 
+      if ((action.kind === "record_reconciled_identity" || action.kind === "assume_remote_commit") &&
+          getPrimaryEffectForRevision(current)?.state === "commit_unknown") {
+        // 照合済みidentityとPrimary Effectの確定も同じ永続transactionで公開する。
+        return this.transitionPrimaryRemoteWrite(key, action.kind === "record_reconciled_identity"
+          ? { ...action, kind: "reconcile" }
+          : { ...action, kind: "assume_committed" }, scope, expected);
+      }
+
       return this.saveOperationInternal(next, scope, current.version ?? current.persistenceVersion);
     });
   }
@@ -775,6 +818,13 @@ export class DefaultSyncOperationRepository implements SyncOperationRepository {
       let effectAction: DurableSyncEffectAction;
 
       switch (transition.kind) {
+        case "reconcile":
+        case "assume_committed":
+          opAction = transition.kind === "reconcile"
+            ? { ...transition, kind: "record_reconciled_identity" }
+            : { ...transition, kind: "assume_remote_commit" };
+          effectAction = { kind: "assume_committed", remoteId: transition.remoteId };
+          break;
         case "start":
           opAction = { kind: "start_normal_remote_write" };
           effectAction = { kind: "start", requestSnapshot: transition.requestSnapshot };

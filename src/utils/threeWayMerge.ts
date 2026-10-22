@@ -6,7 +6,7 @@ const CONFLICT_START = "<<<<<<< LOCAL";
 const CONFLICT_SEPARATOR = "=======";
 const CONFLICT_END = ">>>>>>> REMOTE";
 
-const splitLines = (content: string): string[] => content.split("\n");
+const splitLines = (content: string): string[] => content.split(/\r?\n/);
 
 const changesFrom = (base: string[], variant: string[]): Change[] => {
   const width = variant.length + 1;

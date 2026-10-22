@@ -321,7 +321,11 @@ suite("sync conflict residuals", () => {
     initializeOfflineSyncStore(memento, scope);
     const editor = createMutableEditorStub(
       vscode.Uri.parse("file:///tmp/redmine-client-comment-update-314-407.md"),
-      "Local comment body",
+      buildCommentUpdateFileContent({
+        issueId: ticketId,
+        journalId: commentId,
+        sourceNotesHash: computeNotesHash("Base comment body"),
+      }, "Local comment body"),
     );
     initializeCommentEdit(commentId, ticketId, "Base comment body", "t1", scope);
     await addOfflineCommentUpdateAsync({

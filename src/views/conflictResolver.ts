@@ -1,6 +1,9 @@
 import * as vscode from "vscode";
 import { ConflictContext, TicketSaveResult } from "./ticketSaveTypes";
-import { reloadTicketEditor } from "./ticketSaveSync";
+import type { TicketReloadDependencies } from "./ticketSaveSync";
+import { getIssueDetail } from "../redmine/issues";
+import { metadataFromTicket } from "./ticketSync/ticketRemoteContent";
+import { mapErrorToResult } from "./ticketSync/ticketSyncResult";
 import {
     createTicketSyncService,
     ticketSyncOutcomeToSaveResult,
@@ -74,6 +77,35 @@ const commentConflictExpectation = (
     } : undefined;
 };
 
+/** キューの確定に失敗した場合、自分が適用した編集だけを取り消す。 */
+const applyConflictEditorContent = async (
+    editor: vscode.TextEditor,
+    content: string,
+    removeQueueEntry: () => Promise<boolean>,
+): Promise<boolean> => {
+    const previousContent = editor.document.getText();
+    await applyEditorContent(editor, content);
+    const appliedContent = editor.document.getText();
+    // VS Code は文書の EOL に合わせて編集を正規化する。
+    if (appliedContent.replace(/\r\n/g, "\n") !== content.replace(/\r\n/g, "\n")) { return false; }
+    const appliedVersion = editor.document.version;
+    const restore = async (): Promise<void> => {
+        // 永続化待機中のユーザー編集や別の解決処理を上書きしない。
+        if (editor.document.version === appliedVersion && editor.document.getText() === appliedContent) {
+            await applyEditorContent(editor, previousContent);
+        }
+    };
+    let removed: boolean;
+    try {
+        removed = await removeQueueEntry();
+    } catch (error) {
+        await restore();
+        throw error;
+    }
+    if (!removed) { await restore(); }
+    return removed;
+};
+
 /**
  * Show a dialog asking the user how to resolve the conflict.
  */
@@ -138,21 +170,36 @@ export async function applyRemoteContent(
     editor: vscode.TextEditor,
     operationScope?: string,
     expectedOperation?: OfflineTicketConflictExpectation,
+    deps: Pick<TicketReloadDependencies, "getIssueDetail"> = { getIssueDetail },
 ): Promise<TicketSaveResult> {
     const removalExpectation = expectedOperation ??
         ticketConflictExpectation(context.ticketId, operationScope);
-    const result = await reloadTicketEditor({
-        ticketId: context.ticketId,
-        editor,
-        operationScope,
-    });
-    if (result.status === "success") {
-        // The queued local snapshot was the source of this conflict. It must not
-        // be retried after the editor has been replaced with the remote state.
-        const removed = await removeOfflineTicketUpdateIfMatchesAsync(
-            context.ticketId,
-            removalExpectation,
-            operationScope,
+    const previousContent = editor.document.getText();
+    const previousVersion = editor.document.version;
+    try {
+        if (removalExpectation && previousContent !== removalExpectation.content) {
+            return {
+                status: "conflict",
+                message: vscode.l10n.t("Remote changes detected. Refresh before saving."),
+                conflictContext: context,
+            };
+        }
+        const detail = await deps.getIssueDetail(context.ticketId);
+        if (editor.document.version !== previousVersion || editor.document.getText() !== previousContent) {
+            return {
+                status: "conflict",
+                message: vscode.l10n.t("Remote changes detected. Refresh before saving."),
+                conflictContext: context,
+            };
+        }
+        const removed = await applyConflictEditorContent(
+            editor,
+            buildTicketPreviewContent(detail.ticket),
+            () => removeOfflineTicketUpdateIfMatchesAsync(
+                context.ticketId,
+                removalExpectation,
+                operationScope,
+            ),
         );
         if (!removed) {
             return {
@@ -161,8 +208,18 @@ export async function applyRemoteContent(
                 conflictContext: context,
             };
         }
+        updateDraftAfterSave(
+            context.ticketId,
+            detail.ticket.subject,
+            detail.ticket.description ?? "",
+            metadataFromTicket(detail.ticket),
+            detail.ticket.updatedAt,
+            operationScope,
+        );
+        return { status: "success", message: vscode.l10n.t("Reloaded from Redmine.") };
+    } catch (error) {
+        return mapErrorToResult(error);
     }
-    return result;
 }
 
 /**
@@ -257,13 +314,20 @@ export async function mergeTicketContent(
     } catch (error) {
         return { status: "failed", message: error instanceof Error ? error.message : "Invalid ticket content." };
     }
+    if (removalExpectation && editor.document.getText() !== removalExpectation.content) {
+        return {
+            status: "conflict",
+            message: vscode.l10n.t("Remote changes detected. Refresh before saving."),
+            conflictContext: context,
+        };
+    }
     const subject = mergeThreeWay(context.baseSubject, context.localSubject, context.remoteSubject);
     const description = mergeThreeWay(
         context.baseDescription,
         context.localDescription,
         context.remoteDescription,
     );
-    await applyEditorContent(editor, buildTicketEditorContent({
+    const removed = await applyConflictEditorContent(editor, buildTicketEditorContent({
         subject: subject.content,
         description: description.content,
         // Text is merged manually; metadata is taken from the latest server state.
@@ -272,15 +336,14 @@ export async function mergeTicketContent(
         layout: current.layout,
         metadataBlock: current.metadataBlock,
         controlFields: current.controlFields,
-    }));
-    // A queued update still carries the pre-merge remote timestamp. Keeping it
-    // would cause Sync All / dashboard sync to raise the same conflict again.
-    // The user must review the editor and save, which queues a new snapshot.
-    const removed = await removeOfflineTicketUpdateIfMatchesAsync(
+    }), () => removeOfflineTicketUpdateIfMatchesAsync(
         context.ticketId,
         removalExpectation,
         operationScope,
-    );
+    ));
+    // A queued update still carries the pre-merge remote timestamp. Keeping it
+    // would cause Sync All / dashboard sync to raise the same conflict again.
+    // The user must review the editor and save, which queues a new snapshot.
     if (!removed) {
         return {
             status: "conflict",
@@ -354,7 +417,16 @@ export async function handleConflict(
         }
         : undefined;
     registerConflictContext(context, expectedOperation);
+    const dialogContent = editor.document.getText();
+    const dialogVersion = editor.document.version;
     const resolution = await deps.showConflictDialog(context);
+    if (editor.document.version !== dialogVersion || editor.document.getText() !== dialogContent) {
+        return {
+            status: "conflict",
+            message: vscode.l10n.t("Remote changes detected. Refresh before saving."),
+            conflictContext: context,
+        };
+    }
     if (expectedOperation && operationScope !== undefined) {
         const current = getOfflineSyncQueue(operationScope).tickets.get(context.ticketId);
         if (
@@ -408,11 +480,55 @@ export async function handleConflict(
 // ============================================================================
 
 import { CommentConflictContext, CommentSaveResult } from "./commentSaveTypes";
-import { reloadCommentEditor } from "./commentSaveSync";
-import { getCommentEdit, updateCommentEdit } from "./commentEditStore";
+import { ensureCommentEdit } from "./commentEditStore";
 import { registerCommentConflictContext } from "./conflictDiffProvider";
-import { applyEditorContent } from "./ticketPreview";
+import { applyEditorContent, buildTicketPreviewContent } from "./ticketPreview";
 import { commentSyncOutcomeMessage } from "../app/commentSyncService";
+import {
+    buildCommentUpdateFileContent,
+    invalidCommentUpdateMetadataMessage,
+    isCommentUpdateDocument,
+    parseCommentUpdateFile,
+} from "./commentUpdateFile";
+
+const resolvedCommentEditorContent = (
+    context: CommentConflictContext,
+    editor: vscode.TextEditor,
+    body: string,
+    expectedBody?: string,
+): { ok: true; content: string; hasMetadata: boolean } | { ok: false; result: CommentSaveResult } => {
+    const current = editor.document.getText();
+    const parsed = parseCommentUpdateFile(current);
+    if (
+        (!parsed && isCommentUpdateDocument(current, editor.document.uri.path)) ||
+        (parsed && (parsed.fields.issueId !== context.ticketId ||
+            parsed.fields.journalId !== context.commentId))
+    ) {
+        return {
+            ok: false,
+            result: { status: "failed", message: invalidCommentUpdateMetadataMessage() },
+        };
+    }
+    if (expectedBody !== undefined && (parsed?.body ?? current) !== expectedBody) {
+        return {
+            ok: false,
+            result: {
+                status: "conflict",
+                message: vscode.l10n.t("Remote changes detected. Refresh before saving."),
+                conflictContext: context,
+            },
+        };
+    }
+    return {
+        ok: true,
+        hasMetadata: parsed !== undefined,
+        content: parsed ? buildCommentUpdateFileContent({
+            ...parsed.fields,
+            sourceNotesHash: computeNotesHash(context.remoteBody),
+            lastSyncedAt: new Date().toISOString(),
+        }, body) : body,
+    };
+};
 
 /**
  * Show a dialog asking the user how to resolve a comment conflict.
@@ -486,11 +602,16 @@ export async function applyRemoteCommentContent(
 ): Promise<CommentSaveResult> {
     const removalExpectation = expectedOperation ??
         commentConflictExpectation(context.commentId, operationScope);
-    await applyEditorContent(editor, context.remoteBody);
-    const removed = await removeOfflineCommentEntryIfMatchesAsync(
-        { ticketId: context.ticketId, commentId: context.commentId },
-        removalExpectation,
-        operationScope,
+    const resolved = resolvedCommentEditorContent(context, editor, context.remoteBody, removalExpectation?.body);
+    if (!resolved.ok) { return resolved.result; }
+    const removed = await applyConflictEditorContent(
+        editor,
+        resolved.content,
+        () => removeOfflineCommentEntryIfMatchesAsync(
+            { ticketId: context.ticketId, commentId: context.commentId },
+            removalExpectation,
+            operationScope,
+        ),
     );
     if (!removed) {
         return {
@@ -499,7 +620,7 @@ export async function applyRemoteCommentContent(
             conflictContext: context,
         };
     }
-    updateCommentEdit(context.commentId, context.remoteBody, context.remoteUpdatedAt, operationScope);
+    ensureCommentEdit(context.commentId, context.ticketId, context.remoteBody, context.remoteUpdatedAt, operationScope);
     return { status: "success", message: vscode.l10n.t("Overwritten with remote content.") };
 }
 
@@ -513,23 +634,27 @@ export async function forceCommentSaveLocal(
     syncEngine: Pick<SyncEngine, "syncOne"> = createSyncEngine(),
     expectedOperation?: OfflineCommentConflictExpectation,
 ): Promise<CommentSaveResult> {
-    const edit = getCommentEdit(context.commentId, operationScope);
-    if (!edit) {
-        return { status: "failed", message: "Missing comment edit state." };
-    }
-
     if (operationScope === undefined) {
         return { status: "failed", message: "Connection scope is required." };
     }
+    const resolved = resolvedCommentEditorContent(context, editor, context.localBody);
+    if (!resolved.ok) { return resolved.result; }
+    const queued = getOfflineSyncQueue(operationScope).comments.find(
+        (entry) => entry.commentId === context.commentId,
+    );
+    const rebaseExpectation = expectedOperation ??
+        commentConflictExpectation(context.commentId, operationScope);
     const rebased = await rebaseOfflineCommentUpdateAfterConflictAsync(
         context.commentId,
         {
             baseBody: context.remoteBody,
             lastKnownRemoteUpdatedAt: context.remoteUpdatedAt,
-            sourceNotesHash: computeNotesHash(context.remoteBody),
+            ...(resolved.hasMetadata || queued?.sourceNotesHash !== undefined
+                ? { sourceNotesHash: computeNotesHash(context.remoteBody) }
+                : {}),
         },
         operationScope,
-        expectedOperation,
+        rebaseExpectation,
     );
     if (!rebased) {
         return {
@@ -538,8 +663,19 @@ export async function forceCommentSaveLocal(
             conflictContext: context,
         };
     }
-    updateCommentEdit(
+    if (resolved.hasMetadata) {
+        const current = editor.document.getText();
+        const refreshed = resolvedCommentEditorContent(
+            context,
+            editor,
+            parseCommentUpdateFile(current)?.body ?? current,
+        );
+        if (!refreshed.ok) { return refreshed.result; }
+        await applyEditorContent(editor, refreshed.content);
+    }
+    ensureCommentEdit(
         context.commentId,
+        context.ticketId,
         context.remoteBody,
         context.remoteUpdatedAt,
         operationScope,
@@ -578,11 +714,16 @@ export async function mergeCommentContent(
     const removalExpectation = expectedOperation ??
         commentConflictExpectation(context.commentId, operationScope);
     const merged = mergeThreeWay(context.baseBody, context.localBody, context.remoteBody);
-    await applyEditorContent(editor, merged.content);
-    const removed = await removeOfflineCommentEntryIfMatchesAsync(
-        { ticketId: context.ticketId, commentId: context.commentId },
-        removalExpectation,
-        operationScope,
+    const resolved = resolvedCommentEditorContent(context, editor, merged.content, removalExpectation?.body);
+    if (!resolved.ok) { return resolved.result; }
+    const removed = await applyConflictEditorContent(
+        editor,
+        resolved.content,
+        () => removeOfflineCommentEntryIfMatchesAsync(
+            { ticketId: context.ticketId, commentId: context.commentId },
+            removalExpectation,
+            operationScope,
+        ),
     );
     if (!removed) {
         return {
@@ -591,8 +732,9 @@ export async function mergeCommentContent(
             conflictContext: context,
         };
     }
-    updateCommentEdit(
+    ensureCommentEdit(
         context.commentId,
+        context.ticketId,
         context.remoteBody,
         context.remoteUpdatedAt,
         operationScope,
@@ -634,7 +776,16 @@ export async function handleCommentConflict(
             body: queuedAtDialogOpen.body,
         }
         : undefined;
+    const dialogContent = editor.document.getText();
+    const dialogVersion = editor.document.version;
     const resolution = await showCommentConflictDialog(context);
+    if (editor.document.version !== dialogVersion || editor.document.getText() !== dialogContent) {
+        return {
+            status: "conflict",
+            message: vscode.l10n.t("Remote changes detected. Refresh before saving."),
+            conflictContext: context,
+        };
+    }
     if (expectedOperation && operationScope !== undefined) {
         const current = getOfflineSyncQueue(operationScope).comments.find(
             (entry) => entry.commentId === context.commentId,

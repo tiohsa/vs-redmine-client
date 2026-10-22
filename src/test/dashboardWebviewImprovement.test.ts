@@ -248,8 +248,8 @@ suite("Dashboard Webview 改善", () => {
     assert.ok(dashboardStyles.includes(".ticket-row-meta .badge"));
     assert.ok(!dashboardStyles.includes(".badges .due-7days { display: none; }"));
     assert.ok(dashboardWebviewScript.includes("const unsyncedFeedbackRequests = new Set();"));
-    assert.ok(dashboardWebviewScript.includes("type === 'unsynced.syncOne' || type === 'unsynced.syncAll'"));
-    assert.ok(dashboardWebviewScript.includes("finishOperation('success',message.requestId,message.message)"));
+    assert.ok(dashboardWebviewScript.includes("['unsynced.syncOne','unsynced.syncAll'"));
+    assert.ok(dashboardWebviewScript.includes("finishOperation(message.level || 'success',message.requestId,message.message)"));
     assert.ok(dashboardWebviewScript.includes("else if(message.type === 'toast'){ showToast(message.level,message.message); }"));
     assert.ok(!dashboardWebviewScript.includes("else if(message.type === 'toast'){ setOperationFeedback"));
   });

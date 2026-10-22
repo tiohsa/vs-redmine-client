@@ -1,3 +1,5 @@
+import * as vscode from "vscode";
+import { describeOfflineSync } from "../../views/offlineSyncPresentation";
 import {
   evaluateOfflineSyncPolicy,
   getOfflineSyncQueue,
@@ -47,9 +49,12 @@ export const buildUnsyncedDashboardItems = (abandoned = false): DashboardUnsynce
     const subject = getTicketSummary(ticketId);
     const policy = evaluateOfflineSyncPolicy(update);
     items.push({
-      key: { kind: "ticket", ticketId },
-      label: `${formatTicketLabel(ticketId)} Ticket update`,
-      detail: subject,
+      key: { kind: "ticket", ticketId, ...(abandoned ? {
+        ...(update.operationId ? { operationId: update.operationId } : {}),
+        ...(update.disposition ? { abandonedAt: update.disposition.abandonedAt } : {}),
+      } : {}) },
+      label: `${formatTicketLabel(ticketId)} ${vscode.l10n.t("Ticket update")}`,
+      detail: [subject, describeOfflineSync(update).detail].filter(Boolean).join(" · "),
       documentUri: undefined,
       lifecycle: policy.lifecycle,
       canDiscard: policy.canDiscard,
@@ -67,8 +72,8 @@ export const buildUnsyncedDashboardItems = (abandoned = false): DashboardUnsynce
     const base = formatTicketLabel(comment.ticketId);
     const label =
       comment.commentId !== undefined
-        ? `${base} Comment #${comment.commentId} update`
-        : `${base} New comment`;
+        ? `${base} ${vscode.l10n.t("Comment #{0} update", comment.commentId)}`
+        : `${base} ${vscode.l10n.t("New comment")}`;
     items.push({
       key: {
         kind: "comment",
@@ -78,6 +83,7 @@ export const buildUnsyncedDashboardItems = (abandoned = false): DashboardUnsynce
         documentUri: comment.documentUri,
       },
       label,
+      detail: describeOfflineSync(comment).detail,
       documentUri: comment.documentUri,
       ...evaluateOfflineSyncPolicy(comment),
       canSync: true,
@@ -98,13 +104,12 @@ export const buildUnsyncedDashboardItems = (abandoned = false): DashboardUnsynce
     if (isAbandoned(newTicket) !== abandoned) { continue; }
     const policy = evaluateOfflineSyncPolicy(newTicket);
     const details = [
-      newTicket.projectId ? `Project ID: ${newTicket.projectId}` : undefined,
-      policy.lifecycle === "recovery_pending" ? "Remote commit recovery pending" : undefined,
-      policy.lifecycle === "commit_unknown" ? "Remote commit status unknown" : undefined,
+      newTicket.projectId ? vscode.l10n.t("Project ID: {0}", newTicket.projectId) : undefined,
+      describeOfflineSync(newTicket).detail,
     ].filter((value): value is string => value !== undefined);
     items.push({
       key: { kind: "newTicket", queueId: newTicket.queueId, documentUri: newTicket.documentUri },
-      label: "New ticket",
+      label: vscode.l10n.t("New ticket"),
       detail: details.length > 0 ? details.join(" · ") : undefined,
       documentUri: newTicket.documentUri,
       lifecycle: policy.lifecycle,

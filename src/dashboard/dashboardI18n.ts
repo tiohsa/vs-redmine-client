@@ -2,6 +2,12 @@ import * as vscode from "vscode";
 
 export interface DashboardStrings {
   language: string;
+  projectSearchResults: string;
+  projectSelectedOutsideSearch: string;
+  detailFocus: string;
+  discardUnavailableReason: string;
+  syncUnavailableReason: string;
+
   dashboardTitle: string;
   selectTicketHint: string;
   searchEmptyHint: string;
@@ -62,6 +68,8 @@ export interface DashboardStrings {
   // Sync states
   syncDirty: string;
   syncQueued: string;
+  syncRecoveryPending: string;
+  syncOutcomeUnknown: string;
   syncConflict: string;
   syncFailed: string;
   syncSyncing: string;
@@ -136,6 +144,8 @@ export interface DashboardStrings {
   hideAbandoned: string;
   abandonedCount: string;
   startNewTicketEdit: string;
+  deleteRetainedRecord: string;
+  deleteAllAbandonedRecords: string;
   processingRecord: string;
   syncAbandoned: string;
   syncAllBtn: string;
@@ -232,6 +242,11 @@ export const buildDashboardStrings = (): DashboardStrings => ({
   draft: vscode.l10n.t("Draft"),
   composerHint: vscode.l10n.t("Create a draft, edit it in the editor, then sync the ticket."),
   // Header
+  projectSearchResults: vscode.l10n.t("Search results"),
+  projectSelectedOutsideSearch: vscode.l10n.t("Current selection (outside search results)"),
+  detailFocus: vscode.l10n.t("Expand detail area"),
+  discardUnavailableReason: vscode.l10n.t("Discard is unavailable for this synchronization state. Review the saved state before continuing."),
+  syncUnavailableReason: vscode.l10n.t("Synchronization is unavailable for this item. Review its synchronization state."),
   selectProjectPlaceholder: vscode.l10n.t("— Select project —"),
   selectProjectTitle: vscode.l10n.t("Select project"),
   projectSearchPlaceholder: vscode.l10n.t("Search projects…"),
@@ -278,6 +293,8 @@ export const buildDashboardStrings = (): DashboardStrings => ({
   // Sync states
   syncDirty: vscode.l10n.t("Unsynced changes"),
   syncQueued: vscode.l10n.t("Waiting to sync"),
+  syncRecoveryPending: vscode.l10n.t("Recovery pending"),
+  syncOutcomeUnknown: vscode.l10n.t("Remote outcome unknown"),
   syncConflict: vscode.l10n.t("Conflicting changes"),
   syncFailed: vscode.l10n.t("Sync failed"),
   syncSyncing: vscode.l10n.t("Syncing…"),
@@ -305,7 +322,7 @@ export const buildDashboardStrings = (): DashboardStrings => ({
   // Ticket detail panel
   openTicketTooltip: vscode.l10n.t("Edit ticket Markdown in VS Code"),
   syncToRedmine: vscode.l10n.t("Sync to Redmine"),
-  resolveRecovery: vscode.l10n.t("Resolve"),
+  resolveRecovery: vscode.l10n.t("Review recovery"),
   resolveRecoveryTooltip: vscode.l10n.t("Review available recovery actions before continuing."),
   syncTicketTooltip: vscode.l10n.t("Sync VS Code editor changes to Redmine"),
   editingState: vscode.l10n.t("Editing state"),
@@ -352,6 +369,8 @@ export const buildDashboardStrings = (): DashboardStrings => ({
   hideAbandoned: vscode.l10n.t("Hide abandoned items"),
   abandonedCount: vscode.l10n.t("Abandoned: {0}"),
   startNewTicketEdit: vscode.l10n.t("Load latest and start new edit"),
+  deleteRetainedRecord: vscode.l10n.t("Delete retained record"),
+  deleteAllAbandonedRecords: vscode.l10n.t("Delete all abandoned records"),
   processingRecord: vscode.l10n.t("Processing record"),
   syncAbandoned: vscode.l10n.t("Sync abandoned"),
   syncAllBtn: vscode.l10n.t("Sync all"),

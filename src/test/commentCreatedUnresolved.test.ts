@@ -338,6 +338,86 @@ suite("Comment created_unresolved", () => {
     assert.strictEqual(getOfflineSyncQueue(SCOPE).comments.length, 0);
   });
 
+  for (const scenario of [
+    {
+      name: "画像置換後の送信本文は明示linkできる",
+      remoteBody: "![image](screen.png)",
+      expectedKind: "completed",
+    },
+    {
+      name: "元intent本文だけが一致しても明示linkしない",
+      remoteBody: "![image](./screen.png)",
+      expectedKind: "commit_unknown",
+    },
+  ] as const) {
+    test(`画像付きcomment_createのmanual link: ${scenario.name}`, async () => {
+      initializeOfflineSyncStore(createTestMemento(), SCOPE);
+      const ticketId = scenario.expectedKind === "completed" ? 191 : 192;
+      const commentId = scenario.expectedKind === "completed" ? 911 : 912;
+      const directory = fs.mkdtempSync(path.join(os.tmpdir(), "comment-image-manual-link-"));
+      const imagePath = path.join(directory, "screen.png");
+      fs.writeFileSync(imagePath, "image-bytes");
+      const documentUri = vscode.Uri.file(path.join(directory, "comment.md")).toString();
+      const body = "![image](./screen.png)";
+      const key = { kind: "comment" as const, ticketId, documentUri };
+      let submittedBody: string | undefined;
+      let uploadCalls = 0;
+
+      try {
+        await addOfflineCommentUpdateAsync({ ticketId, body, baseDir: directory, documentUri }, SCOPE);
+        const engine = createSyncEngine({
+          comments: {
+            addComment: async (_ticketId, notes) => {
+              submittedBody = notes;
+              throw new Error("transport timeout");
+            },
+            updateComment: async () => { throw new Error("should not update"); },
+            uploadFile: async () => {
+              uploadCalls++;
+              return {
+                token: "image-token",
+                filename: "screen.png",
+                contentType: "image/png",
+              };
+            },
+            getIssueDetail: async () => ({
+              ticket: { id: ticketId, subject: "T", projectId: 3 },
+              comments: [{
+                id: commentId,
+                body: scenario.remoteBody,
+                authorId: 7,
+                ticketId,
+                authorName: "User",
+                editableByCurrentUser: true,
+              }],
+            }),
+            getCurrentUserId: async () => 7,
+            updateIssue: async () => undefined,
+          },
+        });
+
+        const initial = await engine.syncOne(key, { connectionScope: SCOPE });
+        assert.strictEqual(initial.kind, "commit_unknown");
+        assert.strictEqual(uploadCalls, 1);
+        assert.strictEqual(submittedBody, "![image](screen.png)");
+
+        const linked = await engine.resolveCommentCommitUnknown({
+          key,
+          context: { connectionScope: SCOPE },
+          resolution: { kind: "link_remote_comment", commentId },
+        });
+
+        assert.strictEqual(linked.kind, scenario.expectedKind);
+        assert.strictEqual(
+          getOfflineSyncQueue(SCOPE).comments.length,
+          scenario.expectedKind === "completed" ? 0 : 1,
+        );
+      } finally {
+        fs.rmSync(directory, { recursive: true, force: true });
+      }
+    });
+  }
+
   test("link_remote_comment は検証済み projectId を新規コメントの finalize に渡す", async () => {
     initializeOfflineSyncStore(createTestMemento(), SCOPE);
     const filePath = path.join(os.tmpdir(), `redmine-client-comment-project-${Date.now()}.md`);
@@ -726,7 +806,7 @@ suite("Comment created_unresolved", () => {
         { syncKey: key },
         { createSyncEngine: () => engine },
       );
-      assert.strictEqual(result?.status, "failed");
+      assert.strictEqual(result?.status, "commit_unknown");
       assert.strictEqual(addCalls, 1);
       assert.strictEqual(getOfflineSyncQueue(operationScope).comments.length, 1);
       assert.strictEqual(getOfflineSyncQueue(operationScope).comments[0]?.phase, "reconciliation_pending");

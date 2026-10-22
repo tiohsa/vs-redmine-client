@@ -60,7 +60,7 @@ suite("UnsyncedFilesTreeProvider", () => {
       (items[0].label as string).includes("123"),
       `label must include ticket ID 123, got: ${String(items[0].label)}`,
     );
-    assert.strictEqual(items[0].description, "Local change");
+    assert.strictEqual(items[0].description, "Waiting to sync");
   });
 
   test("commentId あり: '#123 Comment #456 update' として表示される", async () => {
@@ -77,7 +77,7 @@ suite("UnsyncedFilesTreeProvider", () => {
       (items[0].label as string).includes("Comment #456 update"),
       `label must include 'Comment #456 update', got: ${String(items[0].label)}`,
     );
-    assert.strictEqual(items[0].description, "Local change");
+    assert.strictEqual(items[0].description, "Waiting to sync");
   });
 
   test("commentId なし: '#123 New comment' として表示される", async () => {
@@ -93,7 +93,7 @@ suite("UnsyncedFilesTreeProvider", () => {
       (items[0].label as string).includes("New comment"),
       `label must include 'New comment', got: ${String(items[0].label)}`,
     );
-    assert.strictEqual(items[0].description, "Local change");
+    assert.strictEqual(items[0].description, "Waiting to sync");
   });
 
   test("新規チケットエントリが 'New ticket' として表示される", async () => {
@@ -102,7 +102,7 @@ suite("UnsyncedFilesTreeProvider", () => {
     const items = await getItems(provider);
     assert.strictEqual(items.length, 1);
     assert.strictEqual(items[0].label, "New ticket");
-    assert.strictEqual(items[0].description, "Local change");
+    assert.strictEqual(items[0].description, "Waiting to sync");
   });
 
   test("documentUri があるエントリに vscode.open コマンドが付与される", async () => {
