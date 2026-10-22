@@ -1,6 +1,6 @@
+import { describeOfflineSync } from "./offlineSyncPresentation";
 import * as vscode from "vscode";
 import {
-  getOfflineSyncLifecycle,
   getOfflineSyncQueue,
   isAbandoned,
   onOfflineSyncQueueChanged,
@@ -18,9 +18,9 @@ export type UnsyncedFileSyncKey =
 export class UnsyncedFileTreeItem extends vscode.TreeItem {
   readonly syncKey: UnsyncedFileSyncKey;
 
-  constructor(label: string, iconId: string, syncKey: UnsyncedFileSyncKey, documentUri?: string, tooltip?: string) {
+  constructor(label: string, iconId: string, syncKey: UnsyncedFileSyncKey, documentUri?: string, tooltip?: string, description?: string) {
     super(label, vscode.TreeItemCollapsibleState.None);
-    this.description = "Local change";
+    this.description = description ?? vscode.l10n.t("Waiting to sync");
     this.contextValue = "redmineUnsyncedFile";
     this.iconPath = new vscode.ThemeIcon(iconId);
     this.syncKey = syncKey;
@@ -60,6 +60,7 @@ const buildCommentTooltip = (
   ticketId: number,
   commentId?: number,
   documentUri?: string,
+  status = vscode.l10n.t("Status: Saved locally (unsynced)"),
 ): string => {
   const parts: string[] = [vscode.l10n.t("Ticket: {0}", formatTicketLabel(ticketId))];
   if (commentId !== undefined) {
@@ -68,7 +69,7 @@ const buildCommentTooltip = (
   if (documentUri) {
     parts.push(`URI: ${documentUri}`);
   }
-  parts.push(vscode.l10n.t("Status: Saved locally (unsynced)"));
+  parts.push(status);
   return parts.join("\n");
 };
 
@@ -106,7 +107,7 @@ export class UnsyncedFilesTreeProvider
       const subject = getTicketSummary(ticketId);
       const label = subject
         ? `${formatTicketLabel(ticketId)} ${subject}`
-        : `${formatTicketLabel(ticketId)} Ticket update`;
+        : `${formatTicketLabel(ticketId)} ${vscode.l10n.t("Ticket update")}`;
       items.push(
         new UnsyncedFileTreeItem(
           label,
@@ -116,10 +117,9 @@ export class UnsyncedFilesTreeProvider
           buildTicketTooltip(
             ticketId,
             update.documentUri,
-            getOfflineSyncLifecycle(update) === "queued"
-              ? vscode.l10n.t("Status: Saved locally (unsynced)")
-              : vscode.l10n.t("Status: Remote sync recovery pending"),
+            describeOfflineSync(update).detail,
           ),
+          describeOfflineSync(update).label,
         ),
       );
     });
@@ -130,21 +130,23 @@ export class UnsyncedFilesTreeProvider
       if (comment.commentId !== undefined) {
         items.push(
           new UnsyncedFileTreeItem(
-            `${base} Comment #${comment.commentId} update`,
+            `${base} ${vscode.l10n.t("Comment #{0} update", comment.commentId)}`,
             "comment",
             { kind: "comment", ticketId: comment.ticketId, operationId: comment.operationId, commentId: comment.commentId, documentUri: comment.documentUri },
             comment.documentUri,
-            buildCommentTooltip(comment.ticketId, comment.commentId, comment.documentUri),
+            buildCommentTooltip(comment.ticketId, comment.commentId, comment.documentUri, describeOfflineSync(comment).detail),
+            describeOfflineSync(comment).label,
           ),
         );
       } else {
         items.push(
           new UnsyncedFileTreeItem(
-            `${base} New comment`,
+            `${base} ${vscode.l10n.t("New comment")}`,
             "comment",
             { kind: "comment", ticketId: comment.ticketId, operationId: comment.operationId, documentUri: comment.documentUri },
             comment.documentUri,
-            buildCommentTooltip(comment.ticketId, undefined, comment.documentUri),
+            buildCommentTooltip(comment.ticketId, undefined, comment.documentUri, describeOfflineSync(comment).detail),
+            describeOfflineSync(comment).label,
           ),
         );
       }
@@ -160,17 +162,16 @@ export class UnsyncedFilesTreeProvider
         tooltipParts.push(`URI: ${newTicket.documentUri}`);
       }
       tooltipParts.push(
-        getOfflineSyncLifecycle(newTicket) === "queued"
-          ? vscode.l10n.t("Status: Saved locally (unsynced)")
-          : vscode.l10n.t("Status: Remote sync recovery pending"),
+        describeOfflineSync(newTicket).detail,
       );
       items.push(
         new UnsyncedFileTreeItem(
-          "New ticket",
+          vscode.l10n.t("New ticket"),
           "new-file",
           { kind: "newTicket", queueId: newTicket.queueId, documentUri: newTicket.documentUri },
           newTicket.documentUri,
           tooltipParts.join("\n"),
+          describeOfflineSync(newTicket).label,
         ),
       );
     }

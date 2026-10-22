@@ -113,7 +113,7 @@ export interface RedmineIssueListResponse {
     due_date?: string;
     start_date?: string;
     done_ratio?: number;
-    estimated_hours?: number;
+    estimated_hours?: number | null;
   }>;
   total_count?: number;
   limit?: number;
@@ -137,7 +137,7 @@ export interface RedmineIssueDetailResponse {
     due_date?: string;
     start_date?: string;
     done_ratio?: number;
-    estimated_hours?: number;
+    estimated_hours?: number | null;
     allowed_statuses?: Array<{ id: number; name: string }>;
     journals?: Array<{
       id: number;

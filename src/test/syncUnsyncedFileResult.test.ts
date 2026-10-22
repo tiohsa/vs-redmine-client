@@ -187,7 +187,7 @@ suite("syncUnsyncedFileResult — 構造化戻り値", () => {
     // 結果オブジェクト (failed) が返ることを確認する
     const result = await syncUnsyncedFile({ syncKey: { kind: "ticket", ticketId: 1 } });
     assert.ok(result !== undefined, "undefined でなく結果を返すこと");
-    assert.ok(["success", "no_change", "conflict", "failed"].includes(result!.status));
+    assert.ok(["success", "no_change", "conflict", "failed", "commit_unknown", "recovery_pending", "cancelled"].includes(result!.status));
     assert.strictEqual(result!.kind, "ticket");
   });
 

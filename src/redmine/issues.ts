@@ -87,7 +87,7 @@ export const listIssues = async (input: IssuesListInput): Promise<IssuesListResu
     startDate: issue.start_date,
     dueDate: issue.due_date,
     doneRatio: issue.done_ratio,
-    estimatedHours: issue.estimated_hours,
+    estimatedHours: issue.estimated_hours ?? undefined,
     authorName: issue.author?.name,
   }));
 
@@ -246,7 +246,7 @@ export const getIssueDetail = async (issueId: number): Promise<IssueDetailResult
     dueDate: issue.due_date,
     startDate: issue.start_date,
     doneRatio: issue.done_ratio,
-    estimatedHours: issue.estimated_hours,
+    estimatedHours: issue.estimated_hours ?? undefined,
     // authorId removed
   };
 

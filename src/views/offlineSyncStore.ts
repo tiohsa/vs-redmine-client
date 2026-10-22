@@ -10,9 +10,11 @@ import {
   TicketEditorMetadataBlock,
 } from "./ticketEditorContent";
 import type { FrontmatterControlFields } from "./ticketMetadataControlFields";
+import type { TicketUpdateIntent } from "../app/ticketSync/syncOperationTypes";
 import { computeNotesHash } from "../utils/notesHash";
 import {
   getAttemptGeneration,
+  getPrimaryEffectForRevision,
   evaluateAttemptClosure,
   hasUncertainDurableSyncEffect,
   hasUncertainPrimaryDurableSyncEffect,
@@ -56,7 +58,7 @@ export type TicketUpdateIntentSnapshot = {
   controlFields?: FrontmatterControlFields;
   baseDir?: string;
   documentUri?: string;
-};
+} & Pick<TicketUpdateIntent, "attachments" | "uploadTokens" | "childTickets">;
 
 export type OfflineTicketUpdate = {
   ticketId: number;
@@ -85,7 +87,7 @@ export type OfflineTicketUpdate = {
   createdAt?: number;
   effects?: DurableSyncEffect[];
   disposition?: SyncDisposition;
-};
+} & Pick<TicketUpdateIntent, "attachments" | "uploadTokens" | "childTickets">;
 
 export type OfflineCommentUpdate = {
   ticketId: number;
@@ -879,6 +881,9 @@ const promoteTicketIntent = (operation: OfflineTicketUpdate): OfflineTicketUpdat
     description: next.description,
     content: next.content ?? operation.content,
     metadata: next.metadata,
+    attachments: next.attachments,
+    uploadTokens: next.uploadTokens,
+    childTickets: next.childTickets,
     layout: next.layout,
     metadataBlock: next.metadataBlock,
     controlFields: next.controlFields,
@@ -997,6 +1002,11 @@ const promoteCommentIntent = (operation: OfflineCommentUpdate): OfflineCommentUp
   }
   const commentId = operation.commentId ?? (operation as any).createdRemoteId;
   const hasCommentId = commentId !== undefined;
+  const primary = getPrimaryEffectForRevision(operation);
+  const snapshot = primary?.requestSnapshot;
+  const syncedBody = snapshot?.kind === "comment_create"
+    ? snapshot.request.notes
+    : primary?.target.submittedBody ?? operation.body;
   const reusableEffects = effects.filter((e) =>
     e.state === "committed" || e.state === "commit_unknown" || e.state === "compensation_unknown" || e.state === "compensation_started"
   );
@@ -1005,10 +1015,10 @@ const promoteCommentIntent = (operation: OfflineCommentUpdate): OfflineCommentUp
     commentId,
     body: next.body,
     baseBody: operation.finalizeDraft && hasCommentId
-      ? operation.body
+      ? syncedBody
       : operation.baseBody,
     sourceNotesHash: operation.finalizeDraft && hasCommentId
-      ? computeNotesHash(operation.body)
+      ? computeNotesHash(syncedBody)
       : operation.sourceNotesHash,
     finalizeDraft: operation.finalizeDraft && hasCommentId
       ? false
@@ -1317,6 +1327,9 @@ export const mergeOfflineTicketUpdate = (
         description: update.description,
         content: fallbackNextContent,
         metadata: update.metadata,
+        attachments: update.attachments,
+        uploadTokens: update.uploadTokens,
+        childTickets: update.childTickets,
         layout: update.layout,
         metadataBlock: update.metadataBlock,
         controlFields: update.controlFields,
@@ -2443,6 +2456,9 @@ export const completeOfflineTicketUpdateAsync = async (
           subject: next.subject,
           description: next.description,
           metadata: next.metadata,
+          attachments: next.attachments,
+          uploadTokens: next.uploadTokens,
+          childTickets: next.childTickets,
           content: next.content ?? current.content,
           layout: next.layout ?? canonical?.layout ?? current.layout,
           metadataBlock: next.metadataBlock ?? canonical?.metadataBlock ?? current.metadataBlock,

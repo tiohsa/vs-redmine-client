@@ -244,7 +244,7 @@ suite("Dashboard sync attention tray", () => {
 
   test("queued + requiresReview はカード・summary・bulk action の review 状態を共有する", () => {
     const result = renderUnsynced([{ lifecycle: "queued", requiresReview: true, key: { kind: "ticket", ticketId: 10 }, label: "Ticket #10" }]);
-    assert.ok(result.cardHtml.includes('class="badge sync-conflict">Review Required</span>'));
+    assert.ok(result.cardHtml.includes('class="badge sync-review">Review Required</span>'));
     assert.ok(result.summaryHtml.includes('Review Required <strong>1</strong>'));
     assert.ok(!result.summaryHtml.includes("Queued"));
     assert.ok(result.cardHtml.includes("Resolve recovery"));
@@ -255,7 +255,7 @@ suite("Dashboard sync attention tray", () => {
   test("recovery_pending と commit_unknown の既存 review 分類を保つ", () => {
     for (const lifecycle of ["recovery_pending", "commit_unknown"]) {
       const result = renderUnsynced([{ lifecycle, key: { kind: "ticket", ticketId: 10 }, label: "Ticket #10" }]);
-      assert.ok(result.cardHtml.includes('class="badge sync-conflict">Review Required</span>'));
+      assert.ok(result.cardHtml.includes('class="badge sync-review">Review Required</span>'));
       assert.ok(result.summaryHtml.includes('Review Required <strong>1</strong>'));
       assert.ok(result.cardHtml.includes("Resolve recovery"));
       assert.equal(result.syncAllHidden, true);

@@ -842,7 +842,7 @@ suite("TicketSyncService durable lifecycle", () => {
       { createTicketSyncService: () => service },
     );
 
-    assert.strictEqual(first?.status, "failed");
+    assert.strictEqual(first?.status, "recovery_pending");
     assert.strictEqual(createCalls, 1);
     const pending = getOfflineSyncQueue(commandScope).newTickets[0];
     assert.strictEqual(pending.createdIssueId, 260);

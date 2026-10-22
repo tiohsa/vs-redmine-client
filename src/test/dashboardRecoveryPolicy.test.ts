@@ -519,7 +519,8 @@ suite("Dashboard recovery policy — lifecycle matrix", () => {
         }
         assert.strictEqual(confirmations, 1);
         assert.deepStrictEqual(errors, []);
-        assert.strictEqual(successes.length, confirm ? 1 : 0);
+        assert.strictEqual(successes.length, 1);
+        if (!confirm) { assert.match(successes[0], /cancelled/); }
         const expected = structuredClone(before);
         if (confirm) {
           if (hasNext) { expected.newTickets[0].nextIntent = undefined; }

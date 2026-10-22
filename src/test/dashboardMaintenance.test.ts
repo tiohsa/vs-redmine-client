@@ -447,6 +447,7 @@ suite("Dashboard maintenance", () => {
 
     let savedState: Record<string, unknown> = {
       ticketLayoutMode: "split",
+      detailFocus: true,
       detailTab: "comments",
       quickFilters: ["mine", "open"],
       retainedExtensionState: "keep",
@@ -458,7 +459,7 @@ suite("Dashboard maintenance", () => {
     const projectPickerPopup = { hidden: false };
     const filterDialog = { classList: { add: () => undefined } };
     const snapshot = runInNewContext(`${source}\nresetViewState(); JSON.stringify({
-      ticketLayoutMode, detailTab, quickFilters: Array.from(quickFilters),
+      ticketLayoutMode, detailFocus, detailTab, quickFilters: Array.from(quickFilters),
       expanded: Array.from(expandedTicketIds), collapsed: Array.from(collapsedTicketIds),
       expandedComments: Array.from(expandedComments), ticketDetailExpanded, metadataExpanded,
       searchQuery, searchValue: searchInput.value, searchTimer,
@@ -467,6 +468,7 @@ suite("Dashboard maintenance", () => {
       selectedProjectId: state.selectedProject.id,
     });`, {
       ticketLayoutMode: "split",
+      detailFocus: true,
       detailTab: "comments",
       quickFilters: new Set(["mine", "open"]),
       expandedTicketIds: new Set([410]),
@@ -506,6 +508,7 @@ suite("Dashboard maintenance", () => {
 
     assert.deepStrictEqual(JSON.parse(snapshot), {
       ticketLayoutMode: "auto",
+      detailFocus: false,
       detailTab: "overview",
       quickFilters: [],
       expanded: [],
@@ -525,6 +528,7 @@ suite("Dashboard maintenance", () => {
     });
     assert.deepStrictEqual(JSON.parse(JSON.stringify(savedState)), {
       ticketLayoutMode: "auto",
+      detailFocus: false,
       detailTab: "overview",
       quickFilters: [],
       retainedExtensionState: "keep",

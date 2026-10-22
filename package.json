@@ -331,6 +331,7 @@
     "lint": "eslint src",
     "test": "vscode-test",
     "test:dashboard-ui": "pnpm run compile-tests && node scripts/check-dashboard-ui.cjs",
+    "test:live-redmine": "pnpm run compile-tests && node scripts/run-live-redmine-tests.cjs",
     "test:unsafe": "bash ./scripts/vscode-test-nosandbox.sh"
   },
   "pnpm": {

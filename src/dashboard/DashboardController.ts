@@ -59,7 +59,7 @@ export interface ComposerSyncTestHooks {
 export interface DashboardControllerOptions {
   store: DashboardStateStore;
   notifyOperationStarted: (requestId: string, label?: string) => void;
-  notifySuccess: (requestId: string, msg: string) => void;
+  notifySuccess: (requestId: string, msg: string, level?: "success" | "info" | "warning") => void;
   notifyError: (requestId: string, msg: string) => void;
   notifyToast: (level: "info" | "warning" | "error" | "success", msg: string) => void;
   onTicketsRefreshed: () => void;

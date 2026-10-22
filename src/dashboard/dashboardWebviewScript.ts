@@ -7,6 +7,7 @@ const vscode = acquireVsCodeApi();
 const STRINGS = window.STRINGS;
 const persistedUiState = vscode.getState() || {};
 let ticketLayoutMode = ['auto','single','split'].includes(persistedUiState.ticketLayoutMode) ? persistedUiState.ticketLayoutMode : 'auto';
+let detailFocus = persistedUiState.detailFocus === true;
 let detailTab = persistedUiState.detailTab === 'comments' ? 'comments' : 'overview';
 const quickFilters = new Set(Array.isArray(persistedUiState.quickFilters) ? persistedUiState.quickFilters.filter(function(value){ return ['mine','open','overdue','unsynced'].includes(value); }) : []);
 
@@ -37,14 +38,14 @@ const unsyncedFeedbackRequests = new Set();
 function esc(value){ return String(value ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
 function send(message){ vscode.postMessage(message); }
 function req(type, extra){
+  const queueAction = ['unsynced.syncOne','unsynced.syncAll','unsynced.discardOne','unsynced.abandonOne','unsynced.startNewTicketEdit'].includes(type);
+  const ticketAction = type === 'ticket.syncSelected' || type === 'ticket.reviewConflict';
+  if((queueAction || ticketAction) && activeSyncRequests.size) return;
+  if(ticketAction && (state?.selectedTicket?.syncState === 'Syncing' || metadataEdit?.requestId)) return;
   const requestId='req-'+(++requestCounter);
-  if(type === 'unsynced.syncOne' || type === 'unsynced.syncAll') unsyncedFeedbackRequests.add(requestId);
-  if(type === 'ticket.syncSelected' || type === 'ticket.reviewConflict'){
-    if(activeSyncRequests.size || state?.selectedTicket?.syncState === 'Syncing' || metadataEdit?.requestId) return;
-    ticketSyncRequests.set(requestId,extra.ticketId);
-    activeSyncRequests.add(requestId);
-    updateSyncButtonStates();
-  }
+  if(queueAction) unsyncedFeedbackRequests.add(requestId);
+  if(ticketAction) ticketSyncRequests.set(requestId,extra.ticketId);
+  if(queueAction || ticketAction){ activeSyncRequests.add(requestId); updateSyncButtonStates(); }
   send(Object.assign({type:type,requestId:requestId}, extra || {}));
   return requestId;
 }
@@ -56,6 +57,10 @@ function safeJson(value){ try { return esc(JSON.stringify(value)); } catch { ret
 function captureFocus(root){
   const element=document.activeElement;
   if(!element || !root.contains(element)) return null;
+  const card=element.closest('#unsynced-list .unsynced-card');
+  if(card){
+    return {queueKey:card.dataset.queueKey,queueIndex:Array.from(card.parentNode.querySelectorAll('.unsynced-card')).indexOf(card),action:element.dataset.unsyncedAction,moreOpen:!!card.querySelector('.unsynced-more[open]')};
+  }
   let selector=element.id ? '#'+CSS.escape(element.id) : null;
   if(!selector){
     const attributes=['data-ticket-action-menu','data-ticket-action','data-expand','data-expand-comment','data-metadata-field','data-id'];
@@ -68,6 +73,18 @@ function captureFocus(root){
 }
 function restoreFocus(focus){
   if(!focus) return;
+  if(focus.queueKey){
+    if(document.getElementById('panel-unsynced').hidden) return;
+    const cards=Array.from(document.querySelectorAll('#unsynced-list .unsynced-card'));
+    const same=cards.find(function(card){ return card.dataset.queueKey === focus.queueKey; });
+    const card=same || cards[Math.min(focus.queueIndex,cards.length-1)];
+    if(!card){ const feedback=document.getElementById('unsynced-feedback'); (feedback.classList.contains('hidden') ? document.getElementById('unsynced-list') : feedback).focus({preventScroll:true}); return; }
+    if(same && focus.moreOpen) card.querySelector('.unsynced-more').open=true;
+    const action=same && focus.action ? card.querySelector('[data-unsynced-action="'+CSS.escape(focus.action)+'"]') : null;
+    const target=action && !action.disabled ? action : card;
+    target.focus({preventScroll:true});
+    return;
+  }
   const element=document.querySelector(focus.selector);
   if(!element || element.disabled || element.closest('[hidden],.hidden')) return;
   element.focus({preventScroll:true});
@@ -98,7 +115,7 @@ function showToast(level, message){
 }
 function updateSyncButtonStates(){
   const busy = activeSyncRequests.size > 0;
-  document.querySelectorAll('[data-sync-key],[data-discard-key],[data-sync-comment-key],[data-ticket-action="sync"]').forEach(function(button){ button.disabled = busy; });
+  document.querySelectorAll('[data-sync-key],[data-discard-key],[data-sync-comment-key],[data-abandon-key],[data-start-ticket],[data-ticket-action="sync"]').forEach(function(button){ button.disabled = busy; });
   const detailSync = document.getElementById('detail-sync-btn');
   const selectedSyncing = state?.selectedTicket?.syncState === 'Syncing' || Array.from(ticketSyncRequests.values()).includes(state?.selectedTicket?.id);
   if(detailSync){
@@ -170,7 +187,15 @@ function finishMetadataOperation(requestId, succeeded){
   renderTicketDetail();
   document.getElementById(succeeded ? 'metadata-edit-btn' : 'metadata-apply-btn')?.focus();
 }
-function finishOperation(level, requestId, message){ if(unsyncedFeedbackRequests.delete(requestId)) setOperationFeedback(level, message); }
+function finishOperation(level, requestId, message){
+  const handled=unsyncedFeedbackRequests.delete(requestId);
+  if(handled) setOperationFeedback(level, message);
+  return handled && !document.getElementById('panel-unsynced').hidden;
+}
+// トレイの折り返しや文字サイズ変更にも追従する。
+new ResizeObserver(function(entries){
+  document.documentElement.style.setProperty('--sync-tray-height',entries[0].target.getBoundingClientRect().height+'px');
+}).observe(document.getElementById('sync-tray'));
 
 // ── Tabs ───────────────────────────────────────────────────────────────────
 const tabs = Array.from(document.querySelectorAll('#tabs [role="tab"]'));
@@ -264,6 +289,8 @@ function applyTicketLayoutMode(){
   const layout=document.querySelector('.tickets-layout');
   layout.classList.toggle('layout-single',ticketLayoutMode === 'single');
   layout.classList.toggle('layout-split',ticketLayoutMode === 'split');
+  layout.classList.toggle('layout-detail-focus',detailFocus);
+  document.getElementById('detail-focus-toggle').checked=detailFocus;
   ticketLayoutSelect.value=ticketLayoutMode;
   updateCommentExpandButtons();
 }
@@ -272,6 +299,9 @@ ticketLayoutSelect.addEventListener('change',function(){
   vscode.setState(Object.assign({},vscode.getState() || {},{ticketLayoutMode:ticketLayoutMode}));
   applyTicketLayoutMode();
   closeLayoutPopover(); layoutButton.focus();
+});
+document.getElementById('detail-focus-toggle').addEventListener('change',function(){
+  detailFocus=this.checked; persistViewState(); applyTicketLayoutMode();
 });
 applyTicketLayoutMode();
 function updateSearchClearButton(){ searchClearButton.classList.toggle('hidden', !searchInput.value); }
@@ -293,7 +323,7 @@ searchInput.addEventListener('input', function(){
 });
 searchClearButton.addEventListener('click', clearSearch);
 searchInput.addEventListener('keydown', function(event){ if(event.key === 'Escape' && this.value){ clearSearch(); event.preventDefault(); } });
-function persistViewState(){ vscode.setState(Object.assign({},vscode.getState() || {},{ticketLayoutMode:ticketLayoutMode,detailTab:detailTab,quickFilters:Array.from(quickFilters)})); }
+function persistViewState(){ vscode.setState(Object.assign({},vscode.getState() || {},{ticketLayoutMode:ticketLayoutMode,detailFocus:detailFocus,detailTab:detailTab,quickFilters:Array.from(quickFilters)})); }
 document.querySelectorAll('[data-quick-filter]').forEach(function(button){ button.addEventListener('click',function(){
   const name=button.dataset.quickFilter;
   if(quickFilters.has(name)) quickFilters.delete(name); else quickFilters.add(name);
@@ -338,8 +368,8 @@ document.getElementById('filter-dialog-reset').addEventListener('click',function
 const SYNC_META = {
   Dirty: {label:STRINGS.syncDirty, badge:'sync-dirty', icon:'•'},
   Queued: {label:STRINGS.syncQueued, badge:'sync-queued', icon:'→'},
-  RecoveryPending: {label:STRINGS.syncReviewRequired, badge:'sync-conflict', icon:'△'},
-  CommitUnknown: {label:STRINGS.syncReviewRequired, badge:'sync-conflict', icon:'△'},
+  RecoveryPending: {label:STRINGS.syncRecoveryPending, badge:'sync-review', icon:'△'},
+  CommitUnknown: {label:STRINGS.syncOutcomeUnknown, badge:'sync-review', icon:'△'},
   Abandoned: {label:STRINGS.syncAbandoned, badge:'sync-failed', icon:'×'},
   Conflict: {label:STRINGS.syncConflict, badge:'sync-conflict', icon:'△'},
   Failed: {label:STRINGS.syncFailed, badge:'sync-failed', icon:'×'},
@@ -697,12 +727,13 @@ function renderFilterChips(){
 // ── Unsynced ───────────────────────────────────────────────────────────────
 const UNSYNCED_BADGE_META={
   queued:{kind:'queued',label:STRINGS.syncQueued,cls:'sync-queued',icon:'→'},
-  recovery_pending:{kind:'review',label:STRINGS.syncReviewRequired || STRINGS.syncFailed,cls:'sync-conflict',icon:'△',requiresReview:true},
-  commit_unknown:{kind:'review',label:STRINGS.syncReviewRequired || STRINGS.syncFailed,cls:'sync-conflict',icon:'△',requiresReview:true},
+  recovery_pending:{kind:'review',label:STRINGS.syncRecoveryPending || STRINGS.syncReviewRequired || STRINGS.syncFailed,cls:'sync-review',icon:'△',requiresReview:true},
+  commit_unknown:{kind:'review',label:STRINGS.syncOutcomeUnknown || STRINGS.syncReviewRequired || STRINGS.syncFailed,cls:'sync-review',icon:'△',requiresReview:true},
   conflict:{kind:'conflict',label:STRINGS.syncConflict,cls:'sync-conflict',icon:'△'},
   failed:{kind:'failed',label:STRINGS.syncFailed,cls:'sync-failed',icon:'×'},
 };
 function resolveUnsyncedBadge(item){
+  if(item?.lifecycle === 'commit_unknown') return UNSYNCED_BADGE_META.commit_unknown;
   if(item?.requiresReview === true) return UNSYNCED_BADGE_META.recovery_pending;
   const lifecycle=item && typeof item.lifecycle === 'string' ? item.lifecycle : 'queued';
   return UNSYNCED_BADGE_META[lifecycle] || UNSYNCED_BADGE_META.queued;
@@ -727,8 +758,23 @@ function renderUnsynced(){
   const queued=items.filter(function(item){ return resolveUnsyncedBadge(item).kind === 'queued'; }).length; const review=items.filter(function(item){ return resolveUnsyncedBadge(item).kind === 'review'; }).length; const conflict=items.filter(function(item){ return resolveUnsyncedBadge(item).kind === 'conflict'; }).length; const failed=items.filter(function(item){ return resolveUnsyncedBadge(item).kind === 'failed'; }).length; const summary=document.getElementById('unsynced-summary'); summary.innerHTML=(review ? '<span class="summary-badge">'+esc(STRINGS.syncReviewRequired || STRINGS.syncFailed)+' <strong>'+review+'</strong></span>' : '')+(queued ? '<span class="summary-badge">'+esc(STRINGS.syncQueued)+' <strong>'+queued+'</strong></span>' : '')+(conflict ? '<span class="summary-badge">'+esc(STRINGS.syncConflict)+' <strong>'+conflict+'</strong></span>' : '')+(failed ? '<span class="summary-badge">'+esc(STRINGS.syncFailed)+' <strong>'+failed+'</strong></span>' : '');
   const list=document.getElementById('unsynced-list'); if(!items.length){ list.innerHTML='<div class="state-msg">'+STRINGS.noUnsyncedChanges+'</div>'; updateSyncButtonStates(); return; }
   const ordered=items.slice().sort(function(a,b){ return Number(resolveUnsyncedBadge(b).kind === 'review')-Number(resolveUnsyncedBadge(a).kind === 'review'); });
-  list.innerHTML=ordered.map(function(item,index){ const status=resolveUnsyncedBadge(item); const group=index === 0 || resolveUnsyncedBadge(ordered[index-1]).kind === 'review' && status.kind !== 'review' ? '<h3 class="unsynced-group-title">'+esc(status.kind === 'review' ? STRINGS.syncReviewRequired : STRINGS.tabUnsynced)+'</h3>' : ''; const open=item.documentUri ? '<button class="btn btn-secondary" type="button" data-uri="'+esc(item.documentUri)+'">'+actionIcon('open')+esc(STRINGS.openInEditor)+'</button>' : ''; const discardsLaterChanges=item.discardMode === 'nextIntent'; const discardLabel=discardsLaterChanges ? STRINGS.discardLaterChangesAction : STRINGS.discardAction; const discardTitle=discardsLaterChanges ? STRINGS.discardLaterChangesTitle : STRINGS.discardTitle; const discard=item.discardMode === 'none' || item.canDiscard === false ? '<button class="btn btn-secondary" type="button" disabled>'+esc(discardLabel)+'</button>' : '<button class="btn btn-secondary" type="button" data-discard-key="'+safeJson(item.key)+'" title="'+esc(discardTitle)+'">'+esc(discardLabel)+'</button>'; const requiresReview=status.requiresReview === true; const actionLabel=requiresReview ? STRINGS.resolveRecovery : STRINGS.syncToRedmine; const actionTitle=requiresReview ? ' title="'+esc(STRINGS.resolveRecoveryTooltip)+'"' : ''; const sync=item.canSync === false ? '<button class="btn btn-secondary" type="button" disabled>'+actionIcon('sync')+esc(actionLabel)+'</button>' : '<button class="btn btn-secondary" type="button" data-sync-key="'+safeJson(item.key)+'"'+actionTitle+'>'+actionIcon('sync')+esc(actionLabel)+'</button>'; const detail=item.detail || ''; return group+'<div class="unsynced-card" role="listitem"><span class="unsynced-kind-label">'+esc(unsyncedKindLabel(item.key.kind))+'</span><div class="unsynced-body"><div class="unsynced-label">'+esc(item.label)+'</div>'+(detail ? '<div class="unsynced-detail">'+esc(detail)+'</div>' : '')+'</div><div class="unsynced-state">'+badge(status.label,status.cls,status.icon)+'</div><div class="unsynced-actions">'+open+discard+sync+'</div></div>'; }).join('');
-  list.querySelectorAll('.unsynced-card').forEach(function(card,index){ const item=ordered[index]; const menu=document.createElement('details'); menu.className='unsynced-more'; const summary=document.createElement('summary'); summary.className='btn btn-secondary'; summary.textContent=STRINGS.moreActions; menu.appendChild(summary); const action=document.createElement('button'); action.type='button'; action.className='btn btn-secondary'; action.textContent=STRINGS.abandonAction; action.addEventListener('click',function(){ req('unsynced.abandonOne',{key:item.key}); }); menu.appendChild(action); card.querySelector('.unsynced-actions').appendChild(menu); });
+  list.innerHTML=ordered.map(function(item,index){
+    const status=resolveUnsyncedBadge(item);
+    const detail=item.detail || '';
+    const group=index === 0 || resolveUnsyncedBadge(ordered[index-1]).kind === 'review' && status.kind !== 'review' ? '<h3 class="unsynced-group-title">'+esc(status.kind === 'review' ? STRINGS.syncReviewRequired : STRINGS.tabUnsynced)+'</h3>' : '';
+    const open=item.documentUri ? '<button class="btn btn-secondary" type="button" data-unsynced-action="open" data-uri="'+esc(item.documentUri)+'">'+actionIcon('open')+esc(STRINGS.openInEditor)+'</button>' : '';
+    const discardsLaterChanges=item.discardMode === 'nextIntent';
+    const discardLabel=discardsLaterChanges ? STRINGS.discardLaterChangesAction : STRINGS.discardAction;
+    const discardTitle=discardsLaterChanges ? STRINGS.discardLaterChangesTitle : STRINGS.discardTitle;
+    const discardDisabled=item.discardMode === 'none' || item.canDiscard === false;
+    const discard='<button class="btn btn-secondary btn-danger" type="button" data-unsynced-action="discard" '+(discardDisabled ? 'disabled aria-describedby="discard-reason-'+index+'"' : 'data-discard-key="'+safeJson(item.key)+'" title="'+esc(discardTitle)+'"')+'>'+esc(discardLabel)+'</button>';
+    const actionLabel=status.requiresReview ? STRINGS.resolveRecovery : STRINGS.syncToRedmine;
+    const sync='<button class="btn btn-primary" type="button" data-unsynced-action="sync" '+(item.canSync === false ? 'disabled aria-describedby="sync-reason-'+index+'"' : 'data-sync-key="'+safeJson(item.key)+'"')+(status.requiresReview ? ' title="'+esc(STRINGS.resolveRecoveryTooltip)+'"' : '')+'>'+actionIcon('sync')+esc(actionLabel)+'</button>';
+    const more='<details class="unsynced-more"><summary class="btn btn-secondary" data-unsynced-action="more">'+esc(STRINGS.moreActions)+'</summary><div class="unsynced-more-actions">'+discard+(discardDisabled ? '<p class="unsynced-action-reason" id="discard-reason-'+index+'">'+esc(STRINGS.discardUnavailableReason)+'</p>' : '')+'<button class="btn btn-secondary btn-danger" type="button" data-unsynced-action="abandon" data-abandon-key="'+safeJson(item.key)+'">'+esc(STRINGS.abandonAction)+'</button></div></details>';
+    return group+'<div class="unsynced-card" role="listitem" tabindex="-1" data-queue-key="'+safeJson(item.key)+'"><span class="unsynced-kind-label">'+esc(unsyncedKindLabel(item.key.kind))+'</span><div class="unsynced-body"><div class="unsynced-label">'+esc(item.label)+'</div>'+(detail ? '<div class="unsynced-detail">'+esc(detail)+'</div>' : '')+'</div><div class="unsynced-state">'+badge(status.label,status.cls,status.icon)+'</div><div class="unsynced-actions">'+sync+open+more+'</div>'+(item.canSync === false ? '<p class="unsynced-action-reason" id="sync-reason-'+index+'">'+esc(STRINGS.syncUnavailableReason)+'</p>' : '')+'</div>';
+  }).join('');
+  list.querySelectorAll('[data-abandon-key]').forEach(function(button){ button.addEventListener('click',function(){ req('unsynced.abandonOne',{key:JSON.parse(button.getAttribute('data-abandon-key'))}); }); });
+  list.querySelectorAll('.unsynced-more').forEach(function(menu){ menu.addEventListener('keydown',function(event){ if(event.key === 'Escape'){ menu.open=false; menu.querySelector('summary').focus(); event.preventDefault(); } }); });
   list.querySelectorAll('[data-uri]').forEach(function(button){ button.addEventListener('click',function(){ req('unsynced.openLocalFile',{documentUri:button.dataset.uri}); }); });
   list.querySelectorAll('[data-discard-key]').forEach(function(button){ button.addEventListener('click',function(){ try { req('unsynced.discardOne',{key:JSON.parse(button.getAttribute('data-discard-key'))}); } catch {} }); });
   list.querySelectorAll('[data-sync-key]').forEach(function(button){ button.addEventListener('click',function(){ try { req('unsynced.syncOne',{key:JSON.parse(button.getAttribute('data-sync-key'))}); } catch {} }); });
@@ -866,13 +912,13 @@ function renderSettingsBase(){
 }
 
 function resetViewState(){
-  ticketLayoutMode='auto'; detailTab='overview'; quickFilters.clear();
+  ticketLayoutMode='auto'; detailFocus=false; detailTab='overview'; quickFilters.clear();
   expandedTicketIds.clear(); collapsedTicketIds.clear(); expandedComments.clear(); ticketDetailExpanded=false; metadataExpanded=false;
   activeTicketActionMenuId=null; activeTicketActionAnchorTop=null; searchQuery=''; closeProjectPicker(false);
   if(searchTimer){ window.clearTimeout(searchTimer); searchTimer=null; }
   searchInput.value=''; updateSearchClearButton(); filterDialog.classList.add('hidden'); closeLayoutPopover();
   document.querySelectorAll('.settings-category').forEach(function(category){ category.open=category.dataset.category === 'tickets'; });
-  vscode.setState(Object.assign({},vscode.getState() || {},{ticketLayoutMode:ticketLayoutMode,detailTab:detailTab,quickFilters:[]}));
+  vscode.setState(Object.assign({},vscode.getState() || {},{ticketLayoutMode:ticketLayoutMode,detailFocus:detailFocus,detailTab:detailTab,quickFilters:[]}));
   if(!state || !state.selectedProject) req('tickets.searchAllProjects',{query:''});
   render(); applyTicketLayoutMode(); showToast('success',STRINGS.viewStateReset);
 }
@@ -904,9 +950,10 @@ function deriveVisibleProjects(projects){
       if(searchable.includes(query)){ matches.push(project); includeProjectAndAncestors(project); }
     });
   }
+  const resultIds=new Set(visibleIds);
   const selectedId=state?.selectedProject?.id;
   if(selectedId !== undefined){ const selectedProject=projectById.get(selectedId); if(selectedProject) includeProjectAndAncestors(selectedProject); }
-  return { projects:projects.filter(function(project){ return visibleIds.has(project.id); }), matches:matches };
+  return { projects:projects.filter(function(project){ return visibleIds.has(project.id); }), matches:matches, resultIds:resultIds };
 }
 function setActiveProject(projectId){
   activeProjectId=projectId;
@@ -982,7 +1029,21 @@ function renderProjectSelect(resetActive){
   projectSelectLabel.textContent=selectedProject?.name || state?.selectedProject?.name || STRINGS.selectProjectPlaceholder;
   projectSelectTrigger.title=selectedProject?.name || state?.selectedProject?.name || STRINGS.selectProjectTitle;
   projectListbox.replaceChildren();
-  projection.projects.forEach(function(project){
+  const searching=normalizeProjectSearch(projectSearchQuery).length>0;
+  const groups=new Map();
+  function projectGroup(inResults){
+    if(!searching) return projectListbox;
+    const key=inResults ? 'results' : 'selected';
+    if(!groups.has(key)){
+      const group=document.createElement('div'); group.setAttribute('role','group');
+      const label=document.createElement('div'); label.className='project-group-label'; label.id='project-group-'+key;
+      label.textContent=inResults ? STRINGS.projectSearchResults : STRINGS.projectSelectedOutsideSearch;
+      group.setAttribute('aria-labelledby',label.id); group.appendChild(label); groups.set(key,group); projectListbox.appendChild(group);
+    }
+    return groups.get(key);
+  }
+  const orderedProjects=projection.projects.slice().sort(function(a,b){ return Number(projection.resultIds.has(b.id))-Number(projection.resultIds.has(a.id)); });
+  orderedProjects.forEach(function(project){
     const option=document.createElement('div');
     option.id='project-option-'+project.id;
     option.className='project-option';
@@ -996,7 +1057,7 @@ function renderProjectSelect(resetActive){
     copy.appendChild(name); if(identifier.textContent) copy.appendChild(identifier);
     option.appendChild(copy);
     if(project.id===selectedId){ const check=document.createElement('span'); check.className='project-option-check'; check.setAttribute('aria-hidden','true'); check.textContent='✓'; option.appendChild(check); }
-    projectListbox.appendChild(option);
+    projectGroup(projection.resultIds.has(project.id)).appendChild(option);
   });
   projectSearchClearButton.hidden=projectSearchQuery.length===0;
   document.getElementById('project-search-empty').hidden=normalizeProjectSearch(projectSearchQuery).length===0 || projection.matches.length>0;
@@ -1033,6 +1094,6 @@ window.addEventListener('message',function(event){ const message=event.data || {
     render();
     if(panel && panel.mode !== 'detail' && !panel.loading && (openingComposer || previousComposer?.loading)) document.getElementById('work-tracker')?.focus();
     if(previousComposer?.mode === 'newTicket' && (!panel || panel.mode === 'detail')) document.getElementById('new-ticket-btn').focus();
-  } else if(message.type === 'operation.started'){ startOperation(message.requestId,message.label); } else if(message.type === 'operation.success'){ endOperation(message.requestId); finishMetadataOperation(message.requestId,true); finishOperation('success',message.requestId,message.message); showToast('success',message.message); } else if(message.type === 'operation.error'){ endOperation(message.requestId); finishMetadataOperation(message.requestId,false); finishOperation('error',message.requestId,message.message); showToast('error',message.message); } else if(message.type === 'toast'){ showToast(message.level,message.message); } });
+  } else if(message.type === 'operation.started'){ startOperation(message.requestId,message.label); } else if(message.type === 'operation.success'){ endOperation(message.requestId); finishMetadataOperation(message.requestId,true); if(!finishOperation(message.level || 'success',message.requestId,message.message)) showToast(message.level || 'success',message.message); } else if(message.type === 'operation.error'){ endOperation(message.requestId); finishMetadataOperation(message.requestId,false); if(!finishOperation('error',message.requestId,message.message)) showToast('error',message.message); } else if(message.type === 'toast'){ showToast(message.level,message.message); } });
 req('dashboard.ready');
 `;

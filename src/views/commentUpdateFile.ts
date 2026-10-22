@@ -218,21 +218,27 @@ export const finalizeNewCommentDraftFileAfterSync = async (input: {
   if (!openDoc || !editor) { return "not_available"; }
   const raw = openDoc.getText();
   const alreadyFinalized = parseCommentUpdateFile(raw);
+  const syncedHash = computeNotesHash(input.syncedBody);
   if (alreadyFinalized) {
-    return alreadyFinalized.fields.issueId === input.ticketId &&
-      alreadyFinalized.fields.journalId === input.commentId &&
-      alreadyFinalized.body === input.expectedDocumentBody &&
-      alreadyFinalized.fields.sourceNotesHash === computeNotesHash(input.syncedBody)
-      ? "applied"
-      : "stale_source";
+    if (alreadyFinalized.fields.issueId !== input.ticketId ||
+        alreadyFinalized.fields.journalId !== input.commentId) {
+      return "stale_source";
+    }
+    if (alreadyFinalized.fields.sourceNotesHash === syncedHash) { return "applied"; }
+    // 旧版が変換前の本文から確定した基準値だけを、保存済み送信本文へ補正する。
+    if (alreadyFinalized.fields.sourceNotesHash !== computeNotesHash(input.expectedDocumentBody)) {
+      return "stale_source";
+    }
   }
+  const currentBody = alreadyFinalized?.body ?? raw;
   const updated = buildCommentUpdateFileContent({
+    ...alreadyFinalized?.fields,
     issueId: input.ticketId,
     journalId: input.commentId,
-    projectId: input.projectId,
-    sourceNotesHash: computeNotesHash(input.syncedBody),
+    projectId: input.projectId ?? alreadyFinalized?.fields.projectId,
+    sourceNotesHash: syncedHash,
     lastSyncedAt: new Date().toISOString(),
-  }, raw);
+  }, currentBody === input.expectedDocumentBody ? input.syncedBody : currentBody);
 
   suppressSaveSync(input.documentUri);
   try {

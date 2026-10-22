@@ -347,7 +347,7 @@ export type DashboardRequest =
 export type DashboardEvent =
   | { type: "dashboard.state"; state: DashboardState }
   | { type: "operation.started"; requestId: string; label?: string }
-  | { type: "operation.success"; requestId: string; message: string }
+  | { type: "operation.success"; requestId: string; message: string; level?: "success" | "info" | "warning" }
   | { type: "operation.error"; requestId: string; message: string }
   | { type: "toast"; level: "info" | "warning" | "error" | "success"; message: string };
 

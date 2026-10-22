@@ -24,7 +24,14 @@ import {
   createSyncOperationRepository,
   type SyncOperationRepository,
 } from "./syncRepository";
-import { registerTicketDocument, removeTicketEditorByUri } from "../../views/ticketEditorRegistry";
+import {
+  getCommentIdForDocument,
+  getConnectionScopeForDocument,
+  getEditorContentTypeForDocument,
+  getTicketIdForDocument,
+  registerTicketDocument,
+  removeTicketEditorByUri,
+} from "../../views/ticketEditorRegistry";
 import type { TicketCreateDependencies, TicketSaveDependencies } from "../../views/ticketSync/types";
 import { defaultCreateDeps, defaultDeps as defaultTicketDeps } from "../../views/ticketSync/ticketSyncDeps";
 import {
@@ -36,6 +43,7 @@ import {
 } from "../../views/commentSaveSync";
 import {
   finalizeNewCommentDraftFileAfterSync,
+  isCommentUpdateDocument,
   isCommentUpdateFilename,
   updateCommentUpdateFileAfterSync,
 } from "../../views/commentUpdateFile";
@@ -910,7 +918,7 @@ export class TicketCreateHandler implements OperationHandler<TicketCreateIntent,
   }
 
   public async executeSecondaryEffects(
-    operation: UnifiedSyncOperation<TicketCreateIntent>,
+    operation: UnifiedSyncOperation<TicketCreateIntent | TicketUpdateIntent>,
     prepared: PreparedTicketCreate,
     context: OperationHandlerContext,
     deps?: OperationHandlerDeps,
@@ -2423,6 +2431,11 @@ export class TicketUpdateHandler implements OperationHandler<TicketUpdateIntent,
     if (!ticketId || !intent) {
       return { ok: false, outcome: { kind: "failed_before_commit", error: new Error("Missing TicketUpdateIntent") } };
     }
+    if (containsConflictMarkers(intent.content ?? "") || containsConflictMarkers(intent.subject) ||
+        containsConflictMarkers(intent.description)) {
+      return { ok: false, outcome: { kind: "failed_before_commit", ticketId,
+        error: new Error(vscode.l10n.t("Resolve all merge conflict markers before syncing.")) } };
+    }
 
     const saveDeps: any = deps?.ticketUpdate
       ? {
@@ -2691,37 +2704,34 @@ export class TicketUpdateHandler implements OperationHandler<TicketUpdateIntent,
     context: OperationHandlerContext,
     deps?: OperationHandlerDeps,
   ): Promise<{ ok: true; uploadTokens?: IssueUploadInput[] } | { ok: false; error: Error; commitUnknown?: boolean }> {
-    if (prepared.imageLinks.length === 0) {
+    if (prepared.imageLinks.length === 0 && !(operation.intent?.attachments?.length) && !(operation.intent?.uploadTokens?.length)) {
       return { ok: true };
     }
 
     const saveDeps = { ...defaultTicketDeps, ...deps?.ticketUpdate };
-    const repo = deps?.repository ?? createSyncOperationRepository();
-    const opKey: SyncOperationKey = operation.key ?? { kind: "ticket", ticketId: prepared.ticketId };
-    const uploaded = await uploadMarkdownImageEffects(
-      operation, opKey, prepared.imageLinks.map((link) => link.resolvedPath),
-      context, repo, saveDeps.uploadFile, deps?.uploadSpoolStore,
+    // 新規作成と同じdurable upload経路を使い、file/clipboardの固定identityも維持する。
+    const attachmentPrepared: PreparedTicketCreate = {
+      projectId: prepared.projectId ?? 0,
+      parsed: {
+        subject: operation.intent?.subject ?? "",
+        description: operation.intent?.description ?? "",
+        metadata: operation.intent?.metadata ?? { tracker: "", priority: "", status: "", due_date: "" },
+      },
+      imageLinks: prepared.imageLinks,
+      uploadTokens: [...(operation.intent?.uploadTokens ?? [])],
+    };
+    const uploaded = await new TicketCreateHandler().executeSecondaryEffects(
+      operation, attachmentPrepared, context,
+      { ...deps, ticketCreate: { ...deps?.ticketCreate, uploadFile: saveDeps.uploadFile } },
     );
     if (!uploaded.ok) {
       return uploaded;
     }
-    const { resolvedMap } = uploaded;
-
-    const replacements = prepared.imageLinks.flatMap((link) => {
-      const upload = resolvedMap.get(link.resolvedPath);
-      return upload ? [{ range: link.range, value: upload.filename }] : [];
-    });
-    const description = applyMarkdownImageReplacements(operation.intent?.description ?? "", replacements);
-    const uploads = [...(operation.intent?.uploadTokens ?? [])];
-    for (const upload of resolvedMap.values()) {
-      if (!uploads.some((existing) => existing.token === upload.token)) {
-        uploads.push(upload);
-      }
-    }
+    const uploads = attachmentPrepared.uploadTokens;
 
     prepared.changes = {
       ...prepared.changes,
-      description,
+      ...(prepared.imageLinks.length > 0 ? { description: attachmentPrepared.parsed.description } : {}),
       ...(uploads.length > 0 ? { uploads } : {}),
     };
     prepared.request = {
@@ -3145,16 +3155,30 @@ export class TicketUpdateHandler implements OperationHandler<TicketUpdateIntent,
       const getDetail = deps?.ticketUpdate?.getIssueDetail ?? getIssueDetail;
       try {
         detail = await getDetail(ticketId);
-      } catch {
-        // read-back optional in finalizeLocal
+      } catch (error) {
+        return {
+          ok: false,
+          message: vscode.l10n.t("Remote ticket details are unavailable: {0}", error instanceof Error ? error.message : String(error)),
+          pending: "local_finalize",
+        };
       }
     }
 
-    const canonical = detail?.ticket ? editorContentFromTicket(detail.ticket) : undefined;
-    const subject = canonical?.subject ?? operation.intent?.subject ?? "";
-    const description = canonical?.description ?? operation.intent?.description ?? "";
-    const metadata = canonical?.metadata ?? operation.intent?.metadata ?? { tracker: "", priority: "", status: "", due_date: "", children: [] };
-    const remoteUpdatedAt = detail?.ticket?.updatedAt ?? operation.remoteUpdatedAt;
+    if (!detail?.ticket || detail.ticket.id !== ticketId ||
+        typeof detail.ticket.subject !== "string" ||
+        (detail.ticket.description !== undefined && typeof detail.ticket.description !== "string")) {
+      return {
+        ok: false,
+        message: vscode.l10n.t("Remote ticket details are invalid. Retry local finalization."),
+        pending: "local_finalize",
+      };
+    }
+
+    const canonical = editorContentFromTicket(detail.ticket);
+    const subject = canonical.subject;
+    const description = canonical.description;
+    const metadata = canonical.metadata;
+    const remoteUpdatedAt = detail.ticket.updatedAt ?? operation.remoteUpdatedAt;
 
     updateDraftAfterSave(
       ticketId,
@@ -3166,8 +3190,8 @@ export class TicketUpdateHandler implements OperationHandler<TicketUpdateIntent,
     );
 
     const documentUri = operation.documentUri ?? operation.intent?.documentUri;
-    if (documentUri && canonical) {
-      const replacement = (operation.nextIntent && canonical)
+    if (documentUri) {
+      const replacement = operation.nextIntent
         ? rebaseTicketEditorContent(
             {
               subject: operation.intent?.subject ?? "",
@@ -4153,6 +4177,11 @@ export class CommentCreateHandler implements OperationHandler<CommentCreateInten
 
     const documentUri = operation.documentUri ?? operation.intent?.documentUri;
     const commentId = operation.createdRemoteId ?? reconciled?.remoteId;
+    const primary = getPrimaryEffectForRevision(operation);
+    const snapshot = primary?.requestSnapshot;
+    const syncedBody = snapshot?.kind === "comment_create"
+      ? snapshot.request.notes
+      : primary?.target.submittedBody ?? operation.intent?.body ?? "";
 
     if (documentUri && commentId) {
       const uri = vscode.Uri.parse(documentUri);
@@ -4164,6 +4193,7 @@ export class CommentCreateHandler implements OperationHandler<CommentCreateInten
           commentId,
           projectId: operation.projectId ?? reconciled?.projectId ?? 0,
           operationScope: context.connectionScope,
+          body: syncedBody,
         });
       }
       if (operation.intent?.finalizeDraft) {
@@ -4173,7 +4203,7 @@ export class CommentCreateHandler implements OperationHandler<CommentCreateInten
           commentId,
           projectId: operation.projectId ?? reconciled?.projectId,
           expectedDocumentBody: operation.intent?.body ?? "",
-          syncedBody: operation.intent?.body ?? "",
+          syncedBody,
         });
         if (res !== "applied") {
           return { ok: false, message: `Local finalization pending: ${res}`, pending: "local_finalize" };
@@ -4332,7 +4362,7 @@ export class CommentUpdateHandler implements OperationHandler<CommentUpdateInten
       return { ok: false, outcome: { kind: "failed_before_commit", ticketId, commentId, error: new Error(vscode.l10n.t("Resolve all merge conflict markers before syncing.")) } };
     }
 
-    if (intent.baseBody && nextContent === intent.baseBody) {
+    if (intent.baseBody !== undefined && nextContent === intent.baseBody && (operation.effects?.length ?? 0) === 0) {
       return { ok: false, outcome: { kind: "no_change", ticketId, commentId } };
     }
 
@@ -4922,8 +4952,19 @@ export class CommentUpdateHandler implements OperationHandler<CommentUpdateInten
       ? remoteComment.updatedAt
       : operation.remoteUpdatedAt;
 
-    const requiresCommentUpdateFileFinalize = operation.intent?.sourceNotesHash !== undefined ||
-      (documentUri !== undefined && isCommentUpdateFilename(path.basename(vscode.Uri.parse(documentUri).path)));
+    const openDocument = documentUri === undefined
+      ? undefined
+      : vscode.workspace.textDocuments.find((document) => document.uri.toString() === documentUri);
+    // 旧 local priority が通常 editor に付けた hash は、登録済みの同一コメントに限り許容する。
+    const isRegisteredPlainComment = openDocument !== undefined &&
+      getEditorContentTypeForDocument(openDocument) === "comment" &&
+      getTicketIdForDocument(openDocument) === (operation.ticketId ?? operation.intent?.ticketId) &&
+      getCommentIdForDocument(openDocument) === commentId &&
+      getConnectionScopeForDocument(openDocument) === context.connectionScope &&
+      !isCommentUpdateDocument(openDocument.getText(), openDocument.uri.path);
+    const requiresCommentUpdateFileFinalize = !isRegisteredPlainComment &&
+      (operation.intent?.sourceNotesHash !== undefined ||
+        (documentUri !== undefined && isCommentUpdateFilename(path.basename(vscode.Uri.parse(documentUri).path))));
     if (documentUri && requiresCommentUpdateFileFinalize) {
       const res = await updateCommentUpdateFileAfterSync({
         documentUri,
