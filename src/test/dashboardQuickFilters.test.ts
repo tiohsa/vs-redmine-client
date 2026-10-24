@@ -17,7 +17,6 @@ const predicateSource = sourceBetween("function quickFilterCapability(", "// ─
 const renderTicketSource = sourceBetween("function flattenAll(", "// ── Operation feedback")
   + sourceBetween("function flattenVisible(", "function syncExpandedState(")
   + dateSource
-  + sourceBetween("function matchesSearch(", "function quickFilterCapability(")
   + predicateSource
   + sourceBetween("function renderTickets(){", "// ── Ticket detail / composer");
 
@@ -61,10 +60,12 @@ const renderTicketList = (
 ): { ids: number[]; count: string; preferences: string[] } => {
   const quickFilters = new Set(selected);
   const list = { innerHTML: "", setAttribute: () => undefined, querySelectorAll: () => [] as unknown[] };
-  const more = { textContent: "", onclick: undefined as (() => void) | undefined, classList: { add: () => undefined, remove: () => undefined } };
+  const more = { setAttribute: () => undefined, textContent: "", onclick: undefined as (() => void) | undefined, classList: { add: () => undefined, remove: () => undefined } };
   const count = { textContent: "" };
+  const moreError = { textContent: "", classList: { toggle: () => undefined } };
+  const scroll = { scrollTop: 0 };
   const document = {
-    getElementById: (id: string) => id === "ticket-list" ? list : id === "load-more-row" ? more : count,
+    getElementById: (id: string) => id === "ticket-list" ? list : id === "load-more-row" ? more : id === "load-more-error" ? moreError : id === "ticket-scroll" ? scroll : count,
     querySelectorAll: () => [] as unknown[],
   };
   const state = {
@@ -83,9 +84,11 @@ const renderTicketList = (
     state,
     quickFilters,
     searchQuery: "",
+    renderedTicketMarkup: null,
+    ticketAppendStartIds: null,
     expandedTicketIds: new Set(),
     document,
-    STRINGS: { ticketCountLabel: "Ticket count: {0}", shownLoadedTotal: "Showing {0} / {1} / {2}" },
+    STRINGS: { ticketCountLabel: "Ticket count: {0}", loadedTickets: "Loaded {0}", shownLoadedTickets: "Showing {0} / {1}" },
     renderQuickFilters: () => undefined,
     captureFocus: () => null,
     renderTicketRow: (ticket: typeof tickets[number]) => String(ticket.id),
@@ -196,7 +199,7 @@ suite("Dashboard quick filters", () => {
       assert.strictEqual(button.capability, capability);
       assert.deepStrictEqual(rendered.preferences, ["mine"]);
       assert.deepStrictEqual(rendered.ids, [1]);
-      assert.strictEqual(rendered.count, "Showing 1 / 2 / 2");
+      assert.strictEqual(rendered.count, "Showing 1 / 2");
       assert.strictEqual(matches({ assigneeId: 8, syncState: "Synced" }, ["mine"], undefined, [], capabilities), true);
     }
   });
@@ -232,7 +235,7 @@ suite("Dashboard quick filters", () => {
     assert.strictEqual(button.capability, "unavailable");
     assert.deepStrictEqual(rendered.preferences, ["open"]);
     assert.deepStrictEqual(rendered.ids, [1]);
-    assert.strictEqual(rendered.count, "Showing 1 / 2 / 2");
+    assert.strictEqual(rendered.count, "Showing 1 / 2");
     assert.strictEqual(matches({ statusId: 1, syncState: "Synced" }, ["open"], undefined, [{ id: 1 }], capabilities), true);
   });
 
@@ -243,9 +246,9 @@ suite("Dashboard quick filters", () => {
     const before = renderTicketList(["mine"], loading, tickets);
     const after = renderTicketList(["mine"], available, tickets);
     assert.deepStrictEqual(before.ids, [1]);
-    assert.strictEqual(before.count, "Showing 1 / 2 / 2");
+    assert.strictEqual(before.count, "Showing 1 / 2");
     assert.deepStrictEqual(after.ids, [2]);
-    assert.strictEqual(after.count, "Showing 1 / 2 / 2");
+    assert.strictEqual(after.count, "Showing 1 / 2");
     assert.deepStrictEqual(after.preferences, ["mine"]);
   });
 

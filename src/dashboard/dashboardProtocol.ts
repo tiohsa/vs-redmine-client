@@ -214,7 +214,10 @@ export type DashboardWorkPanel =
     error?: string;
   };
 
+export type DashboardSearchScope = { kind: "all" } | { kind: "project"; projectId: number };
+
 export interface DashboardState {
+  ticketSearch?: { query: string; scope: DashboardSearchScope; includeChildProjects: boolean };
   selectedProject?: DashboardSelectedProject;
   currentUserId?: number;
   quickFilterCapabilities: {
@@ -246,10 +249,12 @@ export interface DashboardState {
   settings: DashboardTicketSettingsViewModel;
   loading: {
     tickets: boolean;
+    moreTickets?: boolean;
     comments: boolean;
   };
   errors: {
     tickets?: string;
+    moreTickets?: string;
     comments?: string;
     operation?: string;
   };
@@ -295,10 +300,12 @@ export type DashboardRequest =
   | { type: "dashboard.ready"; requestId: string }
   | { type: "dashboard.refresh"; requestId: string }
   | { type: "dashboard.resetCache"; requestId: string }
-  | { type: "project.select"; requestId: string; projectId: number }
+  | { type: "project.select"; requestId: string; projectId: number; query?: string }
+  | { type: "project.selectAll"; requestId: string; query?: string }
   | { type: "project.toggleChildren"; requestId: string; includeChildProjects: boolean }
   | { type: "tickets.refresh"; requestId: string }
   | { type: "tickets.searchAllProjects"; requestId: string; query: string }
+  | { type: "tickets.search"; requestId: string; query: string; scope: DashboardSearchScope }
   | { type: "tickets.loadMore"; requestId: string }
   | { type: "ticket.select"; requestId: string; ticketId: number }
   | { type: "ticket.openEditor"; requestId: string; ticketId: number }

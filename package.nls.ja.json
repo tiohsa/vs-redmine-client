@@ -48,7 +48,7 @@
   "config.baseUrl.description": "Redmine インスタンスのベース URL。",
   "config.ignoreSSLErrors.markdownDescription": "SSL 証明書エラーを無視します（自己署名証明書など）。**開発・テスト用のみ。本番環境では有効にしないでください。**",
   "config.defaultProjectId.description": "チケット一覧で使用するデフォルトのプロジェクト識別子または ID。",
-  "config.selectedProjectId.description": "最後に選択したプロジェクト ID（選択状態の復元に使用）。",
+  "config.selectedProjectId.description": "最後に選択したプロジェクト ID。全プロジェクトは \"all\"（選択状態の復元に使用）。",
   "config.selectedProjectName.description": "最後に選択したプロジェクト名（選択状態の復元に使用）。",
   "config.includeChildProjects.description": "チケット一覧に子プロジェクトを含めます。",
   "config.ticketListLimit.description": "リクエストごとに読み込むチケットのデフォルト件数。",

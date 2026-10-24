@@ -68,6 +68,79 @@ state.totalTicketCount = 2;
 async function push() {
   await evaluate(`window.dispatchEvent(new MessageEvent('message',{data:{type:'dashboard.state',state:${JSON.stringify(state)}}}))`);
 }
+async function checkLoadMoreState() {
+  const original = structuredClone(state);
+  await call('Emulation.setDeviceMetricsOverride', { width: 440, height: 800, deviceScaleFactor: 1, mobile: false });
+  const node = id => ({ id, subject: `Ticket ${id}`, level: 0, children: [] });
+  const position = () => evaluate(`(()=>{const scroll=document.getElementById('ticket-scroll');const top=scroll.getBoundingClientRect().top;const row=[...document.querySelectorAll('.ticket-row')].find(row=>row.getBoundingClientRect().bottom>top);return {id:row?.dataset.id,offset:row?.getBoundingClientRect().top-top}})()`);
+  for (const query of ['', '検索']) {
+    state.ticketSearch = { query, scope: { kind: 'project', projectId: 1 }, includeChildProjects: false };
+    state.tickets = Array.from({ length: 30 }, (_, i) => node((i + 1) * 10));
+    state.loadedTicketCount = 30;
+    state.hasMoreTickets = true;
+    state.loading = { ...state.loading, tickets: false, moreTickets: false };
+    state.errors = {};
+    await push();
+    await evaluate(`new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)))`);
+    await evaluate(`document.getElementById('load-more-row').focus();document.getElementById('ticket-scroll').scrollTop=100000;window.oldRow=document.querySelector('.ticket-row');window.messages.length=0;document.getElementById('load-more-row').click();document.getElementById('load-more-row').click()`);
+    assert.equal(await evaluate(`window.messages.filter(message=>message.type==='tickets.loadMore').length`), 1, '追加要求を連打しても1回だけ送信');
+    const before = await position();
+    state.loading.moreTickets = true;
+    await push();
+    assert.equal(await evaluate(`window.oldRow===document.querySelector('.ticket-row')`), true, '追加取得開始時に既存DOMを保持');
+    assert.deepEqual(await position(), before, '追加取得開始時に表示位置を保持');
+    assert.equal(await evaluate(`document.activeElement.id`), 'load-more-row');
+    assert.equal(await evaluate(`document.getElementById('load-more-row').getAttribute('aria-disabled')`), 'true');
+    assert.equal(await evaluate(`document.querySelector('.loading-state')===null`), true);
+    // ソートで先頭に新しい行が入っても、見ていた行の相対位置を保持する。
+    state.tickets = [node(5), ...state.tickets, node(310)];
+    state.loadedTicketCount = state.tickets.length;
+    await push();
+    assert.deepEqual(await position(), before, '追加行を挿入しても表示位置を保持');
+    state.loading.moreTickets = false;
+    await push();
+    assert.equal(await evaluate(`document.activeElement.id`), 'load-more-row');
+    // 失敗は一覧の下に表示し、同じボタンから追加取得だけを再試行する。
+    await evaluate(`window.oldRow=document.querySelector('.ticket-row')`);
+    state.loading.moreTickets = true;
+    await push();
+    state.loading.moreTickets = false;
+    state.errors.moreTickets = '追加取得に失敗しました';
+    await push();
+    assert.equal(await evaluate(`window.oldRow===document.querySelector('.ticket-row')`), true);
+    assert.equal(await evaluate(`document.getElementById('load-more-error').textContent`), state.errors.moreTickets);
+    assert.equal(await evaluate(`document.activeElement.id`), 'load-more-row');
+    await evaluate(`document.getElementById('load-more-row').click()`);
+    assert.equal(await evaluate(`window.messages.at(-1).type`), 'tickets.loadMore');
+    state.errors = {};
+    state.loading.moreTickets = true;
+    await push();
+    const finalPosition = await position();
+    state.tickets.push(node(320));
+    state.loadedTicketCount = state.tickets.length;
+    state.hasMoreTickets = false;
+    await push();
+    state.loading.moreTickets = false;
+    await push();
+    assert.equal(await evaluate(`document.activeElement.dataset.id`), '320', '最終ページでは最初の追加行へフォーカス');
+    assert.deepEqual(await position(), finalPosition);
+    // 重複だけの最終ページは件数表示へフォーカスを戻す。
+    state.hasMoreTickets = true;
+    await push();
+    await evaluate(`document.getElementById('load-more-row').focus()`);
+    state.loading.moreTickets = true;
+    await push();
+    state.hasMoreTickets = false;
+    state.loading.moreTickets = false;
+    await push();
+    assert.equal(await evaluate(`document.activeElement.id`), 'ticket-count');
+  }
+  for (const key of Object.keys(state)) delete state[key];
+  Object.assign(state, original);
+  await push();
+  // 長い一覧から戻した際の scroll イベントが、次の picker 操作へ残らないよう待つ。
+  await evaluate(`new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)))`);
+}
 async function main() {
   const url = await new Promise((resolve, reject) => {
     let output = '';
@@ -112,6 +185,7 @@ async function main() {
   assert.equal(await evaluate(`document.getElementById('load-more-row').classList.contains('hidden')`), true);
   state.totalTicketCount = 2;
   await push();
+  await checkLoadMoreState();
   assert.equal(await evaluate(`document.getElementById('search-input').type`), 'text');
   assert.equal(await evaluate(`document.getElementById('project-select-trigger').tagName`), 'BUTTON');
   assert.equal(await evaluate(`document.getElementById('project-select-trigger').getAttribute('aria-haspopup')`), 'dialog');
@@ -133,7 +207,7 @@ async function main() {
   state.selectedProject = { id: 5, name: 'USA' };
   await push();
   const projectNames = () => evaluate(`[...document.querySelectorAll('#project-listbox [role="option"] .project-option-name')].map(option=>option.textContent.trim())`);
-  assert.deepEqual(await projectNames(), ['Production', 'Japan', 'Nagoya Plant', 'Tokyo Plant', 'USA', 'Development']);
+  assert.deepEqual(await projectNames(), [strings.selectProjectPlaceholder, 'Production', 'Japan', 'Nagoya Plant', 'Tokyo Plant', 'USA', 'Development']);
   assert.equal(await evaluate(`document.getElementById('project-picker-popup').hidden`), true);
   await evaluate(`document.getElementById('project-select-trigger').focus()`);
   await key('Enter');
@@ -282,7 +356,7 @@ async function main() {
   assert.equal(await evaluate(`window.messages.length`), messagesBeforeProjectSearchClear, 'clearing project search stays local');
   assert.equal(await evaluate(`document.getElementById('project-search-clear-btn').hidden`), true, 'custom project search clear button hides after clearing');
   assert.equal(await evaluate(`document.getElementById('project-picker-popup').hidden`), false, 'clearing keeps popup open');
-  assert.deepEqual(await projectNames(), ['Production', 'Japan', 'Nagoya Plant', 'Tokyo Plant', 'USA', 'Development']);
+  assert.deepEqual(await projectNames(), [strings.selectProjectPlaceholder, 'Production', 'Japan', 'Nagoya Plant', 'Tokyo Plant', 'USA', 'Development']);
   const projectsBeforeLongList = state.projects;
   state.projects = [...projectsBeforeLongList, ...Array.from({ length: 28 }, (_value, index) => ({ id: 20 + index, name: `Long project ${index + 1}`, identifier: `long-${index + 1}`, level: 0 }))];
   state.selectedProject = { id: 47, name: 'Long project 28' };
@@ -324,13 +398,13 @@ async function main() {
   await push();
   assert.equal(await evaluate(`document.getElementById('project-picker-popup').hidden`), true);
   assert.equal(await evaluate(`document.getElementById('project-search-input').value`), '');
-  assert.deepEqual(await projectNames(), ['Production', 'Japan', 'Nagoya Plant', 'Tokyo Plant', 'USA', 'Development']);
+  assert.deepEqual(await projectNames(), [strings.selectProjectPlaceholder, 'Production', 'Japan', 'Nagoya Plant', 'Tokyo Plant', 'USA', 'Development']);
   state.settings.baseUrl = priorBaseUrlForProjectSearch;
   await push();
   await evaluate(`document.getElementById('tab-settings').click();document.getElementById('project-select-trigger').click();document.getElementById('project-search-input').value='nagoya';document.getElementById('project-search-input').dispatchEvent(new Event('input',{bubbles:true}));document.getElementById('settings-connection').open=true;document.getElementById('settings-reset-view-btn').click()`);
   assert.equal(await evaluate(`document.getElementById('project-search-input').value`), '');
   assert.equal(await evaluate(`document.getElementById('project-picker-popup').hidden`), true);
-  assert.deepEqual(await projectNames(), ['Production', 'Japan', 'Nagoya Plant', 'Tokyo Plant', 'USA', 'Development']);
+  assert.deepEqual(await projectNames(), [strings.selectProjectPlaceholder, 'Production', 'Japan', 'Nagoya Plant', 'Tokyo Plant', 'USA', 'Development']);
   state.projects = originalProjectsForProjectSearch;
   state.selectedProject = originalSelectedProjectForProjectSearch;
   await push();
@@ -347,14 +421,14 @@ async function main() {
   await evaluate(`document.querySelector('[data-quick-filter="mine"]').click()`);
   assert.equal(await evaluate(`document.querySelector('[data-quick-filter="mine"]').getAttribute('aria-pressed')`), 'true');
   assert.equal(await evaluate(`document.querySelectorAll('.ticket-row').length`), 1);
-  assert.equal(await evaluate(`document.getElementById('ticket-count').textContent`), strings.shownLoadedTotal.replace('{0}','1').replace('{1}','2').replace('{2}','2'));
+  assert.equal(await evaluate(`document.getElementById('ticket-count').textContent`), strings.shownLoadedTickets.replace('{0}','1').replace('{1}','2'));
   await evaluate(`document.querySelector('[data-quick-filter="open"]').click()`);
   assert.equal(await evaluate(`document.querySelectorAll('.ticket-row').length`), 1);
   await evaluate(`document.querySelector('[data-quick-filter="overdue"]').click();document.querySelector('[data-quick-filter="unsynced"]').click()`);
   assert.equal(await evaluate(`document.querySelectorAll('.ticket-row').length`), 1);
   await evaluate(`document.querySelectorAll('[data-quick-filter][aria-pressed="true"]').forEach(button=>button.click())`);
   await evaluate(`document.getElementById('advanced-filters-btn').click()`);
-  assert.equal(await evaluate(`document.activeElement.id`), 'advanced-subject');
+  assert.equal(await evaluate(`document.activeElement.id`), 'advanced-status');
   await key('Escape');
   assert.equal(await evaluate(`document.activeElement.id`), 'advanced-filters-btn');
 
@@ -476,50 +550,28 @@ async function main() {
   state.tickets[0].trackerName = 'Bug <img src=x onerror=alert(1)>';
   state.tickets[0].priorityName = '優先度 "最優先" & 要確認';
   await push();
-  assert.equal(await evaluate(`document.querySelectorAll('.ticket-row[data-id="10"] .ticket-attribute').length`), 3);
-  assert.equal(await evaluate(`document.querySelectorAll('.ticket-row[data-id="10"] .ticket-attribute')[1].textContent`), state.tickets[0].trackerName);
+  assert.equal(await evaluate(`document.querySelectorAll('.ticket-row[data-id="10"] .ticket-attribute').length`), 1);
+  assert.equal(await evaluate(`document.querySelector('.ticket-row[data-id="10"]').textContent.includes('Bug <img')`), false);
   assert.equal(await evaluate(`document.querySelectorAll('.ticket-row img').length`), 0);
-  assert.equal(await evaluate(`document.getElementById('ticket-count').textContent`), strings.shownLoadedTotal.replace('{0}','2').replace('{1}','2').replace('{2}','2'));
+  assert.equal(await evaluate(`document.getElementById('ticket-count').textContent`), strings.loadedTickets.replace('{0}','2'));
   state.tickets[0].trackerName = 'Bug';
   state.tickets[0].priorityName = 'Normal';
 
-  // date-only はローカル暦日で判定し、固定日時で日付境界と不正値を検証する。
-  async function assertDueDateBadge(dueDate, className) {
-    state.tickets[0].dueDate = dueDate;
-    await push();
-    const selector = ['due-overdue', 'due-1day', 'due-3days', 'due-7days'].map(name => `.ticket-row[data-id="10"] .${name}`).join(',');
-    assert.equal(await evaluate(`document.querySelector(${JSON.stringify(selector)})?.className || null`), className ? `badge ${className}` : null);
-  }
-  await assertDueDateBadge('2026-09-14', 'due-overdue');
-  await assertDueDateBadge('2026-09-15', 'due-1day');
-  await assertDueDateBadge('2026-09-16', 'due-1day');
-  await assertDueDateBadge('invalid-date', null);
-  await assertDueDateBadge('2026-02-30', null);
-  await assertDueDateBadge('2020-01-01', 'due-overdue');
+  // 日付は詳細へ集約し、一覧では重複しない。
+  assert.equal(await evaluate(`document.querySelectorAll('.ticket-row .due-overdue').length`), 0);
 
   // 担当者は一覧ではテキストで、詳細では既存アバターで示す。
   state.selectedTicketId = 10;
   state.tickets[0].assigneeName = 'Taro Yamada';
   state.selectedTicket = { ...state.tickets[0], projectName: '検証プロジェクト', description: '担当者表示を確認します。' };
   await push();
-  assert.equal(await evaluate(`document.querySelector('.ticket-assignee').textContent`), 'Taro Yamada');
+  assert.equal(await evaluate(`document.querySelectorAll('.ticket-assignee').length`), 0);
   assert.equal(await evaluate(`document.querySelectorAll('.detail-avatar').length`), 1);
   assert.equal(await evaluate(`document.querySelector('.detail-avatar').textContent`), 'TA');
   assert.equal(await evaluate(`document.querySelector('.detail-avatar').getAttribute('aria-label')`), 'Taro Yamada');
   await evaluate(`document.getElementById('ticket-detail-toggle').click()`);
   assert.equal(await evaluate(`document.querySelectorAll('.detail-avatar').length`), 1);
-  // 設定の操作・再描画で一覧の担当者のみを非表示にする。
-  await evaluate(`document.getElementById('set-show-assignee').click()`);
-  assert.deepEqual(await evaluate(`window.messages.at(-1).patch`), { showAssignee: false });
-  state.settings.showAssignee = false;
-  await push();
-  assert.equal(await evaluate(`document.querySelectorAll('.ticket-assignee').length`), 0);
-  assert.equal(await evaluate(`document.querySelectorAll('.detail-avatar').length`), 1);
-  assert.equal(await evaluate(`document.getElementById('set-show-assignee').checked`), false);
-  state.settings.showAssignee = true;
-  await push();
-  assert.equal(await evaluate(`document.querySelectorAll('.ticket-assignee').length`), 1);
-  assert.equal(await evaluate(`document.getElementById('set-show-assignee').checked`), true);
+  assert.equal(await evaluate(`document.querySelectorAll('#set-show-assignee,#set-show-tracker,#set-show-priority,#set-show-due-date').length`), 0);
 
   // 一覧・詳細・コメント・未同期の同じ操作はラベルと SVG が一致する。
   state.comments.ticketId = 10;
@@ -530,10 +582,10 @@ async function main() {
     const appearances = await evaluate(`(${JSON.stringify(selectors)}).map(selector=>{const button=document.querySelector(selector);return {label:button.textContent.trim(),icon:button.querySelector('svg').outerHTML};})`);
     appearances.slice(1).forEach(actual => assert.deepEqual(actual, appearances[0]));
   }
-  await assertSameAction(['[data-ticket-action="open"]', '#detail-open-btn', '[data-edit-comment]', '[data-uri]']);
+  await assertSameAction(['#detail-open-btn', '[data-edit-comment]', '[data-uri]']);
   assert.equal(await evaluate(`document.querySelector('#detail-comment-btn').getAttribute('aria-label')`), strings.addCommentAction);
   assert.equal(await evaluate(`document.querySelector('#detail-comment-btn svg').outerHTML === document.querySelector('#add-comment-btn svg').outerHTML`), true);
-  await assertSameAction(['[data-ticket-action="browser"]', '#detail-browser-btn', '[data-open-comment]']);
+  await assertSameAction(['#detail-browser-btn', '[data-open-comment]']);
   await assertSameAction(['#detail-sync-btn', '[data-sync-key]', '[data-sync-comment-key]']);
   assert.equal(await evaluate(`document.querySelector('#sync-all-btn svg').outerHTML`), await evaluate(`document.querySelector('#detail-sync-btn svg').outerHTML`));
   state.comments.items = [];
@@ -552,26 +604,56 @@ async function main() {
   await evaluate(`document.querySelector('[data-expand="10"]').focus()`);
   await key('Enter');
   assert.equal(await evaluate(`document.querySelector('[data-expand="10"]').getAttribute('aria-expanded')`), 'false');
-  assert.equal(await evaluate(`document.getElementById('ticket-count').textContent`), strings.shownLoadedTotal.replace('{0}','1').replace('{1}','2').replace('{2}','2'));
+  assert.equal(await evaluate(`document.getElementById('ticket-count').textContent`), strings.shownLoadedTickets.replace('{0}','1').replace('{1}','2'));
   assert.equal(await evaluate('window.messages.filter(m=>m.type==="ticket.select").length'), 0);
   await push();
   assert.equal(await evaluate(`document.querySelector('[data-expand="10"]').getAttribute('aria-expanded')`), 'false');
   assert.equal(await evaluate(`document.activeElement.dataset.expand`), '10');
-  await evaluate(`document.getElementById('search-input').value='検索対象'; document.getElementById('search-input').dispatchEvent(new Event('input'))`);
+  // 連続入力は最後の値を1回だけ送信。同じプロジェクトの再選択でも予約を失わない。
+  await evaluate(`window.messages.length=0;document.getElementById('search-input').value='途中';document.getElementById('search-input').dispatchEvent(new Event('input'));document.getElementById('search-input').value='最後';document.getElementById('search-input').dispatchEvent(new Event('input'));document.getElementById('project-select-trigger').click();document.getElementById('project-option-1').click()`);
+  await new Promise(resolve => setTimeout(resolve,350));
+  assert.deepEqual(await evaluate(`window.messages.filter(m=>m.type==='tickets.search').map(m=>m.query)`),['最後']);
+
+  // サーバー検索: IME変換中は送信せず、Enterで確定。本文のみの一致を消さない。
+  const originalTickets = state.tickets;
+  await evaluate(`window.messages.length=0;document.getElementById('search-input').focus();document.getElementById('search-input').dispatchEvent(new CompositionEvent('compositionstart'));document.getElementById('search-input').value='本文だけ';document.getElementById('search-input').dispatchEvent(new Event('input'))`);
+  await new Promise(resolve => setTimeout(resolve, 350));
+  assert.equal(await evaluate(`window.messages.filter(m=>m.type==='tickets.search').length`), 0);
+  await key('Enter');
+  assert.equal(await evaluate(`window.messages.filter(m=>m.type==='tickets.search').length`), 0);
+  await evaluate(`document.getElementById('search-input').dispatchEvent(new CompositionEvent('compositionend'))`);
+  await key('Enter');
+  assert.deepEqual(await evaluate(`(({query,scope})=>({query,scope}))(window.messages.at(-1))`), { query: '本文だけ', scope: {kind:'project',projectId:1} });
+  await new Promise(resolve => setTimeout(resolve, 350));
+  assert.equal(await evaluate(`window.messages.filter(m=>m.type==='tickets.search').length`), 1);
+  state.ticketSearch = {query:'本文だけ',scope:{kind:'project',projectId:1},includeChildProjects:false};
+  state.tickets = [{id:11,subject:'別の件名',level:0,children:[]}];
+  state.loadedTicketCount = 1;
+  await push();
   assert.equal(await evaluate(`document.querySelectorAll('.ticket-row').length`), 1);
   assert.equal(await evaluate(`document.querySelector('.ticket-row').dataset.id`), '11');
-  assert.equal(await evaluate(`document.getElementById('ticket-count').textContent`), strings.shownLoadedTotal.replace('{0}','1').replace('{1}','2').replace('{2}','2'));
-  await evaluate(`document.getElementById('search-clear-btn').click()`);
-
-  // Enter でメニューを開き、矢印で移動、Escape で起点へ戻る。
-  await evaluate(`document.querySelector('[data-ticket-action-menu="10"]').focus()`);
-  await key('Enter');
-  assert.equal(await evaluate('document.activeElement.dataset.ticketAction'), 'open');
-  await key('ArrowDown');
-  assert.equal(await evaluate('document.activeElement.dataset.ticketAction'), 'comment');
+  await evaluate(`document.getElementById('project-select-trigger').click();document.getElementById('project-option-0').click()`);
+  assert.deepEqual(await evaluate(`(({type,query})=>({type,query}))(window.messages.at(-1))`), {type:'project.selectAll',query:'本文だけ'});
+  state.selectedProject=undefined;
+  state.ticketSearch.scope={kind:'all'};
+  state.tickets[0].projectName='別プロジェクト';
+  await push();
+  assert.equal(await evaluate(`document.getElementById('search-input').value`),'本文だけ');
+  assert.equal(await evaluate(`getComputedStyle(document.getElementById('include-children').closest('label')).display`),'none');
+  assert.equal(await evaluate(`document.querySelector('.ticket-project').textContent`),'別プロジェクト');
+  await evaluate(`document.getElementById('search-input').focus()`);
   await key('Escape');
-  assert.equal(await evaluate('document.activeElement.dataset.ticketActionMenu'), '10');
-  assert.equal(await evaluate('window.messages.filter(m=>m.type==="ticket.select").length'), 0);
+  assert.deepEqual(await evaluate(`(({query,scope})=>({query,scope}))(window.messages.at(-1))`),{query:'',scope:{kind:'all'}});
+  state.selectedProject={id:1,name:'検証プロジェクト'};
+  state.ticketSearch={query:'',scope:{kind:'project',projectId:1},includeChildProjects:false};
+  state.tickets=originalTickets;
+  state.loadedTicketCount=2;
+  await push();
+  // 行から詳細を開く操作とフォーカスを維持する。
+  await evaluate(`document.querySelector('.ticket-row[data-id="10"]').focus()`);
+  await key('Enter');
+  assert.equal(await evaluate(`window.messages.at(-1).type`),'ticket.select');
+  assert.equal(await evaluate(`window.messages.at(-1).ticketId`),10);
 
   // Detail の主要操作は既存 request のまま。Markdown preview は安全な読み取り専用。
   state.selectedProject = { id: 1, name: '検証プロジェクト' };
@@ -709,6 +791,17 @@ async function main() {
   await evaluate(`window.dispatchEvent(new MessageEvent('message',{data:{type:'operation.error',requestId:'${failedSync}',message:'同期に失敗しました'}}))`);
   assert.equal(await evaluate(`document.getElementById('detail-sync-btn').disabled`), false);
   assert.equal(await evaluate(`document.querySelector('.toast-error:last-child').textContent`), '同期に失敗しました');
+  // キャッシュ再取得の中断通知も started を終了し、同期操作を再び使えるようにする。
+  await evaluate(`window.dispatchEvent(new MessageEvent('message',{data:{type:'operation.started',requestId:'interrupted-cache-reset',label:'キャッシュ再取得中'}}))`);
+  assert.equal(await evaluate(`document.getElementById('detail-sync-btn').disabled`), true);
+  await push();
+  await evaluate(`window.dispatchEvent(new MessageEvent('message',{data:{type:'operation.success',requestId:'interrupted-cache-reset',message:'表示が変更されたため再取得を中断しました',level:'info'}}))`);
+  assert.equal(await evaluate(`document.getElementById('detail-sync-btn').disabled`), false);
+  const messagesAfterReset = await evaluate('window.messages.length');
+  await evaluate(`document.getElementById('detail-sync-btn').click()`);
+  assert.equal(await evaluate('window.messages.length'), messagesAfterReset + 1);
+  assert.equal(await evaluate('window.messages.at(-1).type'), 'ticket.syncSelected');
+  await evaluate(`window.dispatchEvent(new MessageEvent('message',{data:{type:'operation.success',requestId:window.messages.at(-1).requestId,message:'完了'}}))`);
   for (const [syncState, label] of [['Synced', strings.synced], ['Draft', strings.draft], ['Dirty', strings.syncDirty], ['Queued', strings.syncQueued], ['Syncing', strings.syncSyncing], ['Failed', strings.syncFailed], ['Conflict', strings.syncConflict], ['RecoveryPending', strings.syncRecoveryPending], ['CommitUnknown', strings.syncOutcomeUnknown]]) {
     state.selectedTicket.syncState = syncState;
     await push();
@@ -797,6 +890,38 @@ async function main() {
   state.workPanel.draftUri = 'file:///tmp/dashboard-smoke-draft.md';
   await push();
   assert.equal(await evaluate(`document.getElementById('work-sync-new-ticket').disabled`), false);
+  const beforeComposerSearch = structuredClone(state);
+  for (const mode of ['newTicket', 'childTicket']) {
+    state.workPanel = { ...beforeComposerSearch.workPanel, mode, parentTicketId: 10, parentSubject: 'Parent' };
+    await push();
+    await evaluate(`document.getElementById('work-description').value='検索しても保持する本文';document.getElementById('work-description').dispatchEvent(new Event('input'));document.getElementById('work-due-date').value='2026-10-31';document.getElementById('work-due-date').dispatchEvent(new Event('input'))`);
+    await evaluate(`document.getElementById('search-input').value='検索';document.getElementById('search-input').focus()`);
+    await key('Enter');
+    assert.equal(await evaluate('window.messages.at(-1).type'), 'tickets.search');
+    state.selectedTicketId = undefined;
+    state.selectedTicket = undefined;
+    state.ticketSearch = { query: '検索', scope: { kind: 'project', projectId: 1 }, includeChildProjects: false };
+    for (const phase of ['loading', 'empty', 'error', 'clear']) {
+      state.loading.tickets = phase === 'loading';
+      state.errors.tickets = phase === 'error' ? '検索失敗' : undefined;
+      state.tickets = [];
+      if (phase === 'clear') {
+        await evaluate(`document.getElementById('search-input').value=''`);
+        await key('Enter');
+        state.ticketSearch.query = '';
+      }
+      await push();
+      assert.equal(await evaluate(`document.getElementById('work-description').value`), '検索しても保持する本文', `${mode} ${phase}`);
+      assert.equal(await evaluate(`document.getElementById('work-due-date').value`), '2026-10-31');
+      assert.equal(await evaluate(`document.getElementById('work-tracker').value`), 'バグ');
+      assert.equal(await evaluate(`document.getElementById('work-sync-new-ticket').disabled`), false, 'draftUriを保持');
+      assert.equal(await evaluate('document.activeElement.id'), 'search-input');
+    }
+  }
+  for (const key of Object.keys(state)) delete state[key];
+  Object.assign(state, beforeComposerSearch);
+  await push();
+  await evaluate(`document.getElementById('work-description').focus()`);
   delete state.workPanel;
   await push();
   assert.equal(await evaluate('document.activeElement.id'), 'new-ticket-btn');
@@ -809,7 +934,7 @@ async function main() {
   assert.equal(await evaluate(`document.querySelector('[role="alert"]').textContent.includes('接続に失敗しました')`), true);
   assert.equal(await evaluate(`document.getElementById('ticket-count').textContent`), '');
   await evaluate(`document.getElementById('retry-tickets').click()`);
-  assert.equal(await evaluate('window.messages.at(-1).type'), 'dashboard.refresh');
+  assert.equal(await evaluate('window.messages.at(-1).type'), 'tickets.search');
   state.errors = {};
   state.loading.tickets = true;
   await push();
@@ -984,6 +1109,9 @@ async function main() {
   }
   state.selectedProject = { id: 1, name: '検証プロジェクト' };
   state.tickets = Array.from({ length: 20 }, (_, index) => ({ id: 10 + index, subject: 'チケットの詳細と操作を確認するための長い件名 ' + index, level: 0, trackerName: '長い名前のカスタムトラッカー', priorityName: 'カスタム優先度・最優先', statusName: '進行中', syncState: 'Queued', dueDate: '2020-01-01', children: [] }));
+  state.loadedTicketCount = state.tickets.length;
+  state.totalTicketCount = state.tickets.length;
+  await evaluate(`document.getElementById('toast-area').replaceChildren()`);
   state.selectedTicketId = 10;
   state.selectedTicket = { ...state.tickets[0], projectName: '検証プロジェクト', description: '日本語の説明文と状態表示を確認します。\nキーボードと画面幅に合わせて操作できます。' };
   for (const [theme, width] of [['vscode-light', 280], ['vscode-light', 320], ['vscode-dark', 440], ['vscode-dark', 768], ['vscode-dark', 1200], ['vscode-high-contrast-light', 480], ['vscode-high-contrast', 320]]) {
@@ -991,16 +1119,16 @@ async function main() {
     await evaluate(`document.body.className=${JSON.stringify(theme)};document.getElementById('tab-tickets').click()`);
     await push();
     if (theme === 'vscode-dark') assert.equal(await evaluate('getComputedStyle(document.body).backgroundColor'), 'rgb(37, 37, 38)');
-    assert.equal(await evaluate(`getComputedStyle(document.querySelector('.due-overdue')).display !== 'none'`), true);
+    assert.equal(await evaluate(`document.querySelectorAll('.ticket-row .due-overdue').length`), 0);
     assert.equal(await evaluate(`document.querySelector('.tickets-master').scrollWidth <= document.querySelector('.tickets-master').clientWidth`), true);
     assert.equal(await evaluate(`document.getElementById('ticket-scroll').scrollWidth <= document.getElementById('ticket-scroll').clientWidth`), true, `list overflow: ${theme} ${width}`);
     assert.equal(await evaluate(`getComputedStyle(document.querySelector('.tickets-master')).borderRightWidth`), '1px');
     assert.equal(await evaluate(`document.querySelector('.ticket-subject').getBoundingClientRect().width >= 40`), true, `subject clipped: ${theme} ${width}`);
     assert.equal(await evaluate(`document.querySelectorAll('.detail-actions svg[aria-hidden="true"]').length >= 3`), true);
     if (width < 700) assert.equal(await evaluate(`document.querySelector('.tickets-master').getBoundingClientRect().height <= innerHeight * .45 + 1`), true);
-    await evaluate(`document.querySelector('[data-ticket-action-menu="29"]').scrollIntoView(); document.querySelector('[data-ticket-action-menu="29"]').click()`);
+    await evaluate(`document.getElementById('detail-more-btn').scrollIntoView(); document.getElementById('detail-more-btn').click()`);
     await evaluate('new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)))');
-    assert.equal(await evaluate(`(()=>{const menu=document.getElementById('ticket-action-menu-29');const r=menu.getBoundingClientRect();return r.top>=0&&r.bottom<=innerHeight&&r.left>=0&&r.right<=innerWidth&&menu.contains(document.elementFromPoint(r.left+10,r.top+10))})()`), true, `menu clipping: ${theme}`);
+    assert.equal(await evaluate(`(()=>{const menu=document.getElementById('detail-action-menu');const r=menu.getBoundingClientRect();return r.top>=0&&r.bottom<=innerHeight&&r.left>=0&&r.right<=innerWidth&&menu.contains(document.elementFromPoint(r.left+10,r.top+10))})()`), true, `menu clipping: ${theme}`);
     await key('Escape');
     await evaluate(`document.getElementById('ticket-scroll').scrollTop=0; document.querySelector('.tickets-layout').scrollTop=0`);
     await evaluate('new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)))');
@@ -1065,7 +1193,7 @@ async function main() {
   fs.writeFileSync(path.join(directory, 'dashboard-metadata-preview.png'), Buffer.from(metadataPreview.data, 'base64'));
   assert.deepEqual(errors, []);
   assert.deepEqual(await evaluate('window.cspViolations'), [], 'Dashboard は CSP 違反を発生させない');
-  console.log('PASS: Detail操作/状態9種/読み取り専用preview、Metadata一括適用/キャンセル/失敗/接続切替、同期二重送信防止/成功/失敗、日本語、属性バッジ/エスケープ/表示件数、Settings セクション/編集/キーボード操作、折りたたみ維持、子チケット検索、メニューのキーボード操作/表示領域、タブ横断の新規作成、入力/フォーカス維持、下書き前の同期抑止、ローディング/エラー再試行、7画面幅、4テーマ');
+  console.log('PASS: Detail操作/状態9種/読み取り専用preview、Metadata一括適用/キャンセル/失敗/接続切替、同期二重送信防止/成功/失敗、日本語/IME/入力待機、番号・本文検索の要求/範囲切替、検索中の新規/子チケット入力保持、追加取得の一覧/スクロール/フォーカス保持/再試行、一覧の情報集約/表示件数、Settings セクション/編集/キーボード操作、折りたたみ維持、子チケット検索、メニューのキーボード操作/表示領域、タブ横断の新規作成、入力/フォーカス維持、下書き前の同期抑止、ローディング/エラー再試行、7画面幅、4テーマ');
   console.log('検証用 HTML: ' + fixture);
   console.log('Project picker screenshots: ' + path.join(directory, 'project-picker-search-440.png') + ', ' + path.join(directory, 'project-picker-search-320.png') + ', ' + path.join(directory, 'project-picker-search-440-dark.png'));
   console.log('Short viewport popup bounds: ' + JSON.stringify(shortViewportBounds));

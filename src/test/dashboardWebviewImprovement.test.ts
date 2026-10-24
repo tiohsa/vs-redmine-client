@@ -95,10 +95,12 @@ suite("Dashboard Webview 改善", () => {
     assert.ok(!dashboardWebviewScript.includes("data-ticket-action=\"refresh\""));
   });
 
-  test("チケット一覧の三点リーダーメニューから同期できる", () => {
-    assert.ok(dashboardWebviewScript.includes("['sync',STRINGS.syncToRedmine]"));
-    assert.ok(dashboardWebviewScript.includes("action === 'sync') req('ticket.syncSelected',{ticketId:ticketId})"));
-    assert.ok(dashboardWebviewScript.includes('[data-ticket-action="sync"]'));
+  test("一覧操作を詳細へ集約する", () => {
+    const row = dashboardWebviewScript.slice(dashboardWebviewScript.indexOf("function renderTicketRow("), dashboardWebviewScript.indexOf("function isTicketActionTarget("));
+    assert.ok(!row.includes("ticket-actions"));
+    assert.ok(!row.includes("assigneeName"));
+    assert.ok(dashboardWebviewScript.includes('id="detail-sync-btn"'));
+    assert.ok(dashboardWebviewScript.includes('id="detail-open-btn"'));
   });
 
   test("未同期一覧の要確認は詳細文と重複せずバッジだけに表示する", () => {
@@ -144,9 +146,10 @@ suite("Dashboard Webview 改善", () => {
     assert.ok(dashboardWebviewScript.includes("showDueDate !== false"));
   });
 
-  test("トラッカーと優先度のバッジは表示設定のガード付きで描画される", () => {
-    assert.ok(dashboardWebviewScript.includes("showTracker !== false"));
-    assert.ok(dashboardWebviewScript.includes("showPriority !== false"));
+  test("トラッカーと優先度は詳細に集約する", () => {
+    assert.ok(dashboardWebviewScript.includes("['tracker',STRINGS.sortTracker]"));
+    assert.ok(dashboardWebviewScript.includes("['priority',STRINGS.sortPriority]"));
+    assert.ok(dashboardStyles.includes(".detail-metadata[open] .metadata-summary { display:none; }"));
   });
 
   test("コメント本文は3行プレビューから全文を展開できる", () => {
@@ -257,13 +260,13 @@ suite("Dashboard Webview 改善", () => {
   test("設定パネルの Tickets セクションに表示設定を公開する", () => {
     assert.ok(dashboardWebviewScript.includes("STRINGS.sectionTickets"));
     assert.ok(dashboardWebviewScript.includes('id="set-show-status"'));
-    assert.ok(dashboardWebviewScript.includes('id="set-show-due-date"'));
-    assert.ok(dashboardWebviewScript.includes('id="set-show-tracker"'));
-    assert.ok(dashboardWebviewScript.includes('id="set-show-priority"'));
+    assert.ok(!dashboardWebviewScript.includes('id="set-show-due-date"'));
+    assert.ok(!dashboardWebviewScript.includes('id="set-show-tracker"'));
+    assert.ok(!dashboardWebviewScript.includes('id="set-show-priority"'));
     assert.ok(dashboardWebviewScript.includes("requestForRenderedSettings('settings.updateGeneral',{patch:{showStatus:this.checked}})"));
-    assert.ok(dashboardWebviewScript.includes("requestForRenderedSettings('settings.updateGeneral',{patch:{showDueDate:this.checked}})"));
-    assert.ok(dashboardWebviewScript.includes("requestForRenderedSettings('settings.updateGeneral',{patch:{showTracker:this.checked}})"));
-    assert.ok(dashboardWebviewScript.includes("requestForRenderedSettings('settings.updateGeneral',{patch:{showPriority:this.checked}})"));
+    assert.ok(!dashboardWebviewScript.includes("requestForRenderedSettings('settings.updateGeneral',{patch:{showDueDate:this.checked}})"));
+    assert.ok(!dashboardWebviewScript.includes("requestForRenderedSettings('settings.updateGeneral',{patch:{showTracker:this.checked}})"));
+    assert.ok(!dashboardWebviewScript.includes("requestForRenderedSettings('settings.updateGeneral',{patch:{showPriority:this.checked}})"));
     assert.ok(dashboardWebviewScript.includes("const sections=new Map("));
     assert.ok(dashboardWebviewScript.includes("document.createElement('details')"));
     assert.ok(dashboardWebviewScript.includes("['tickets',STRINGS.sectionTickets"));

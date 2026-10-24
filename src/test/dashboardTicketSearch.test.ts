@@ -57,14 +57,13 @@ suite("DashboardTicketService all-project search", () => {
       refreshUnsynced: () => undefined,
       listIssues: async (input): Promise<IssuesListResult> => {
         inputs.push(input);
-        return { tickets: [subjectTicket], totalCount: 1, limit: input.limit, offset: input.offset };
+        return { tickets: input.issueIds ? [idTicket] : [subjectTicket], totalCount: 1, limit: input.limit, offset: input.offset };
       },
-      getIssueDetail: async () => ({ ticket: idTicket, comments: [] }),
     });
 
     await service.searchAllProjects("123");
 
-    assert.strictEqual(inputs.length, 1);
+    assert.strictEqual(inputs.length, 3);
     assert.strictEqual(inputs[0].projectId, undefined);
     assert.strictEqual(inputs[0].subjectQuery, "123");
     assert.deepStrictEqual(tickets.map((ticket) => ticket.id), [123, 20]);
@@ -124,6 +123,8 @@ suite("DashboardTicketService all-project search", () => {
       loadComments: async () => undefined,
       refreshUnsynced: () => undefined,
       listIssues: async (input) => {
+        if (input.issueIds) { return { tickets: [idTicket], totalCount: 1, limit: 50, offset: 0 }; }
+        if (input.descriptionQuery) { return { tickets: [], totalCount: 0, limit: 50, offset: 0 }; }
         inputs.push(input);
         if (inputs.length === 1) {
           return { tickets: [makeTicket(20, "123 subject")], totalCount: 3, limit: 50, offset: 0 };
@@ -131,13 +132,12 @@ suite("DashboardTicketService all-project search", () => {
         if (inputs.length === 2) { throw new Error("temporary"); }
         return nextPage.promise;
       },
-      getIssueDetail: async () => ({ ticket: idTicket, comments: [] }),
     });
 
     await service.searchAllProjects("123");
-    assert.strictEqual(totalCount, 4);
+    assert.strictEqual(totalCount, 2);
     await service.loadMoreTickets();
-    assert.match(store.getState().errors.tickets ?? "", /temporary/);
+    assert.match(store.getState().errors.moreTickets ?? "", /temporary/);
     const retry = service.loadMoreTickets();
     assert.strictEqual(service.loadMoreTickets(), retry);
     nextPage.resolve({ tickets: [idTicket, makeTicket(30, "123 last")], totalCount: 3, limit: 50, offset: 1 });
@@ -202,7 +202,7 @@ suite("DashboardTicketService all-project search", () => {
       getSettings: () => DEFAULT_TICKET_LIST_SETTINGS,
       loadComments: async () => undefined,
       refreshUnsynced: () => undefined,
-      listIssues: (input) => input.subjectQuery === "old" ? oldSearch.promise : newSearch.promise,
+      listIssues: (input) => (input.subjectQuery ?? input.descriptionQuery) === "old" ? oldSearch.promise : newSearch.promise,
     });
 
     const first = service.searchAllProjects("old");
@@ -276,7 +276,7 @@ suite("DashboardTicketService all-project search", () => {
     });
 
     await service.loadMoreTickets();
-    assert.match(store.getState().errors.tickets ?? "", /temporary/);
+    assert.match(store.getState().errors.moreTickets ?? "", /temporary/);
     await service.loadMoreTickets();
 
     assert.strictEqual(calls, 2);
@@ -363,4 +363,133 @@ suite("DashboardTicketService all-project search", () => {
     assert.deepStrictEqual(tickets.map((ticket) => ticket.id), [2]);
   });
 
+});
+
+const searchFixture = (listIssues: (input: IssuesListInput) => Promise<IssuesListResult>) => {
+  const store = new DashboardStateStore();
+  let tickets: Ticket[] = [];
+  let total = 0;
+  let project: { id: number; name: string } | undefined;
+  const service = new DashboardTicketService({
+    context: makeContext(store), getResolvedProject: () => project,
+    getTickets: () => tickets, setTickets: value => { tickets = value; },
+    getTotalCount: () => total, setTotalCount: value => { total = value; },
+    getSettings: () => DEFAULT_TICKET_LIST_SETTINGS,
+    loadComments: async () => undefined, refreshUnsynced: () => undefined, listIssues,
+  });
+  return { service, store, setProject: (id?: number) => { project = id === undefined ? undefined : { id, name: `Project ${id}` }; } };
+};
+const page = (tickets: Ticket[], totalCount = tickets.length, offset = 0): IssuesListResult => ({ tickets, totalCount, offset, limit: 50 });
+
+suite("Dashboard 共通検索", () => {
+  test("本文だけの一致を含め、件名・本文・親子の結果を各1回表示する", async () => {
+    const fixture = searchFixture(async input => input.subjectQuery
+      ? page([makeTicket(1, "検索"), makeTicket(2, "検索")])
+      : page([{ ...makeTicket(3, "本文だけ"), description: "検索", parentId: 1 }, makeTicket(2, "検索")]));
+    await fixture.service.searchTickets("検索");
+    const state = fixture.store.getState();
+    assert.deepStrictEqual(state.tickets.map(ticket => ticket.id), [1, 2, 3]);
+    assert.ok(state.tickets.every(ticket => ticket.level === 0 && ticket.children.length === 0));
+    assert.strictEqual(state.loadedTicketCount, 3);
+    assert.strictEqual(state.hasMoreTickets, false);
+  });
+
+  test("件名と本文は独立したoffsetで読み込み、ページ間でも重複しない", async () => {
+    const inputs: IssuesListInput[] = [];
+    const fixture = searchFixture(async input => {
+      inputs.push(input);
+      if (input.subjectQuery) { return input.offset === 0 ? page([makeTicket(1, "A")], 2) : page([makeTicket(2, "B")], 2, 1); }
+      return input.offset === 0 ? page([makeTicket(1, "A"), makeTicket(3, "C")], 3) : page([makeTicket(2, "B")], 3, 2);
+    });
+    await fixture.service.searchTickets("a");
+    assert.strictEqual(fixture.store.getState().hasMoreTickets, true);
+    await fixture.service.loadMoreTickets();
+    assert.deepStrictEqual(inputs.map(input => input.offset), [0, 0, 1, 2]);
+    assert.deepStrictEqual(fixture.store.getState().tickets.map(ticket => ticket.id), [1, 2, 3]);
+    assert.strictEqual(fixture.store.getState().hasMoreTickets, false);
+  });
+
+  test("#付き番号は範囲付きの番号検索だけを行い、通常番号は文章検索も統合する", async () => {
+    const inputs: IssuesListInput[] = [];
+    const fixture = searchFixture(async input => {
+      inputs.push(input);
+      return input.issueIds ? page([makeTicket(123, "直接一致")]) : page([makeTicket(1, "123")]);
+    });
+    fixture.setProject(1);
+    await fixture.service.searchTickets(" #123 ", { kind: "project", projectId: 1 });
+    assert.strictEqual(inputs.length, 1);
+    assert.deepStrictEqual(inputs[0].issueIds, [123]);
+    assert.strictEqual(inputs[0].projectId, 1);
+    assert.deepStrictEqual(fixture.store.getState().tickets.map(ticket => ticket.id), [123]);
+    await fixture.service.searchTickets("123");
+    assert.strictEqual(inputs.length, 4);
+    assert.deepStrictEqual(fixture.store.getState().tickets.map(ticket => ticket.id), [123, 1]);
+  });
+
+  test("検索範囲外の番号・閲覧できない番号は0件として扱う", async () => {
+    const fixture = searchFixture(async input => {
+      assert.strictEqual(input.projectId, 2);
+      assert.deepStrictEqual(input.issueIds, [123]);
+      return page([]);
+    });
+    fixture.setProject(2);
+    await fixture.service.searchTickets("#123");
+    assert.deepStrictEqual(fixture.store.getState().tickets, []);
+    assert.strictEqual(fixture.store.getState().errors.tickets, undefined);
+  });
+
+  test("更新・プロジェクト切替でも検索文字列を保持し、空検索は通常一覧へ戻る", async () => {
+    const inputs: IssuesListInput[] = [];
+    const fixture = searchFixture(async input => { inputs.push(input); return page([makeTicket(1, "result")]); });
+    await fixture.service.searchTickets("文章");
+    fixture.setProject(2);
+    fixture.service.invalidate(false);
+    await fixture.service.loadTickets();
+    await fixture.service.loadTickets();
+    assert.ok(inputs.slice(2).every(input => input.projectId === 2 && (input.subjectQuery ?? input.descriptionQuery) === "文章"));
+    await fixture.service.searchTickets("");
+    assert.strictEqual(inputs.at(-1)?.projectId, 2);
+    assert.strictEqual(inputs.at(-1)?.subjectQuery, undefined);
+    assert.strictEqual(fixture.store.getState().ticketSearch?.query, "");
+    fixture.setProject();
+    await fixture.service.searchTickets(" ");
+    assert.deepStrictEqual(fixture.store.getState().tickets, []);
+  });
+
+  test("一方の検索の失敗を0件扱いせず、両方のoffsetを維持して再試行する", async () => {
+    let fail = true;
+    const inputs: IssuesListInput[] = [];
+    const fixture = searchFixture(async input => {
+      inputs.push(input);
+      if (input.offset === 0) { return page([makeTicket(1, "A")], 2); }
+      if (input.descriptionQuery && fail) { throw new Error("本文検索失敗"); }
+      return page([makeTicket(2, "B")], 2, 1);
+    });
+    await fixture.service.searchTickets("a");
+    await fixture.service.loadMoreTickets();
+    assert.match(fixture.store.getState().errors.moreTickets ?? "", /本文検索失敗/);
+    assert.strictEqual(fixture.store.getState().loadedTicketCount, 1);
+    fail = false;
+    await fixture.service.loadMoreTickets();
+    assert.deepStrictEqual(inputs.map(input => input.offset), [0, 0, 1, 1, 1, 1]);
+    assert.strictEqual(fixture.store.getState().loadedTicketCount, 2);
+    assert.strictEqual(fixture.store.getState().errors.tickets, undefined);
+  });
+
+  test("古い範囲の要求と接続切替前の検索応答を反映しない", async () => {
+    const response = deferred<IssuesListResult>();
+    let calls = 0;
+    const fixture = searchFixture(async () => { calls++; return response.promise; });
+    fixture.setProject(2);
+    await fixture.service.searchTickets("stale", { kind: "project", projectId: 1 });
+    assert.strictEqual(calls, 0);
+    const pending = fixture.service.searchTickets("old");
+    fixture.service.invalidate();
+    fixture.setProject();
+    await fixture.service.loadTickets();
+    response.resolve(page([makeTicket(1, "old")]));
+    await pending;
+    assert.deepStrictEqual(fixture.store.getState().tickets, []);
+    assert.strictEqual(fixture.store.getState().ticketSearch?.query, "");
+  });
 });

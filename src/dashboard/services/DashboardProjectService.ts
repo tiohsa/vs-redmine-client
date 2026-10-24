@@ -1,5 +1,5 @@
 import * as vscode from "vscode";
-import { clearProjectSelection, getProjectSelection, setProjectSelection } from "../../config/projectSelection";
+import { clearProjectSelection, getProjectSelection, setAllProjectsSelection, setProjectSelection } from "../../config/projectSelection";
 import { getDefaultProjectId } from "../../config/settings";
 import { listProjects } from "../../redmine/projects";
 import { resolveCurrentProject, type ResolvedProject } from "../resolveProject";
@@ -23,6 +23,7 @@ export class DashboardProjectService {
   constructor(private readonly deps: DashboardProjectServiceDeps) {}
 
   getResolvedProject(): ResolvedProject | undefined {
+    if (this.selectedProject.allProjects) { return undefined; }
     return resolveCurrentProject({
       selectionId: this.selectedProject.id,
       selectionName: this.selectedProject.name,
@@ -59,41 +60,45 @@ export class DashboardProjectService {
     this.selectedProject = {};
     this.deps.setProjects([]);
     this.deps.resetTickets(undefined);
-    await clearProjectSelection();
+    // 旧接続の保存が完了してから消去し、新接続の選択とも順序を揃える。
+    const operation = this.selectionQueue.then(() => clearProjectSelection());
+    this.selectionQueue = operation.catch(() => undefined);
+    await operation;
   }
 
-  async selectProject(projectId: number): Promise<void> {
+  async selectProject(projectId?: number): Promise<void> {
     const generation = this.connectionGeneration;
     const operation = this.selectionQueue.then(() => this.selectProjectNow(projectId, generation));
     this.selectionQueue = operation.catch(() => undefined);
     return operation;
   }
 
-  private async selectProjectNow(projectId: number, generation: number): Promise<void> {
+  private async selectProjectNow(projectId: number | undefined, generation: number): Promise<void> {
     if (generation !== this.connectionGeneration) {
       return;
     }
-    if (this.deps.getProjects().length === 0) {
+    if (projectId !== undefined && this.deps.getProjects().length === 0) {
       await this.loadProjects();
     }
     if (generation !== this.connectionGeneration) {
       return;
     }
     const project = this.deps.getProjects().find((p) => p.id === projectId);
-    if (!project) {
+    if (projectId !== undefined && !project) {
       throw new Error(`Project ${projectId} is not available.`);
     }
-    this.selectedProject = { id: project.id, name: project.name };
+    this.selectedProject = project ? { id: project.id, name: project.name } : { allProjects: true };
     this.deps.resetTickets(project);
     try {
-      await setProjectSelection(project.id, project.name);
+      if (project) { await setProjectSelection(project.id, project.name); }
+      else { await setAllProjectsSelection(); }
     } catch (err) {
       this.deps.context.notifyToast(
         "warning",
-        `Project selected for this session, but saving it failed: ${err instanceof Error ? err.message : String(err)}`,
+        vscode.l10n.t("Project selected for this session, but saving it failed: {0}", err instanceof Error ? err.message : String(err)),
       );
     }
-    await this.deps.loadTickets();
+    if (generation === this.connectionGeneration) { await this.deps.loadTickets(); }
   }
 
   async toggleIncludeChildren(include: boolean): Promise<void> {

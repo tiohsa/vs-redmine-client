@@ -501,5 +501,15 @@
     "No abandoned sync records to delete.": "削除する中止済みの同期記録はありません。",
     "Deleted {0} abandoned sync records.": "中止済みの同期記録を {0} 件削除しました。",
     "Could not delete the records. All records were retained.": "記録を削除できませんでした。すべての記録を保持しました。",
-    "The abandoned records changed. Nothing was deleted. Refresh and try again.": "中止済みの記録が変更されたため、削除しませんでした。更新して再試行してください。"
+    "The abandoned records changed. Nothing was deleted. Refresh and try again.": "中止済みの記録が変更されたため、削除しませんでした。更新して再試行してください。",
+  "All projects": "全プロジェクト",
+  "Ticket number, subject or description…": "チケット番号・件名・説明本文で検索…",
+  "Enter a ticket number or text to search all projects.": "チケット番号や文章を入力して、全プロジェクトを検索できます。",
+  "{0} tickets loaded": "読み込み済み {0} 件",
+  "{0} shown / {1} tickets loaded": "表示 {0} 件／読み込み済み {1} 件",
+  "Failed to load tickets: {0}": "チケットを取得できませんでした: {0}",
+  "Failed to load more: {0}": "追加のチケットを取得できませんでした: {0}",
+  "Loading more tickets…": "追加のチケットを読み込み中…",
+  "Dashboard cache reset canceled because the view changed.": "表示が変更されたため、Dashboard キャッシュの再取得を中断しました。",
+  "Project selected for this session, but saving it failed: {0}": "このセッションのプロジェクトを選択しましたが、保存に失敗しました: {0}"
 }

@@ -14,10 +14,11 @@ suite("Ticket list query", () => {
 
     assert.deepStrictEqual(query, {
       project_id: 12,
-      include_children: true,
+      subproject_id: "*",
       limit: 50,
       offset: 0,
       sort: "id:asc",
+      set_filter: 1,
       status_id: "1,2",
       assigned_to_id: "5",
     });
@@ -33,10 +34,11 @@ suite("Ticket list query", () => {
 
     assert.deepStrictEqual(query, {
       project_id: 5,
-      include_children: false,
+      subproject_id: "!*",
       limit: 25,
       offset: 0,
       sort: "id:asc",
+      set_filter: 1,
       status_id: "*",
     });
   });
@@ -52,10 +54,11 @@ suite("Ticket list query", () => {
 
     assert.deepStrictEqual(query, {
       project_id: 5,
-      include_children: false,
+      subproject_id: "!*",
       limit: 25,
       offset: 0,
       sort: "id:asc",
+      set_filter: 1,
       status_id: "*",
     });
   });
@@ -71,6 +74,7 @@ suite("Ticket list query", () => {
       limit: 25,
       offset: 0,
       sort: "id:asc",
+      set_filter: 1,
       status_id: "*",
     });
   });
@@ -86,12 +90,28 @@ suite("Ticket list query", () => {
     assert.deepStrictEqual(query, {
       limit: 25,
       offset: 0,
-      set_filter: 1,
-      "f[]": "subject",
-      "op[subject]": "~",
-      "v[subject][]": "login bug",
+      subject: "~login bug",
       sort: "id:asc",
+      set_filter: 1,
       status_id: "*",
     });
+  });
+});
+
+suite("本文・番号検索のAPI条件", () => {
+  test("本文フィルターとプロジェクト・終了状態・担当者条件を併用できる形式で送る", () => {
+    const query = buildIssuesListQuery({ projectId: 8, includeChildProjects: false, limit: 50, offset: 50, descriptionQuery: " 日本語の文章 ", statusIds: ["2"], assigneeIds: ["7"] });
+    assert.strictEqual(query.description, "~日本語の文章");
+    assert.strictEqual(query.subproject_id, "!*");
+    assert.strictEqual(query.status_id, "2");
+    assert.strictEqual(query.assigned_to_id, "7");
+    assert.strictEqual(query["f[]"], undefined, "短縮形式のフィルターを無効化するf[]を混在させない");
+  });
+  test("番号検索にも子プロジェクトを含む範囲と全ステータスを指定する", () => {
+    const query = buildIssuesListQuery({ projectId: 8, includeChildProjects: true, limit: 50, offset: 0, issueIds: [123] });
+    assert.strictEqual(query.issue_id, "123");
+    assert.strictEqual(query.project_id, 8);
+    assert.strictEqual(query.subproject_id, "*");
+    assert.strictEqual(query.status_id, "*");
   });
 });
