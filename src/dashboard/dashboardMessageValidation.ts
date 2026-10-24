@@ -176,7 +176,33 @@ export const validateDashboardMessage = (raw: unknown): ValidationResult => {
       if (!isPositiveInt(projectId)) {
         return { ok: false, reason: "project.select: projectId must be a positive integer" };
       }
-      return { ok: true, request: { type, requestId, projectId } };
+      if ("query" in raw && !isString(raw["query"])) {
+        return { ok: false, reason: "project.select: query must be a string" };
+      }
+      return { ok: true, request: { type, requestId, projectId, ...(isString(raw["query"]) ? { query: raw["query"] } : {}) } };
+    }
+
+    case "project.selectAll": {
+      const query = raw["query"];
+      if (query !== undefined && !isString(query)) {
+        return { ok: false, reason: "project.selectAll: query must be a string" };
+      }
+      return { ok: true, request: { type, requestId, ...(query !== undefined ? { query } : {}) } };
+    }
+
+    case "tickets.search": {
+      const query = raw["query"];
+      const scope = raw["scope"];
+      if (!isString(query) || !isObject(scope)) {
+        return { ok: false, reason: "tickets.search: invalid query or scope" };
+      }
+      if (scope["kind"] === "all" && !("projectId" in scope)) {
+        return { ok: true, request: { type, requestId, query, scope: { kind: "all" } } };
+      }
+      if (scope["kind"] === "project" && isPositiveInt(scope["projectId"]) && Number.isSafeInteger(scope["projectId"])) {
+        return { ok: true, request: { type, requestId, query, scope: { kind: "project", projectId: scope["projectId"] } } };
+      }
+      return { ok: false, reason: "tickets.search: invalid scope" };
     }
 
     case "project.toggleChildren": {

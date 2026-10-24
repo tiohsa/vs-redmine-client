@@ -109,6 +109,7 @@ export class DashboardController {
         this.projects = projects;
       },
       resetTickets: (project) => {
+        this.ticketService?.invalidate(false);
         this.tickets = [];
         this.totalCount = 0;
         this.commentService?.invalidate();
@@ -150,6 +151,10 @@ export class DashboardController {
       getSettings: () => this.settingsCtrl.getSettings(),
       loadComments: (ticketId, throwOnError) => this.loadComments(ticketId, throwOnError),
       refreshUnsynced: () => this.refreshUnsynced(),
+      onSearchAccepted: () => {
+        this.commentService.invalidate();
+        this.metadataService.invalidate();
+      },
     });
     this.commentService = new DashboardCommentService(context, {
       selectTicket: (ticketId) => this.selectTicket(ticketId),
@@ -221,6 +226,7 @@ export class DashboardController {
   }
 
   selectProject(projectId: number): Promise<void> {
+    this.ticketService.prepareSearch();
     return this.projectService.selectProject(projectId);
   }
 
@@ -261,6 +267,7 @@ export class DashboardController {
       loadedTicketCount: 0,
       hasMoreTickets: false,
       selectedProject: undefined,
+      ticketSearch: undefined,
       currentUserId: undefined,
       quickFilterCapabilities: { mine: "loading", open: "loading" },
       selectedTicketId: undefined,
@@ -290,27 +297,34 @@ export class DashboardController {
     this.opts.notifyOperationStarted(requestId, vscode.l10n.t("Resetting Dashboard cache…"));
     const previous = this.opts.store.getState();
     const previousState = structuredClone(previous);
+    const previousMetadataOptionsLoaded = this.metadataOptionsLoaded;
     const previousTickets = this.tickets;
     const previousProjects = this.projects;
     const previousTotalCount = this.totalCount;
+    const previousPagination = this.ticketService.snapshotPagination();
     const previousTicketSummaries = snapshotTicketSummaries();
     const selectedDetailId = previous.workPanel?.mode === "detail"
       ? previous.workPanel.ticketId
       : undefined;
 
     this.projectService.invalidate();
-    this.ticketService.invalidate();
+    this.ticketService.invalidate(false);
     this.commentService.invalidate();
     this.metadataService.invalidate();
-    this.metadataLoadGeneration++;
-    this.metadataOptionsLoaded = false;
+    // 同じ接続のメタデータと進行中の取得は、新しい取得を開始するまで有効。
+    let outcome: { level: "success" | "info" | "error"; message: string } = {
+      level: "info",
+      message: vscode.l10n.t("Dashboard cache reset canceled because the view changed."),
+    };
 
     try {
       await this.loadProjects(true);
+      if (!this.ticketService.isPaginationSnapshotCurrent(previousPagination)) { return; }
       const results = await Promise.allSettled([
-        this.loadMetadataOptions(true),
+        this.loadMetadataOptions(true, true),
         this.loadTickets(true),
       ]);
+      if (!this.ticketService.isPaginationSnapshotCurrent(previousPagination)) { return; }
       const failures = results
         .filter((result): result is PromiseRejectedResult => result.status === "rejected")
         .map((result) => result.reason instanceof Error ? result.reason.message : String(result.reason));
@@ -323,16 +337,20 @@ export class DashboardController {
       if (selectedDetailId !== undefined && this.tickets.some((ticket) => ticket.id === selectedDetailId)) {
         await this.selectTicket(selectedDetailId, true);
       }
+      if (!this.ticketService.isPaginationSnapshotCurrent(previousPagination)) { return; }
       this.refreshUnsynced();
       clearTicketSummaries();
       rememberTicketSummaries(this.tickets);
-      this.opts.notifySuccess(requestId, vscode.l10n.t("Dashboard cache reset."));
+      outcome = { level: "success", message: vscode.l10n.t("Dashboard cache reset.") };
     } catch (err) {
+      if (!this.ticketService.isPaginationSnapshotCurrent(previousPagination)) { return; }
       const reason = err instanceof Error ? err.message : String(err);
       const current = this.opts.store.getState();
       this.tickets = previousTickets;
       this.projects = previousProjects;
       this.totalCount = previousTotalCount;
+      this.metadataOptionsLoaded = previousMetadataOptionsLoaded;
+      this.ticketService.restorePagination(previousPagination);
       restoreTicketSummaries(previousTicketSummaries);
       this.opts.store.update({
         projects: previousState.projects,
@@ -340,6 +358,7 @@ export class DashboardController {
         totalTicketCount: previousState.totalTicketCount,
         loadedTicketCount: previousState.loadedTicketCount,
         hasMoreTickets: previousState.hasMoreTickets,
+        ticketSearch: previousState.ticketSearch,
         selectedProject: previousState.selectedProject,
         currentUserId: previousState.currentUserId,
         quickFilterCapabilities: previousState.quickFilterCapabilities,
@@ -350,14 +369,17 @@ export class DashboardController {
         editOptions: previousState.editOptions,
         metadataOptions: previousState.metadataOptions,
         comments: previousState.comments,
-        loading: { ...current.loading, tickets: false },
-        errors: current.errors,
+        loading: { ...current.loading, tickets: false, moreTickets: false },
+        errors: { ...current.errors, tickets: previousState.errors.tickets, moreTickets: previousState.errors.moreTickets },
       });
-      this.opts.notifyError(
-        requestId,
-        vscode.l10n.t("Dashboard cache reset failed: {0}", reason),
-      );
+      outcome = { level: "error", message: vscode.l10n.t("Dashboard cache reset failed: {0}", reason) };
     } finally {
+      // 中断を含む全経路で started に対応する終了通知を一度だけ送る。
+      if (outcome.level === "error") {
+        this.opts.notifyError(requestId, outcome.message);
+      } else {
+        this.opts.notifySuccess(requestId, outcome.message, outcome.level);
+      }
       // RefreshUnsynced only rebuilds presentation from the existing stores.
       this.refreshUnsynced();
     }
@@ -395,9 +417,15 @@ export class DashboardController {
         await this.resetDashboardCache(req.requestId);
         break;
       case "project.select":
+        this.ticketService.prepareSearch(req.query);
         await this.projectService.selectProject(req.projectId);
         break;
+      case "project.selectAll":
+        this.ticketService.prepareSearch(req.query);
+        await this.projectService.selectProject();
+        break;
       case "project.toggleChildren":
+        this.ticketService.prepareSearch();
         await this.projectService.toggleIncludeChildren(req.includeChildProjects);
         break;
       case "tickets.refresh":
@@ -405,6 +433,9 @@ export class DashboardController {
         break;
       case "tickets.searchAllProjects":
         await this.ticketService.searchAllProjects(req.query);
+        break;
+      case "tickets.search":
+        await this.ticketService.searchTickets(req.query, req.scope);
         break;
       case "tickets.loadMore":
         await this.loadMoreTickets();
@@ -547,9 +578,11 @@ export class DashboardController {
     await this.projectService.loadProjects(throwOnError);
   }
 
-  private async loadMetadataOptions(throwOnError = false): Promise<void> {
+  private async loadMetadataOptions(throwOnError = false, preserveExisting = false): Promise<void> {
     const connectionGeneration = this.connectionGeneration;
     const metadataGeneration = ++this.metadataLoadGeneration;
+    const previous = this.opts.store.getState();
+    const retainMetadata = preserveExisting && this.metadataOptionsLoaded;
     const isCurrent = () =>
       connectionGeneration === this.connectionGeneration &&
       metadataGeneration === this.metadataLoadGeneration;
@@ -624,14 +657,21 @@ export class DashboardController {
       if (!isCurrent()) {
         return;
       }
-      this.metadataOptionsLoaded = false;
-      this.opts.store.update({
-        metadataOptions: { trackers: [], priorities: [], statuses: [] },
-        quickFilterCapabilities: {
-          mine: throwOnError ? "unavailable" : this.opts.store.getState().quickFilterCapabilities.mine,
-          open: "unavailable",
-        },
-      });
+      if (retainMetadata) {
+        this.opts.store.update({
+          currentUserId: previous.currentUserId,
+          quickFilterCapabilities: previous.quickFilterCapabilities,
+        });
+      } else {
+        this.metadataOptionsLoaded = false;
+        this.opts.store.update({
+          metadataOptions: { trackers: [], priorities: [], statuses: [] },
+          quickFilterCapabilities: {
+            mine: throwOnError ? "unavailable" : this.opts.store.getState().quickFilterCapabilities.mine,
+            open: "unavailable",
+          },
+        });
+      }
       if (throwOnError) {
         throw err;
       }

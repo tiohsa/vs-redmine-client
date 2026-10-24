@@ -17,6 +17,8 @@ export interface IssuesListInput {
   limit: number;
   offset: number;
   subjectQuery?: string;
+  descriptionQuery?: string;
+  issueIds?: number[];
   statusIds?: string[];
   assigneeIds?: string[];
 }
@@ -28,19 +30,23 @@ export const buildIssuesListQuery = (input: IssuesListInput): Record<string, str
     limit: input.limit,
     offset: input.offset,
     sort: "id:asc",
+    set_filter: 1,
   };
 
   if (input.projectId !== undefined) {
     query.project_id = input.projectId;
-    query.include_children = input.includeChildProjects;
+    query.subproject_id = input.includeChildProjects ? "*" : "!*";
   }
 
   const subjectQuery = input.subjectQuery?.trim();
   if (subjectQuery) {
-    query.set_filter = 1;
-    query["f[]"] = "subject";
-    query["op[subject]"] = "~";
-    query["v[subject][]"] = subjectQuery;
+    query.subject = `~${subjectQuery}`;
+  }
+  if (input.descriptionQuery?.trim()) {
+    query.description = `~${input.descriptionQuery.trim()}`;
+  }
+  if (input.issueIds?.length) {
+    query.issue_id = input.issueIds.join(",");
   }
 
   query.status_id = (input.statusIds && input.statusIds.length > 0)

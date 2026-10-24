@@ -18,6 +18,7 @@ let requestCounter = 0;
 let searchQuery = '';
 let projectSearchQuery = '';
 let searchTimer = null;
+let searchComposing = false;
 let ticketDetailExpanded = false;
 let metadataExpanded = false;
 const expandedComments = new Set();
@@ -305,24 +306,30 @@ document.getElementById('detail-focus-toggle').addEventListener('change',functio
 });
 applyTicketLayoutMode();
 function updateSearchClearButton(){ searchClearButton.classList.toggle('hidden', !searchInput.value); }
-function clearSearch(){
-  searchInput.value = '';
-  searchQuery = '';
-  if(searchTimer){ window.clearTimeout(searchTimer); searchTimer = null; }
-  updateSearchClearButton();
-  if(!state || !state.selectedProject) req('tickets.searchAllProjects',{query:''}); else renderTickets();
-  searchInput.focus();
+function submitSearch(){
+  if(searchTimer){ window.clearTimeout(searchTimer); searchTimer=null; }
+  if(searchComposing) return;
+  searchQuery=searchInput.value.trim();
+  req('tickets.search',{query:searchQuery,scope:state?.selectedProject ? {kind:'project',projectId:state.selectedProject.id} : {kind:'all'}});
 }
-searchInput.addEventListener('input', function(){
-  searchQuery = this.value.toLowerCase();
-  updateSearchClearButton();
-  if(!state || !state.selectedProject){
-    if(searchTimer) window.clearTimeout(searchTimer);
-    searchTimer = window.setTimeout(function(){ searchTimer = null; req('tickets.searchAllProjects',{query:searchInput.value}); }, 300);
-  } else renderTickets();
+function clearSearch(){
+  searchInput.value=''; searchQuery=''; searchComposing=false;
+  updateSearchClearButton(); submitSearch(); searchInput.focus();
+}
+function scheduleSearch(){
+  searchQuery=searchInput.value.trim(); updateSearchClearButton();
+  if(searchTimer){ window.clearTimeout(searchTimer); searchTimer=null; }
+  if(!searchComposing) searchTimer=window.setTimeout(submitSearch,300);
+}
+searchInput.addEventListener('input',scheduleSearch);
+searchInput.addEventListener('compositionstart',function(){ searchComposing=true; if(searchTimer){ window.clearTimeout(searchTimer); searchTimer=null; } });
+searchInput.addEventListener('compositionend',function(){ searchComposing=false; scheduleSearch(); });
+searchClearButton.addEventListener('click',clearSearch);
+searchInput.addEventListener('keydown',function(event){
+  if(searchComposing || event.isComposing || event.keyCode === 229) return;
+  if(event.key === 'Enter'){ submitSearch(); event.preventDefault(); }
+  else if(event.key === 'Escape' && this.value){ clearSearch(); event.preventDefault(); }
 });
-searchClearButton.addEventListener('click', clearSearch);
-searchInput.addEventListener('keydown', function(event){ if(event.key === 'Escape' && this.value){ clearSearch(); event.preventDefault(); } });
 function persistViewState(){ vscode.setState(Object.assign({},vscode.getState() || {},{ticketLayoutMode:ticketLayoutMode,detailFocus:detailFocus,detailTab:detailTab,quickFilters:Array.from(quickFilters)})); }
 document.querySelectorAll('[data-quick-filter]').forEach(function(button){ button.addEventListener('click',function(){
   const name=button.dataset.quickFilter;
@@ -337,13 +344,13 @@ function openFilterDialog(){
   const filters=state.settings.filters;
   const options=state.metadataOptions;
   const choices=function(items,selected){ return (items || []).map(function(item){ return '<option value="'+item.id+'"'+((selected || []).includes(item.id)?' selected':'')+'>'+esc(item.name)+'</option>'; }).join(''); };
-  document.getElementById('filter-dialog-fields').innerHTML='<label>'+esc(STRINGS.filterSubjectPrefix)+'<input id="advanced-subject" type="text" value="'+esc(filters.subjectQuery)+'"></label>'+
+  document.getElementById('filter-dialog-fields').innerHTML=
     '<label>'+esc(STRINGS.sortStatus)+'<select id="advanced-status" multiple size="4">'+choices(state.ticketFilterOptions.statuses,filters.statusIds)+'</select></label>'+
     '<label>'+esc(STRINGS.sortPriority)+'<select id="advanced-priority" multiple size="4">'+choices(options.priorities,filters.priorityIds)+'</select></label>'+
     '<label>'+esc(STRINGS.sortTracker)+'<select id="advanced-tracker" multiple size="4">'+choices(options.trackers,filters.trackerIds)+'</select></label>'+
     '<label>'+esc(STRINGS.sortAssignee)+'<select id="advanced-assignee" multiple size="4">'+choices(state.ticketFilterOptions.assignees,filters.assigneeIds)+'</select></label>'+
     '<label class="filter-check"><input id="advanced-unassigned" type="checkbox"'+(filters.includeUnassigned?' checked':'')+'>'+esc(STRINGS.filterIncludeUnassignedLabel)+'</label>';
-  filterDialog.classList.remove('hidden'); document.getElementById('advanced-subject').focus();
+  filterDialog.classList.remove('hidden'); document.getElementById('advanced-status').focus();
 }
 filterTrigger.addEventListener('click',openFilterDialog);
 document.getElementById('filter-dialog-close').addEventListener('click',closeFilterDialog);
@@ -358,7 +365,7 @@ filterDialog.addEventListener('keydown',function(event){
 });
 function selectedIds(id){ return Array.from(document.getElementById(id).selectedOptions).map(function(option){ return Number(option.value); }); }
 document.getElementById('filter-dialog-apply').addEventListener('click',function(){
-  req('settings.update',{patch:{filters:{subjectQuery:document.getElementById('advanced-subject').value, statusIds:selectedIds('advanced-status'),priorityIds:selectedIds('advanced-priority'),trackerIds:selectedIds('advanced-tracker'),assigneeIds:selectedIds('advanced-assignee'),includeUnassigned:document.getElementById('advanced-unassigned').checked}}}); closeFilterDialog();
+  req('settings.update',{patch:{filters:{subjectQuery:'', statusIds:selectedIds('advanced-status'),priorityIds:selectedIds('advanced-priority'),trackerIds:selectedIds('advanced-tracker'),assigneeIds:selectedIds('advanced-assignee'),includeUnassigned:document.getElementById('advanced-unassigned').checked}}}); closeFilterDialog();
 });
 document.getElementById('filter-dialog-reset').addEventListener('click',function(){
   req('settings.update',{patch:{filters:{subjectQuery:'',statusIds:[],priorityIds:[],trackerIds:[],assigneeIds:[],includeUnassigned:true}}}); closeFilterDialog();
@@ -445,7 +452,6 @@ function flattenVisible(nodes, result){
 function syncExpandedState(nodes){
   for(const node of nodes || []){ if(node.children && node.children.length && !collapsedTicketIds.has(node.id)) expandedTicketIds.add(node.id); syncExpandedState(node.children); }
 }
-function matchesSearch(ticket){ return !searchQuery || String(ticket.id).indexOf(searchQuery) >= 0 || String(ticket.subject || '').toLowerCase().indexOf(searchQuery) >= 0; }
 function quickFilterCapability(name){
   if(name === 'mine') return state?.quickFilterCapabilities?.mine || 'loading';
   if(name === 'open') return state?.quickFilterCapabilities?.open || 'loading';
@@ -550,53 +556,81 @@ document.addEventListener('scroll',function(event){
   if(!trigger || trigger.getBoundingClientRect().top !== activeTicketActionAnchorTop) closeTicketActionMenus();
 },true);
 function renderTicketRow(ticket){
-  const selected = ticket.id === state.selectedTicketId;
-  const hasChildren = !!(ticket.children && ticket.children.length);
-  const expanded = expandedTicketIds.has(ticket.id);
-  const sync = ticket.syncState && ticket.syncState !== 'Synced' && ticket.syncState !== 'Draft' ? syncBadge(ticket.syncState) : '';
-  const status = state.settings && state.settings.showStatus !== false && ticket.statusName ? '<span class="ticket-attribute" title="'+esc(STRINGS.sortStatus)+'">'+esc(ticket.statusName)+'</span>' : '';
-  const due = dueBadge(ticket);
-  const tracker = state.settings && state.settings.showTracker !== false && ticket.trackerName ? '<span class="ticket-attribute" title="'+esc(STRINGS.sortTracker)+'">'+esc(ticket.trackerName)+'</span>' : '';
-  const priority = state.settings && state.settings.showPriority !== false && ticket.priorityName ? '<span class="ticket-attribute" title="'+esc(STRINGS.sortPriority)+'">'+esc(ticket.priorityName)+'</span>' : '';
-  const actionItems = [['open',STRINGS.openInEditor],['comment',STRINGS.addCommentAction],['browser',STRINGS.openInBrowser],['child',STRINGS.createChildTicket],['sync',STRINGS.syncToRedmine]].map(function(item){ return '<button type="button" role="menuitem" data-ticket-action="'+item[0]+'" data-ticket="'+ticket.id+'">'+actionIcon(item[0])+esc(item[1])+'</button>'; }).join('');
-  const actionMenu = '<span class="ticket-actions"><button class="ticket-action-btn" type="button" data-ticket-action-menu="'+ticket.id+'" aria-haspopup="menu" aria-expanded="false" aria-controls="ticket-action-menu-'+ticket.id+'" aria-label="'+esc(STRINGS.ticketActionMenu)+'" title="'+esc(STRINGS.ticketActionMenu)+'"><span class="icon-more" aria-hidden="true">•••</span></button><span class="ticket-action-menu hidden" id="ticket-action-menu-'+ticket.id+'" role="menu">'+actionItems+'</span></span>';
-  const expand = hasChildren ? '<button class="expand-btn" type="button" data-expand="'+ticket.id+'" aria-expanded="'+expanded+'" aria-label="'+esc(expanded ? STRINGS.collapseTitle : STRINGS.expandTitle)+'" title="'+esc(expanded ? STRINGS.collapseTitle : STRINGS.expandTitle)+'"><span class="expand-icon '+(expanded?'expanded':'collapsed')+'" aria-hidden="true"></span></button>' : '<span class="expand-placeholder" aria-hidden="true"></span>';
-  const assignee = state.settings.showAssignee !== false && hasAssignee(ticket.assigneeName) ? '<span class="ticket-attribute ticket-assignee" title="'+esc(STRINGS.sortAssignee)+'">'+esc(ticket.assigneeName)+'</span>' : '';
-  return '<div class="ticket-row'+(ticket.level > 0 ? ' child-row' : '')+(selected ? ' selected' : '')+'" data-id="'+ticket.id+'" role="listitem" aria-current="'+selected+'" tabindex="0" data-level="'+esc(ticket.level || 0)+'">'+expand+'<div class="ticket-row-content"><div class="ticket-row-main"><span class="ticket-id">#'+ticket.id+'</span><span class="ticket-subject" title="'+esc(ticket.subject)+'">'+esc(ticket.subject)+'</span></div><div class="ticket-row-meta">'+status+tracker+priority+assignee+due+sync+'</div></div>'+actionMenu+'</div>';
+  const selected=ticket.id === state.selectedTicketId;
+  const searching=!!state.ticketSearch?.query;
+  const hasChildren=!searching && !!ticket.children?.length;
+  const expanded=expandedTicketIds.has(ticket.id);
+  const sync=ticket.syncState && ticket.syncState !== 'Synced' && ticket.syncState !== 'Draft' ? syncBadge(ticket.syncState) : '';
+  const status=state.settings.showStatus !== false && ticket.statusName ? '<span class="ticket-attribute">'+esc(ticket.statusName)+'</span>' : '';
+  const project=(!state.selectedProject || state.includeChildProjects) && ticket.projectName ? '<span class="ticket-attribute ticket-project">'+esc(ticket.projectName)+'</span>' : '';
+  const expand=hasChildren ? '<button class="expand-btn" type="button" data-expand="'+ticket.id+'" aria-expanded="'+expanded+'" aria-label="'+esc(expanded ? STRINGS.collapseTitle : STRINGS.expandTitle)+'"><span class="expand-icon '+(expanded?'expanded':'collapsed')+'" aria-hidden="true"></span></button>' : '<span class="expand-placeholder" aria-hidden="true"></span>';
+  const level=searching ? 0 : (ticket.level || 0);
+  return '<div class="ticket-row'+(level > 0 ? ' child-row' : '')+(selected ? ' selected' : '')+'" data-id="'+ticket.id+'" role="listitem" aria-current="'+selected+'" tabindex="0" data-level="'+level+'">'+expand+'<div class="ticket-row-content"><div class="ticket-row-main"><span class="ticket-id">#'+ticket.id+'</span><span class="ticket-subject" title="'+esc(ticket.subject)+'">'+esc(ticket.subject)+'</span></div><div class="ticket-row-meta">'+status+project+sync+'</div></div></div>';
 }
 function isTicketActionTarget(target){ return isElement(target) && !!target.closest('.ticket-action-btn,.ticket-action-menu,.expand-btn'); }
+let renderedTicketMarkup = null;
+let ticketAppendStartIds = null;
 function renderTickets(){
   if(!state) return;
   renderQuickFilters();
   const list = document.getElementById('ticket-list');
   const focus=captureFocus(list);
-  list.setAttribute('aria-busy',String(state.loading.tickets));
+  const scroll=document.getElementById('ticket-scroll');
+  const previousRows=Array.from(list.querySelectorAll('.ticket-row'));
+  const previousTop=scroll.scrollTop;
+  const anchor=previousRows.find(function(row){ return row.getBoundingClientRect().bottom > scroll.getBoundingClientRect().top; });
+  const anchorOffset=anchor ? anchor.getBoundingClientRect().top-scroll.getBoundingClientRect().top : 0;
+  list.setAttribute('aria-busy',String(!!(state.loading.tickets || state.loading.moreTickets)));
   const more = document.getElementById('load-more-row');
+  const moreHadFocus=document.activeElement === more;
+  const moreError=document.getElementById('load-more-error');
+  moreError.textContent=state.errors.moreTickets || '';
+  moreError.classList.toggle('hidden',!state.errors.moreTickets);
+  more.setAttribute('aria-disabled',String(!!state.loading.moreTickets));
+  if(state.loading.tickets){ renderedTicketMarkup=null; ticketAppendStartIds=null; }
+  else if(state.loading.moreTickets && !ticketAppendStartIds){ ticketAppendStartIds=new Set(previousRows.map(function(row){ return row.dataset.id; })); }
   const count = document.getElementById('ticket-count');
   count.textContent = '';
   if(state.errors.tickets && !state.loading.tickets){
+    renderedTicketMarkup=null;
     list.innerHTML='<div class="state-msg error-msg" role="alert"><strong>'+esc(STRINGS.errorLabel)+'</strong><p>'+esc(state.errors.tickets)+'</p><button id="retry-tickets" class="btn btn-secondary" type="button">'+esc(STRINGS.retry)+'</button></div>';
-    list.querySelector('#retry-tickets').addEventListener('click',function(){ if(!state.selectedProject && searchQuery) req('tickets.searchAllProjects',{query:searchInput.value}); else req('dashboard.refresh'); });
+    list.querySelector('#retry-tickets').addEventListener('click',function(){ submitSearch(); });
     more.classList.add('hidden'); updateSyncButtonStates(); return;
   }
-  if(!state.selectedProject && !state.tickets.length && !state.loading.tickets && !searchQuery){ list.innerHTML='<div class="state-msg">'+STRINGS.noProjectSelected+'</div>'; more.classList.add('hidden'); updateSyncButtonStates(); return; }
+  if(!state.selectedProject && !state.tickets.length && !state.loading.tickets && !searchQuery){ renderedTicketMarkup=null; list.innerHTML='<div class="state-msg">'+STRINGS.noProjectSelected+'</div>'; more.classList.add('hidden'); updateSyncButtonStates(); return; }
   if(state.loading.tickets){ list.innerHTML='<div class="state-msg loading-state" role="status">'+esc(STRINGS.loadingTickets)+'</div>'; more.classList.add('hidden'); updateSyncButtonStates(); return; }
   const hasActiveQuickFilter=hasEffectiveQuickFilters();
-  const tickets = (searchQuery || hasActiveQuickFilter ? flattenAll(state.tickets) : flattenVisible(state.tickets)).filter(function(ticket){ return matchesSearch(ticket) && matchesQuickFilters(ticket); });
-  count.textContent = STRINGS.shownLoadedTotal.replace('{0}',String(tickets.length)).replace('{1}',String(state.loadedTicketCount)).replace('{2}',String(state.totalTicketCount));
-  list.innerHTML = tickets.length ? tickets.map(renderTicketRow).join('') : '<div class="state-msg" role="status"><strong>'+esc(STRINGS.noTicketsFound)+'</strong><p>'+esc(STRINGS.searchEmptyHint)+'</p></div>';
-  if(state.hasMoreTickets){ more.classList.remove('hidden'); more.textContent=STRINGS.loadMore+' ('+state.loadedTicketCount+' / '+state.totalTicketCount+')'; } else more.classList.add('hidden');
-  list.querySelectorAll('.ticket-row').forEach(function(row){
-    row.style.paddingLeft=(12 + Math.max(0,Number(row.dataset.level) || 0) * 14)+'px';
-    row.addEventListener('click',function(event){ if(isTicketActionTarget(event.target)) return; const id=Number(row.dataset.id); if(state.selectedTicketId === id){ ticketDetailExpanded=true; renderTicketDetail(); } req('ticket.select',{ticketId:id}); });
-    row.addEventListener('dblclick',function(event){ if(!isTicketActionTarget(event.target)) req('ticket.openEditor',{ticketId:Number(row.dataset.id)}); });
-    row.addEventListener('keydown',function(event){ if(isTicketActionTarget(event.target)) return; if(event.key === 'Enter'){ row.click(); event.preventDefault(); } else if(event.key === ' '){ if(!isTicketActionTarget(event.target)){ row.click(); event.preventDefault(); } } });
-  });
-  list.querySelectorAll('.expand-btn').forEach(function(button){ button.addEventListener('click',function(event){ event.stopPropagation(); const id=Number(button.dataset.expand); if(expandedTicketIds.has(id)){ expandedTicketIds.delete(id); collapsedTicketIds.add(id); } else { expandedTicketIds.add(id); collapsedTicketIds.delete(id); } renderTickets(); }); });
-  list.querySelectorAll('[data-ticket-action-menu]').forEach(function(button){ button.addEventListener('click',function(event){ event.stopPropagation(); toggleTicketActionMenu(Number(button.dataset.ticketActionMenu)); }); });
-  list.querySelectorAll('[data-ticket-action]').forEach(function(button){ button.addEventListener('click',function(event){ event.stopPropagation(); runTicketAction(button.dataset.ticketAction,Number(button.dataset.ticket)); }); });
-  more.onclick = function(){ req('tickets.loadMore'); };
+  const tickets = (state.ticketSearch?.query || hasActiveQuickFilter ? flattenAll(state.tickets) : flattenVisible(state.tickets)).filter(matchesQuickFilters);
+  count.textContent = tickets.length === state.loadedTicketCount ? STRINGS.loadedTickets.replace('{0}',String(state.loadedTicketCount)) : STRINGS.shownLoadedTickets.replace('{0}',String(tickets.length)).replace('{1}',String(state.loadedTicketCount));
+  const markup = tickets.length ? tickets.map(renderTicketRow).join('') : '<div class="state-msg" role="status"><strong>'+esc(STRINGS.noTicketsFound)+'</strong><p>'+esc(STRINGS.searchEmptyHint)+'</p></div>';
+  if(state.hasMoreTickets || state.loading.moreTickets){ more.classList.remove('hidden'); more.textContent=state.loading.moreTickets ? STRINGS.loadingMore : state.errors.moreTickets ? STRINGS.retry : STRINGS.loadMore; } else more.classList.add('hidden');
+  // 追加取得の開始・失敗通知だけでは既存行を作り直さない。
+  if(markup !== renderedTicketMarkup){
+    list.innerHTML=markup; renderedTicketMarkup=markup;
+    list.querySelectorAll('.ticket-row').forEach(function(row){
+      row.style.paddingLeft=(12 + Math.max(0,Number(row.dataset.level) || 0) * 14)+'px';
+      row.addEventListener('click',function(event){ if(isTicketActionTarget(event.target)) return; const id=Number(row.dataset.id); if(state.selectedTicketId === id){ ticketDetailExpanded=true; renderTicketDetail(); } req('ticket.select',{ticketId:id}); });
+      row.addEventListener('dblclick',function(event){ if(!isTicketActionTarget(event.target)) req('ticket.openEditor',{ticketId:Number(row.dataset.id)}); });
+      row.addEventListener('keydown',function(event){ if(isTicketActionTarget(event.target)) return; if(event.key === 'Enter'){ row.click(); event.preventDefault(); } else if(event.key === ' '){ if(!isTicketActionTarget(event.target)){ row.click(); event.preventDefault(); } } });
+    });
+    list.querySelectorAll('.expand-btn').forEach(function(button){ button.addEventListener('click',function(event){ event.stopPropagation(); const id=Number(button.dataset.expand); if(expandedTicketIds.has(id)){ expandedTicketIds.delete(id); collapsedTicketIds.add(id); } else { expandedTicketIds.add(id); collapsedTicketIds.delete(id); } renderTickets(); }); });
+    list.querySelectorAll('[data-ticket-action-menu]').forEach(function(button){ button.addEventListener('click',function(event){ event.stopPropagation(); toggleTicketActionMenu(Number(button.dataset.ticketActionMenu)); }); });
+    list.querySelectorAll('[data-ticket-action]').forEach(function(button){ button.addEventListener('click',function(event){ event.stopPropagation(); runTicketAction(button.dataset.ticketAction,Number(button.dataset.ticket)); }); });
+  }
+  more.onclick = function(){
+    if(more.getAttribute('aria-disabled') === 'true') return;
+    more.setAttribute('aria-disabled','true'); req('tickets.loadMore');
+  };
   restoreFocus(focus);
+  if(moreHadFocus && more.classList.contains('hidden')){
+    const priorIds=ticketAppendStartIds || new Set(previousRows.map(function(row){ return row.dataset.id; }));
+    const added=Array.from(list.querySelectorAll('.ticket-row')).find(function(row){ return !priorIds.has(row.dataset.id); });
+    (added || count).focus({preventScroll:true});
+  }
+  const restoredAnchor=anchor && list.querySelector('.ticket-row[data-id="'+CSS.escape(anchor.dataset.id)+'"]');
+  if(restoredAnchor) scroll.scrollTop+=restoredAnchor.getBoundingClientRect().top-scroll.getBoundingClientRect().top-anchorOffset;
+  else scroll.scrollTop=previousTop;
+  if(!state.loading.moreTickets) ticketAppendStartIds=null;
   updateSyncButtonStates();
 }
 
@@ -717,11 +751,11 @@ function renderTicketDetail(){
 function renderFilterChips(){
   if(!state) return;
   const filters=state.settings.filters;
-  const count=Number(!!filters.subjectQuery)+(filters.assigneeIds || []).length+(filters.statusIds || []).length+(filters.priorityIds || []).length+(filters.trackerIds || []).length+Number(filters.includeUnassigned === false);
+  const count=(filters.assigneeIds || []).length+(filters.statusIds || []).length+(filters.priorityIds || []).length+(filters.trackerIds || []).length+Number(filters.includeUnassigned === false);
   const badge=document.getElementById('advanced-filter-count'); badge.textContent=String(count); badge.classList.toggle('hidden',count === 0);
   filterTrigger.setAttribute('aria-label',STRINGS.advancedFilters+(count ? ' '+count : ''));
   const element=document.getElementById('filter-chips');
-  if(element) element.textContent=count ? STRINGS.advancedFilters+' '+count : '';
+  if(element) element.textContent='';
 }
 
 // ── Unsynced ───────────────────────────────────────────────────────────────
@@ -852,11 +886,7 @@ function renderSettingsBase(){
     '<section class="settings-section" data-section="tickets"><h3>'+STRINGS.sectionTickets+'</h3>'+
     '<label class="setting-row" for="set-ticket-limit"><span class="setting-label">'+STRINGS.ticketLimitLabel+'</span><input class="setting-input setting-input-num" id="set-ticket-limit" type="number" min="1" max="500" value="'+esc(settings.ticketListLimit)+'"></label>'+
     '<label class="setting-row" for="set-include-children"><span class="setting-label">'+STRINGS.includeChildProjectsLabel+'</span><input class="setting-check" id="set-include-children" type="checkbox"'+(settings.includeChildProjects?' checked':'')+'></label>'+
-    '<label class="setting-row" for="set-show-status"><span class="setting-label">'+STRINGS.showStatusLabel+'</span><input class="setting-check" id="set-show-status" type="checkbox"'+(settings.showStatus?' checked':'')+'></label>'+
-    '<label class="setting-row" for="set-show-due-date"><span class="setting-label">'+STRINGS.showDueDateLabel+'</span><input class="setting-check" id="set-show-due-date" type="checkbox"'+(settings.showDueDate?' checked':'')+'></label>'+
-    '<label class="setting-row" for="set-show-tracker"><span class="setting-label">'+STRINGS.showTrackerLabel+'</span><input class="setting-check" id="set-show-tracker" type="checkbox"'+(settings.showTracker?' checked':'')+'></label>'+
-    '<label class="setting-row" for="set-show-priority"><span class="setting-label">'+STRINGS.showPriorityLabel+'</span><input class="setting-check" id="set-show-priority" type="checkbox"'+(settings.showPriority?' checked':'')+'></label>'+
-    '<label class="setting-row" for="set-show-assignee"><span class="setting-label">'+STRINGS.showAssigneeLabel+'</span><input class="setting-check" id="set-show-assignee" type="checkbox"'+(settings.showAssignee?' checked':'')+'></label></section>'+
+    '<label class="setting-row" for="set-show-status"><span class="setting-label">'+STRINGS.showStatusLabel+'</span><input class="setting-check" id="set-show-status" type="checkbox"'+(settings.showStatus?' checked':'')+'></label></section>'+
     '<section class="settings-section" data-section="editor"><h3>'+STRINGS.sectionEditor+'</h3>'+
     '<label class="setting-row" for="set-editor-storage"><span class="setting-label">'+STRINGS.editorStorageDirectoryLabel+'</span><input class="setting-input" id="set-editor-storage" type="text" value="'+esc(settings.editorStorageDirectory)+'"></label>'+
     '<label class="setting-row" for="set-editor-subject"><span class="setting-label">'+STRINGS.defaultSubjectLabel+'</span><input class="setting-input" id="set-editor-subject" type="text" data-editor-default="subject" value="'+esc(defaults.subject)+'"></label>'+
@@ -907,7 +937,7 @@ function renderSettingsBase(){
   bindConnectionInput('set-request-timeout','requestTimeoutMs',function(value){ const number=Number(value); return Number.isFinite(number) && number > 0 ? number : undefined; });
   document.getElementById('set-ignore-ssl').addEventListener('change',function(){ requestForRenderedSettings('settings.updateConnection',{patch:{ignoreSSLErrors:this.checked}}); });
   bindSettingInput(document.getElementById('set-ticket-limit'),'settings.updateGeneral',function(value){ const number=Number(value); return number >= 1 && number <= 500 ? {patch:{ticketListLimit:number}} : undefined; });
-  document.getElementById('set-include-children').addEventListener('change',function(){ requestForRenderedSettings('settings.updateGeneral',{patch:{includeChildProjects:this.checked}}); }); document.getElementById('set-show-status').addEventListener('change',function(){ requestForRenderedSettings('settings.updateGeneral',{patch:{showStatus:this.checked}}); }); document.getElementById('set-show-due-date').addEventListener('change',function(){ requestForRenderedSettings('settings.updateGeneral',{patch:{showDueDate:this.checked}}); }); document.getElementById('set-show-tracker').addEventListener('change',function(){ requestForRenderedSettings('settings.updateGeneral',{patch:{showTracker:this.checked}}); }); document.getElementById('set-show-priority').addEventListener('change',function(){ requestForRenderedSettings('settings.updateGeneral',{patch:{showPriority:this.checked}}); }); document.getElementById('set-show-assignee').addEventListener('change',function(){ requestForRenderedSettings('settings.updateGeneral',{patch:{showAssignee:this.checked}}); }); document.getElementById('set-sync-mode').addEventListener('change',function(){ requestForRenderedSettings('settings.updateGeneral',{patch:{offlineSyncMode:this.value}}); });
+  document.getElementById('set-include-children').addEventListener('change',function(){ requestForRenderedSettings('settings.updateGeneral',{patch:{includeChildProjects:this.checked}}); }); document.getElementById('set-show-status').addEventListener('change',function(){ requestForRenderedSettings('settings.updateGeneral',{patch:{showStatus:this.checked}}); }); document.getElementById('set-sync-mode').addEventListener('change',function(){ requestForRenderedSettings('settings.updateGeneral',{patch:{offlineSyncMode:this.value}}); });
   bindSettingInput(document.getElementById('set-editor-storage'),'settings.updateEditor',function(value){ return {patch:{editorStorageDirectory:value}}; });
   document.querySelectorAll('[data-editor-default]').forEach(function(input){ bindSettingInput(input,'settings.updateEditorDefault',function(value){ return {field:input.dataset.editorDefault,value:value}; }); });
   document.getElementById('reset-editor-defaults-btn').addEventListener('click',function(){ requestForRenderedSettings('settings.resetEditorDefaults',{fields:['subject','description','tracker','priority','status','due_date']}); });
@@ -923,7 +953,7 @@ function resetViewState(){
   searchInput.value=''; updateSearchClearButton(); filterDialog.classList.add('hidden'); closeLayoutPopover();
   document.querySelectorAll('.settings-category').forEach(function(category){ category.open=category.dataset.category === 'tickets'; });
   vscode.setState(Object.assign({},vscode.getState() || {},{ticketLayoutMode:ticketLayoutMode,detailFocus:detailFocus,detailTab:detailTab,quickFilters:[]}));
-  if(!state || !state.selectedProject) req('tickets.searchAllProjects',{query:''});
+  submitSearch();
   render(); applyTicketLayoutMode(); showToast('success',STRINGS.viewStateReset);
 }
 
@@ -1021,14 +1051,18 @@ function openProjectPicker(){
   projectSearchInput.focus();
 }
 function selectProjectFromPicker(projectId){
-  if(!Number.isSafeInteger(projectId) || projectId<=0) return;
-  if(projectId !== state?.selectedProject?.id) req('project.select',{projectId:projectId});
+  if(!Number.isSafeInteger(projectId) || projectId<0) return;
+  if(projectId !== (state?.selectedProject?.id ?? 0)){
+    if(searchTimer){ window.clearTimeout(searchTimer); searchTimer=null; }
+    if(projectId === 0) req('project.selectAll',{query:searchInput.value});
+    else req('project.select',{projectId:projectId,query:searchInput.value});
+  }
   closeProjectPicker(true);
 }
 function renderProjectSelect(resetActive){
-  const projects=state?.projects || [];
+  const projects=[{id:0,name:STRINGS.selectProjectPlaceholder,level:0},...(state?.projects || [])];
   const projection=deriveVisibleProjects(projects);
-  const selectedId=state?.selectedProject?.id;
+  const selectedId=state?.selectedProject?.id ?? 0;
   const selectedProject=projects.find(function(project){ return project.id===selectedId; });
   projectSelectLabel.textContent=selectedProject?.name || state?.selectedProject?.name || STRINGS.selectProjectPlaceholder;
   projectSelectTrigger.title=selectedProject?.name || state?.selectedProject?.name || STRINGS.selectProjectTitle;
@@ -1079,19 +1113,21 @@ function renderProjectSelect(resetActive){
 function render(){
   if(!state) return; const focus=captureFocus(document); closeTicketActionMenus(); syncExpandedState(state.tickets);
   renderProjectSelect();
-  document.getElementById('include-children').checked=!!state.includeChildProjects; renderTickets(); renderTicketDetail(); renderFilterChips(); renderUnsynced(); renderComments(); renderSettings(); renderSyncTray(); updateSyncButtonStates(); restoreFocus(focus);
+  document.getElementById('include-children').checked=!!state.includeChildProjects; document.getElementById('include-children').closest('label').hidden=!state.selectedProject; renderTickets(); renderTicketDetail(); renderFilterChips(); renderUnsynced(); renderComments(); renderSettings(); renderSyncTray(); updateSyncButtonStates(); restoreFocus(focus);
 }
 window.addEventListener('message',function(event){ const message=event.data || {}; if(message.type === 'dashboard.state'){
     const previous=state;
     const projectChanged=previous?.selectedProject?.id !== message.state.selectedProject?.id;
     if(projectChanged){ expandedTicketIds.clear(); collapsedTicketIds.clear(); }
     const connectionChanged=previous?.settings?.baseUrl !== message.state.settings?.baseUrl;
-    if(connectionChanged) closeProjectPicker(false);
+    if(connectionChanged){ closeProjectPicker(false); if(searchTimer){ window.clearTimeout(searchTimer); searchTimer=null; } searchComposing=false; searchQuery=message.state.ticketSearch?.query || ''; searchInput.value=searchQuery; updateSearchClearButton(); }
     const ticketChanged=previous?.selectedTicketId !== message.state.selectedTicketId;
     const leavingDetail=message.state.workPanel && message.state.workPanel.mode !== 'detail';
     if(projectChanged || connectionChanged || ticketChanged || leavingDetail || !message.state.selectedTicket) metadataEdit=null;
     const previousComposer=previous?.workPanel;
+    if(!previous && message.state.ticketSearch){ searchQuery=message.state.ticketSearch.query; searchInput.value=searchQuery; updateSearchClearButton(); }
     state=message.state;
+    if(previous && projectChanged && !connectionChanged && searchInput.value.trim() !== (state.ticketSearch?.query || '')) scheduleSearch();
     const panel=state.workPanel;
     const openingComposer=panel && panel.mode !== 'detail' && (!previousComposer || previousComposer.mode !== panel.mode || previousComposer.projectId !== panel.projectId);
     if(openingComposer) activateTab('tickets');

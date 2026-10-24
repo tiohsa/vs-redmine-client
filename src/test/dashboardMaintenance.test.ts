@@ -499,6 +499,7 @@ suite("Dashboard maintenance", () => {
       window: { clearTimeout: () => undefined },
       document: { getElementById: () => searchInput, querySelectorAll: () => [] },
       updateSearchClearButton: () => undefined,
+      submitSearch: () => undefined,
       closeLayoutPopover: () => undefined,
       req: () => undefined,
       render: () => { renderCount++; },

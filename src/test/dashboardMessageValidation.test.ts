@@ -256,3 +256,25 @@ suite("Dashboard メッセージバリデーション", () => {
     }).ok, false);
   });
 });
+
+suite("Dashboard 検索要求の境界", () => {
+  test("プロジェクト内・横断検索の範囲と文字列を検証する", () => {
+    for (const scope of [{ kind: "all" }, { kind: "project", projectId: 42 }]) {
+      const input = { type: "tickets.search", requestId: "search", query: "本文", scope };
+      const result = validateDashboardMessage(input);
+      assert.strictEqual(result.ok, true);
+      if (result.ok) { assert.deepStrictEqual(result.request, input); }
+    }
+    for (const scope of [undefined, null, "all", {}, { kind: "all", projectId: 1 }, { kind: "project", projectId: 0 }, { kind: "project", projectId: "1" }, { kind: "project", projectId: Number.MAX_SAFE_INTEGER + 1 }]) {
+      assert.strictEqual(validateDashboardMessage({ type: "tickets.search", requestId: "r", query: "x", scope }).ok, false);
+    }
+    assert.strictEqual(validateDashboardMessage({ type: "tickets.search", requestId: "r", query: 1, scope: { kind: "all" } }).ok, false);
+  });
+
+  test("範囲切替に添える検索文字列も検証する", () => {
+    for (const type of ["project.select", "project.selectAll"]) {
+      assert.strictEqual(validateDashboardMessage({ type, requestId: "r", projectId: 1, query: "入力中" }).ok, true);
+      assert.strictEqual(validateDashboardMessage({ type, requestId: "r", projectId: 1, query: {} }).ok, false);
+    }
+  });
+});

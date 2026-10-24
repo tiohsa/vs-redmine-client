@@ -58,6 +58,8 @@ export interface DashboardStrings {
   resetFilters: string;
   overview: string;
   shownLoadedTotal: string;
+  loadedTickets: string;
+  shownLoadedTickets: string;
   syncTrayAllClear: string;
   syncTrayItems: string;
   syncTrayAttention: string;
@@ -93,6 +95,7 @@ export interface DashboardStrings {
   errorLabel: string;
   noTicketsFound: string;
   loadMore: string;
+  loadingMore: string;
   ticketCountLabel: string;
   // Ticket detail panel
   openTicketTooltip: string;
@@ -247,7 +250,7 @@ export const buildDashboardStrings = (): DashboardStrings => ({
   detailFocus: vscode.l10n.t("Expand detail area"),
   discardUnavailableReason: vscode.l10n.t("Discard is unavailable for this synchronization state. Review the saved state before continuing."),
   syncUnavailableReason: vscode.l10n.t("Synchronization is unavailable for this item. Review its synchronization state."),
-  selectProjectPlaceholder: vscode.l10n.t("— Select project —"),
+  selectProjectPlaceholder: vscode.l10n.t("All projects"),
   selectProjectTitle: vscode.l10n.t("Select project"),
   projectSearchPlaceholder: vscode.l10n.t("Search projects…"),
   clearProjectSearch: vscode.l10n.t("Clear project search"),
@@ -261,7 +264,7 @@ export const buildDashboardStrings = (): DashboardStrings => ({
   tabComments: vscode.l10n.t("Comments"),
   tabSettings: vscode.l10n.t("Settings"),
   // Search
-  searchPlaceholder: vscode.l10n.t("Search tickets…"),
+  searchPlaceholder: vscode.l10n.t("Ticket number, subject or description…"),
   clearSearch: vscode.l10n.t("Clear search"),
   layoutModeLabel: vscode.l10n.t("Ticket layout"),
   layoutAuto: vscode.l10n.t("Automatic layout"),
@@ -282,6 +285,8 @@ export const buildDashboardStrings = (): DashboardStrings => ({
   applyFilters: vscode.l10n.t("Apply filters"),
   resetFilters: vscode.l10n.t("Reset ticket filters"),
   overview: vscode.l10n.t("Overview"),
+  loadedTickets: vscode.l10n.t("{0} tickets loaded"),
+  shownLoadedTickets: vscode.l10n.t("{0} shown / {1} tickets loaded"),
   shownLoadedTotal: vscode.l10n.t("{0} shown · {1} loaded · {2} total"),
   syncTrayAllClear: vscode.l10n.t("No unsynced items in sync queue"),
   syncTrayItems: vscode.l10n.t("{0} unsynced items"),
@@ -313,11 +318,12 @@ export const buildDashboardStrings = (): DashboardStrings => ({
   openInBrowser: vscode.l10n.t("Open in browser"),
   createChildTicket: vscode.l10n.t("Create child ticket"),
   // Ticket list states
-  noProjectSelected: vscode.l10n.t("No project selected. Select a project above to view tickets."),
+  noProjectSelected: vscode.l10n.t("Enter a ticket number or text to search all projects."),
   loadingTickets: vscode.l10n.t("Loading tickets…"),
   errorLabel: vscode.l10n.t("Error"),
   noTicketsFound: vscode.l10n.t("No tickets match the filter."),
   loadMore: vscode.l10n.t("Load more…"),
+  loadingMore: vscode.l10n.t("Loading more tickets…"),
   ticketCountLabel: vscode.l10n.t("Showing {0} tickets"),
   // Ticket detail panel
   openTicketTooltip: vscode.l10n.t("Edit ticket Markdown in VS Code"),

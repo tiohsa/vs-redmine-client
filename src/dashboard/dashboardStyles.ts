@@ -92,6 +92,7 @@ button:disabled, input:disabled, select:disabled, textarea:disabled { cursor: no
 .project-option-check { flex: 0 0 auto; color: var(--app-accent); }
 .toggle-children { display: inline-flex; align-items: center; gap: 6px; min-width: 0; height: 32px; color: var(--app-text-secondary); font-size: var(--app-font-caption); white-space: nowrap; }
 .toggle-children input { accent-color: var(--app-accent); }
+.toggle-children[hidden] { display: none; }
 .header-actions { display: inline-flex; align-items: center; gap: 6px; margin-left: auto; }
 
 /* Tabs */
@@ -216,6 +217,7 @@ button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-
 .child-connector { flex: 0 0 auto; color: var(--app-text-secondary); font-size: var(--app-font-body); }
 .load-more-row { display: block; width: 100%; padding: 9px 12px; border: 0; background: transparent; color: var(--app-accent); cursor: pointer; font-size: var(--app-font-caption); text-align: center; }
 .load-more-row:hover { background: var(--app-surface-hover); text-decoration: underline; }
+.load-more-row[aria-disabled="true"] { cursor: progress; text-decoration: none; color: var(--app-text-readable-muted); }
 .state-msg { padding: 28px 16px; color: var(--app-text-readable-muted); font-size: var(--app-font-body); text-align: center; }
 .state-msg strong { display: block; margin-bottom: 4px; color: var(--app-text); }
 .state-msg { overflow-wrap: anywhere; }
@@ -603,6 +605,7 @@ body.vscode-high-contrast .quick-filter,body.vscode-high-contrast-light .quick-f
 .detail-metadata summary { display:flex; align-items:center; gap:8px; min-height:29px; cursor:pointer; color:var(--app-text); font-weight:600; }
 .detail-metadata summary::marker { color:var(--app-text-secondary); }
 .metadata-summary { min-width:0; overflow:hidden; color:var(--app-text-secondary); font-size: var(--app-font-caption); font-weight:400; text-overflow:ellipsis; white-space:nowrap; }
+.detail-metadata[open] .metadata-summary { display:none; }
 .detail-metadata .detail-section-head { justify-content:flex-end; margin:4px 0; }
 .detail-section-head { margin-bottom:5px; }
 .detail-description { margin:6px 0; }
