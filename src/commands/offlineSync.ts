@@ -7,6 +7,7 @@ import {
 } from "../views/offlineSyncStore";
 import { showInfo, showWarning } from "../utils/notifications";
 import { getCurrentConnectionScope } from "../config/connectionScope";
+import { CreateOperationHttpError } from "../redmine/httpError";
 import { runWithConnectionScope } from "../redmine/client";
 import { createSyncEngine, createTicketSyncService } from "../app/ticketSync";
 import type { SyncEngine, TicketSyncService } from "../app/ticketSync";
@@ -29,7 +30,10 @@ const summarizeFailures = (
   return parts.join(", ");
 };
 
-export type OfflineSyncRunResult = { remainingChanges?: number } & (
+export type OfflineSyncRunResult = {
+  remainingChanges?: number;
+  newTicketDiagnostics?: readonly string[];
+} & (
   | { status: "nothing_to_sync"; total: 0; synced: 0; failed: 0; conflicts: 0 }
   | { status: "success"; total: number; synced: number; failed: 0; conflicts: 0 }
   | { status: "partial_failure"; total: number; synced: number; failed: number; conflicts: number }
@@ -83,6 +87,7 @@ const runOfflineSyncAtScope = async (
   const failedComments: OfflineCommentUpdate[] = [];
   const failedNewTickets: typeof queue.newTickets = [];
 
+  const newTicketErrors = new Set<string>();
   let synced = 0;
   let conflicts = 0;
   let wasCancelled = false;
@@ -123,6 +128,10 @@ const runOfflineSyncAtScope = async (
 
         if (outcome.kind !== "completed" && outcome.kind !== "no_change") {
           if (key.kind === "newTicket") {
+            if ("error" in outcome &&
+                outcome.error instanceof CreateOperationHttpError) {
+              newTicketErrors.add(outcome.error.message);
+            }
             const original = queue.newTickets.find((candidate) => candidate.queueId === key.queueId);
             if (original) { failedNewTickets.push(original); }
           } else if (key.kind === "ticket") {
@@ -173,6 +182,14 @@ const runOfflineSyncAtScope = async (
     failedTickets.length + failedComments.length + failedNewTickets.length;
 
   if (wasCancelled || failed > 0 || conflicts > 0) {
+    const diagnostics = Array.from(newTicketErrors);
+    const counts = {
+      total: totalItems,
+      synced,
+      failed,
+      conflicts,
+      ...(diagnostics.length > 0 ? { newTicketDiagnostics: diagnostics } : {}),
+    };
     const parts: string[] = [];
     if (synced > 0) { parts.push(vscode.l10n.t("Synced: {0}", synced)); }
     if (conflicts > 0) { parts.push(vscode.l10n.t("Conflicts: {0}", conflicts)); }
@@ -182,18 +199,18 @@ const runOfflineSyncAtScope = async (
         "Sync completed with issues. {0}. Remaining: {1}",
         parts.join(", "),
         summarizeFailures(failedTickets, failedComments, failedNewTickets.length),
-      ),
+      ) + (diagnostics.length > 0 ? ` ${diagnostics.join(" ")}` : ""),
     );
     if (wasCancelled) {
-      return { status: "cancelled", total: totalItems, synced, failed, conflicts };
+      return { status: "cancelled", ...counts };
     }
     if (recoveryPending) {
-      return { status: "recovery_pending", total: totalItems, synced, failed, conflicts };
+      return { status: "recovery_pending", ...counts };
     }
     if (synced === 0) {
-      return { status: "failed", total: totalItems, synced, failed, conflicts };
+      return { status: "failed", ...counts };
     }
-    return { status: "partial_failure", total: totalItems, synced, failed, conflicts };
+    return { status: "partial_failure", ...counts };
   }
 
   const remaining = getOfflineSyncQueue(operationScope);

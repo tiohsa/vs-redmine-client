@@ -1,4 +1,5 @@
 import * as vscode from "vscode";
+import { createOperationHttpError } from "../../redmine/httpError";
 import { TicketUpdateFields } from "../../redmine/types";
 import { IssueMetadata } from "../ticketMetadataTypes";
 import type { TicketCreateDependencies, TicketSaveDependencies } from "./types";
@@ -180,7 +181,9 @@ export const resolveMetadataForCreate = async (
   const useProjectTrackers = projectId !== undefined && deps.getProjectTrackers !== undefined;
 
   const [statuses, trackers, priorities] = await Promise.all([
-    deps.listIssueStatuses(),
+    metadata.status.trim().length > 0
+      ? deps.listIssueStatuses().catch((error: unknown) => { throw createOperationHttpError(error, "statuses"); })
+      : Promise.resolve([]),
     useProjectTrackers ? Promise.resolve([]) : deps.listTrackers(),
     deps.listIssuePriorities(),
   ]);

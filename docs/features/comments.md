@@ -1,0 +1,8 @@
+# コメントの閲覧・追加・編集
+
+- Dashboard の Work Panel のコメントタブは選択中のチケットに紐付くコメントを表示します。ローカルの追加・更新ドラフトは未同期として扱います。
+- コメントの追加と編集は Markdown エディタで行えます。既存コメントの編集は現在の Redmine ユーザーに編集権限がある場合に限ります。送信はコメントを紐付けたチケットと接続先で実行します。
+- 下書きと更新文書は再オープンできます。リロード時はローカル変更の有無と編集中コメントの状態を確認します。
+- コメントも [保存と同期](offline-sync.md) の対象です。追加と更新を別の操作として扱い、作成済みコメントの特定やローカル反映に失敗した場合は復旧情報を保持します。画像付きコメントは [添付処理](attachments.md) を参照してください。
+
+実装は [コメントサービス](../../src/dashboard/services/DashboardCommentService.ts)、[コメント同期](../../src/app/commentSyncService.ts)、[コメント保存](../../src/views/commentSaveSync.ts) を参照してください。検証は [コメント表示](../../src/test/commentListMapping.test.ts)、[編集権限](../../src/test/commentPermissions.test.ts)、[追加後の再開](../../src/test/syncCommentCreateResume.test.ts)、[更新時の復旧](../../src/test/commentUpdateRecovery.test.ts) を参照してください。

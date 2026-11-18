@@ -117,6 +117,7 @@ export interface DashboardUnsyncedItem {
   canDiscard?: boolean;
   discardMode?: "active" | "nextIntent" | "none";
   canSync?: boolean;
+  canRetrySync?: boolean;
   requiresReview?: boolean;
   abandonedAt?: number;
   hasLaterChanges?: boolean;

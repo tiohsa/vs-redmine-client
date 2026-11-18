@@ -15,6 +15,7 @@ import { computeNotesHash } from "../utils/notesHash";
 import {
   getAttemptGeneration,
   getPrimaryEffectForRevision,
+  isRejectedTicketCreate,
   evaluateAttemptClosure,
   hasUncertainDurableSyncEffect,
   hasUncertainPrimaryDurableSyncEffect,
@@ -158,6 +159,7 @@ export type OfflineNewTicket = {
   createdIssueId?: number;
   status?: "queued" | "created_rewrite_failed";
   phase?: NewTicketSyncPhase;
+  preparationFailure?: string;
   connectionScope?: string;
   attemptGeneration?: number;
   remoteUpdatedAt?: string;
@@ -995,7 +997,9 @@ const normalizeNewTicket = (ticket: OfflineNewTicket): OfflineNewTicket => {
     phase: restoredPhase,
     effects,
   };
-  return restored.phase === "preparing" || restored.phase === "queued"
+  const primary = getPrimaryEffectForRevision(restored);
+  return (restored.phase === "preparing" || restored.phase === "queued") &&
+    !(primary && isRejectedTicketCreate(primary))
     ? promoteNewTicketIntent(restored)
     : restored;
 };
@@ -1685,6 +1689,11 @@ export const addOfflineNewTicketAsync = async (
   const queueId = update.queueId ?? randomUUID();
   const existing = index === -1 ? undefined : queue.newTickets[index];
   if (existing && isAbandoned(existing)) { return skipQueueMutation(existing); }
+  const primary = existing && getPrimaryEffectForRevision(existing);
+  const rejected = primary && isRejectedTicketCreate(primary);
+  if (existing && rejected && (existing.nextIntent?.content ?? existing.content) === update.content) {
+    return skipQueueMutation(existing);
+  }
   const entry: OfflineNewTicket = index === -1
     ? {
       ...update,
@@ -1695,7 +1704,7 @@ export const addOfflineNewTicketAsync = async (
       revision: update.revision ?? 1,
       createdAt: update.createdAt ?? Date.now(),
     }
-    : existing?.phase && existing.phase !== "queued" && existing.phase !== "completed"
+    : existing && (rejected || (existing.phase && existing.phase !== "queued" && existing.phase !== "completed"))
       ? {
         ...existing,
         documentUri: existing.documentUri ?? update.documentUri,
@@ -1713,7 +1722,7 @@ export const addOfflineNewTicketAsync = async (
       : {
         ...existing,
         ...update,
-        queueId,
+        queueId: existing?.queueId ?? queueId,
         revision: existing?.revision ?? update.revision ?? 1,
       };
   if (index === -1) {

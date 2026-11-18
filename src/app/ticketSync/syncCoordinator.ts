@@ -1,4 +1,5 @@
 import * as vscode from "vscode";
+import { CreateOperationHttpError, extractHttpStatusCode } from "../../redmine/httpError";
 import { runWithConnectionScope } from "../../redmine/client";
 import {
   CommentCreateHandler,
@@ -36,6 +37,7 @@ import {
   getPrimaryEffectForRevision,
   getRecoveryItemsForOperation,
   isPrimaryEffectKind,
+  isRejectedTicketCreate,
   isPrimaryRecoveryRequired,
   RecoveryItem,
 } from "../syncEffects";
@@ -229,7 +231,9 @@ export class SyncCoordinator {
       }
       return {
         kind: "failed_before_commit",
-        error: new Error(primary.failure?.detail ?? "Primary remote mutation has previously failed. Explicit recovery required."),
+        error: new Error(isRejectedTicketCreate(primary)
+          ? vscode.l10n.t("Failed to create issue (HTTP {0}).", 403)
+          : primary.failure?.detail ?? "Primary remote mutation has previously failed. Explicit recovery required."),
         ticketId: operation.ticketId,
         commentId: operation.commentId,
       };
@@ -377,11 +381,21 @@ export class SyncCoordinator {
           };
         }
         if (currentOp.phase === "preparing") {
+          const error: unknown = prepResult.outcome.error;
+          const status = extractHttpStatusCode(error);
+          const message = currentOp.kind === "ticket_create" && prepResult.outcome.kind === "failed_before_commit"
+            ? error instanceof CreateOperationHttpError ? error.message
+              : status ? vscode.l10n.t("Ticket creation preparation failed (HTTP {0}).", status)
+                : vscode.l10n.t("Ticket creation preparation failed.")
+            : undefined;
           await repository.transitionOperation(
             getOpKey(currentOp),
-            { kind: "abort_before_remote_write" },
+            { kind: "abort_before_remote_write", message },
             scope,
           );
+          if (message && status && !(error instanceof CreateOperationHttpError)) {
+            return { kind: "failed_before_commit", error: new Error(message) };
+          }
         }
         return prepResult.outcome;
       }
@@ -461,6 +475,7 @@ export class SyncCoordinator {
             ticketId: currentOp.ticketId,
             commentId: currentOp.commentId,
             message: remoteResult.error.message,
+            error: remoteResult.error,
           };
         }
 
@@ -853,7 +868,8 @@ export class SyncCoordinator {
         }
 
         // D-04 / R-04: Legacy uncertain + identity不足、または non_retriable failure、または missing disposition は retry 拒絶
-        if (primaryEffect && !canRetryEffect(primaryEffect)) {
+        if (primaryEffect && (!canRetryEffect(primaryEffect) ||
+          (freshOp.kind === "ticket_create" && freshOp.createdRemoteId !== undefined))) {
           return {
             kind: "failed_before_commit",
             ticketId: freshOp.ticketId,

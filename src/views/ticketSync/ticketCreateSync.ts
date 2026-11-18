@@ -55,7 +55,7 @@ export const syncNewTicketDraft = async (input: {
   let draftId: string | undefined;
   let originalControlFields;
   try {
-    const parsedForDraftId = parseTicketEditorContent(input.editor.document.getText(), { allowMissingMetadata: true, fallbackMetadata: { tracker: "", priority: "", status: "", due_date: "", children: [] } });
+    const parsedForDraftId = parseTicketEditorContent(input.editor.document.getText(), { allowEmptyStatus: true, allowMissingMetadata: true, fallbackMetadata: { tracker: "", priority: "", status: "", due_date: "", children: [] } });
     draftId = parsedForDraftId.controlFields?.draft_id;
     originalControlFields = parsedForDraftId.controlFields;
   } catch {
@@ -202,7 +202,7 @@ export const createTicketFromContent = async (input: {
 
   let parsed: TicketEditorContent;
   try {
-    parsed = parseTicketEditorContent(input.content);
+    parsed = parseTicketEditorContent(input.content, { allowEmptyStatus: true });
   } catch (error) {
     const message = error instanceof Error ? error.message : "Invalid metadata.";
     return { result: buildResult("failed", message) };

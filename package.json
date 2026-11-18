@@ -219,6 +219,10 @@
         "command": "redmine-client.syncAllOpenEditors",
         "title": "%command.syncAllOpenEditors.title%",
         "icon": "$(cloud-upload)"
+      },
+      {
+        "command": "redmine-client.referenceExample",
+        "title": "%command.referenceExample%"
       }
     ],
     "views": {
@@ -328,11 +332,13 @@
     "compile-tests": "node ./scripts/clean-test-output.js && tsc -p . --outDir out",
     "watch-tests": "tsc -p . -w --outDir out",
     "pretest": "pnpm run compile-tests && pnpm run compile && pnpm run lint",
-    "lint": "eslint src",
+    "lint": "eslint src && node scripts/check-architecture.cjs",
     "test": "vscode-test",
     "test:dashboard-ui": "pnpm run compile-tests && node scripts/check-dashboard-ui.cjs",
     "test:live-redmine": "pnpm run compile-tests && node scripts/run-live-redmine-tests.cjs",
-    "test:unsafe": "bash ./scripts/vscode-test-nosandbox.sh"
+    "test:unsafe": "bash ./scripts/vscode-test-nosandbox.sh",
+    "verify": "node verification/driver-cli.cjs",
+    "verify:all": "pnpm run lint && node --test verification/architecture.test.cjs && pnpm run compile-tests && pnpm run compile && pnpm run verify run"
   },
   "pnpm": {
     "onlyBuiltDependencies": [

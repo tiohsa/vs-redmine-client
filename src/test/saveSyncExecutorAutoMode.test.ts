@@ -1,5 +1,11 @@
 import * as assert from "assert";
 import * as vscode from "vscode";
+import { mkdtemp, rm } from "fs/promises";
+import { tmpdir } from "os";
+import { join } from "path";
+import { TicketSyncService } from "../app/ticketSync";
+import { isSaveSyncSuppressed } from "../views/saveSyncSuppression";
+import { buildTicketEditorContent, parseTicketEditorContent } from "../views/ticketEditorContent";
 import { performSyncOnSave } from "../app/saveSyncExecutor";
 import { clearTicketDrafts, initializeTicketDraft } from "../views/ticketDraftStore";
 import { clearNewTicketDrafts } from "../views/newTicketDraftStore";
@@ -148,41 +154,68 @@ suite("saveSyncExecutor auto/manual mode policy (RT-01, RT-02)", () => {
     assert.strictEqual(syncQueueItemCalls, 1, "auto モードでは即時同期が実行されること");
   });
 
-  test("New Ticket Draft は auto モードでも保存時は queueOnly であり即時 create は行われない (Q-01 / D-001)", async () => {
-    const uri = vscode.Uri.parse("untitled:redmine-client-new-ticket.md");
-    const content = createTicketContentFixture("New Ticket Subject", "New Ticket Body", { tracker: "Bug" });
-    const editor = createMutableEditorStub(uri, content);
-    registerNewTicketDraft(editor, scope);
-
-    let syncCalls = 0;
-    const notifications: { status: string; message: string }[] = [];
-
-    await performSyncOnSave(editor.document, editor, {
-      ticketsPresentation: makeNoopProvider(),
-      commentsPresentation: makeNoopProvider(),
-      unsyncedPresentation: makeNoopProvider(),
-      notifications: {
-        notifyTicketSaveResult: (r: { status: string; message: string }) => notifications.push(r),
-        notifyCommentSaveResult: () => undefined,
-      } as unknown as import("../app/notificationController").NotificationController,
-      updateTicketListSubject: () => undefined,
-      offlineSyncMode: "auto",
-      syncEngine: createSyncEngine({
-        tickets: {
-          syncQueueItem: async () => {
-            syncCalls++;
-            return { kind: "completed", ticketId: 200 };
+  for (const mode of ["auto", "manual"] as const) {
+    test(`新規下書き保存時の同期モード ${mode}`, async () => {
+      const dir = await mkdtemp(join(tmpdir(), "redmine-save-mode-"));
+      const uri = vscode.Uri.file(join(dir, "draft.md"));
+      let listener: vscode.Disposable | undefined;
+      let posts = 0;
+      let reads = 0;
+      const service = new TicketSyncService({
+        create: {
+          listIssueStatuses: async () => [{ id: 1, name: "In Progress" }],
+          getProjectTrackers: async () => [{ id: 2, name: "Task" }],
+          listIssuePriorities: async () => [{ id: 3, name: "Normal" }],
+          createIssue: async (request) => {
+            posts++;
+            assert.strictEqual(request.projectId, 12);
+            return 200;
           },
-          syncAll: async () => ({ plan: [], results: [], remaining: [], cancelled: false }),
-          resolveCommitUnknown: async () => ({ kind: "completed", ticketId: 200 }),
+          getIssueDetail: async () => {
+            reads++;
+            return { ticket: { id: 200, subject: "Saved subject", description: "Body", projectId: 12,
+              trackerName: "Task", statusName: "In Progress", priorityName: "Normal", updatedAt: "t1" }, comments: [] };
+          },
         },
-      }),
+      });
+      try {
+        await vscode.workspace.fs.writeFile(uri, new Uint8Array());
+        const document = await vscode.workspace.openTextDocument(uri);
+        const editor = await vscode.window.showTextDocument(document);
+        registerNewTicketDraft(editor, scope);
+        const content = buildTicketEditorContent({
+          subject: "Saved subject", description: "Body", metadata: buildIssueMetadataFixture(),
+          controlFields: { mode: "new-ticket", project_id: 12, issue_id: null },
+        });
+        await editor.edit((edit) => edit.insert(new vscode.Position(0, 0), content));
+        const saved = new Promise<void>((resolve, reject) => {
+          listener = vscode.workspace.onDidSaveTextDocument((doc) => {
+            if (doc !== document || isSaveSyncSuppressed(doc.uri.toString())) { return; }
+            void performSyncOnSave(doc, editor, {
+              ticketsPresentation: makeNoopProvider(), commentsPresentation: makeNoopProvider(),
+              unsyncedPresentation: makeNoopProvider(),
+              notifications: { notifyTicketSaveResult: () => {}, notifyCommentSaveResult: () => {} },
+              updateTicketListSubject: () => {}, offlineSyncMode: mode, syncEngine: createSyncEngine({ tickets: service }),
+            }).then(resolve, reject);
+          });
+        });
+        assert.ok(await document.save());
+        await saved;
+        assert.strictEqual(posts, mode === "auto" ? 1 : 0);
+        if (mode === "manual") {
+          assert.strictEqual(getOfflineSyncQueue(scope).newTickets.length, 1);
+          await service.syncQueueItem({ kind: "newTicket", documentUri: uri.toString() }, { connectionScope: scope });
+        }
+        assert.strictEqual(posts, 1);
+        assert.strictEqual(reads, 1);
+        assert.strictEqual(parseTicketEditorContent(document.getText()).controlFields?.issue_id, 200);
+        assert.strictEqual(getOfflineSyncQueue(scope).newTickets.length, 0);
+      } finally {
+        listener?.dispose();
+        await rm(dir, { recursive: true, force: true });
+      }
     });
-
-    assert.strictEqual(syncCalls, 0, "New Ticket Draft は auto でも即時 create されないこと");
-    const queue = getOfflineSyncQueue(scope);
-    assert.strictEqual(queue.newTickets.length, 1, "新規チケットキューに追加されていること");
-  });
+  }
 
   test("finalized new-comment の metadata 破損時は registry identity があっても queue / sync しない", async () => {
     const uri = vscode.Uri.parse("file:///tmp/redmine-client-new-comment-39.md");

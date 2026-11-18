@@ -15,6 +15,7 @@ import {
   getConnectionScopeForDocument,
   getTicketIdForDocument,
   getTicketIdForUri,
+  NEW_TICKET_DRAFT_ID,
 } from "../views/ticketEditorRegistry";
 import {
   addOfflineCommentUpdateAsync,
@@ -176,12 +177,13 @@ export const performSyncOnSave = async (
   };
 
   const syncIfAuto = async (key: SyncEngineKey): Promise<void> => {
-    if (syncMode === "auto" && deps.syncEngine && key.kind !== "newTicket") {
+    if (syncMode === "auto" && deps.syncEngine) {
       if (key.kind === "ticket") {
         markDraftStatus(key.ticketId, "Syncing", operationScope);
       }
       try {
         const outcome = await deps.syncEngine.syncOne(key, { connectionScope: operationScope });
+        if (key.kind === "newTicket" && outcome.kind === "completed") { ticketsPresentation.refresh(); }
         const conflictHandled = await resolveAutoConflict(key, outcome);
         if (!conflictHandled) {
           if (key.kind === "ticket") {
@@ -227,6 +229,13 @@ export const performSyncOnSave = async (
     }
   };
 
+  const newTicketKey: SyncEngineKey = { kind: "newTicket", documentUri: document.uri.toString() };
+  const finishNewTicketSave = async (result: TicketSaveResult): Promise<void> => {
+    notifications.notifyTicketSaveResult(result);
+    if (result.status === "queued") { await syncIfAuto(newTicketKey); }
+    else { unsyncedPresentation.refresh(); }
+  };
+
   if (editor) {
     let ticketResult = await handleTicketEditorSave(editor, {
       onSubjectUpdated: deps.updateTicketListSubject,
@@ -250,6 +259,8 @@ export const performSyncOnSave = async (
         const ticketId = getTicketIdForDocument(editor.document) ?? getTicketIdForUri(editor.document.uri);
         if (ticketId && ticketId > 0) {
           await syncIfAuto({ kind: "ticket", ticketId });
+        } else if (ticketId === NEW_TICKET_DRAFT_ID) {
+          await syncIfAuto(newTicketKey);
         } else {
           unsyncedPresentation.refresh();
         }
@@ -358,8 +369,7 @@ export const performSyncOnSave = async (
         documentUri: document.uri,
         operationScope,
       });
-      notifications.notifyTicketSaveResult(result);
-      unsyncedPresentation.refresh();
+      await finishNewTicketSave(result);
       return;
     }
 
@@ -386,8 +396,7 @@ export const performSyncOnSave = async (
         return;
       }
       const result = await queueNewTicketDraft({ editor, operationScope });
-      notifications.notifyTicketSaveResult(result);
-      unsyncedPresentation.refresh();
+      await finishNewTicketSave(result);
       return;
     }
 
@@ -397,8 +406,7 @@ export const performSyncOnSave = async (
         documentUri: document.uri,
         operationScope,
       });
-      notifications.notifyTicketSaveResult(result);
-      unsyncedPresentation.refresh();
+      await finishNewTicketSave(result);
       return;
     }
 

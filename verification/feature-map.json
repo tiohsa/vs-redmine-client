@@ -1,0 +1,440 @@
+{
+  "features": [
+    {
+      "id": "connection",
+      "name": "接続先と API キー",
+      "entryPoints": [
+        "redmine-clientActivityDashboard",
+        "redmine-client.setApiKey",
+        "redmine-client.clearApiKey",
+        "redmine-client.showApiKeyStatus",
+        "redmine-client.assignEditorToCurrentConnection"
+      ],
+      "selectors": [
+        "#tab-settings",
+        "#set-apikey-btn",
+        "#clear-api-key-btn"
+      ],
+      "invariants": [
+        "API キーは正規化された connectionScope ごとに SecretStorage へ保存する。",
+        "ループバック以外の HTTP 接続には認証情報を送らない。"
+      ],
+      "checks": [
+        "src/test/connectionScope.test.ts",
+        "src/test/dashboardConnectionReset.test.ts"
+      ]
+    },
+    {
+      "id": "ticket-browsing",
+      "name": "プロジェクト選択とチケット検索",
+      "entryPoints": [
+        "redmine-clientActivityDashboard",
+        "redmine-client.selectProject",
+        "redmine-client.toggleChildProjects",
+        "redmine-client.searchTickets",
+        "redmine-client.refreshTickets"
+      ],
+      "selectors": [
+        "#project-select-trigger",
+        "#tab-tickets",
+        "#search-input",
+        ".ticket-row[data-id]",
+        "#tab-settings",
+        "#set-sort-field",
+        "#set-sort-dir"
+      ],
+      "invariants": [
+        "プロジェクト選択と子プロジェクトの設定に従ってチケットを表示する。",
+        "Dashboard の操作メッセージは検証してから処理する。",
+        "期日と開始日の並び替えは取得済みチケットに適用し、階層と検索の直接一致優先を維持する。"
+      ],
+      "checks": [
+        "src/test/dashboardProjectSelection.test.ts",
+        "src/test/dashboardMessageValidation.test.ts",
+        "src/test/ticketsSettingsSorting.test.ts",
+        "src/test/dashboardTicketSearch.test.ts",
+        "src/test/ticketListSettingsStore.test.ts",
+        "src/test/dashboardValidationExtended.test.ts",
+        "scripts/check-dashboard-ui.cjs"
+      ]
+    },
+    {
+      "id": "ticket-editing",
+      "name": "チケット作成と Markdown 編集",
+      "entryPoints": [
+        "redmine-clientActivityDashboard",
+        "redmine-client.createTicket",
+        "redmine-client.createTicketFromMarkdownHeader",
+        "redmine-client.createTicketFromList",
+        "redmine-client.createChildTicketFromList",
+        "redmine-client.openTicketPreview",
+        "redmine-client.syncOpenEditor"
+      ],
+      "selectors": [
+        "#new-ticket-btn",
+        "#metadata-edit-btn",
+        "#metadata-apply-btn"
+      ],
+      "invariants": [
+        "作成時は Markdown の見出しとメタデータをチケットの入力に反映する。",
+        "下書きは接続先ごとに分離する。"
+      ],
+      "checks": [
+        "src/test/createTicketFromMarkdownHeader.test.ts",
+        "src/test/markdownTicketCreateService.test.ts",
+        "src/test/draftPersistenceScope.test.ts"
+      ]
+    },
+    {
+      "id": "comments",
+      "name": "コメントの閲覧・追加・編集",
+      "entryPoints": [
+        "redmine-clientActivityDashboard",
+        "redmine-client.refreshComments",
+        "redmine-client.addComment",
+        "redmine-client.addCommentFromComments",
+        "redmine-client.editComment"
+      ],
+      "selectors": [
+        "#detail-tab-comments",
+        "#comments-list",
+        "#add-comment-btn"
+      ],
+      "invariants": [
+        "選択チケットのコメントを表示する。",
+        "編集権限のないコメントの更新を拒否する。"
+      ],
+      "checks": [
+        "src/test/commentListMapping.test.ts",
+        "src/test/commentPermissions.test.ts",
+        "src/test/commentSaveSync.test.ts"
+      ]
+    },
+    {
+      "id": "offline-sync",
+      "name": "未同期の変更と同期の復旧",
+      "entryPoints": [
+        "redmine-clientActivityDashboard",
+        "redmine-client.runOfflineSync",
+        "redmine-client.syncUnsyncedFile",
+        "redmine-client.configureOfflineSyncMode",
+        "redmine-client.syncAllOpenEditors"
+      ],
+      "selectors": [
+        "#tab-unsynced",
+        "#unsynced-list",
+        "#sync-all-btn",
+        "#sync-tray"
+      ],
+      "invariants": [
+        "リモート書き込み後に再取得・照合してからローカル状態を確定する。",
+        "commit_unknown の操作は自動再試行しない。",
+        "旧 revision または attemptGeneration の処理による保存を拒否する。",
+        "新規チケットは auto で保存時に作成し、manual はローカル保存する。作成が 403 の場合は明示的な再同期のみ許可する。",
+        "Dashboard の一括同期では新規チケットのステータス一覧取得または作成の HTTP エラーを操作名とコードで表示する。"
+      ],
+      "checks": [
+        "src/test/dashboardSyncTray.test.ts",
+        "src/test/dashboardSyncFeedback.test.ts",
+        "src/test/saveSyncExecutorAutoMode.test.ts",
+        "src/test/ticketSyncService.test.ts",
+        "src/test/syncLifecycleBoundary.test.ts",
+        "src/test/syncLifecycleOwnership.test.ts"
+      ]
+    },
+    {
+      "id": "editor-defaults",
+      "name": "エディターの既定値",
+      "entryPoints": [
+        "redmine-clientActivityDashboard",
+        "redmine-client.configureEditorDefaultSubject",
+        "redmine-client.configureEditorDefaultDescription",
+        "redmine-client.configureEditorDefaultTracker",
+        "redmine-client.configureEditorDefaultPriority",
+        "redmine-client.configureEditorDefaultStatus",
+        "redmine-client.configureEditorDefaultDueDate",
+        "redmine-client.resetEditorDefaults"
+      ],
+      "selectors": [
+        "#tab-settings",
+        "#set-editor-subject",
+        "#reset-editor-defaults-btn"
+      ],
+      "invariants": [
+        "設定した既定値を新規チケットの入力に適用できる。"
+      ],
+      "checks": [
+        "src/test/dashboardSettingsState.test.ts"
+      ]
+    }
+  ],
+  "entryPoints": [
+    {
+      "id": "redmine-client.setApiKey",
+      "label": "%command.setApiKey.title%",
+      "navigation": "Command Palette",
+      "shortcuts": []
+    },
+    {
+      "id": "redmine-client.clearApiKey",
+      "label": "%command.clearApiKey.title%",
+      "navigation": "Command Palette",
+      "shortcuts": []
+    },
+    {
+      "id": "redmine-client.showApiKeyStatus",
+      "label": "%command.showApiKeyStatus.title%",
+      "navigation": "Command Palette",
+      "shortcuts": []
+    },
+    {
+      "id": "redmine-client.assignEditorToCurrentConnection",
+      "label": "%command.assignEditorToCurrentConnection.title%",
+      "navigation": "Command Palette",
+      "shortcuts": []
+    },
+    {
+      "id": "redmine-client.refreshProjects",
+      "label": "%command.refreshProjects.title%",
+      "navigation": "Command Palette",
+      "shortcuts": []
+    },
+    {
+      "id": "redmine-client.refreshTickets",
+      "label": "%command.refreshTickets.title%",
+      "navigation": "Command Palette",
+      "shortcuts": []
+    },
+    {
+      "id": "redmine-client.searchTickets",
+      "label": "%command.searchTickets.title%",
+      "navigation": "Command Palette",
+      "shortcuts": []
+    },
+    {
+      "id": "redmine-client.refreshComments",
+      "label": "%command.refreshComments.title%",
+      "navigation": "Command Palette",
+      "shortcuts": []
+    },
+    {
+      "id": "redmine-client.reloadProject",
+      "label": "%command.reloadProject.title%",
+      "navigation": "Command Palette",
+      "shortcuts": []
+    },
+    {
+      "id": "redmine-client.reloadTicket",
+      "label": "%command.reloadTicket.title%",
+      "navigation": "Command Palette",
+      "shortcuts": []
+    },
+    {
+      "id": "redmine-client.reloadComment",
+      "label": "%command.reloadComment.title%",
+      "navigation": "Command Palette",
+      "shortcuts": []
+    },
+    {
+      "id": "redmine-client.selectProject",
+      "label": "%command.selectProject.title%",
+      "navigation": "Command Palette",
+      "shortcuts": []
+    },
+    {
+      "id": "redmine-client.toggleChildProjects",
+      "label": "%command.toggleChildProjects.title%",
+      "navigation": "Command Palette",
+      "shortcuts": []
+    },
+    {
+      "id": "redmine-client.openTicketPreview",
+      "label": "%command.openTicketPreview.title%",
+      "navigation": "Command Palette",
+      "shortcuts": []
+    },
+    {
+      "id": "redmine-client.openExtraTicketEditor",
+      "label": "%command.openExtraTicketEditor.title%",
+      "navigation": "Command Palette",
+      "shortcuts": []
+    },
+    {
+      "id": "redmine-client.configureEditorDefaultSubject",
+      "label": "%command.configureEditorDefaultSubject.title%",
+      "navigation": "Command Palette",
+      "shortcuts": []
+    },
+    {
+      "id": "redmine-client.configureEditorDefaultDescription",
+      "label": "%command.configureEditorDefaultDescription.title%",
+      "navigation": "Command Palette",
+      "shortcuts": []
+    },
+    {
+      "id": "redmine-client.configureEditorDefaultTracker",
+      "label": "%command.configureEditorDefaultTracker.title%",
+      "navigation": "Command Palette",
+      "shortcuts": []
+    },
+    {
+      "id": "redmine-client.configureEditorDefaultPriority",
+      "label": "%command.configureEditorDefaultPriority.title%",
+      "navigation": "Command Palette",
+      "shortcuts": []
+    },
+    {
+      "id": "redmine-client.configureEditorDefaultStatus",
+      "label": "%command.configureEditorDefaultStatus.title%",
+      "navigation": "Command Palette",
+      "shortcuts": []
+    },
+    {
+      "id": "redmine-client.configureEditorDefaultDueDate",
+      "label": "%command.configureEditorDefaultDueDate.title%",
+      "navigation": "Command Palette",
+      "shortcuts": []
+    },
+    {
+      "id": "redmine-client.resetEditorDefaults",
+      "label": "%command.resetEditorDefaults.title%",
+      "navigation": "Command Palette",
+      "shortcuts": []
+    },
+    {
+      "id": "redmine-client.createTicket",
+      "label": "%command.createTicket.title%",
+      "navigation": "Command Palette",
+      "shortcuts": []
+    },
+    {
+      "id": "redmine-client.createTicketFromMarkdownHeader",
+      "label": "%command.createTicketFromMarkdownHeader.title%",
+      "navigation": "Command Palette",
+      "shortcuts": []
+    },
+    {
+      "id": "redmine-client.insertRedmineTicketFrontmatter",
+      "label": "%command.insertRedmineTicketFrontmatter.title%",
+      "navigation": "Command Palette",
+      "shortcuts": []
+    },
+    {
+      "id": "redmine-client.createTicketFromList",
+      "label": "%command.createTicketFromList.title%",
+      "navigation": "Command Palette",
+      "shortcuts": []
+    },
+    {
+      "id": "redmine-client.createChildTicketFromList",
+      "label": "%command.createChildTicketFromList.title%",
+      "navigation": "Command Palette",
+      "shortcuts": []
+    },
+    {
+      "id": "redmine-client.openProjectInBrowser",
+      "label": "%command.openProjectInBrowser.title%",
+      "navigation": "Command Palette",
+      "shortcuts": []
+    },
+    {
+      "id": "redmine-client.openTicketInBrowser",
+      "label": "%command.openTicketInBrowser.title%",
+      "navigation": "Command Palette",
+      "shortcuts": []
+    },
+    {
+      "id": "redmine-client.openCommentInBrowser",
+      "label": "%command.openCommentInBrowser.title%",
+      "navigation": "Command Palette",
+      "shortcuts": []
+    },
+    {
+      "id": "redmine-client.editComment",
+      "label": "%command.editComment.title%",
+      "navigation": "Command Palette",
+      "shortcuts": []
+    },
+    {
+      "id": "redmine-client.addComment",
+      "label": "%command.addComment.title%",
+      "navigation": "Command Palette",
+      "shortcuts": []
+    },
+    {
+      "id": "redmine-client.addCommentFromComments",
+      "label": "%command.addCommentFromComments.title%",
+      "navigation": "Command Palette",
+      "shortcuts": []
+    },
+    {
+      "id": "redmine-client.runOfflineSync",
+      "label": "%command.runOfflineSync.title%",
+      "navigation": "Command Palette",
+      "shortcuts": []
+    },
+    {
+      "id": "redmine-client.syncUnsyncedFile",
+      "label": "%command.syncUnsyncedFile.title%",
+      "navigation": "Command Palette",
+      "shortcuts": []
+    },
+    {
+      "id": "redmine-client.configureOfflineSyncMode",
+      "label": "%command.configureOfflineSyncMode.title%",
+      "navigation": "Command Palette",
+      "shortcuts": []
+    },
+    {
+      "id": "redmine-client.revealActiveTicket",
+      "label": "%command.revealActiveTicket.title%",
+      "navigation": "Command Palette",
+      "shortcuts": []
+    },
+    {
+      "id": "redmine-client.focusTicketEditor",
+      "label": "%command.focusTicketEditor.title%",
+      "navigation": "Command Palette",
+      "shortcuts": []
+    },
+    {
+      "id": "redmine-client.syncToRedmine",
+      "label": "%command.syncToRedmine.title%",
+      "navigation": "Command Palette",
+      "shortcuts": []
+    },
+    {
+      "id": "redmine-client.syncOpenEditor",
+      "label": "%command.syncOpenEditor.title%",
+      "navigation": "Command Palette",
+      "shortcuts": []
+    },
+    {
+      "id": "redmine-client.syncAllOpenEditors",
+      "label": "%command.syncAllOpenEditors.title%",
+      "navigation": "Command Palette",
+      "shortcuts": []
+    },
+    {
+      "id": "redmine-client.referenceExample",
+      "label": "%command.referenceExample%",
+      "navigation": "Command Palette",
+      "shortcuts": []
+    },
+    {
+      "id": "redmine-clientActivityDashboard",
+      "label": "%view.dashboard.name%",
+      "navigation": "redmine-clientActivity"
+    }
+  ],
+  "scenarios": [
+    {
+      "id": "reference-example",
+      "command": "redmine-client.referenceExample",
+      "expectedResult": "ready",
+      "maxLatencyMs": 2000,
+      "maxCpuMs": 2000,
+      "maxRssBytes": 805306368
+    }
+  ]
+}

@@ -97,4 +97,15 @@ suite("ticketListSettingsStore", () => {
     const s2 = getStoredTicketListSettings();
     assert.strictEqual(s2.filters.subjectQuery, "");
   });
+  test("日付の並び替え設定を再初期化後に復元する", () => {
+    for (const field of ["dueDate", "startDate"] as const) {
+      for (const direction of ["asc", "desc"] as const) {
+        const memento = makeMemento();
+        initializeTicketListSettingsStore(memento);
+        setStoredTicketListSettings({ ...DEFAULT_TICKET_LIST_SETTINGS, sort: { field, direction } });
+        initializeTicketListSettingsStore(memento);
+        assert.deepStrictEqual(getStoredTicketListSettings().sort, { field, direction });
+      }
+    }
+  });
 });

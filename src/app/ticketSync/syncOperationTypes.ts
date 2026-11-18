@@ -34,8 +34,8 @@ export type GenericLifecycleAction =
   | { kind: "mark_reconciliation_pending"; message?: string }
   | { kind: "mark_local_finalize_pending"; canonical?: any }
   | { kind: "complete" }
-  | { kind: "abort_before_remote_write" }
-  | { kind: "abort_known_remote_failure" }
+  | { kind: "abort_before_remote_write"; message?: string }
+  | { kind: "abort_known_remote_failure"; preserveRequest?: boolean }
   | { kind: "assume_remote_commit"; remoteId?: number; projectId?: number; remoteUpdatedAt?: string }
   | { kind: "record_reconciled_identity"; remoteId: number; projectId?: number; remoteUpdatedAt?: string; canonical?: any };
 
@@ -145,6 +145,7 @@ export type SyncOutcome =
     }
   | {
       kind: "commit_unknown";
+      error?: Error;
       operationId: string;
       ticketId?: number;
       commentId?: number;

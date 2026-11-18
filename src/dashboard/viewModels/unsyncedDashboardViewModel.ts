@@ -9,6 +9,7 @@ import { getTicketSummary } from "../../views/ticketSummaryStore";
 import { formatTicketLabel } from "../../views/ticketLabel";
 import type { DashboardUnsyncedItem } from "../dashboardProtocol";
 import { getCurrentConnectionScope } from "../../config/connectionScope";
+import { canRetryEffect, getPrimaryEffectForRevision, isRejectedTicketCreate } from "../../app/syncEffects";
 import { createSyncEngine } from "../../app/syncEngine";
 
 const processingRecord = (operation: {
@@ -103,9 +104,13 @@ export const buildUnsyncedDashboardItems = (abandoned = false): DashboardUnsynce
   for (const newTicket of queue.newTickets) {
     if (isAbandoned(newTicket) !== abandoned) { continue; }
     const policy = evaluateOfflineSyncPolicy(newTicket);
+    const primary = getPrimaryEffectForRevision(newTicket);
+    const rejected = primary && isRejectedTicketCreate(primary);
+    const canRetrySync = !abandoned && !newTicket.createdIssueId && (newTicket.phase ?? "queued") === "queued" &&
+      (rejected ? canRetryEffect(primary) : !primary && Boolean(newTicket.preparationFailure));
     const details = [
       newTicket.projectId ? vscode.l10n.t("Project ID: {0}", newTicket.projectId) : undefined,
-      describeOfflineSync(newTicket).detail,
+      rejected ? vscode.l10n.t("Failed to create issue (HTTP {0}).", 403) : newTicket.preparationFailure ?? describeOfflineSync(newTicket).detail,
     ].filter((value): value is string => value !== undefined);
     items.push({
       key: { kind: "newTicket", queueId: newTicket.queueId, documentUri: newTicket.documentUri },
@@ -116,6 +121,7 @@ export const buildUnsyncedDashboardItems = (abandoned = false): DashboardUnsynce
       canDiscard: policy.canDiscard,
       discardMode: policy.discardMode,
       canSync: true,
+      canRetrySync,
       abandonedAt: newTicket.disposition?.abandonedAt,
       hasLaterChanges: newTicket.nextIntent !== undefined,
       processingRecord: abandoned ? processingRecord(newTicket) : undefined,

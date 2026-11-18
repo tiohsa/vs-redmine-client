@@ -179,11 +179,7 @@ export const saveTicketDraftLocally = async (
   if (!ticketId) { return undefined; }
 
   if (ticketId === NEW_TICKET_DRAFT_ID) {
-    await addOfflineNewTicketAsync({
-      content: editor.document.getText(),
-      documentUri: editor.document.uri.toString(),
-    }, operationScope);
-    return buildResult("queued", vscode.l10n.t("New ticket draft saved locally."));
+    return queueNewTicketDraft({ editor, operationScope });
   }
 
   return queueTicketDraft({
@@ -228,7 +224,7 @@ const resolveProjectIdForEditor = (editor: vscode.TextEditor): number | undefine
 export const validateNewTicketContent = (content: string): TicketSaveResult | undefined => {
   let parsed;
   try {
-    parsed = parseTicketEditorContent(content);
+    parsed = parseTicketEditorContent(content, { allowEmptyStatus: true });
   } catch (error) {
     const message = error instanceof Error ? error.message : "Invalid metadata.";
     return buildResult("failed", message);

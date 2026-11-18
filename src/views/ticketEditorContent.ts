@@ -28,6 +28,7 @@ export type TicketEditorLayout = "metadata-first" | "subject-first";
 export type TicketEditorMetadataBlock = "present" | "missing";
 
 type TicketEditorParseOptions = {
+  allowEmptyStatus?: boolean;
   allowMissingMetadata?: boolean;
   fallbackMetadata?: IssueMetadata;
   allowMissingSubject?: boolean;
@@ -63,11 +64,12 @@ const extractSubjectLine = (
 
 const parseMetadataBlockText = (
   metadataLines: string,
+  options: TicketEditorParseOptions,
 ): { metadata: IssueMetadata; controlFields: FrontmatterControlFields } => {
   const { controlText, issueText } = splitMetadataBlockText(metadataLines);
   const controlFields = parseFrontmatterControlFields(controlText);
   const textToParse = issueText.length > 0 ? issueText : metadataLines;
-  const metadata = parseIssueMetadataYaml(textToParse);
+  const metadata = parseIssueMetadataYaml(textToParse, options.allowEmptyStatus || controlFields.mode === "new-ticket");
   return { metadata, controlFields };
 };
 
@@ -109,7 +111,7 @@ const extractMetadataBlock = (
   }
 
   const metadataLines = lines.slice(blockStart + 1, blockEnd).join("\n");
-  const { metadata, controlFields } = parseMetadataBlockText(metadataLines);
+  const { metadata, controlFields } = parseMetadataBlockText(metadataLines, options);
   const description = normalizeDescription(lines.slice(blockEnd + 1));
 
   return { metadata, description, metadataBlock: "present", controlFields };
@@ -117,6 +119,7 @@ const extractMetadataBlock = (
 
 const extractMetadataFromStart = (
   lines: string[],
+  options: TicketEditorParseOptions,
 ): { metadata: IssueMetadata; nextIndex: number; controlFields: FrontmatterControlFields } => {
   if (lines[0]?.trim() !== "---") {
     throw new Error("Metadata block must appear at the start.");
@@ -130,7 +133,7 @@ const extractMetadataFromStart = (
   }
 
   const metadataLines = lines.slice(1, blockEnd).join("\n");
-  const { metadata, controlFields } = parseMetadataBlockText(metadataLines);
+  const { metadata, controlFields } = parseMetadataBlockText(metadataLines, options);
   return { metadata, nextIndex: blockEnd + 1, controlFields };
 };
 
@@ -142,7 +145,7 @@ export const parseTicketEditorContent = (
   const isMetadataFirst = lines[0]?.trim() === "---";
 
   if (isMetadataFirst) {
-    const { metadata, nextIndex, controlFields } = extractMetadataFromStart(lines);
+    const { metadata, nextIndex, controlFields } = extractMetadataFromStart(lines, options);
     const { subject, subjectIndex } = extractSubjectLine(lines, nextIndex);
     if (subjectIndex === -1) {
       if (options.allowMissingSubject) {
