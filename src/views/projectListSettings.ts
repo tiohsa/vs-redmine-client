@@ -1,7 +1,7 @@
 import { Ticket } from "../redmine/types";
 import { MAX_VIEW_ITEMS } from "./viewLimits";
 
-export type TicketSortField = "priority" | "status" | "tracker" | "assignee";
+export type TicketSortField = "priority" | "status" | "tracker" | "assignee" | "dueDate" | "startDate";
 export type SortDirection = "asc" | "desc";
 export type DueDateWindow = "within1Day" | "within3Days" | "within7Days" | "overdue";
 
@@ -144,6 +144,18 @@ export const applyTicketFilters = (
   });
 };
 
+const validDateOnly = (value: string | undefined): string | undefined => {
+  if (!value || value.length !== 10) { return undefined; }
+  const match = DATE_ONLY_PATTERN.exec(value);
+  if (!match) { return undefined; }
+  const year = Number(match[1]);
+  const month = Number(match[2]);
+  const day = Number(match[3]);
+  const leap = year % 4 === 0 && (year % 100 !== 0 || year % 400 === 0);
+  const days = [31, leap ? 29 : 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
+  return year >= 1 && month >= 1 && month <= 12 && day >= 1 && day <= days[month - 1] ? value : undefined;
+};
+
 export const applyTicketSort = (
   tickets: Ticket[],
   sort: TicketSortPreference,
@@ -162,6 +174,10 @@ export const applyTicketSort = (
         return ticket.trackerName ?? ticket.trackerId;
       case "assignee":
         return ticket.assigneeName ?? ticket.assigneeId;
+      case "dueDate":
+        return validDateOnly(ticket.dueDate);
+      case "startDate":
+        return validDateOnly(ticket.startDate);
       default:
         return undefined;
     }

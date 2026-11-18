@@ -955,6 +955,20 @@ async function main() {
   for (const id of ['set-base-url', 'set-default-project', 'set-request-timeout', 'set-ignore-ssl', 'set-ticket-limit', 'set-editor-storage', 'set-editor-subject']) {
     assert.equal(await evaluate(`document.getElementById(${JSON.stringify(id)}) !== null`), true, `missing setting control: ${id}`);
   }
+  for (const [field, label] of [['dueDate', strings.dueDateLabel], ['startDate', strings.startDate]]) {
+    assert.equal(await evaluate(`document.querySelector('#set-sort-field option[value="${field}"]').textContent`), label);
+    await evaluate(`document.getElementById('set-sort-field').value='${field}';document.getElementById('set-sort-field').dispatchEvent(new Event('change'))`);
+    assert.equal(await evaluate('window.messages.at(-1).patch.sort.field'), field);
+    state.settings.sort.field = field;
+    await push();
+    for (const direction of ['asc', 'desc']) {
+      await evaluate(`document.getElementById('set-sort-dir').value='${direction}';document.getElementById('set-sort-dir').dispatchEvent(new Event('change'))`);
+      assert.equal(await evaluate('window.messages.at(-1).patch.sort.direction'), direction);
+      assert.equal(await evaluate('window.messages.at(-1).patch.sort.field'), field);
+      state.settings.sort.direction = direction;
+      await push();
+    }
+  }
   // 未編集のフォーカス値はホストの更新に従い、編集中の値は同じ接続先で維持する。
   const previousBaseUrl = state.settings.baseUrl;
   const previousDefaultProjectId = state.settings.defaultProjectId;

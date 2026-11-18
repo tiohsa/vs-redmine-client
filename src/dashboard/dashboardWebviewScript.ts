@@ -858,7 +858,7 @@ function renderComments(){
 }
 
 // ── Settings ──────────────────────────────────────────────────────────────
-const sortFields=function(){ return [['',STRINGS.sortDefaultOption],['priority',STRINGS.sortPriority],['status',STRINGS.sortStatus],['tracker',STRINGS.sortTracker],['assignee',STRINGS.sortAssignee]]; };
+const sortFields=function(){ return [['',STRINGS.sortDefaultOption],['priority',STRINGS.sortPriority],['status',STRINGS.sortStatus],['tracker',STRINGS.sortTracker],['assignee',STRINGS.sortAssignee],['dueDate',STRINGS.dueDateLabel],['startDate',STRINGS.startDate]]; };
 function selectOptions(options,current){ return options.map(function(option){ return '<option value="'+esc(option[0])+'"'+(option[0] === current ? ' selected' : '')+'>'+esc(option[1])+'</option>'; }).join(''); }
 function dueToggles(rule){ return [['set-dd-overdue','showOverdue',STRINGS.dueOverdue],['set-dd-1d','showWithin1Day',STRINGS.due1Day],['set-dd-3d','showWithin3Days',STRINGS.due3Days],['set-dd-7d','showWithin7Days',STRINGS.due7Days]].map(function(item){ return '<label class="setting-row"><span class="setting-label">'+esc(item[2])+'</span><input class="setting-check" type="checkbox" id="'+item[0]+'"'+(rule[item[1]]?' checked':'')+'></label>'; }).join(''); }
 

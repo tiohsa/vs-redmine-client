@@ -25,7 +25,7 @@ const isPositiveIntArray = (v: unknown): v is number[] =>
 const UNSYNCED_KINDS = new Set(["ticket", "newTicket", "comment"]);
 const OFFLINE_SYNC_MODES = new Set(["auto", "manual"]);
 const SORT_DIRECTIONS = new Set(["asc", "desc"]);
-const SORT_FIELDS = new Set(["priority", "status", "tracker", "assignee"]);
+const SORT_FIELDS = new Set(["priority", "status", "tracker", "assignee", "dueDate", "startDate"]);
 const METADATA_PATCH_FIELDS = new Set(["tracker", "priority", "status", "due_date", "start_date", "assignee"]);
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 

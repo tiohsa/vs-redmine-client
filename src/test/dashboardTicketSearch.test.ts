@@ -33,6 +33,45 @@ const makeContext = (store: DashboardStateStore): DashboardServiceContext => ({
 });
 
 suite("DashboardTicketService all-project search", () => {
+  test("日付順の変更は取得済みのツリーと検索結果に反映し再取得しない", async () => {
+    const store = new DashboardStateStore();
+    let tickets: Ticket[] = [];
+    let total = 0;
+    let requests = 0;
+    const settings = structuredClone(DEFAULT_TICKET_LIST_SETTINGS);
+    settings.filters.statusIds = [1];
+    const data: Ticket[] = [
+      { ...makeTicket(1, "root"), statusId: 1, dueDate: "2026-02-01", startDate: "2025-01-01" },
+      { ...makeTicket(2, "root"), statusId: 1, dueDate: "2026-01-01", startDate: "2025-02-01" },
+      { ...makeTicket(3, "child"), statusId: 1, parentId: 1, dueDate: "2026-03-01" },
+      { ...makeTicket(4, "child"), statusId: 1, parentId: 1, dueDate: "2026-01-01" },
+      { ...makeTicket(5, "filtered"), statusId: 2, dueDate: "2024-01-01" },
+    ];
+    const service = new DashboardTicketService({
+      context: makeContext(store), getResolvedProject: () => ({ id: 1, name: "Project" }),
+      getTickets: () => tickets, setTickets: value => { tickets = value; },
+      getTotalCount: () => total, setTotalCount: value => { total = value; },
+      getSettings: () => settings, loadComments: async () => undefined, refreshUnsynced: () => undefined,
+      listIssues: async input => { requests++; return { tickets: data, totalCount: data.length, limit: input.limit, offset: input.offset }; },
+    });
+    await service.loadTickets();
+    settings.sort = { field: "dueDate", direction: "asc" };
+    service.pushTickets();
+    assert.deepStrictEqual(store.getState().tickets.map(ticket => ticket.id), [2, 1]);
+    assert.deepStrictEqual(store.getState().tickets[1].children.map(ticket => ticket.id), [4, 3]);
+    settings.sort = { field: "startDate", direction: "asc" };
+    service.pushTickets();
+    assert.deepStrictEqual(store.getState().tickets.map(ticket => ticket.id), [1, 2]);
+    assert.strictEqual(requests, 1);
+    await service.searchTickets("1");
+    const afterSearch = requests;
+    settings.sort = { field: "dueDate", direction: "asc" };
+    service.pushTickets();
+    assert.deepStrictEqual(store.getState().tickets.map(ticket => ticket.id), [1, 2, 4, 3]);
+    assert.ok(store.getState().tickets.every(ticket => ticket.level === 0));
+    assert.strictEqual(requests, afterSearch);
+  });
+
   test("未選択時の全プロジェクト検索で件名検索とID検索をマージする", async () => {
     const store = new DashboardStateStore();
     let tickets: Ticket[] = [];

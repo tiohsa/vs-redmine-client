@@ -60,4 +60,21 @@ suite("Ticket settings sorting", () => {
       [2, 1, 3],
     );
   });
+  test("sorts valid calendar dates independently and keeps invalid dates last", () => {
+    const tickets = [
+      { id: 1, subject: "a", projectId: 1, dueDate: "2025-12-31", startDate: "2026-02-01" },
+      { id: 2, subject: "b", projectId: 1, dueDate: "2026-01-01", startDate: "2025-12-31" },
+      { id: 3, subject: "c", projectId: 1, dueDate: "2026-01-01", startDate: "2025-12-31" },
+      { id: 6, subject: "f", projectId: 1, dueDate: "2025-02-29", startDate: "2025-13-01" },
+      { id: 5, subject: "e", projectId: 1, dueDate: "", startDate: "" },
+      { id: 4, subject: "d", projectId: 1 },
+      { id: 7, subject: "g", projectId: 1, dueDate: "2024-02-29", startDate: "2024-02-29" },
+    ];
+    const order = (field: "dueDate" | "startDate", direction: "asc" | "desc") =>
+      applyTicketSort(tickets, { field, direction }).map(ticket => ticket.id);
+    assert.deepStrictEqual(order("dueDate", "asc"), [7, 1, 2, 3, 4, 5, 6]);
+    assert.deepStrictEqual(order("dueDate", "desc"), [3, 2, 1, 7, 4, 5, 6]);
+    assert.deepStrictEqual(order("startDate", "asc"), [7, 2, 3, 1, 4, 5, 6]);
+    assert.deepStrictEqual(order("startDate", "desc"), [1, 3, 2, 7, 4, 5, 6]);
+  });
 });

@@ -58,7 +58,8 @@ const mergeWithDefaults = (stored: Partial<TicketListSettings>): TicketListSetti
     },
     sort: {
       field: stored.sort?.field === "priority" || stored.sort?.field === "status" ||
-             stored.sort?.field === "tracker" || stored.sort?.field === "assignee"
+             stored.sort?.field === "tracker" || stored.sort?.field === "assignee" ||
+             stored.sort?.field === "dueDate" || stored.sort?.field === "startDate"
         ? stored.sort.field
         : def.sort.field,
       direction: stored.sort?.direction === "asc" || stored.sort?.direction === "desc"

@@ -161,6 +161,16 @@ suite("Dashboard バリデーション拡張", () => {
     assert.strictEqual(r.ok, false);
   });
 
+  test("settings.update: 日付項目と両方向を受け入れる", () => {
+    for (const field of ["dueDate", "startDate"]) {
+      for (const direction of ["asc", "desc"]) {
+        assert.strictEqual(validateDashboardMessage({
+          type: "settings.update", requestId: "r", patch: { sort: { field, direction } },
+        }).ok, true);
+      }
+    }
+  });
+
   test("settings.update: 正常な sort と filter", () => {
     const r = validateDashboardMessage({
       type: "settings.update", requestId: "r",
