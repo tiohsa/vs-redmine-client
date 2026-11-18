@@ -40,6 +40,7 @@ export interface DashboardTicketNode {
   assigneeId?: number;
   dueDate?: string;
   startDate?: string;
+  doneRatio?: number;
   projectId?: number;
   projectName?: string;
   parentId?: number;

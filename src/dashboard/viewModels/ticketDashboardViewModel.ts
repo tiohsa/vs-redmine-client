@@ -89,6 +89,7 @@ const buildDashboardNode = (
   assigneeId: node.data.assigneeId,
   dueDate: node.data.dueDate,
   startDate: node.data.startDate,
+  doneRatio: node.data.doneRatio,
   projectId: node.data.projectId,
   projectName: node.data.projectName,
   parentId: node.data.parentId,

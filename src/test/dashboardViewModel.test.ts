@@ -32,6 +32,7 @@ const makeTicket = (overrides: Partial<Ticket> & { id: number }): Ticket => ({
   assigneeId: overrides.assigneeId,
   dueDate: overrides.dueDate,
   startDate: overrides.startDate,
+  doneRatio: overrides.doneRatio,
   parentId: overrides.parentId,
   description: overrides.description,
 });
@@ -118,6 +119,21 @@ suite("Dashboard ViewModel — チケット変換", () => {
     assert.strictEqual(node.assigneeId, 42);
     assert.strictEqual(node.dueDate, "2026-05-01");
     assert.strictEqual(node.startDate, "2026-04-01");
+  });
+
+  test("doneRatio (0, 50, 100, undefined) が DashboardTicketNode に保持される", async () => {
+    const tickets = [
+      makeTicket({ id: 1, doneRatio: 0 }),
+      makeTicket({ id: 2, doneRatio: 50 }),
+      makeTicket({ id: 3, doneRatio: 100, parentId: 2 }),
+      makeTicket({ id: 4 }),
+    ];
+    const nodes = buildTicketDashboardNodes(tickets);
+    assert.strictEqual(nodes.length, 3);
+    assert.strictEqual(nodes[0].doneRatio, 0);
+    assert.strictEqual(nodes[1].doneRatio, 50);
+    assert.strictEqual(nodes[1].children[0].doneRatio, 100);
+    assert.strictEqual(nodes[2].doneRatio, undefined);
   });
 
   test("buildTicketDetail でチケット詳細を変換する", async () => {
