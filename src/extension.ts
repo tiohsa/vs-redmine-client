@@ -26,7 +26,10 @@ import {
 import { registerCommands } from "./app/commandRegistry";
 import { getConnectionScope } from "./config/connectionScope";
 
+import { registerReferenceExample } from "./layers/extension-host/entry-points/referenceExample";
+
 export async function activate(context: vscode.ExtensionContext) {
+  registerReferenceExample(context);
   // ── ストア初期化 ─────────────────────────────────────────────────────────
   let activeBaseUrl = getConnectionScope(getBaseUrl());
   initializeDraftStore(

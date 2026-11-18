@@ -511,5 +511,6 @@
   "Failed to load more: {0}": "追加のチケットを取得できませんでした: {0}",
   "Loading more tickets…": "追加のチケットを読み込み中…",
   "Dashboard cache reset canceled because the view changed.": "表示が変更されたため、Dashboard キャッシュの再取得を中断しました。",
-  "Project selected for this session, but saving it failed: {0}": "このセッションのプロジェクトを選択しましたが、保存に失敗しました: {0}"
+  "Project selected for this session, but saving it failed: {0}": "このセッションのプロジェクトを選択しましたが、保存に失敗しました: {0}",
+    "Redmine reference example completed.": "Redmine の参照例が完了しました。"
 }

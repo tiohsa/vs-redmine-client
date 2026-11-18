@@ -27,7 +27,7 @@ jobs:
         run: pnpm install --frozen-lockfile
 
       - name: Lint
-        run: pnpm run lint
+        run: pnpm run lint && node --test verification/architecture.test.cjs
 
       - name: Typecheck
         run: pnpm exec tsc --noEmit
@@ -37,6 +37,11 @@ jobs:
         env:
           ELECTRON_DISABLE_SANDBOX: '1'
           ELECTRON_NO_SANDBOX: '1'
+          VSCODE_TEST_ELECTRON_ARGS: '--no-sandbox --disable-setuid-sandbox'
+
+      - name: Verify reference feature
+        run: xvfb-run -a pnpm run verify run
+        env:
           VSCODE_TEST_ELECTRON_ARGS: '--no-sandbox --disable-setuid-sandbox'
 
       - name: Dashboard UI test

@@ -1,0 +1,11 @@
+/.github/CODEOWNERS @tiohsa
+/.github/workflows/ @tiohsa
+/architecture.config.json @tiohsa
+/eslint.config.mjs @tiohsa
+/tsconfig.json @tiohsa
+/package.json @tiohsa
+/scripts/check-architecture.cjs @tiohsa
+/scripts/architecture-baseline.json @tiohsa
+/verification/ @tiohsa
+/src/test/referenceVerification.ts @tiohsa
+/src/packages/framework-core/ @tiohsa

@@ -1,0 +1,11 @@
+{
+  "layers": ["extension-host", "webview"],
+  "restrictedApis": {
+    "setTimeout": "scheduleTask",
+    "clearTimeout": "scheduleTask の戻り値であるキャンセル関数",
+    "setInterval": "scheduleTask による再スケジュール",
+    "clearInterval": "scheduleTask の戻り値であるキャンセル関数",
+    "setImmediate": "scheduleTask",
+    "clearImmediate": "scheduleTask の戻り値であるキャンセル関数"
+  }
+}
