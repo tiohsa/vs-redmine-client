@@ -121,7 +121,7 @@ Redmine が作成・更新を受理した後も、remote read-back とローカ�
 
 | 設定キー | デフォルト | 説明 |
 |---------|----------|------|
-| `redmine-client.baseUrl` | `""` | Redmine のベース URL（`http://` または `https://` を含める） |
+| `redmine-client.baseUrl` | `""` | Redmine のベース URL（HTTPS。HTTP はループバックのみ） |
 | `redmine-client.ignoreSSLErrors` | `false` | SSL 証明書エラーを無視する（開発・テスト用のみ） |
 | `redmine-client.defaultProjectId` | `""` | デフォルトのプロジェクト ID / 識別子 |
 | `redmine-client.includeChildProjects` | `false` | チケット一覧に子プロジェクトを含める |
@@ -212,6 +212,8 @@ Redmine が作成・更新を受理した後も、remote read-back とローカ�
 - **プロジェクト固有トラッカー**: 新規チケット作成フォームとメタデータエディタには、選択中プロジェクトで有効なトラッカーのみ表示されます。
 
 ## 開発
+
+[開発者向け機能仕様](docs/README.md)を参照してください。
 
 ```bash
 pnpm test              # コンパイル + Lint + VS Code 統合テスト

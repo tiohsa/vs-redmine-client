@@ -121,7 +121,7 @@ After Redmine accepts a ticket, child-ticket, or comment mutation, the item rema
 
 | Setting | Default | Description |
 |---------|---------|-------------|
-| `redmine-client.baseUrl` | `""` | Base URL of the Redmine instance (include `http://` or `https://`) |
+| `redmine-client.baseUrl` | `""` | Redmine base URL. HTTPS is required except for loopback hosts. |
 | `redmine-client.ignoreSSLErrors` | `false` | Ignore SSL certificate errors (development/testing only) |
 | `redmine-client.defaultProjectId` | `""` | Default project identifier or numeric ID |
 | `redmine-client.includeChildProjects` | `false` | Include child projects when listing tickets |
@@ -214,6 +214,8 @@ After Redmine accepts a ticket, child-ticket, or comment mutation, the item rema
 - **Project-specific trackers**: the new-ticket composer and metadata editor show only trackers enabled for the selected project.
 
 ## Development
+
+See the [developer specifications (Japanese)](docs/README.md).
 
 ```bash
 pnpm test              # compile + lint + VS Code integration tests

@@ -7,8 +7,8 @@
 - **Stack**: TypeScript 5.9 (strict mode), VS Code ^1.107.0, webpack 5, @vscode/test-cli + Mocha, ESLint 9. Entry point: `src/extension.ts`.
 - **Language Policy**: Write responses, review comments, and documentation in Japanese. Preserve commands, API names, identifiers, and source notation as-is.
 - **Authority**:
-  - Architecture & Persistence Decisions: `docs/implementation-decisions/`
-  - Planning & Specs: `docs/planning/`
+  - 機能仕様・アーキテクチャー・永続化の正本は [docs/README.md](docs/README.md) から参照する。
+  - 挙動を変更するときは、該当する機能の正本と関連テストを同じ変更で更新する。
   - Dashboard UI / Visual: Local `DESIGN.md` (takes precedence for visual decisions; otherwise preserve existing conventions)
 - **Artifacts**: Do not edit `dist/` or `out/` directly. Regenerate via standard build scripts.
 
