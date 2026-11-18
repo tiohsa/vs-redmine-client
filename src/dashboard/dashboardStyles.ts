@@ -24,6 +24,11 @@ export const dashboardStyles = String.raw`
   --app-danger: var(--vscode-errorForeground, var(--vscode-notificationsErrorIcon-foreground, var(--app-text)));
   --app-warning: var(--vscode-editorWarning-foreground, var(--vscode-notificationsWarningIcon-foreground, var(--app-text)));
   --app-success: var(--vscode-testing-iconPassed, var(--vscode-charts-green, var(--app-text)));
+  --app-tracker-bug: var(--vscode-charts-red, var(--app-danger));
+  --app-tracker-feature: var(--vscode-charts-green, var(--app-success));
+  --app-tracker-task: var(--vscode-charts-blue, var(--app-link));
+  --app-tracker-neutral: var(--app-border-strong);
+  --app-mono-font: var(--vscode-editor-font-family, ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace);
   --app-radius-sm: 4px;
   --app-radius-md: 8px;
   --app-radius-card: 8px;
@@ -534,33 +539,37 @@ body.vscode-high-contrast .tab.active { border-bottom-width: 3px; }
 #filter-dialog-fields .filter-check { flex-direction:row; align-items:center; }
 #filter-dialog-fields .filter-check input { width:auto; }
 .filter-dialog-actions { justify-content:flex-end; }
-body.vscode-high-contrast .quick-filter,body.vscode-high-contrast-light .quick-filter,body.vscode-high-contrast .sync-tray,body.vscode-high-contrast-light .sync-tray,body.vscode-high-contrast .filter-dialog-card,body.vscode-high-contrast-light .filter-dialog-card,body.vscode-high-contrast .settings-category,body.vscode-high-contrast-light .settings-category { border-color:var(--vscode-contrastBorder,var(--app-border-strong)); box-shadow:none; }
+body.vscode-high-contrast .quick-filter,body.vscode-high-contrast-light .quick-filter,body.vscode-high-contrast .toggle-children-btn,body.vscode-high-contrast-light .toggle-children-btn,body.vscode-high-contrast .sync-tray,body.vscode-high-contrast-light .sync-tray,body.vscode-high-contrast .filter-dialog-card,body.vscode-high-contrast-light .filter-dialog-card,body.vscode-high-contrast .settings-category,body.vscode-high-contrast-light .settings-category { border-color:var(--vscode-contrastBorder,var(--app-border-strong)); box-shadow:none; }
 @media (max-width:480px) { #filter-dialog-fields { grid-template-columns:minmax(0,1fr); } .sync-tray { flex-wrap:wrap; } }
 
 /* Dashboard 全体の密度。色とフォーカスは VS Code のテーマトークンを使う。 */
-.dashboard-header { margin:0; padding:4px 8px; border:0; border-bottom:1px solid var(--app-border-subtle); border-radius:0; background:var(--app-bg); }
+.dashboard-header { margin:0; padding:3px 8px; border:0; border-bottom:1px solid var(--app-border-subtle); border-radius:0; background:var(--app-bg); }
 .header-row { align-items:center; gap:6px; flex-wrap:nowrap; }
 .project-field { flex:1 1 110px; max-width:none; }
-.project-select-trigger { width:100%; height:31px; }
-.toggle-children { order:0; flex:0 0 auto; height:31px; font-size: var(--app-font-caption); }
+.project-select-trigger { width:100%; height:28px; }
+.toggle-children { order:0; flex:0 0 auto; height:28px; gap:0; }
+.toggle-children-btn { display:inline-flex; align-items:center; justify-content:center; width:28px; height:28px; padding:0; border:1px solid var(--app-border); border-radius:var(--app-radius-sm); background:var(--app-surface); color:var(--app-text-secondary); cursor:pointer; }
+.toggle-children-btn:hover { background:var(--app-surface-hover); color:var(--app-text); }
+.toggle-children-btn[aria-pressed="true"] { border-color:var(--app-focus); background:color-mix(in srgb, var(--app-focus) 18%, var(--app-surface)); color:var(--app-text); }
+.toggle-children-btn:focus-visible { outline:2px solid var(--app-focus); outline-offset:2px; }
 .header-actions { gap:4px; }
-.header-actions .btn { min-height:29px; padding:4px 7px; }
+.header-actions .btn { min-height:28px; padding:3px 7px; }
 .header-actions #refresh-btn .btn-label { display:none; }
 @media (max-width:480px) { .btn-primary-new span { display:none; } }
-#tabs { gap:0; min-height:35px; padding:0 8px; }
-.tab { min-height:34px; padding:0 10px; border-radius:0; font-size: var(--app-font-body); }
+#tabs { gap:0; min-height:30px; padding:0 8px; }
+.tab { min-height:30px; padding:0 10px; border-radius:0; font-size: var(--app-font-body); }
 .tab.active { background:transparent; border-bottom-color:var(--app-focus); }
 .tab.active::after { content:none; }
 .tab-badge { min-width:16px; height:16px; padding-inline:4px; }
 .tickets-master { margin:0; border:0; border-right:1px solid var(--app-border-subtle); border-radius:0; background:var(--app-surface); }
 .tickets-detail { margin:0; padding:0; border-radius:0; background:var(--app-surface); }
 .tickets-detail:has(.ticket-detail-card.hidden) { display:none; }
-#filter-bar { padding:7px 9px 5px; }
+#filter-bar { padding:5px 8px 4px; }
 #search-row { gap:5px; }
-#search-input { height:30px; padding:0 29px; border-radius:var(--app-radius-sm); }
-.search-icon { left:9px; }
-.search-clear-btn { width:28px; height:28px; right:1px; }
-.filter-tool-btn { display:inline-flex; flex:0 0 30px; width:30px; height:30px; align-items:center; justify-content:center; gap:2px; padding:0 3px; border:1px solid var(--app-border); border-radius:var(--app-radius-sm); background:var(--app-surface); color:var(--app-text); cursor:pointer; }
+#search-input { height:28px; padding:0 28px; border-radius:var(--app-radius-sm); }
+.search-icon { left:8px; }
+.search-clear-btn { width:26px; height:26px; right:1px; }
+.filter-tool-btn { display:inline-flex; flex:0 0 28px; width:28px; height:28px; align-items:center; justify-content:center; gap:2px; padding:0 3px; border:1px solid var(--app-border); border-radius:var(--app-radius-sm); background:var(--app-surface); color:var(--app-text); cursor:pointer; }
 .filter-tool-btn:hover,.filter-tool-btn[aria-expanded="true"] { background:var(--app-surface-hover); }
 .tool-count { position:absolute; top:-5px; right:-5px; min-width:15px; padding:0 2px; border-radius:8px; background:var(--app-badge-bg); color:var(--app-badge-fg); font-size: var(--app-font-label); line-height:15px; }
 #advanced-filters-btn { position:relative; }
@@ -568,21 +577,39 @@ body.vscode-high-contrast .quick-filter,body.vscode-high-contrast-light .quick-f
 .layout-popover { position:fixed; z-index:30; display:grid; gap:5px; min-width:min(170px,calc(100vw - 16px)); max-width:calc(100vw - 16px); padding:9px; border:1px solid var(--app-border-strong); border-radius:var(--app-radius-sm); background:var(--app-surface-raised); box-shadow:var(--app-shadow); }
 .layout-popover label { font-size: var(--app-font-caption); }
 .layout-mode-select { width:100%; max-width:none; height:30px; }
-.quick-filter-row { flex-wrap:nowrap; gap:5px; margin-top:6px; overflow-x:auto; padding:1px 1px 3px; scrollbar-width:thin; }
-.quick-filter { flex:0 0 auto; min-height:28px; padding:3px 8px; border-radius:var(--app-radius-sm); }
-.filter-summary { gap:5px; margin-top:2px; min-height:17px; }
-.ticket-count { margin-left:0; }
-#filter-chips { flex:0 1 auto; margin-left:auto; color:var(--app-text-secondary); font-size: var(--app-font-label); }
+.quick-filter-bar { display:flex; align-items:center; gap:6px; min-width:0; margin-top:4px; }
+.quick-filter-row { display:flex; flex:1 1 auto; min-width:0; flex-wrap:nowrap; gap:4px; margin-top:0; overflow-x:auto; padding:1px 0; scrollbar-width:none; }
+.quick-filter-row::-webkit-scrollbar { display:none; }
+.quick-filter { flex:0 0 auto; min-height:22px; padding:2px 8px; border-radius:var(--app-radius-pill); font-size: var(--app-font-label); line-height:1.3; white-space:nowrap; }
+.ticket-count { flex:0 0 auto; margin-left:auto; white-space:nowrap; }
+#filter-chips { flex:0 1 auto; margin-top:4px; color:var(--app-text-secondary); font-size: var(--app-font-label); }
 #filter-chips:empty { display:none; }
-.ticket-row { gap:5px; min-height:56px; padding:5px 8px; }
+.ticket-row { gap:5px; min-height:50px; padding:5px 8px 6px; border-left:3px solid var(--tracker-color, transparent); border-bottom:1px solid color-mix(in srgb, var(--app-text) 5%, transparent); }
+.ticket-row.tracker-bug { --tracker-color: var(--app-tracker-bug); }
+.ticket-row.tracker-feature { --tracker-color: var(--app-tracker-feature); }
+.ticket-row.tracker-task { --tracker-color: var(--app-tracker-task); }
+.ticket-row.tracker-neutral { --tracker-color: var(--app-tracker-neutral); }
+.ticket-row.is-unsynced { background:color-mix(in srgb, var(--app-link) 7%, transparent); }
+.ticket-row.is-unsynced:hover { background:color-mix(in srgb, var(--app-link) 12%, var(--app-surface-hover)); }
+.ticket-row.selected, .ticket-row.is-unsynced.selected { background:var(--app-selected); color:var(--app-selected-fg); }
+.ticket-indent-guide { position:absolute; top:0; bottom:0; width:1px; background:var(--vscode-tree-indentGuidesStroke, color-mix(in srgb, var(--app-text) 16%, transparent)); pointer-events:none; }
 .ticket-row-content { display:flex; flex:1 1 auto; min-width:0; flex-direction:column; gap:3px; }
 .ticket-row-main { display:flex; min-width:0; align-items:baseline; gap:6px; }
-.ticket-row-main .ticket-id { padding:0; border:0; background:transparent; font-size: var(--app-font-caption); }
-.ticket-row-main .ticket-subject { display:-webkit-box; overflow:hidden; min-width:0; white-space:normal; overflow-wrap:anywhere; -webkit-box-orient:vertical; -webkit-line-clamp:2; line-height:1.35; }
+.ticket-row-main .ticket-id { padding:0; border:0; background:transparent; color:var(--app-text-secondary); font-family:var(--app-mono-font); font-size: var(--app-font-label); font-weight:500; }
+.ticket-row-main .ticket-subject { display:-webkit-box; overflow:hidden; min-width:0; color:var(--app-text); font-weight:500; white-space:normal; overflow-wrap:anywhere; -webkit-box-orient:vertical; -webkit-line-clamp:2; line-height:1.35; }
+.ticket-row.selected .ticket-row-main .ticket-subject { color:var(--app-selected-fg); font-weight:700; }
 .ticket-row-meta { display:flex; min-width:0; align-items:center; flex-wrap:wrap; gap:4px 8px; color:var(--app-text-secondary); font-size: var(--app-font-caption); line-height:1.25; }
 .ticket-attribute { flex:0 1 auto; min-width:0; max-width:120px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.ticket-meta-item { flex:0 1 auto; min-width:0; max-width:120px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; color:var(--app-text-secondary); font-size: var(--app-font-label); }
+.ticket-meta-due { font-variant-numeric:tabular-nums; }
+.ticket-meta-due.is-overdue { color:var(--app-danger); font-weight:600; }
 .ticket-row-meta .badge { flex:0 0 auto; padding:1px 5px; font-size: var(--app-font-label); }
-.ticket-row.selected .ticket-attribute { color:inherit; }
+.ticket-row.selected .ticket-attribute, .ticket-row.selected .ticket-meta-item { color:inherit; }
+.ticket-row.selected .ticket-meta-due.is-overdue { color:var(--app-danger); background:color-mix(in srgb, var(--app-surface) 85%, transparent); padding:0 4px; border-radius:var(--app-radius-sm); }
+.ticket-progress { position:absolute; right:0; bottom:0; left:0; height:2px; overflow:hidden; background:color-mix(in srgb, var(--app-text) 10%, transparent); pointer-events:none; }
+.ticket-progress-fill { width:0; height:100%; background:var(--app-accent); }
+.ticket-row.selected .ticket-progress { background:color-mix(in srgb, var(--app-selected-fg) 22%, transparent); }
+.ticket-row.selected .ticket-progress-fill { background:var(--app-selected-fg); }
 .ticket-action-btn { opacity:1; border:1px solid var(--app-border-subtle); border-radius:var(--app-radius-sm); background:var(--app-surface); color:var(--app-text); }
 .expand-btn,.expand-placeholder { flex-basis:24px; width:24px; }
 .expand-btn { height:28px; }

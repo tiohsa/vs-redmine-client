@@ -95,12 +95,37 @@ suite("Dashboard Webview 改善", () => {
     assert.ok(!dashboardWebviewScript.includes("data-ticket-action=\"refresh\""));
   });
 
-  test("一覧操作を詳細へ集約する", () => {
+  test("一覧操作を詳細へ集約し、一覧行に担当者・期日・トラッカーバー・進捗バーを表示する", () => {
     const row = dashboardWebviewScript.slice(dashboardWebviewScript.indexOf("function renderTicketRow("), dashboardWebviewScript.indexOf("function isTicketActionTarget("));
     assert.ok(!row.includes("ticket-actions"));
-    assert.ok(!row.includes("assigneeName"));
+    assert.ok(row.includes("assigneeName"));
+    assert.ok(row.includes("ticket-meta-due"));
+    assert.ok(row.includes("is-overdue"));
+    assert.ok(row.includes("trackerAccentClass"));
+    assert.ok(row.includes("ticket-indent-guide"));
+    assert.ok(row.includes("is-unsynced"));
+    assert.ok(row.includes("ticket-progress"));
+    assert.ok(row.includes("doneRatio"));
     assert.ok(dashboardWebviewScript.includes('id="detail-sync-btn"'));
     assert.ok(dashboardWebviewScript.includes('id="detail-open-btn"'));
+  });
+
+  test("Phase 1: ヘッダー・クイックフィルター省スペース化とカード視認性スタイルを持つ", () => {
+    const strings = buildDashboardStrings();
+    const html = buildDashboardHtml("nonce", strings);
+    assert.ok(html.includes('id="include-children" class="toggle-children-btn" type="button" aria-pressed="false"'));
+    assert.ok(html.includes(`title="${strings.includeChildren}"`));
+    assert.ok(html.includes(`aria-label="${strings.includeChildren}"`));
+    assert.ok(html.includes('class="quick-filter-bar"'));
+    assert.ok(dashboardStyles.includes(".toggle-children-btn"));
+    assert.ok(dashboardStyles.includes(".quick-filter-bar"));
+    assert.ok(dashboardStyles.includes("--app-mono-font"));
+    assert.ok(dashboardStyles.includes(".ticket-indent-guide"));
+    assert.ok(dashboardStyles.includes(".ticket-row.is-unsynced"));
+    assert.ok(dashboardStyles.includes(".ticket-row.tracker-bug"));
+    assert.ok(dashboardStyles.includes(".ticket-row.tracker-feature"));
+    assert.ok(dashboardStyles.includes(".ticket-row.tracker-task"));
+    assert.ok(dashboardStyles.includes(".ticket-progress"));
   });
 
   test("未同期一覧の要確認は詳細文と重複せずバッジだけに表示する", () => {

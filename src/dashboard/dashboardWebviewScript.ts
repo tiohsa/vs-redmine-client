@@ -233,7 +233,11 @@ document.getElementById('tabs').addEventListener('keydown', function(event){
 // ── Header / search ───────────────────────────────────────────────────────
 document.getElementById('refresh-btn').addEventListener('click', function(){ req('dashboard.refresh'); });
 document.getElementById('new-ticket-btn').addEventListener('click', function(){ activateTab('tickets'); req('ticket.create'); });
-document.getElementById('include-children').addEventListener('change', function(){ req('project.toggleChildren',{includeChildProjects:this.checked}); });
+document.getElementById('include-children').addEventListener('click', function(){
+  const next = this.getAttribute('aria-pressed') !== 'true';
+  this.setAttribute('aria-pressed', String(next));
+  req('project.toggleChildren',{includeChildProjects:next});
+});
 const projectPicker = document.getElementById('project-picker');
 const projectSelectTrigger = document.getElementById('project-select-trigger');
 const projectSelectLabel = document.getElementById('project-select-label');
@@ -560,17 +564,35 @@ document.addEventListener('scroll',function(event){
   const trigger=document.querySelector('[aria-controls="'+activeTicketActionMenuId+'"]');
   if(!trigger || trigger.getBoundingClientRect().top !== activeTicketActionAnchorTop) closeTicketActionMenus();
 },true);
+function trackerAccentClass(name){
+  const n = String(name || '').trim().toLowerCase();
+  if(!n) return 'tracker-neutral';
+  if(n.includes('bug') || n.includes('defect') || n.includes('バグ') || n.includes('不具合') || n.includes('障害')) return 'tracker-bug';
+  if(n.includes('feature') || n.includes('enhancement') || n.includes('機能') || n.includes('改善')) return 'tracker-feature';
+  if(n.includes('task') || n.includes('todo') || n.includes('chore') || n.includes('タスク') || n.includes('作業')) return 'tracker-task';
+  return 'tracker-neutral';
+}
 function renderTicketRow(ticket){
   const selected=ticket.id === state.selectedTicketId;
   const searching=!!state.ticketSearch?.query;
   const hasChildren=!searching && !!ticket.children?.length;
   const expanded=expandedTicketIds.has(ticket.id);
   const sync=ticket.syncState && ticket.syncState !== 'Synced' && ticket.syncState !== 'Draft' ? syncBadge(ticket.syncState) : '';
+  const unsynced=!!ticket.syncState && ticket.syncState !== 'Synced';
+  const trackerCls=trackerAccentClass(ticket.trackerName);
   const status=state.settings.showStatus !== false && ticket.statusName ? '<span class="ticket-attribute">'+esc(ticket.statusName)+'</span>' : '';
   const project=(!state.selectedProject || state.includeChildProjects) && ticket.projectName ? '<span class="ticket-attribute ticket-project">'+esc(ticket.projectName)+'</span>' : '';
+  const assignee=hasAssignee(ticket.assigneeName) ? '<span class="ticket-meta-item ticket-meta-assignee" title="'+esc(ticket.assigneeName)+'">'+esc(ticket.assigneeName)+'</span>' : '';
+  const dueDiff=ticket.dueDate ? daysUntilDateOnly(ticket.dueDate, new Date()) : undefined;
+  const isOverdue=dueDiff !== undefined && dueDiff < 0;
+  const dueDate=ticket.dueDate ? '<span class="ticket-meta-item ticket-meta-due'+(isOverdue ? ' is-overdue' : '')+'" title="'+esc(STRINGS.dueDateLabel+': '+ticket.dueDate)+'">'+esc(ticket.dueDate)+'</span>' : '';
   const expand=hasChildren ? '<button class="expand-btn" type="button" data-expand="'+ticket.id+'" aria-expanded="'+expanded+'" aria-label="'+esc(expanded ? STRINGS.collapseTitle : STRINGS.expandTitle)+'"><span class="expand-icon '+(expanded?'expanded':'collapsed')+'" aria-hidden="true"></span></button>' : '<span class="expand-placeholder" aria-hidden="true"></span>';
   const level=searching ? 0 : (ticket.level || 0);
-  return '<div class="ticket-row'+(level > 0 ? ' child-row' : '')+(selected ? ' selected' : '')+'" data-id="'+ticket.id+'" role="listitem" aria-current="'+selected+'" tabindex="0" data-level="'+level+'">'+expand+'<div class="ticket-row-content"><div class="ticket-row-main"><span class="ticket-id">#'+ticket.id+'</span><span class="ticket-subject" title="'+esc(ticket.subject)+'">'+esc(ticket.subject)+'</span></div><div class="ticket-row-meta">'+status+project+sync+'</div></div></div>';
+  let guides='';
+  for(let i=0;i<level;i++) guides+='<span class="ticket-indent-guide" aria-hidden="true"></span>';
+  const hasDoneRatio=typeof ticket.doneRatio === 'number' && !Number.isNaN(ticket.doneRatio) && ticket.doneRatio >= 0 && ticket.doneRatio <= 100;
+  const progress=hasDoneRatio ? '<div class="ticket-progress" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="'+ticket.doneRatio+'" aria-label="'+esc(String(ticket.doneRatio)+'%')+'"><div class="ticket-progress-fill" data-progress="'+ticket.doneRatio+'"></div></div>' : '';
+  return '<div class="ticket-row '+trackerCls+(unsynced ? ' is-unsynced' : '')+(level > 0 ? ' child-row' : '')+(selected ? ' selected' : '')+'" data-id="'+ticket.id+'" role="listitem" aria-current="'+selected+'" tabindex="0" data-level="'+level+'">'+guides+expand+'<div class="ticket-row-content"><div class="ticket-row-main"><span class="ticket-id">#'+ticket.id+'</span><span class="ticket-subject" title="'+esc(ticket.subject)+'">'+esc(ticket.subject)+'</span></div><div class="ticket-row-meta">'+status+project+assignee+dueDate+sync+'</div></div>'+progress+'</div>';
 }
 function isTicketActionTarget(target){ return isElement(target) && !!target.closest('.ticket-action-btn,.ticket-action-menu,.expand-btn'); }
 let renderedTicketMarkup = null;
@@ -613,7 +635,10 @@ function renderTickets(){
   if(markup !== renderedTicketMarkup){
     list.innerHTML=markup; renderedTicketMarkup=markup;
     list.querySelectorAll('.ticket-row').forEach(function(row){
-      row.style.paddingLeft=(12 + Math.max(0,Number(row.dataset.level) || 0) * 14)+'px';
+      const level = Math.max(0,Number(row.dataset.level) || 0);
+      row.style.paddingLeft=(12 + level * 14)+'px';
+      row.querySelectorAll('.ticket-indent-guide').forEach(function(guide, idx){ guide.style.left=(12 + idx * 14 + 6)+'px'; });
+      row.querySelectorAll('.ticket-progress-fill[data-progress]').forEach(function(bar){ bar.style.width=bar.dataset.progress+'%'; });
       row.addEventListener('click',function(event){ if(isTicketActionTarget(event.target)) return; const id=Number(row.dataset.id); if(state.selectedTicketId === id){ ticketDetailExpanded=true; renderTicketDetail(); } req('ticket.select',{ticketId:id}); });
       row.addEventListener('dblclick',function(event){ if(!isTicketActionTarget(event.target)) req('ticket.openEditor',{ticketId:Number(row.dataset.id)}); });
       row.addEventListener('keydown',function(event){ if(isTicketActionTarget(event.target)) return; if(event.key === 'Enter'){ row.click(); event.preventDefault(); } else if(event.key === ' '){ if(!isTicketActionTarget(event.target)){ row.click(); event.preventDefault(); } } });
@@ -1118,7 +1143,12 @@ function renderProjectSelect(resetActive){
 function render(){
   if(!state) return; const focus=captureFocus(document); closeTicketActionMenus(); syncExpandedState(state.tickets);
   renderProjectSelect();
-  document.getElementById('include-children').checked=!!state.includeChildProjects; document.getElementById('include-children').closest('label').hidden=!state.selectedProject; renderTickets(); renderTicketDetail(); renderFilterChips(); renderUnsynced(); renderComments(); renderSettings(); renderSyncTray(); updateSyncButtonStates(); restoreFocus(focus);
+  const includeChildrenBtn = document.getElementById('include-children');
+  const includeChildrenWrap = includeChildrenBtn.closest('label');
+  includeChildrenBtn.setAttribute('aria-pressed', String(!!state.includeChildProjects));
+  includeChildrenBtn.disabled = !state.selectedProject;
+  if(includeChildrenWrap) includeChildrenWrap.hidden = !state.selectedProject;
+  renderTickets(); renderTicketDetail(); renderFilterChips(); renderUnsynced(); renderComments(); renderSettings(); renderSyncTray(); updateSyncButtonStates(); restoreFocus(focus);
 }
 window.addEventListener('message',function(event){ const message=event.data || {}; if(message.type === 'dashboard.state'){
     const previous=state;
