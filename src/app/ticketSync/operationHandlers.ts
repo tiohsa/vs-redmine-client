@@ -62,6 +62,7 @@ import { resolveUploadSummary } from "../../views/ticketSync/ticketImageUploadSy
 import { containsConflictMarkers } from "../../utils/threeWayMerge";
 import { computeNotesHash } from "../../utils/notesHash";
 import { computeFileHashAndSizeAsync } from "../../utils/fileHash";
+import { CreateOperationHttpError, createOperationHttpError } from "../../redmine/httpError";
 import { classifyFailureDisposition } from "../../utils/redmineErrors";
 import type { TicketUpdateFields, UploadToken } from "../../redmine/types";
 import {
@@ -685,6 +686,7 @@ export class TicketCreateHandler implements OperationHandler<TicketCreateIntent,
     if (typeof intent.content === "string" && intent.content.trim().length > 0) {
       try {
         parsed = parseTicketEditorContent(intent.content, {
+          allowEmptyStatus: true,
           allowMissingMetadata: true,
           allowMissingSubject: true,
           fallbackMetadata: intent.metadata ?? { tracker: "", priority: "", status: "", due_date: "", children: [] },
@@ -752,6 +754,7 @@ export class TicketCreateHandler implements OperationHandler<TicketCreateIntent,
     } else if (typeof intent.description === "string" && !intent.subject && !intent.metadata?.tracker) {
       try {
         parsed = parseTicketEditorContent(intent.description, {
+          allowEmptyStatus: true,
           allowMissingMetadata: true,
           allowMissingSubject: true,
           fallbackMetadata: intent.metadata ?? { tracker: "", priority: "", status: "", due_date: "", children: [] },
@@ -826,13 +829,6 @@ export class TicketCreateHandler implements OperationHandler<TicketCreateIntent,
 
     if (isRetry && primaryEffect?.requestSnapshot && (primaryEffect.requestSnapshot as TicketCreateRequestSnapshot).request) {
       request = (primaryEffect.requestSnapshot as TicketCreateRequestSnapshot).request;
-      if (deps?.ticketCreate?.listIssueStatuses && typeof deps.ticketCreate.listIssueStatuses === "function") {
-        try {
-          await deps.ticketCreate.listIssueStatuses();
-        } catch (err) {
-          return { ok: false, outcome: { kind: "failed_before_commit", error: err as Error } };
-        }
-      }
     } else {
       const resolveFn = createDeps.resolveMetadataForCreate ?? resolveMetadataForCreate;
       try {
@@ -1358,14 +1354,17 @@ export class TicketCreateHandler implements OperationHandler<TicketCreateIntent,
             outcome: { kind: "commit_unknown", operationId: operation.operationId, message: "Remote issue created but failed to persist commit checkpoint" },
           };
         }
-      } catch (err) {
+      } catch (caught) {
+        const err = createOperationHttpError(caught, "create");
         const commitUnknown = isRemoteCommitUnknownError(err);
         const disposition = classifyFailureDisposition(err);
         await repo.transitionPrimaryRemoteWrite(
           opKey,
           commitUnknown
             ? { kind: "commit_unknown", detail: (err as Error).message }
-            : { kind: "failed", failure: { disposition, detail: (err as Error).message } },
+            : { kind: "failed", failure: { disposition, detail: (err as Error).message,
+                ...(err instanceof CreateOperationHttpError && err.statusCode === 403 ? { category: "http_403" } : {}),
+              } },
           context.connectionScope,
           { operationId: operation.operationId, revision, sourcePhase: "remote_write_started" },
         );
@@ -1709,6 +1708,7 @@ export class TicketCreateHandler implements OperationHandler<TicketCreateIntent,
     if (effectiveContent) {
       try {
         baseParsed = parseTicketEditorContent(effectiveContent, {
+          allowEmptyStatus: true,
           allowMissingMetadata: true,
           allowMissingSubject: true,
           fallbackMetadata: (effectiveIntent as any)?.metadata ?? { tracker: "", priority: "", status: "", due_date: "", children: [] },

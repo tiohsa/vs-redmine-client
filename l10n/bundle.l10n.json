@@ -1,4 +1,9 @@
 {
+    "Ticket creation preparation failed (HTTP {0}).": "Ticket creation preparation failed (HTTP {0}).",
+    "Ticket creation preparation failed.": "Ticket creation preparation failed.",
+    "Retry sync": "Retry sync",
+    "Failed to list issue statuses (HTTP {0}).": "Failed to list issue statuses (HTTP {0}).",
+    "Failed to create issue (HTTP {0}).": "Failed to create issue (HTTP {0}).",
     "Quick filters": "Quick filters",
     "Ticket List": "Ticket List",
     "My Issues": "My Issues",

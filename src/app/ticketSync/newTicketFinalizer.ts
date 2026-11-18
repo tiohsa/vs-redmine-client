@@ -105,6 +105,7 @@ export class NewTicketFinalizer {
     let parsed;
     try {
       parsed = parseTicketEditorContent(input.operation.content, {
+        allowEmptyStatus: true,
         allowMissingMetadata: true,
         fallbackMetadata: {
           tracker: "",
@@ -144,6 +145,7 @@ export class NewTicketFinalizer {
     if (latestOperation.nextIntent) {
       try {
         const latest = parseTicketEditorContent(latestOperation.nextIntent.content, {
+          allowEmptyStatus: true,
           allowMissingMetadata: true,
           fallbackMetadata: parsed.metadata,
           allowMissingSubject: true,

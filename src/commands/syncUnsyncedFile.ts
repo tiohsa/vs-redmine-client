@@ -19,7 +19,7 @@ import type {
   TicketSyncOutcome,
   TicketSyncQueueKey,
 } from "../app/ticketSync";
-import { isPrimaryEffectKind } from "../app/syncEffects";
+import { getPrimaryEffectForRevision, isPrimaryEffectKind } from "../app/syncEffects";
 import { getTicketDraft } from "../views/ticketDraftStore";
 import type { ConflictContext } from "../views/ticketSaveTypes";
 import type { CommentConflictContext } from "../views/commentSaveTypes";
@@ -85,7 +85,8 @@ const resolveCommitUnknownInteractive = async (
   const primaryItem = items.find((item) => isPrimaryEffectKind(item.effectKind));
   const actions = primaryItem?.allowedActions ?? [];
 
-  const retryLabel = vscode.l10n.t("Retry remote write");
+  const failedCreate = key.kind === "newTicket" && primaryItem?.state === "failed" && !actions.includes("link_created_ticket");
+  const retryLabel = failedCreate ? vscode.l10n.t("Retry sync") : vscode.l10n.t("Retry remote write");
   const compLabel = vscode.l10n.t("Clean up remote write (Reconcile compensation)");
 
   if (actions.includes("reconcile_compensation") || primaryItem?.state === "compensation_unknown" || primaryItem?.state === "compensation_started") {
@@ -117,7 +118,7 @@ const resolveCommitUnknownInteractive = async (
     ];
     if (createChoices.length === 0) { return undefined; }
     const choice = await vscode.window.showWarningMessage(
-      vscode.l10n.t("The previous ticket creation may have reached Redmine. Link the created ticket ID, or retry only after confirming that no ticket was created."),
+      failedCreate ? vscode.l10n.t("Failed to create issue (HTTP {0}).", 403) : vscode.l10n.t("The previous ticket creation may have reached Redmine. Link the created ticket ID, or retry only after confirming that no ticket was created."),
       { modal: true },
       ...createChoices,
     );
@@ -139,10 +140,13 @@ const resolveCommitUnknownInteractive = async (
       });
     }
     if (choice === retryLabel) {
+      if (getCurrentConnectionScope() !== operationScope) { return { kind: "cancelled" }; }
       return service.resolveCommitUnknown({
         key,
         context: syncContext,
         attemptGeneration: primaryItem?.attemptGeneration,
+        operationId: primaryItem?.operationId,
+        operationRevision: primaryItem?.operationRevision,
         resolution: { kind: "retry_remote_write" },
       });
     }
@@ -537,7 +541,9 @@ const syncUnsyncedFileAtScope = async (
   }
 
   if (syncKey.kind === "newTicket") {
-    const previousPhase = getOfflineNewTicket(syncKey, operationScope)?.phase;
+    const previous = getOfflineNewTicket(syncKey, operationScope);
+    const previousPhase = previous?.phase;
+    const wasFailed = previous && getPrimaryEffectForRevision(previous)?.state === "failed";
     const engine = engineFactory({ tickets: serviceFactory({ rewrite: rewriteDeps }) });
     let outcome = await engine.syncOne(
       syncKey,
@@ -549,7 +555,7 @@ const syncUnsyncedFileAtScope = async (
     if (
       (outcome.kind === "commit_unknown" &&
         (previousPhase === "commit_unknown" || previousPhase === "remote_write_started")) ||
-      (outcome.kind === "failed_before_commit" && hasPrimaryRecovery) ||
+      (outcome.kind === "failed_before_commit" && wasFailed && hasPrimaryRecovery) ||
       (outcome.kind === "remote_committed" && recoveryItems.some((item) =>
         isPrimaryEffectKind(item.effectKind) && item.allowedActions.includes("reconcile_compensation")))
     ) {

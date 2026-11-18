@@ -100,6 +100,7 @@ export interface DashboardStrings {
   // Ticket detail panel
   openTicketTooltip: string;
   syncToRedmine: string;
+  retrySync: string;
   resolveRecovery: string;
   resolveRecoveryTooltip: string;
   syncTicketTooltip: string;
@@ -328,6 +329,7 @@ export const buildDashboardStrings = (): DashboardStrings => ({
   // Ticket detail panel
   openTicketTooltip: vscode.l10n.t("Edit ticket Markdown in VS Code"),
   syncToRedmine: vscode.l10n.t("Sync to Redmine"),
+  retrySync: vscode.l10n.t("Retry sync"),
   resolveRecovery: vscode.l10n.t("Review recovery"),
   resolveRecoveryTooltip: vscode.l10n.t("Review available recovery actions before continuing."),
   syncTicketTooltip: vscode.l10n.t("Sync VS Code editor changes to Redmine"),

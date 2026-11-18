@@ -1,6 +1,8 @@
 import * as assert from "assert";
 import * as vscode from "vscode";
 import { TicketSyncService } from "../app/ticketSync";
+import { canRetryEffect, type DurableSyncEffect } from "../app/syncEffects";
+import { RedmineHttpError } from "../redmine/httpError";
 import {
   addOfflineNewTicketAsync,
   addOfflineTicketUpdateAsync,
@@ -169,6 +171,131 @@ suite("TicketSyncService durable lifecycle", () => {
     assert.strictEqual(getCalls, 1);
     assert.strictEqual(rewrittenStatus, "Closed");
     assert.strictEqual(getOfflineSyncQueue(SCOPE).tickets.size, 0);
+  });
+
+  for (const mode of ["new-ticket", undefined] as const) {
+    test(`空 status・mode ${mode ?? "省略"} は一覧が拒否されても作成と読み戻しを完了する`, async () => {
+      initializeOfflineSyncStore(createTestMemento(), SCOPE);
+      let statusCalls = 0;
+      let createCalls = 0;
+      let readCalls = 0;
+      const service = new TicketSyncService({
+        create: {
+          ...metadataDeps,
+          listIssueStatuses: async () => { statusCalls++; throw new Error("HTTP 403"); },
+          createIssue: async (fields) => {
+            createCalls++;
+            assert.strictEqual(fields.statusId, undefined);
+            return 100;
+          },
+          getIssueDetail: async () => { readCalls++; return issueDetail(100); },
+        },
+        documents: { rewriteNewTicket: async () => ({ kind: "applied" }), findOpenDocument: () => undefined },
+      });
+      const emptyStatusContent = buildTicketEditorContent({
+        subject: "Empty status", description: "Body", metadata: buildIssueMetadataFixture({ status: "" }),
+        controlFields: mode ? { mode, issue_id: null, project_id: 12 } : undefined,
+      });
+      const outcome = await service.syncNewTicket({
+        context: { connectionScope: SCOPE },
+        operation: { content: emptyStatusContent, projectId: 12, documentUri: DOCUMENT_URI },
+      });
+      assert.strictEqual(outcome.kind, "completed", outcome.kind === "failed_before_commit" ? outcome.error.message : outcome.kind);
+      assert.strictEqual(statusCalls, 0);
+      assert.strictEqual(createCalls, 1);
+      assert.strictEqual(readCalls, 1);
+      assert.strictEqual(getOfflineSyncQueue(SCOPE).newTickets.length, 0);
+    });
+  }
+
+  for (const denied of ["status", "create", "create-unknown"] as const) {
+    test(`${denied} の HTTP エラー は未確定のまま残し自動再送しない`, async () => {
+      const scope = getCurrentConnectionScope();
+      initializeOfflineSyncStore(createTestMemento(), scope);
+      const status = denied === "create-unknown" ? 503 : 403;
+      let createCalls = 0;
+      const service = new TicketSyncService({
+        create: {
+          ...metadataDeps,
+          listIssueStatuses: async () => {
+            if (denied === "status") { throw new RedmineHttpError(403, "Forbidden sensitive response"); }
+            return [{ id: 1, name: "In Progress" }];
+          },
+          createIssue: async () => { createCalls++; throw new RedmineHttpError(status, "Forbidden sensitive response"); },
+        },
+        documents: { rewriteNewTicket: async () => ({ kind: "applied" }), findOpenDocument: () => undefined },
+      });
+      await addOfflineNewTicketAsync({ content, projectId: 12, documentUri: DOCUMENT_URI }, scope);
+      const warnings: string[] = [];
+      const originalWarning = vscode.window.showWarningMessage;
+      vscode.window.showWarningMessage = async (message: string) => {
+        warnings.push(message);
+        return undefined;
+      };
+      try {
+        const result = await runOfflineSync({ createTicketSyncService: () => service });
+        assert.strictEqual(result.status, denied === "create-unknown" ? "recovery_pending" : "failed");
+        assert.strictEqual(warnings.length, 1);
+        const operation = denied === "status" ? "list issue statuses" : "create issue";
+        assert.match(warnings[0], new RegExp(`${operation}.*${status}`, "i"));
+        assert.doesNotMatch(warnings[0], /sensitive response/);
+      } finally {
+        vscode.window.showWarningMessage = originalWarning;
+      }
+      assert.strictEqual(createCalls, denied === "status" ? 0 : 1);
+      const pending = getOfflineSyncQueue(scope).newTickets[0];
+      assert.ok(pending);
+      assert.strictEqual(pending.createdIssueId, undefined);
+      if (denied === "create-unknown") { assert.strictEqual(pending.phase, "commit_unknown"); }
+      await service.syncQueueItem({ kind: "newTicket", documentUri: DOCUMENT_URI }, { connectionScope: scope });
+      if (denied !== "status") { assert.strictEqual(createCalls, 1); }
+    });
+  }
+
+  test("旧キューの作成拒否は保存済みリクエストと 403 を照合して再同期できる", () => {
+    const effect: DurableSyncEffect = {
+      kind: "ticket_create", effectId: "ticket-create", state: "failed", operationRevision: 1, target: {},
+      requestSnapshot: { kind: "ticket_create", request: { projectId: 1, subject: "Subject", description: "" } },
+    };
+    for (const detail of ["チケットの作成に失敗しました（HTTP 403）。", "Failed to create issue (HTTP 403).", "Redmine request failed (403): Forbidden"]) {
+      const rejected = { ...effect, failure: { disposition: "non_retriable" as const, detail } };
+      assert.ok(canRetryEffect(rejected));
+      assert.strictEqual(canRetryEffect({ ...rejected, requestSnapshot: undefined }), false);
+    }
+    assert.strictEqual(canRetryEffect({ ...effect, failure: { disposition: "non_retriable", detail: "HTTP 422" } }), false);
+  });
+
+  test("403 の再同期は再起動と後続保存を越えて拒否されたリクエストだけを送る", async () => {
+    const storage = createTestMemento();
+    initializeOfflineSyncStore(storage, SCOPE);
+    const posted: unknown[] = [];
+    const service = new TicketSyncService({
+      create: {
+        ...metadataDeps,
+        createIssue: async (request) => {
+          posted.push(request);
+          if (posted.length <= 2) { throw new RedmineHttpError(403, "Forbidden"); }
+          return 100;
+        },
+        getIssueDetail: async () => issueDetail(100),
+      },
+      documents: { rewriteNewTicket: async () => ({ kind: "applied" }), findOpenDocument: () => undefined },
+    });
+    const key = { kind: "newTicket", documentUri: DOCUMENT_URI } as const;
+    const context = { connectionScope: SCOPE };
+    const retry = () => service.resolveCommitUnknown({ key, context, resolution: { kind: "retry_remote_write" } });
+    const first = await service.syncNewTicket({ context, operation: { content, projectId: 12, documentUri: DOCUMENT_URI } });
+    assert.strictEqual(first.kind, "failed_before_commit");
+    await addOfflineNewTicketAsync({ content: content.replace("Durable ticket", "Later edit"), projectId: 12, documentUri: DOCUMENT_URI }, SCOPE);
+    initializeOfflineSyncStore(storage, SCOPE);
+    await service.syncQueueItem(key, context);
+    assert.strictEqual(posted.length, 1);
+    assert.strictEqual((await retry()).kind, "failed_before_commit");
+    assert.strictEqual(posted.length, 2);
+    assert.ok(getOfflineSyncQueue(SCOPE).newTickets[0].nextIntent);
+    const [result] = await Promise.all([retry(), retry()]);
+    assert.strictEqual(result.kind, "completed", JSON.stringify(result));
+    assert.deepStrictEqual(posted, [posted[0], posted[0], posted[0]]);
   });
 
   test("create 成功後の rewrite 失敗で createdIssueId を保持し retry は POST しない", async () => {
@@ -1065,50 +1192,45 @@ suite("TicketSyncService durable lifecycle", () => {
     assert.strictEqual(createCalls, 3);
   });
 
-  test("new-ticket Retry preflight failure は commit_unknown active と nextIntent を保持する", async () => {
+  test("new-ticket Explicit Retry は一覧を再取得せず凍結済みペイロードを送る", async () => {
     initializeOfflineSyncStore(createTestMemento(), SCOPE);
-    let createCalls = 0;
-    let failRetryPreflight = false;
+    const posted: unknown[] = [];
+    let statusCalls = 0;
     const service = new TicketSyncService({
       create: {
         ...metadataDeps,
         listIssueStatuses: async () => {
-          if (failRetryPreflight) {
-            throw new Error("retry metadata unavailable");
-          }
+          statusCalls++;
+          if (statusCalls > 1) { throw new Error("HTTP 403"); }
           return [{ id: 1, name: "In Progress" }];
         },
-        createIssue: async () => {
-          createCalls++;
-          throw new Error("Request timed out after 30000ms");
+        createIssue: async (fields) => {
+          posted.push(fields);
+          if (posted.length === 1) { throw new Error("Request timed out after 30000ms"); }
+          return 777;
         },
+        getIssueDetail: async () => issueDetail(777),
       },
       documents: {
         rewriteNewTicket: async () => ({ kind: "applied" }),
         findOpenDocument: () => undefined,
       },
     });
-
-    await service.syncNewTicket({
+    const first = await service.syncNewTicket({
       context: { connectionScope: SCOPE },
       operation: { content, projectId: 12, documentUri: DOCUMENT_URI },
     });
-    const laterContent = content.replace("Durable ticket", "Later local intent");
-    await addOfflineNewTicketAsync({ content: laterContent, projectId: 12, documentUri: DOCUMENT_URI }, SCOPE);
-    failRetryPreflight = true;
-
+    assert.strictEqual(first.kind, "commit_unknown");
+    const beforeRetry = statusCalls;
     const outcome = await service.resolveCommitUnknown({
       key: { kind: "newTicket", documentUri: DOCUMENT_URI },
       context: { connectionScope: SCOPE },
       resolution: { kind: "retry_remote_write" },
     });
-    const pending = getOfflineSyncQueue(SCOPE).newTickets[0];
-
-    assert.strictEqual(outcome.kind, "commit_unknown");
-    assert.strictEqual(createCalls, 1);
-    assert.strictEqual(pending.phase, "commit_unknown");
-    assert.strictEqual(pending.content, content);
-    assert.strictEqual(pending.nextIntent?.content, laterContent);
+    assert.strictEqual(outcome.kind, "completed");
+    assert.strictEqual(statusCalls, beforeRetry);
+    assert.strictEqual(posted.length, 2);
+    assert.deepStrictEqual(posted[1], posted[0]);
   });
 
   test("同一 new-ticket Explicit Retry の並行3回は remote write を1回にする", async () => {
@@ -1152,57 +1274,6 @@ suite("TicketSyncService durable lifecycle", () => {
     releaseRetry?.();
     await Promise.all(retries);
     assert.strictEqual(createCalls, 2);
-  });
-
-  test("new-ticket Retry と Link の競合では source phase を取得した一方だけが進む", async () => {
-    initializeOfflineSyncStore(createTestMemento(), SCOPE);
-    let createCalls = 0;
-    let holdRetryPreflight = false;
-    let releasePreflight: (() => void) | undefined;
-    let notifyPreflight: (() => void) | undefined;
-    const preflightReached = new Promise<void>((resolve) => { notifyPreflight = resolve; });
-    const service = new TicketSyncService({
-      create: {
-        ...metadataDeps,
-        listIssueStatuses: async () => {
-          if (holdRetryPreflight) {
-            notifyPreflight?.();
-            await new Promise<void>((resolve) => { releasePreflight = resolve; });
-          }
-          return [{ id: 1, name: "In Progress" }];
-        },
-        createIssue: async () => {
-          createCalls++;
-          throw new Error("Request timed out after 30000ms");
-        },
-        getIssueDetail: async (ticketId) => issueDetail(ticketId),
-      },
-      documents: {
-        rewriteNewTicket: async () => ({ kind: "applied" }),
-        findOpenDocument: () => undefined,
-      },
-    });
-    await service.syncNewTicket({
-      context: { connectionScope: SCOPE },
-      operation: { content, projectId: 12, documentUri: DOCUMENT_URI },
-    });
-    holdRetryPreflight = true;
-    const retry = service.resolveCommitUnknown({
-      key: { kind: "newTicket", documentUri: DOCUMENT_URI },
-      context: { connectionScope: SCOPE },
-      resolution: { kind: "retry_remote_write" },
-    });
-    await preflightReached;
-    const link = service.resolveCommitUnknown({
-      key: { kind: "newTicket", documentUri: DOCUMENT_URI },
-      context: { connectionScope: SCOPE },
-      resolution: { kind: "link_created_ticket", ticketId: 779 },
-    });
-    releasePreflight?.();
-    const outcomes = await Promise.all([retry, link]);
-
-    assert.strictEqual(createCalls, 1);
-    assert.strictEqual(outcomes.filter((outcome) => outcome.kind === "completed").length, 1);
   });
 
   test("new-ticket Retry が remote_write_started を取得後は Link が割り込まない", async () => {

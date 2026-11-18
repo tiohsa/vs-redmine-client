@@ -501,8 +501,26 @@ export const restoreDurableSyncEffect = (
   return restored;
 };
 
+export const isRejectedTicketCreate = (effect: DurableSyncEffect): boolean => {
+  if (effect.kind !== "ticket_create" || effect.state !== "failed" ||
+      effect.failure?.disposition !== "non_retriable") { return false; }
+  if (effect.failure.category !== undefined) { return effect.failure.category === "http_403"; }
+  const detail = effect.failure.detail ?? "";
+  return detail === "Failed to create issue (HTTP 403)." || detail === "チケットの作成に失敗しました（HTTP 403）。" ||
+    /^(?:Redmine request failed \(403\)|HTTP 403|403)(?:$|[ :])/.test(detail);
+};
+
 export const canRetryEffect = (effect: DurableSyncEffect): boolean => {
   if (effect.state === "failed") {
+    if (isRejectedTicketCreate(effect)) {
+      const snapshot = effect.requestSnapshot;
+      return snapshot?.kind === "ticket_create" && Number.isSafeInteger(snapshot.request?.projectId) &&
+        snapshot.request.projectId > 0 && typeof snapshot.request.subject === "string" &&
+        snapshot.request.subject.trim().length > 0 && typeof snapshot.request.description === "string" &&
+        (snapshot.request.uploads === undefined || (Array.isArray(snapshot.request.uploads) &&
+          snapshot.request.uploads.every((upload) => typeof upload?.token === "string" && upload.token.length > 0 &&
+            typeof upload.filename === "string" && typeof upload.content_type === "string")));
+    }
     return effect.failure?.disposition === "retryable";
   }
   if (effect.state === "commit_unknown") {
@@ -771,7 +789,7 @@ export const getRecoveryItemsForOperation = (
         if (effect.state === "compensation_unknown" || effect.state === "compensation_started") {
           allowedActions.push("reconcile_compensation");
         } else if (operation.kind === "ticket_create") {
-          allowedActions.push("link_created_ticket");
+          if (!isRejectedTicketCreate(effect)) { allowedActions.push("link_created_ticket"); }
           if (canRetryEffect(effect)) {
             allowedActions.push("retry_remote_write");
           }
@@ -940,7 +958,8 @@ const actionAllowsSource = (
     case "start": return source === "planned";
     case "start_explicit_retry":
       if (source === "failed") {
-        return effect.failure?.disposition === "retryable";
+        return canRetryEffect(effect) && (!isRejectedTicketCreate(effect) ||
+          areSnapshotsEqual(effect.requestSnapshot, action.requestSnapshot));
       }
       return source === "commit_unknown";
     case "commit": return source === "started";

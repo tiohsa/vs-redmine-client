@@ -225,6 +225,9 @@ export class SyncEngine {
     key: SyncEngineKey,
     context: SyncContext,
   ): Promise<SyncEngineOutcome> {
+    if (key.kind === "newTicket" && !this.rawTicketDeps && !this.documents) {
+      return this.tickets.syncQueueItem(key, context);
+    }
     if (this.explicitTickets && (key.kind === "ticket" || key.kind === "newTicket")) {
       return this.explicitTickets.syncQueueItem(key as any, context);
     }

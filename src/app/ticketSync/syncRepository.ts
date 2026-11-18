@@ -25,6 +25,7 @@ import {
   getPrimaryEffectForRevision,
   normalizeAttemptGeneration,
   isPrimaryEffectKind,
+  isRejectedTicketCreate,
   evaluateAttemptClosure,
   SyncEffectRequestSnapshot,
   transitionDurableSyncEffect,
@@ -238,6 +239,7 @@ export const toUnifiedOperationFromNewTicket = (
   if (ticket.content) {
     try {
       parsed = parseTicketEditorContent(ticket.content, {
+        allowEmptyStatus: true,
         allowMissingMetadata: true,
         allowMissingSubject: true,
         fallbackMetadata: { tracker: "", priority: "", status: "", due_date: "", children: [] },
@@ -255,6 +257,7 @@ export const toUnifiedOperationFromNewTicket = (
   if (ticket.nextIntent?.content) {
     try {
       nextParsed = parseTicketEditorContent(ticket.nextIntent.content, {
+        allowEmptyStatus: true,
         allowMissingMetadata: true,
         allowMissingSubject: true,
         fallbackMetadata: { tracker: "", priority: "", status: "", due_date: "", children: [] },
@@ -288,6 +291,7 @@ export const toUnifiedOperationFromNewTicket = (
     attemptGeneration: getAttemptGeneration(ticket),
     projectId: ticket.projectId,
     documentUri: ticket.documentUri,
+    errorMessage: ticket.preparationFailure,
     createdRemoteId: ticket.createdIssueId,
     effects: ticket.effects,
     intent: {
@@ -627,6 +631,7 @@ export class DefaultSyncOperationRepository implements SyncOperationRepository {
         content,
         documentUri: operation.documentUri ?? intentObj?.documentUri,
         baseDir: intentObj?.baseDir,
+        preparationFailure: operation.phase === "queued" ? operation.errorMessage : undefined,
         createdIssueId: operation.createdRemoteId,
         createdChildIds: operation.createdChildIds,
         effects: operation.effects ?? nextQueue.newTickets.find((t) => (operation.operationId && t.operationId === operation.operationId) || (operation.key?.kind === "newTicket" && operation.key.queueId !== undefined && t.queueId === operation.key.queueId) || (operation.documentUri && t.documentUri && sameDocumentIdentity(t.documentUri, operation.documentUri)))?.effects,
@@ -941,6 +946,9 @@ export class DefaultSyncOperationRepository implements SyncOperationRepository {
         return undefined;
       }
 
+      if (opAction.kind === "abort_known_remote_failure" && isRejectedTicketCreate(updatedEffect)) {
+        opAction.preserveRequest = true;
+      }
       let nextOp: UnifiedSyncOperation | undefined;
       if (current.phase === "remote_write_started" && (transition.kind === "start" || transition.kind === "start_explicit_retry")) {
         nextOp = { ...current };
@@ -1328,6 +1336,7 @@ export class DefaultSyncOperationRepository implements SyncOperationRepository {
           let parsedNext: any;
           try {
             parsedNext = parseTicketEditorContent(nextContent, {
+              allowEmptyStatus: true,
               allowMissingMetadata: true,
               fallbackMetadata: next.metadata ?? { tracker: "", priority: "", status: "", due_date: "", children: [] },
               allowMissingSubject: true,

@@ -21,50 +21,35 @@ const baseDeps = {
 };
 
 suite("resolveMetadataForCreate — status optional handling", () => {
-  test("空のステータスでもエラーにならない", async () => {
-    await assert.doesNotReject(() =>
-      resolveMetadataForCreate({ ...baseMetadata, status: "" }, baseDeps, 1),
-    );
-  });
+  for (const status of ["", "   "]) {
+    test(`空のステータス ${JSON.stringify(status)} は一覧を取得しない`, async () => {
+      let calls = 0;
+      const fields = await resolveMetadataForCreate({ ...baseMetadata, status }, {
+        ...baseDeps,
+        listIssueStatuses: async () => { calls++; throw new Error("HTTP 403"); },
+      }, 1);
+      assert.strictEqual(calls, 0);
+      assert.strictEqual(fields.statusId, undefined);
+    });
+  }
 
-  test("空のステータスでは statusId をセットしない", async () => {
-    const fields = await resolveMetadataForCreate(
-      { ...baseMetadata, status: "" },
-      baseDeps,
-      1,
-    );
-    assert.strictEqual(fields.statusId, undefined);
-  });
-
-  test("空白のみのステータスでも statusId をセットしない", async () => {
-    const fields = await resolveMetadataForCreate(
-      { ...baseMetadata, status: "   " },
-      baseDeps,
-      1,
-    );
-    assert.strictEqual(fields.statusId, undefined);
-  });
-
-  test("有効なステータスを指定すると statusId がセットされる", async () => {
-    const fields = await resolveMetadataForCreate(
-      { ...baseMetadata, status: "In Progress" },
-      baseDeps,
-      1,
-    );
-    assert.strictEqual(fields.statusId, 1);
-  });
-
-  test("無効なステータスを指定するとエラーになる", async () => {
-    await assert.rejects(
-      () =>
-        resolveMetadataForCreate(
-          { ...baseMetadata, status: "存在しないステータス" },
-          baseDeps,
-          1,
-        ),
-      /Unknown status: 存在しないステータス/,
-    );
-  });
+  for (const status of ["In Progress", "存在しないステータス"]) {
+    test(`指定ステータス ${status} は一覧を一度取得して解決する`, async () => {
+      let calls = 0;
+      const deps = { ...baseDeps, listIssueStatuses: async () => {
+        calls++;
+        return [{ id: 1, name: "In Progress" }];
+      } };
+      if (status === "In Progress") {
+        const fields = await resolveMetadataForCreate({ ...baseMetadata, status }, deps, 1);
+        assert.strictEqual(fields.statusId, 1);
+      } else {
+        await assert.rejects(() => resolveMetadataForCreate({ ...baseMetadata, status }, deps, 1),
+          /Unknown status: 存在しないステータス/);
+      }
+      assert.strictEqual(calls, 1);
+    });
+  }
 
   test("statusId なしでも trackerId と priorityId はセットされる", async () => {
     const fields = await resolveMetadataForCreate(

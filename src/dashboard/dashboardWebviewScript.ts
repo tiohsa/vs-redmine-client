@@ -148,6 +148,8 @@ function deriveSyncTrayState(){
   const conflict=all.find(function(ticket){ return ticket.syncState === 'Conflict' && Number.isSafeInteger(ticket.id) && ticket.id > 0; });
   if(conflict) return {kind:'conflict',ticketId:conflict.id,count:count};
   const hasRecovery=all.some(function(ticket){ return ticket.syncState === 'RecoveryPending' || ticket.syncState === 'CommitUnknown'; }) || items.some(function(item){ return item.requiresReview === true || ['recovery_pending','commit_unknown'].includes(item.lifecycle); });
+  const retryItems=items.filter(function(item){ return item.canRetrySync; });
+  if(retryItems.length) return {kind:'retry',key:retryItems.length === 1 ? retryItems[0].key : undefined,count:count};
   if(hasRecovery) return {kind:'recovery',count:count};
   const failed=all.find(function(ticket){ return ticket.syncState === 'Failed' && Number.isSafeInteger(ticket.id) && ticket.id > 0; });
   if(failed){
@@ -173,6 +175,9 @@ function renderSyncTray(){
   if(model.kind === 'conflict'){
     addButton(STRINGS.syncTrayReviewConflict,false,function(){ activateTab('tickets'); req('ticket.reviewConflict',{ticketId:model.ticketId}); },true);
     addButton(STRINGS.syncTrayOpenUnsynced,true,function(){ activateTab('unsynced'); });
+  } else if(model.kind === 'retry'){
+    addButton(STRINGS.retrySync,true,function(){ if(model.key) req('unsynced.syncOne',{key:model.key}); else activateTab('unsynced'); },true);
+    addButton(STRINGS.syncTrayOpenUnsynced,false,function(){ activateTab('unsynced'); });
   } else if(model.kind === 'recovery' || model.kind === 'failedQueued'){
     addButton(STRINGS.syncTrayOpenUnsynced,true,function(){ activateTab('unsynced'); });
   } else if(model.kind === 'failedTicket'){
@@ -806,7 +811,7 @@ function renderUnsynced(){
     const discardTitle=discardsLaterChanges ? STRINGS.discardLaterChangesTitle : STRINGS.discardTitle;
     const discardDisabled=item.discardMode === 'none' || item.canDiscard === false;
     const discard='<button class="btn btn-secondary btn-danger" type="button" data-unsynced-action="discard" '+(discardDisabled ? 'disabled aria-describedby="discard-reason-'+index+'"' : 'data-discard-key="'+safeJson(item.key)+'" title="'+esc(discardTitle)+'"')+'>'+esc(discardLabel)+'</button>';
-    const actionLabel=status.requiresReview ? STRINGS.resolveRecovery : STRINGS.syncToRedmine;
+    const actionLabel=item.canRetrySync ? STRINGS.retrySync : status.requiresReview ? STRINGS.resolveRecovery : STRINGS.syncToRedmine;
     const sync='<button class="btn btn-primary" type="button" data-unsynced-action="sync" '+(item.canSync === false ? 'disabled aria-describedby="sync-reason-'+index+'"' : 'data-sync-key="'+safeJson(item.key)+'"')+(status.requiresReview ? ' title="'+esc(STRINGS.resolveRecoveryTooltip)+'"' : '')+'>'+actionIcon('sync')+esc(actionLabel)+'</button>';
     const more='<details class="unsynced-more"><summary class="btn btn-secondary" data-unsynced-action="more">'+esc(STRINGS.moreActions)+'</summary><div class="unsynced-more-actions">'+discard+(discardDisabled ? '<p class="unsynced-action-reason" id="discard-reason-'+index+'">'+esc(STRINGS.discardUnavailableReason)+'</p>' : '')+'<button class="btn btn-secondary btn-danger" type="button" data-unsynced-action="abandon" data-abandon-key="'+safeJson(item.key)+'">'+esc(STRINGS.abandonAction)+'</button></div></details>';
     return group+'<div class="unsynced-card" role="listitem" tabindex="-1" data-queue-key="'+safeJson(item.key)+'"><span class="unsynced-kind-label">'+esc(unsyncedKindLabel(item.key.kind))+'</span><div class="unsynced-body"><div class="unsynced-label">'+esc(item.label)+'</div>'+(detail ? '<div class="unsynced-detail">'+esc(detail)+'</div>' : '')+'</div><div class="unsynced-state">'+badge(status.label,status.cls,status.icon)+'</div><div class="unsynced-actions">'+sync+open+more+'</div>'+(item.canSync === false ? '<p class="unsynced-action-reason" id="sync-reason-'+index+'">'+esc(STRINGS.syncUnavailableReason)+'</p>' : '')+'</div>';

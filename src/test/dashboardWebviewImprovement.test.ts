@@ -115,14 +115,6 @@ suite("Dashboard Webview 改善", () => {
     assert.ok(strings.discardLaterChangesTitle);
   });
 
-  test("未同期の新規チケットは文書書き換え対応の同期エンジンを使用する", () => {
-    const source = readFileSync(
-      join(__dirname, "..", "dashboard", "services", "DashboardUnsyncedService.js"),
-      "utf8",
-    );
-    assert.ok(source.includes('key.kind !== "newTicket" && this.deps.syncEngine'));
-  });
-
   test("開始日と日付ピッカー視認性のスタイルを持つ", () => {
     assert.ok(dashboardWebviewScript.includes("STRINGS.startDate"));
     assert.ok(buildDashboardStrings().startDate);

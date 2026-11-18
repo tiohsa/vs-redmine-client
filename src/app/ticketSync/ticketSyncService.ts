@@ -269,6 +269,7 @@ export class TicketSyncService {
         return { kind: "clipboard" as const, filename: a.filename, contentType: a.contentType };
       });
       const parsed = parseTicketEditorContent(input.editor.document.getText(), {
+        allowEmptyStatus: true,
         allowMissingMetadata: true,
         fallbackMetadata: { tracker: "", priority: "", status: "", due_date: "", children: [] },
       });
@@ -433,6 +434,8 @@ export class TicketSyncService {
     key: TicketSyncQueueKey;
     context: SyncContext;
     attemptGeneration?: number;
+    operationId?: string;
+    operationRevision?: number;
     resolution:
       | { kind: "link_created_ticket"; ticketId: number }
       | { kind: "link_remote_ticket"; ticketId: number }
@@ -450,8 +453,8 @@ export class TicketSyncService {
         : input.resolution);
     return this.coordinator.resolveCommitUnknown({
       key: input.key as any,
-      operationId: operation?.operationId ?? "",
-      operationRevision: operation?.intentRevision ?? operation?.revision ?? 1,
+      operationId: input.operationId ?? operation?.operationId ?? "",
+      operationRevision: input.operationRevision ?? operation?.intentRevision ?? operation?.revision ?? 1,
       context: input.context,
       attemptGeneration,
       resolution,

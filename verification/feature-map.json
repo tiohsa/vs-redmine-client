@@ -129,10 +129,15 @@
       "invariants": [
         "リモート書き込み後に再取得・照合してからローカル状態を確定する。",
         "commit_unknown の操作は自動再試行しない。",
-        "旧 revision または attemptGeneration の処理による保存を拒否する。"
+        "旧 revision または attemptGeneration の処理による保存を拒否する。",
+        "新規チケットは auto で保存時に作成し、manual はローカル保存する。作成が 403 の場合は明示的な再同期のみ許可する。",
+        "Dashboard の一括同期では新規チケットのステータス一覧取得または作成の HTTP エラーを操作名とコードで表示する。"
       ],
       "checks": [
         "src/test/dashboardSyncTray.test.ts",
+        "src/test/dashboardSyncFeedback.test.ts",
+        "src/test/saveSyncExecutorAutoMode.test.ts",
+        "src/test/ticketSyncService.test.ts",
         "src/test/syncLifecycleBoundary.test.ts",
         "src/test/syncLifecycleOwnership.test.ts"
       ]

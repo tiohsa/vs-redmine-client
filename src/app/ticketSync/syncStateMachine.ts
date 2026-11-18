@@ -88,6 +88,7 @@ export const applyGenericTransition = (
   switch (action.kind) {
     case "begin_preparation":
       next.phase = "preparing";
+      next.errorMessage = undefined;
       return next;
 
     case "start_normal_remote_write":
@@ -135,6 +136,7 @@ export const applyGenericTransition = (
         return undefined; // Primary committed がある場合はロールバック拒絶 (INV-N01)
       }
       next.phase = "queued";
+      next.errorMessage = action.message;
       next.createdRemoteId = undefined;
       next.createdChildIds = undefined;
       // INV-N11, F-17: committed/commit_unknown/failed/compensation_* なEffectは保持する
@@ -206,7 +208,7 @@ export const applyGenericTransition = (
         next.remoteUpdatedAt = undefined;
         next.errorMessage = undefined;
       }
-      if ((!primaryIsCompensated || canCloseAttempt) && next.nextIntent) {
+      if (!action.preserveRequest && (!primaryIsCompensated || canCloseAttempt) && next.nextIntent) {
         // 次の intent があれば昇格 (INV-07)
         const promotedIntent = next.nextIntent;
         next.intent = promotedIntent;

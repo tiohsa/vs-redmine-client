@@ -598,6 +598,8 @@ export class DashboardUnsyncedService {
   }
 
   private notifySyncAllResult(requestId: string, result: OfflineSyncRunResult): void {
+    const diagnostics = result.newTicketDiagnostics?.join(" ");
+    const suffix = diagnostics ? ` ${diagnostics}` : "";
     switch (result.status) {
       case "nothing_to_sync":
         this.deps.context.notifySuccess(requestId, vscode.l10n.t("Nothing to sync."));
@@ -608,23 +610,25 @@ export class DashboardUnsyncedService {
           : vscode.l10n.t("All items synced. Synced: {0}.", result.synced), result.remainingChanges ? "info" : "success");
         break;
       case "recovery_pending":
-        this.deps.context.notifySuccess(requestId, vscode.l10n.t("Sync paused for recovery. Synced: {0}; incomplete: {1}. Review the unsynced items.", result.synced, result.failed), "warning");
+        this.deps.context.notifySuccess(requestId, vscode.l10n.t("Sync paused for recovery. Synced: {0}; incomplete: {1}. Review the unsynced items.", result.synced, result.failed) + suffix, "warning");
         break;
       case "partial_failure":
         this.deps.context.notifyError(
           requestId,
-          vscode.l10n.t("Partial sync failure. Succeeded: {0} / Failed: {1} / Conflicts: {2}.", result.synced, result.failed, result.conflicts),
+          vscode.l10n.t("Partial sync failure. Succeeded: {0} / Failed: {1} / Conflicts: {2}.", result.synced, result.failed, result.conflicts) + suffix,
         );
         break;
       case "cancelled":
         this.deps.context.notifySuccess(
           requestId,
-          vscode.l10n.t("Sync cancelled. Succeeded: {0} / Incomplete: {1}.", result.synced, result.failed),
+          vscode.l10n.t("Sync cancelled. Succeeded: {0} / Incomplete: {1}.", result.synced, result.failed) + suffix,
           "info",
         );
         break;
       case "failed":
-        this.deps.context.notifyError(requestId, vscode.l10n.t("Sync failed. Check the VS Code notifications."));
+        this.deps.context.notifyError(requestId, diagnostics
+          ? vscode.l10n.t("Sync failed: {0}", diagnostics)
+          : vscode.l10n.t("Sync failed. Check the VS Code notifications."));
         break;
     }
   }
@@ -655,7 +659,7 @@ export class DashboardUnsyncedService {
       {
         suppressResultNotifications: true,
         onTicketCreated: () => this.deps.context.onTicketsRefreshed(),
-        createSyncEngine: key.kind !== "newTicket" && this.deps.syncEngine
+        createSyncEngine: this.deps.syncEngine
           ? () => this.deps.syncEngine!
           : undefined,
       },

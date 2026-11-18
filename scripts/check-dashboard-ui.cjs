@@ -432,6 +432,17 @@ async function main() {
   await key('Escape');
   assert.equal(await evaluate(`document.activeElement.id`), 'advanced-filters-btn');
 
+  state.unsynced = { totalCount: 1, items: [
+    { key: { kind: 'newTicket', queueId: 'failed-create' }, label: 'New ticket', lifecycle: 'queued', canRetrySync: true, canSync: true },
+  ] };
+  await push();
+  assert.equal(await evaluate(`document.querySelector('#sync-tray button').textContent`), strings.retrySync);
+  assert.ok(await evaluate(`document.querySelector('[data-sync-key]').textContent.includes(${JSON.stringify(strings.retrySync)})`));
+  await evaluate(`document.querySelector('#sync-tray button').click()`);
+  const retryMessage = await evaluate(`window.messages.filter(m=>m.type==='unsynced.syncOne').at(-1)`);
+  assert.equal(retryMessage.key.queueId, 'failed-create');
+  await evaluate(`window.dispatchEvent(new MessageEvent('message',{data:{type:'operation.success',requestId:${JSON.stringify(retryMessage.requestId)},message:'OK'}}))`);
+
   // queued でも Store が remote evidence を検出した項目は破棄不可。
   state.unsynced = { totalCount: 3, items: [
     { key: { kind: 'ticket', ticketId: 10 }, label: 'Ticket', lifecycle: 'queued', canDiscard: false, discardMode: 'none', canSync: true },

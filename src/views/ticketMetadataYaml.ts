@@ -133,7 +133,7 @@ const requireValue = (key: IssueMetadataKey, value: string): void => {
   }
 };
 
-export const parseIssueMetadataYaml = (text: string): IssueMetadata => {
+export const parseIssueMetadataYaml = (text: string, allowEmptyStatus = false): IssueMetadata => {
   const lines = text.split(/\r?\n/);
   const values: Partial<IssueMetadata> = {};
   const seen = new Set<IssueMetadataKey>();
@@ -274,7 +274,7 @@ export const parseIssueMetadataYaml = (text: string): IssueMetadata => {
     }
 
     readingChildren = false;
-    requireValue(key, value);
+    if (key !== "status" || !allowEmptyStatus) { requireValue(key, value); }
     values[key] = value;
   });
 
