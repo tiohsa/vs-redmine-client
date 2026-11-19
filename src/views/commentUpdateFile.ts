@@ -55,6 +55,9 @@ export const hasCommentUpdateMetadataMarkers = (content: string): boolean => {
   }
   const closeIdx = lines.findIndex((line, idx) => idx > 0 && line.trim() === "---");
   const frontmatter = lines.slice(1, closeIdx === -1 ? undefined : closeIdx);
+  if (frontmatter.some((line) => /^mode:\s*comment-create\s*$/.test(line.trim()))) {
+    return false;
+  }
   return frontmatter.some((line) =>
     /^(?:mode:\s*comment-update\s*$|(?:journal_id|source_notes_hash|last_synced_at):)/.test(
       line.trim(),
@@ -141,8 +144,67 @@ export const parseCommentUpdateFile = (content: string): ParsedCommentUpdateFile
   return { fields, body };
 };
 
+export interface ParsedCommentCreateFile {
+  issueId: number;
+  body: string;
+}
+
+export const buildCommentCreateFileContent = (issueId: number): string =>
+  `---\nmode: comment-create\nissue_id: ${issueId}\n---\n\n# ${vscode.l10n.t("Comment on ticket #{0}", issueId)}\n\n`;
+
+export const parseCommentCreateFile = (
+  content: string,
+): ParsedCommentCreateFile | undefined => {
+  const lines = content.split(/\r?\n/);
+  if (lines[0]?.trim() !== "---") {
+    return undefined;
+  }
+  const closeIdx = lines.findIndex((line, idx) => idx > 0 && line.trim() === "---");
+  if (closeIdx === -1) {
+    return undefined;
+  }
+
+  const fm: Record<string, string> = {};
+  for (const line of lines.slice(1, closeIdx)) {
+    const m = line.match(/^([a-z_]+):\s*(.*)$/);
+    if (m) {
+      fm[m[1]] = m[2].trim();
+    }
+  }
+
+  if (fm["mode"] !== "comment-create") {
+    return undefined;
+  }
+
+  const issueId = fm["issue_id"] ? Number(fm["issue_id"]) : NaN;
+  if (!Number.isInteger(issueId) || issueId <= 0) {
+    return undefined;
+  }
+
+  const rest = lines.slice(closeIdx + 1);
+  let idx = 0;
+  while (idx < rest.length && rest[idx].trim() === "") {
+    idx += 1;
+  }
+  if (idx < rest.length && /^#(?:\s|$)/.test(rest[idx])) {
+    idx += 1;
+    if (idx < rest.length && rest[idx] === "") {
+      idx += 1;
+    }
+  } else {
+    idx = rest[0] === "" ? 1 : 0;
+  }
+
+  return {
+    issueId,
+    body: rest.slice(idx).join("\n"),
+  };
+};
+
 export const extractCommentBody = (content: string): string =>
-  parseCommentUpdateFile(content)?.body ?? content;
+  parseCommentUpdateFile(content)?.body ??
+  parseCommentCreateFile(content)?.body ??
+  content;
 
 export interface UpdateCommentUpdateFileInput {
   documentUri: string;
@@ -230,7 +292,7 @@ export const finalizeNewCommentDraftFileAfterSync = async (input: {
       return "stale_source";
     }
   }
-  const currentBody = alreadyFinalized?.body ?? raw;
+  const currentBody = alreadyFinalized?.body ?? extractCommentBody(raw);
   const updated = buildCommentUpdateFileContent({
     ...alreadyFinalized?.fields,
     issueId: input.ticketId,

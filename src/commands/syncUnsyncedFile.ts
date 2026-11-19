@@ -23,6 +23,8 @@ import { getPrimaryEffectForRevision, isPrimaryEffectKind } from "../app/syncEff
 import { getTicketDraft } from "../views/ticketDraftStore";
 import type { ConflictContext } from "../views/ticketSaveTypes";
 import type { CommentConflictContext } from "../views/commentSaveTypes";
+import { renameSyncedNewTicketFileIfEligible } from "../views/ticketSync/ticketEditorRewrite";
+import { refreshTicketEditorContexts } from "../app/editorEventController";
 
 export type SyncFailureReason =
   | "parse_error"
@@ -576,6 +578,20 @@ const syncUnsyncedFileAtScope = async (
       }
     }
     if (outcome.kind === "completed") {
+      if (
+        !hasRemainingChanges() &&
+        outcome.ticketId &&
+        previous?.documentUri &&
+        Object.keys(rewriteDeps).length === 0
+      ) {
+        await renameSyncedNewTicketFileIfEligible({
+          oldUri: vscode.Uri.parse(previous.documentUri),
+          ticketId: outcome.ticketId,
+          projectId: previous.projectId,
+          connectionScope: operationScope,
+        });
+        refreshTicketEditorContexts();
+      }
       options.onTicketCreated?.();
       showInfoResult(hasRemainingChanges()
         ? vscode.l10n.t("This sync completed. Later local changes are still waiting to sync.")

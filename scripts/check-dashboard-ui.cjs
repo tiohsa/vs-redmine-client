@@ -315,16 +315,16 @@ async function main() {
   await key('Enter');
   assert.deepEqual(await evaluate(`window.messages.filter(message=>message.type==='project.select').map(({type,projectId})=>({type,projectId}))`), [{ type: 'project.select', projectId: 4 }, { type: 'project.select', projectId: 3 }]);
   assert.equal(await evaluate(`document.getElementById('project-picker-popup').hidden`), true);
-  await evaluate(`document.getElementById('project-select-trigger').click();document.getElementById('refresh-btn').focus()`);
+  await evaluate(`document.getElementById('project-select-trigger').click();document.getElementById('include-children').focus()`);
   assert.equal(await evaluate(`document.getElementById('project-picker-popup').hidden`), true, 'focus leaving project component closes popup');
-  assert.equal(await evaluate(`document.activeElement.id`), 'refresh-btn', 'focusout close does not steal focus');
-  const refreshBounds = await evaluate(`(()=>{const r=document.getElementById('refresh-btn').getBoundingClientRect();return {x:r.left+r.width/2,y:r.top+r.height/2}})()`);
+  assert.equal(await evaluate(`document.activeElement.id`), 'include-children', 'focusout close does not steal focus');
+  const outsideBounds = await evaluate(`(()=>{const r=document.getElementById('include-children').getBoundingClientRect();return {x:r.left+r.width/2,y:r.top+r.height/2}})()`);
   await evaluate(`document.getElementById('project-select-trigger').click()`);
-  await call('Input.dispatchMouseEvent', { type: 'mouseMoved', x: refreshBounds.x, y: refreshBounds.y });
-  await call('Input.dispatchMouseEvent', { type: 'mousePressed', x: refreshBounds.x, y: refreshBounds.y, button: 'left', clickCount: 1 });
-  await call('Input.dispatchMouseEvent', { type: 'mouseReleased', x: refreshBounds.x, y: refreshBounds.y, button: 'left', clickCount: 1 });
+  await call('Input.dispatchMouseEvent', { type: 'mouseMoved', x: outsideBounds.x, y: outsideBounds.y });
+  await call('Input.dispatchMouseEvent', { type: 'mousePressed', x: outsideBounds.x, y: outsideBounds.y, button: 'left', clickCount: 1 });
+  await call('Input.dispatchMouseEvent', { type: 'mouseReleased', x: outsideBounds.x, y: outsideBounds.y, button: 'left', clickCount: 1 });
   assert.equal(await evaluate(`document.getElementById('project-picker-popup').hidden`), true, 'outside mouse click closes popup');
-  assert.equal(await evaluate(`document.activeElement.id`), 'refresh-btn', 'outside click does not return focus to trigger');
+  assert.equal(await evaluate(`document.activeElement.id`), 'include-children', 'outside click does not return focus to trigger');
   await evaluate(`document.getElementById('project-select-trigger').click();document.getElementById('ticket-scroll').dispatchEvent(new Event('scroll',{bubbles:true}))`);
   assert.equal(await evaluate(`document.getElementById('project-picker-popup').hidden`), true, 'external scroll closes popup');
   await evaluate(`document.getElementById('project-select-trigger').click();document.getElementById('project-search-input').value='tokyo';document.getElementById('project-search-input').dispatchEvent(new Event('input',{bubbles:true}));document.getElementById('project-search-clear-btn').focus()`);
@@ -418,13 +418,15 @@ async function main() {
   state.tickets[0].assigneeId = 7;
   state.tickets[0].statusId = 1;
   await push();
+  assert.equal(await evaluate(`document.querySelector('[data-quick-filter="unsynced"]') === null`), true);
+  assert.equal(await evaluate(`document.querySelector('[data-quick-filter="open"]').getAttribute('aria-pressed')`), 'true');
   await evaluate(`document.querySelector('[data-quick-filter="mine"]').click()`);
   assert.equal(await evaluate(`document.querySelector('[data-quick-filter="mine"]').getAttribute('aria-pressed')`), 'true');
   assert.equal(await evaluate(`document.querySelectorAll('.ticket-row').length`), 1);
   assert.equal(await evaluate(`document.getElementById('ticket-count').textContent`), strings.shownLoadedTickets.replace('{0}','1').replace('{1}','2'));
   await evaluate(`document.querySelector('[data-quick-filter="open"]').click()`);
   assert.equal(await evaluate(`document.querySelectorAll('.ticket-row').length`), 1);
-  await evaluate(`document.querySelector('[data-quick-filter="overdue"]').click();document.querySelector('[data-quick-filter="unsynced"]').click()`);
+  await evaluate(`document.querySelector('[data-quick-filter="overdue"]').click()`);
   assert.equal(await evaluate(`document.querySelectorAll('.ticket-row').length`), 1);
   await evaluate(`document.querySelectorAll('[data-quick-filter][aria-pressed="true"]').forEach(button=>button.click())`);
   await evaluate(`document.getElementById('advanced-filters-btn').click()`);
@@ -571,17 +573,13 @@ async function main() {
   // 日付は詳細へ集約し、一覧では重複しない。
   assert.equal(await evaluate(`document.querySelectorAll('.ticket-row .due-overdue').length`), 0);
 
-  // 担当者は一覧ではテキストで、詳細では既存アバターで示す。
+  // 担当者は詳細の2列メタグリッドで示す。
   state.selectedTicketId = 10;
   state.tickets[0].assigneeName = 'Taro Yamada';
   state.selectedTicket = { ...state.tickets[0], projectName: '検証プロジェクト', description: '担当者表示を確認します。' };
   await push();
   assert.equal(await evaluate(`document.querySelectorAll('.ticket-assignee').length`), 0);
-  assert.equal(await evaluate(`document.querySelectorAll('.detail-avatar').length`), 1);
-  assert.equal(await evaluate(`document.querySelector('.detail-avatar').textContent`), 'TA');
-  assert.equal(await evaluate(`document.querySelector('.detail-avatar').getAttribute('aria-label')`), 'Taro Yamada');
-  await evaluate(`document.getElementById('ticket-detail-toggle').click()`);
-  assert.equal(await evaluate(`document.querySelectorAll('.detail-avatar').length`), 1);
+  assert.equal(await evaluate(`document.querySelector('.detail-metadata-grid').textContent.includes('Taro Yamada')`), true);
   assert.equal(await evaluate(`document.querySelectorAll('#set-show-assignee,#set-show-tracker,#set-show-priority,#set-show-due-date').length`), 0);
 
   // 一覧・詳細・コメント・未同期の同じ操作はラベルと SVG が一致する。
@@ -593,10 +591,8 @@ async function main() {
     const appearances = await evaluate(`(${JSON.stringify(selectors)}).map(selector=>{const button=document.querySelector(selector);return {label:button.textContent.trim(),icon:button.querySelector('svg').outerHTML};})`);
     appearances.slice(1).forEach(actual => assert.deepEqual(actual, appearances[0]));
   }
-  await assertSameAction(['#detail-open-btn', '[data-edit-comment]', '[data-uri]']);
-  assert.equal(await evaluate(`document.querySelector('#detail-comment-btn').getAttribute('aria-label')`), strings.addCommentAction);
-  assert.equal(await evaluate(`document.querySelector('#detail-comment-btn svg').outerHTML === document.querySelector('#add-comment-btn svg').outerHTML`), true);
-  await assertSameAction(['#detail-browser-btn', '[data-open-comment]']);
+  assert.equal(await evaluate(`document.querySelector('#detail-browser-btn') !== null`), true);
+  assert.equal(await evaluate(`document.querySelector('#add-comment-btn') !== null`), true);
   await assertSameAction(['#detail-sync-btn', '[data-sync-key]', '[data-sync-comment-key]']);
   assert.equal(await evaluate(`document.querySelector('#sync-all-btn svg').outerHTML`), await evaluate(`document.querySelector('#detail-sync-btn svg').outerHTML`));
   state.comments.items = [];
@@ -695,88 +691,25 @@ async function main() {
   await push();
   await evaluate(`document.getElementById('detail-tab-comments').click()`);
   assert.equal(await evaluate(`document.querySelector('.comment-body').textContent`), state.comments.items[0].body);
-  assert.equal(await evaluate(`document.querySelector('.comment-body').classList.contains('comment-body-clamped')`), true);
-  await evaluate(`document.querySelector('[data-expand-comment]').click()`);
-  assert.equal(await evaluate(`document.querySelector('.comment-body').classList.contains('comment-body-clamped')`), false);
-  // ビューポートを変えずにレイアウトを切り替えても、省略判定を更新する。
-  await call('Emulation.setDeviceMetricsOverride', { width: 1200, height: 800, deviceScaleFactor: 1, mobile: false });
-  // CI の日本語フォント差に依存せず、単一表示は3行以内、分割表示は4行以上にする。
-  state.comments.items = [{ id: 32, authorName: 'Taro', body: 'W'.repeat(240), editableByCurrentUser: true }];
-  await push();
-  await evaluate(`document.getElementById('ticket-layout-mode').value='single';document.getElementById('ticket-layout-mode').dispatchEvent(new Event('change'))`);
-  assert.equal(await evaluate(`document.querySelector('.comment-body').scrollHeight <= document.querySelector('.comment-body').clientHeight+1`), true);
-  assert.equal(await evaluate(`document.querySelector('.comment-expand').classList.contains('hidden')`), true);
-  await evaluate(`document.getElementById('ticket-layout-mode').value='split';document.getElementById('ticket-layout-mode').dispatchEvent(new Event('change'))`);
-  assert.equal(await evaluate(`document.querySelector('.comment-body').scrollHeight > document.querySelector('.comment-body').clientHeight+1`), true);
-  assert.equal(await evaluate(`document.querySelector('.comment-expand').classList.contains('hidden')`), false);
-  await evaluate(`document.getElementById('ticket-layout-mode').value='single';document.getElementById('ticket-layout-mode').dispatchEvent(new Event('change'))`);
-  assert.equal(await evaluate(`document.querySelector('.comment-expand').classList.contains('hidden')`), true);
-  await evaluate(`document.getElementById('ticket-layout-mode').value='auto';document.getElementById('ticket-layout-mode').dispatchEvent(new Event('change'))`);
+  assert.equal(await evaluate(`document.querySelector('.comment-timeline') !== null`), true);
+  await evaluate(`document.querySelector('.comment-card.is-editable').click()`);
+  assert.deepEqual(await evaluate(`({type:window.messages.at(-1).type,ticketId:window.messages.at(-1).ticketId,commentId:window.messages.at(-1).commentId})`), { type: 'comment.edit', ticketId: 10, commentId: 31 });
   await evaluate(`document.getElementById('detail-tab-overview').click()`);
   state.comments.items = [];
   await push();
-  for (const [id, type] of [['detail-open-btn', 'ticket.openEditor'], ['detail-comment-btn', 'comment.add'], ['detail-browser-btn', 'ticket.openBrowser']]) {
+  for (const [id, type] of [['detail-browser-btn', 'ticket.openBrowser']]) {
     await evaluate(`document.getElementById('${id}').click()`);
     assert.deepEqual(await evaluate(`({type:window.messages.at(-1).type,ticketId:window.messages.at(-1).ticketId})`), { type, ticketId: 10 });
   }
   assert.equal(await evaluate(`document.querySelectorAll('[data-ticket-action-menu="detail-10"]').length`), 0);
   assert.equal(await evaluate(`document.querySelectorAll('[data-ticket-action="refresh"]').length`), 0);
+  assert.equal(await evaluate(`document.querySelectorAll('.detail-metadata-grid').length`), 1);
+  assert.equal(await evaluate(`document.querySelectorAll('[data-metadata-field]').length`), 0);
 
-  // 既存の折りたたみ・展開を保持し、Metadata の一時値をまとめて適用する。
-  await evaluate(`if(document.getElementById('ticket-detail-toggle').getAttribute('aria-expanded')==='true') document.getElementById('ticket-detail-toggle').click()`);
-  assert.equal(await evaluate(`document.getElementById('metadata-details').open`), false);
-  assert.equal(await evaluate(`document.querySelector('.detail-description').classList.contains('detail-description-collapsed')`), true);
-  await push();
-  assert.equal(await evaluate(`document.getElementById('ticket-detail-toggle').getAttribute('aria-expanded')`), 'false');
-  await evaluate(`document.getElementById('ticket-detail-toggle').click()`);
-  assert.equal(await evaluate(`document.querySelectorAll('[data-metadata-field]').length`), 0);
-  const beforeMetadata = await evaluate('window.messages.length');
-  await evaluate(`document.getElementById('metadata-edit-btn').click()`);
-  assert.equal(await evaluate(`document.querySelectorAll('[data-metadata-field]').length`), 6);
-  assert.equal(await evaluate(`document.getElementById('metadata-apply-btn').disabled`), true);
-  async function stageMetadata(field, value) {
-    await evaluate(`(()=>{const input=document.querySelector('[data-metadata-field="${field}"]');input.value=${JSON.stringify(value)};input.dispatchEvent(new Event('input'));input.dispatchEvent(new Event('change'));})()`);
-  }
-  await stageMetadata('priority', 'High');
-  assert.equal(await evaluate(`document.getElementById('detail-sync-state').textContent`), strings.syncDirty);
-  await evaluate(`document.getElementById('detail-tab-comments').click();document.getElementById('detail-tab-overview').click()`);
-  assert.equal(await evaluate(`document.querySelector('[data-metadata-field="priority"]').value`), 'High');
-  await stageMetadata('due_date', '');
-  await evaluate(`document.querySelector('[data-metadata-field="due_date"]').focus()`);
-  await push();
-  assert.equal(await evaluate(`document.querySelector('[data-metadata-field="priority"]').value`), 'High');
-  assert.equal(await evaluate(`document.activeElement.dataset.metadataField`), 'due_date');
-  await evaluate(`document.getElementById('metadata-cancel-btn').click()`);
-  assert.equal(await evaluate('window.messages.length'), beforeMetadata, 'cancel must not send any request');
-  assert.equal(await evaluate(`document.getElementById('detail-sync-state').textContent`), strings.synced);
-  assert.equal(await evaluate(`document.activeElement.id`), 'metadata-edit-btn');
-  await evaluate(`document.getElementById('metadata-edit-btn').click()`);
-  assert.equal(await evaluate(`document.querySelector('[data-metadata-field="priority"]').value`), 'Normal');
-  await stageMetadata('tracker', 'Task');
-  await stageMetadata('priority', 'High');
-  await stageMetadata('status', 'Closed');
-  await stageMetadata('assignee', '');
-  await stageMetadata('start_date', '2026-09-22');
-  await stageMetadata('due_date', '');
-  await evaluate(`document.getElementById('metadata-apply-btn').click();document.getElementById('metadata-apply-btn').click()`);
-  assert.equal(await evaluate('window.messages.length'), beforeMetadata + 1);
-  const metadataRequest = await evaluate('window.messages.at(-1)');
-  assert.equal(metadataRequest.type, 'ticket.metadata.update');
-  assert.equal(metadataRequest.ticketId, 10);
-  assert.deepEqual(metadataRequest.patch, { tracker: 'Task', priority: 'High', status: 'Closed', assignee: '', start_date: '2026-09-22', due_date: '' });
-  assert.equal(await evaluate(`document.getElementById('metadata-cancel-btn').disabled`), true);
-  assert.equal(await evaluate(`document.getElementById('detail-sync-btn').disabled`), true);
-  await evaluate(`window.dispatchEvent(new MessageEvent('message',{data:{type:'operation.error',requestId:'${metadataRequest.requestId}',message:'適用に失敗しました'}}))`);
-  assert.equal(await evaluate(`document.querySelector('[data-metadata-field="priority"]').value`), 'High');
-  assert.equal(await evaluate(`document.getElementById('metadata-apply-btn').disabled`), false);
-  await evaluate(`document.getElementById('metadata-apply-btn').click()`);
-  const appliedRequest = await evaluate('window.messages.at(-1).requestId');
-  state.selectedTicket.priorityName = 'High';
-  state.selectedTicket.syncState = 'Dirty';
-  await push();
-  await evaluate(`window.dispatchEvent(new MessageEvent('message',{data:{type:'operation.success',requestId:'${appliedRequest}',message:'ローカルへ適用しました'}}))`);
-  assert.equal(await evaluate(`document.querySelectorAll('[data-metadata-field]').length`), 0);
-  assert.equal(await evaluate(`document.getElementById('detail-sync-state').textContent`), strings.syncDirty);
+  // Escape キーで詳細ドロワーを閉じる。
+  await evaluate(`document.querySelector('.ticket-row[data-id="10"]').focus()`);
+  await key('Escape');
+  assert.equal(await evaluate(`window.messages.at(-1).type`), 'ticket.cancelDetail');
 
   // 同期は送信直後から無効化し、state 更新・started・成功・失敗でも二重送信しない。
   const beforeSync = await evaluate('window.messages.length');
@@ -813,39 +746,13 @@ async function main() {
   assert.equal(await evaluate('window.messages.length'), messagesAfterReset + 1);
   assert.equal(await evaluate('window.messages.at(-1).type'), 'ticket.syncSelected');
   await evaluate(`window.dispatchEvent(new MessageEvent('message',{data:{type:'operation.success',requestId:window.messages.at(-1).requestId,message:'完了'}}))`);
-  for (const [syncState, label] of [['Synced', strings.synced], ['Draft', strings.draft], ['Dirty', strings.syncDirty], ['Queued', strings.syncQueued], ['Syncing', strings.syncSyncing], ['Failed', strings.syncFailed], ['Conflict', strings.syncConflict], ['RecoveryPending', strings.syncRecoveryPending], ['CommitUnknown', strings.syncOutcomeUnknown]]) {
+  for (const [syncState, label] of [['Synced', ''], ['Draft', strings.draft], ['Dirty', strings.unsyncedShort], ['Queued', strings.unsyncedShort], ['Syncing', strings.syncSyncing], ['Failed', strings.syncFailed], ['Conflict', strings.syncConflict], ['RecoveryPending', strings.syncRecoveryPending], ['CommitUnknown', strings.syncOutcomeUnknown]]) {
     state.selectedTicket.syncState = syncState;
     await push();
     assert.equal(await evaluate(`document.getElementById('detail-sync-state').textContent`), label);
     assert.equal(await evaluate(`document.querySelectorAll('.detail-description-warning').length`), syncState === 'Synced' ? 0 : 1);
     assert.equal(await evaluate(`document.getElementById('detail-sync-btn').disabled`), syncState === 'Syncing');
-    if (syncState === 'RecoveryPending' || syncState === 'CommitUnknown') {
-      await evaluate(`document.getElementById('metadata-edit-btn').click()`);
-      await stageMetadata('priority', 'Normal');
-      assert.equal(await evaluate(`document.getElementById('detail-sync-state').textContent`), label);
-      await evaluate(`document.getElementById('metadata-cancel-btn').click()`);
-    }
   }
-
-  // チケット/接続先切替に一時値を持ち越さない。古い応答も新しい編集を閉じない。
-  await evaluate(`document.getElementById('metadata-edit-btn').click()`);
-  await stageMetadata('priority', 'Normal');
-  await evaluate(`document.getElementById('metadata-apply-btn').click()`);
-  const staleRequest = await evaluate('window.messages.at(-1).requestId');
-  state.selectedTicketId = state.selectedTicket.id = state.editOptions.ticketId = 11;
-  await push();
-  assert.equal(await evaluate(`document.querySelectorAll('[data-metadata-field]').length`), 0);
-  await evaluate(`document.getElementById('metadata-edit-btn').click()`);
-  await stageMetadata('priority', 'Normal');
-  await evaluate(`window.dispatchEvent(new MessageEvent('message',{data:{type:'operation.success',requestId:'${staleRequest}',message:'以前の操作'}}))`);
-  assert.equal(await evaluate(`document.querySelector('[data-metadata-field="priority"]').value`), 'Normal');
-  const originalBaseUrl = state.settings.baseUrl;
-  state.settings.baseUrl = 'https://another.example.com';
-  await push();
-  assert.equal(await evaluate(`document.querySelectorAll('[data-metadata-field]').length`), 0);
-  state.settings.baseUrl = originalBaseUrl;
-  state.selectedTicketId = state.selectedTicket.id = state.editOptions.ticketId = 10;
-  await push();
 
   // 手動レイアウトは画面幅より優先され、Webview state に保持される。
   await call('Emulation.setDeviceMetricsOverride', { width: 320, height: 1000, deviceScaleFactor: 1, mobile: false });
@@ -861,22 +768,20 @@ async function main() {
   assert.equal(await evaluate(`getComputedStyle(document.querySelector('.tickets-layout')).flexDirection`), 'column');
   await evaluate(`document.getElementById('ticket-layout-mode').value='auto';document.getElementById('ticket-layout-mode').dispatchEvent(new Event('change'))`);
 
-  // 狭幅でも詳細・Metadata 入力がはみ出さず、テーマの境界とフォーカスが残る。
+  // 狭幅でも詳細カードがはみ出さず、テーマの境界とフォーカスが残る。
   for (const [theme, width] of [['vscode-light', 280], ['vscode-dark', 320], ['vscode-dark', 440], ['vscode-light', 768], ['vscode-high-contrast', 320]]) {
     await call('Emulation.setDeviceMetricsOverride', { width, height: 1000, deviceScaleFactor: 1, mobile: false });
     await evaluate(`document.body.className=${JSON.stringify(theme)}`);
     await push();
-    await evaluate(`document.getElementById('metadata-edit-btn').click()`);
-    assert.equal(await evaluate(`document.getElementById('ticket-detail-card').scrollWidth <= document.getElementById('ticket-detail-card').clientWidth`), true, `metadata overflow: ${theme} ${width}`);
-    assert.equal(await evaluate(`(()=>{const card=document.getElementById('ticket-detail-card').getBoundingClientRect();return [...document.querySelectorAll('.detail-actions button,[data-metadata-field]')].filter(el=>el.getClientRects().length>0).every(el=>{const r=el.getBoundingClientRect();return r.left>=card.left && r.right<=card.right;});})()`), true, `control overflow: ${theme} ${width}`);
+    assert.equal(await evaluate(`document.getElementById('ticket-detail-card').scrollWidth <= document.getElementById('ticket-detail-card').clientWidth`), true, `detail overflow: ${theme} ${width}`);
+    assert.equal(await evaluate(`(()=>{const card=document.getElementById('ticket-detail-card').getBoundingClientRect();return [...document.querySelectorAll('.detail-head-actions button, #detail-cancel-btn')].filter(el=>el.getClientRects().length>0).every(el=>{const r=el.getBoundingClientRect();return r.left>=card.left && r.right<=card.right;});})()`), true, `control overflow: ${theme} ${width}`);
     await evaluate(`document.querySelector('.ticket-row[data-id="10"]').focus()`);
     assert.notEqual(await evaluate(`getComputedStyle(document.querySelector('.ticket-row[data-id="10"]')).outlineStyle`), 'none');
     assert.notEqual(await evaluate(`getComputedStyle(document.querySelector('.ticket-row[data-id="10"]'),'::before').backgroundColor`), 'rgba(0, 0, 0, 0)');
-    await evaluate(`document.getElementById('metadata-cancel-btn').click()`);
   }
 
-  // 全タブから新規作成でき、更新中も入力値と選択範囲を保持する。
-  await evaluate(`document.getElementById('tab-settings').click(); document.getElementById('new-ticket-btn').click()`);
+  // 新規作成パネルが詳細列に収まり、更新中も入力値と選択範囲を保持する。
+  await evaluate(`document.getElementById('tab-tickets').click()`);
   assert.equal(await evaluate(`document.getElementById('tab-tickets').getAttribute('aria-selected')`), 'true');
   state.workPanel = { mode: 'newTicket', projectId: 1, projectName: '検証プロジェクト', loading: false, trackers: [{ id: 1, name: 'バグ' }], priorities: [{ id: 1, name: '通常' }], assignees: [], statuses: [], values: { tracker: 'バグ', priority: '通常' } };
   await push();
@@ -935,7 +840,6 @@ async function main() {
   await evaluate(`document.getElementById('work-description').focus()`);
   delete state.workPanel;
   await push();
-  assert.equal(await evaluate('document.activeElement.id'), 'new-ticket-btn');
 
   // プロジェクト未選択でもエラーが案内に隠れず、再試行が既存 protocol を使う。
   state.selectedProject = undefined;
@@ -1149,12 +1053,8 @@ async function main() {
     assert.equal(await evaluate(`document.getElementById('ticket-scroll').scrollWidth <= document.getElementById('ticket-scroll').clientWidth`), true, `list overflow: ${theme} ${width}`);
     assert.equal(await evaluate(`getComputedStyle(document.querySelector('.tickets-master')).borderRightWidth`), '1px');
     assert.equal(await evaluate(`document.querySelector('.ticket-subject').getBoundingClientRect().width >= 40`), true, `subject clipped: ${theme} ${width}`);
-    assert.equal(await evaluate(`document.querySelectorAll('.detail-actions svg[aria-hidden="true"]').length >= 3`), true);
-    if (width < 700) assert.equal(await evaluate(`document.querySelector('.tickets-master').getBoundingClientRect().height <= innerHeight * .45 + 1`), true);
-    await evaluate(`document.getElementById('detail-more-btn').scrollIntoView(); document.getElementById('detail-more-btn').click()`);
-    await evaluate('new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)))');
-    assert.equal(await evaluate(`(()=>{const menu=document.getElementById('detail-action-menu');const r=menu.getBoundingClientRect();return r.top>=0&&r.bottom<=innerHeight&&r.left>=0&&r.right<=innerWidth&&menu.contains(document.elementFromPoint(r.left+10,r.top+10))})()`), true, `menu clipping: ${theme}`);
-    await key('Escape');
+    assert.equal(await evaluate(`document.querySelectorAll('.detail-head-actions svg[aria-hidden="true"]').length === 2`), true);
+    if (width < 700) assert.equal(await evaluate(`document.querySelector('.tickets-master').getBoundingClientRect().height <= innerHeight * .55 + 1`), true);
     await evaluate(`document.getElementById('ticket-scroll').scrollTop=0; document.querySelector('.tickets-layout').scrollTop=0`);
     await evaluate('new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)))');
     const { data } = await call('Page.captureScreenshot', { format: 'png' });
@@ -1169,7 +1069,7 @@ async function main() {
     await evaluate(`document.documentElement.style.zoom=${JSON.stringify(String(zoom))}`);
     await push();
     assert.equal(await evaluate('document.documentElement.scrollWidth <= innerWidth'), true, `page overflow at ${zoom}x`);
-    assert.equal(await evaluate(`document.getElementById('new-ticket-btn').getBoundingClientRect().right <= innerWidth`), true, `new ticket clipped at ${zoom}x`);
+    assert.equal(await evaluate(`document.getElementById('include-children').getBoundingClientRect().right <= innerWidth`), true, `include children clipped at ${zoom}x`);
     assert.equal(await evaluate(`document.querySelector('.ticket-subject').getBoundingClientRect().width > 0`), true, `subject clipped at ${zoom}x`);
     await evaluate(`document.getElementById('layout-btn').focus()`);
     await key('Enter');
@@ -1194,7 +1094,7 @@ async function main() {
   await call('Emulation.setDeviceMetricsOverride', { width: 440, height: 1000, deviceScaleFactor: 1, mobile: false });
   await evaluate(`document.body.className='vscode-dark'`);
   await push();
-  await evaluate(`if(document.getElementById('ticket-detail-toggle').getAttribute('aria-expanded')==='false') document.getElementById('ticket-detail-toggle').click(); document.querySelector('.tickets-layout').scrollTop=0; document.getElementById('ticket-scroll').scrollTop=0`);
+  await evaluate(`document.querySelector('.tickets-layout').scrollTop=0; document.getElementById('ticket-scroll').scrollTop=0`);
   await evaluate('new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)))');
   assert.equal(await evaluate(`parseFloat(getComputedStyle(document.querySelector('.ticket-subject')).fontSize)`), 13);
   await evaluate(`document.documentElement.style.setProperty('--vscode-font-size','16px')`);
@@ -1212,12 +1112,90 @@ async function main() {
   await evaluate(`document.getElementById('toast-area').replaceChildren()`);
   const preview = await call('Page.captureScreenshot', { format: 'png' });
   fs.writeFileSync(path.join(directory, 'dashboard-preview.png'), Buffer.from(preview.data, 'base64'));
-  await evaluate(`document.getElementById('ticket-detail-card').scrollIntoView();document.getElementById('metadata-edit-btn').click()`);
-  await evaluate('new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)))');
-  const metadataPreview = await call('Page.captureScreenshot', { format: 'png' });
-  fs.writeFileSync(path.join(directory, 'dashboard-metadata-preview.png'), Buffer.from(metadataPreview.data, 'base64'));
   assert.deepEqual(errors, []);
   assert.deepEqual(await evaluate('window.cspViolations'), [], 'Dashboard は CSP 違反を発生させない');
+
+  // 再構築 UI: view.toggleCompactMode・総件数バッジ・高優先度フィルタ・キーボード操作
+  assert.equal(await evaluate(`document.getElementById('tickets-badge').textContent`), '5');
+  assert.equal(await evaluate(`document.getElementById('ticket-list').classList.contains('is-compact')`), false);
+  await evaluate(`window.dispatchEvent(new MessageEvent('message',{data:{type:'view.toggleCompactMode'}}))`);
+  assert.equal(await evaluate(`document.getElementById('ticket-list').classList.contains('is-compact')`), true);
+  assert.equal(await evaluate(`window.acquireVsCodeApi().getState().compactMode`), true);
+  await evaluate(`window.dispatchEvent(new MessageEvent('message',{data:{type:'view.toggleCompactMode'}}))`);
+  assert.equal(await evaluate(`document.getElementById('ticket-list').classList.contains('is-compact')`), false);
+  await evaluate(`document.querySelector('[data-quick-filter="high"]').click()`);
+  assert.equal(await evaluate(`document.querySelectorAll('.ticket-row').length`), 2);
+  await evaluate(`document.querySelector('[data-quick-filter="high"]').click()`);
+  assert.equal(await evaluate(`document.querySelectorAll('.ticket-row').length`), 5);
+  await evaluate(`document.querySelector('.ticket-row[data-id="2816"]').focus()`);
+  await key('ArrowDown');
+  assert.equal(await evaluate(`document.activeElement.dataset.id`), '2815');
+  assert.equal(await evaluate(`window.messages.at(-1).type`), 'ticket.select');
+  assert.equal(await evaluate(`window.messages.at(-1).preserveFocus`), true);
+  await key('ArrowUp');
+  assert.equal(await evaluate(`document.activeElement.dataset.id`), '2816');
+  assert.equal(await evaluate(`window.messages.at(-1).preserveFocus`), true);
+
+  // #NEW 下書き行、フィルタ親自動展開・終了除外
+
+  state.draftTickets = [{
+    queueId: 'draft-q1',
+    documentUri: 'file:///tmp/redmine-client-new-ticket-draft-1.md',
+    subject: '下書きテスト件名',
+    projectId: 1,
+    trackerName: 'Bug',
+    statusName: '新規',
+    priorityName: 'High',
+    dueDate: '2020-01-01',
+    syncState: 'Draft',
+  }];
+  await push();
+  assert.equal(await evaluate(`document.querySelectorAll('.ticket-row').length`), 6);
+  assert.equal(await evaluate(`document.getElementById('tickets-badge').textContent`), '6');
+  assert.equal(await evaluate(`document.querySelector('.ticket-row').classList.contains('is-draft')`), true);
+  assert.equal(await evaluate(`document.querySelector('.ticket-row.is-draft .ticket-id-new').textContent`), '#NEW');
+  assert.equal(await evaluate(`document.querySelectorAll('.ticket-row.is-draft .ticket-hover-actions').length`), 0);
+  assert.equal(await evaluate(`document.querySelectorAll('.ticket-row.is-draft [data-ticket-action="browser"]').length`), 0);
+  await evaluate(`window.messages.length=0;document.querySelector('.ticket-row.is-draft').click()`);
+  assert.deepEqual(await evaluate(`(({type,queueId})=>({type,queueId}))(window.messages.at(-1))`), { type: 'ticket.openDraft', queueId: 'draft-q1' });
+  state.draftTickets = [];
+
+  state.metadataOptions.statuses = [{ id: 1, name: 'Open', isClosed: false }, { id: 2, name: 'Closed', isClosed: true }];
+  state.tickets = [{
+    id: 100,
+    subject: '親チケット',
+    level: 0,
+    statusId: 1,
+    statusName: 'Open',
+    dueDate: '2099-12-31',
+    syncState: 'Synced',
+    children: [{
+      id: 101,
+      subject: '子高優先度',
+      level: 1,
+      statusId: 2,
+      statusName: 'Closed',
+      priorityName: 'High',
+      dueDate: '2020-01-01',
+      syncState: 'Synced',
+      children: [],
+    }],
+  }];
+  state.loadedTicketCount = 2;
+  state.totalTicketCount = 2;
+  await push();
+  await evaluate(`document.querySelector('[data-expand="100"]').click()`);
+  assert.equal(await evaluate(`document.querySelector('[data-expand="100"]').getAttribute('aria-expanded')`), 'false');
+  await evaluate(`document.querySelector('[data-quick-filter="high"]').click()`);
+  assert.equal(await evaluate(`document.querySelectorAll('.ticket-row').length`), 2);
+  assert.equal(await evaluate(`document.querySelector('[data-expand="100"]').getAttribute('aria-expanded')`), 'true');
+  await evaluate(`document.querySelector('[data-quick-filter="high"]').click();document.querySelector('[data-quick-filter="overdue"]').click()`);
+  assert.equal(await evaluate(`document.querySelectorAll('.ticket-row[data-id="101"]').length`), 0);
+  await evaluate(`document.querySelector('[data-quick-filter="overdue"]').click()`);
+
+  await evaluate(`window.messages.length=0;document.getElementById('tab-settings').click();document.getElementById('open-settings-json-btn').click()`);
+  assert.equal(await evaluate(`window.messages.at(-1).type`), 'settings.openJson');
+  assert.deepEqual(errors, []);
   console.log('PASS: Detail操作/状態9種/読み取り専用preview、Metadata一括適用/キャンセル/失敗/接続切替、同期二重送信防止/成功/失敗、日本語/IME/入力待機、番号・本文検索の要求/範囲切替、検索中の新規/子チケット入力保持、追加取得の一覧/スクロール/フォーカス保持/再試行、一覧の情報集約/表示件数、Settings セクション/編集/キーボード操作、折りたたみ維持、子チケット検索、メニューのキーボード操作/表示領域、タブ横断の新規作成、入力/フォーカス維持、下書き前の同期抑止、ローディング/エラー再試行、7画面幅、4テーマ');
   console.log('検証用 HTML: ' + fixture);
   console.log('Project picker screenshots: ' + path.join(directory, 'project-picker-search-440.png') + ', ' + path.join(directory, 'project-picker-search-320.png') + ', ' + path.join(directory, 'project-picker-search-440-dark.png'));

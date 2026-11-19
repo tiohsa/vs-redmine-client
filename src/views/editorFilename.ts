@@ -12,7 +12,11 @@ const newCommentDraftPattern = new RegExp(
   "i",
 );
 const newTicketDraftPattern = new RegExp(
-  `^redmine-client-${scopeHashPattern}new-ticket(?:-\\d+)?\\.md$`,
+  `^redmine-client-${scopeHashPattern}new-ticket(?:-(?:draft-[a-z0-9_-]+|\\d+))?\\.md$`,
+  "i",
+);
+const directTicketPattern = new RegExp(
+  `^redmine-client-${scopeHashPattern}ticket-(\\d+)\\.md$`,
   "i",
 );
 
@@ -45,8 +49,13 @@ export const buildCommentEditorFilename = (
 ): string =>
   `project-${sanitizeId(projectId)}_ticket-${sanitizeId(ticketId)}_${COMMENT_TYPE_LABEL}-${sanitizeId(commentId)}.md`;
 
-export const buildNewTicketDraftFilename = (scopeHash?: string): string =>
-  `redmine-client-${scopeHash ? `${scopeHash}-` : ""}new-ticket.md`;
+export const buildNewTicketDraftFilename = (scopeHash?: string, draftId?: string): string => {
+  const prefix = `redmine-client-${scopeHash ? `${scopeHash}-` : ""}new-ticket`;
+  return draftId ? `${prefix}-${draftId}.md` : `${prefix}.md`;
+};
+
+export const buildDirectTicketFilename = (ticketId: number): string =>
+  `redmine-client-ticket-${sanitizeId(ticketId)}.md`;
 
 export const buildNewCommentDraftFilename = (
   ticketId: number,
@@ -90,3 +99,12 @@ export const parseNewCommentDraftFilename = (filename: string): number | undefin
 
 export const isNewTicketDraftFilename = (filename: string): boolean =>
   newTicketDraftPattern.test(filename);
+
+export const parseDirectTicketFilename = (filename: string): number | undefined => {
+  const match = filename.match(directTicketPattern);
+  if (!match) {
+    return undefined;
+  }
+
+  return Number(match[1]);
+};

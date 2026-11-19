@@ -15,6 +15,7 @@ import {
 } from "../views/ticketEditorRegistry";
 import {
   isNewTicketDraftFilename,
+  parseDirectTicketFilename,
   parseEditorFilename,
   parseNewCommentDraftFilename,
 } from "../views/editorFilename";
@@ -120,6 +121,11 @@ export const classifyDocumentSave = (
       ticketId: parsed.ticketId,
       commentId: parsed.commentId,
     };
+  }
+
+  const directTicketId = parseDirectTicketFilename(filename);
+  if (directTicketId !== undefined) {
+    return { kind: "parsedTicket", ticketId: directTicketId };
   }
 
   const draftTicketId = newCommentDraftTicketId;

@@ -6,6 +6,7 @@ import { randomUUID } from "crypto";
 import { Ticket } from "../redmine/types";
 import { TicketEditorKind } from "./ticketEditorTypes";
 import {
+  getTicketEditors,
   registerTicketEditor,
   setEditorCommentId,
   setEditorContentType,
@@ -24,6 +25,7 @@ import {
 } from "./ticketEditorContent";
 import { IssueMetadata } from "./ticketMetadataTypes";
 import {
+  buildDirectTicketFilename,
   buildTicketEditorFilename,
 } from "./editorFilename";
 import { getEditorStorageDirectory } from "../config/settings";
@@ -35,7 +37,7 @@ import {
 } from "../config/connectionScope";
 
 export const buildTicketPreviewContent = (
-  ticket: Pick<Ticket, "subject" | "description" | "trackerName" | "priorityName" | "statusName" | "dueDate" | "startDate" | "assigneeName" | "assigneeId">,
+  ticket: Pick<Ticket, "subject" | "description" | "trackerName" | "priorityName" | "statusName" | "dueDate" | "startDate" | "assigneeName" | "assigneeId" | "doneRatio">,
 ): string => {
   const metadata: IssueMetadata = {
     tracker: ticket.trackerName ?? "",
@@ -45,6 +47,7 @@ export const buildTicketPreviewContent = (
     start_date: ticket.startDate ?? "",
     assignee: ticket.assigneeName,
     assignee_id: ticket.assigneeId,
+    ...(ticket.doneRatio !== undefined ? { done_ratio: ticket.doneRatio } : {}),
   };
   return buildTicketEditorContent({
     subject: ticket.subject,
@@ -67,6 +70,38 @@ const moveCursorToEnd = (editor: vscode.TextEditor): void => {
   const end = editor.document.positionAt(editor.document.getText().length);
   editor.selection = new vscode.Selection(end, end);
   editor.revealRange(new vscode.Range(end, end));
+};
+
+export const findSubjectTextRange = (
+  content: string,
+): { line: number; startChar: number; endChar: number } | undefined => {
+  const lines = content.split(/\r?\n/);
+  let startIndex = 0;
+  if (lines[0]?.trim() === "---") {
+    const closing = lines.findIndex((line, index) => index > 0 && line.trim() === "---");
+    if (closing !== -1) {
+      startIndex = closing + 1;
+    }
+  }
+  for (let index = startIndex; index < lines.length; index += 1) {
+    const line = lines[index];
+    const trimmed = line.trim();
+    if (trimmed.length === 0) {
+      continue;
+    }
+    if (!trimmed.startsWith("#") || trimmed.startsWith("##")) {
+      return undefined;
+    }
+    const hashIndex = line.indexOf("#");
+    const afterHash = line.slice(hashIndex + 1);
+    const leadingSpaces = afterHash.match(/^\s*/)?.[0].length ?? 0;
+    return {
+      line: index,
+      startChar: hashIndex + 1 + leadingSpaces,
+      endChar: line.length,
+    };
+  }
+  return undefined;
 };
 
 export const findEmptySubjectPosition = (
@@ -244,6 +279,7 @@ const openTicketEditor = async (
   kind: TicketEditorKind,
   content: string,
   freshStart = false,
+  preserveFocus = false,
 ): Promise<vscode.TextEditor> => {
   const connectionScope = getCurrentConnectionScope();
   if (freshStart) {
@@ -265,7 +301,7 @@ const openTicketEditor = async (
     if (storage.uri) { await vscode.workspace.fs.createDirectory(storage.uri); }
     await vscode.workspace.fs.writeFile(fileUri, new TextEncoder().encode(content));
     const document = await vscode.workspace.openTextDocument(fileUri);
-    const editor = await vscode.window.showTextDocument(document, { preview: false });
+    const editor = await vscode.window.showTextDocument(document, { preview: false, preserveFocus });
     registerTicketEditor(ticket.id, editor, kind, "ticket", ticket.projectId, connectionScope);
     return editor;
   }
@@ -281,28 +317,69 @@ const openTicketEditor = async (
         `untitled:redmine-client-${scopeHash}-${buildTicketEditorFilename(ticket.projectId, ticket.id, kind)}`,
       ),
     );
-    const editor = await vscode.window.showTextDocument(document, { preview: false });
+    const editor = await vscode.window.showTextDocument(document, { preview: false, preserveFocus });
     await applyEditorContent(editor, content);
     registerTicketEditor(ticket.id, editor, kind, "ticket", ticket.projectId, connectionScope);
     return editor;
   }
 
   await vscode.workspace.fs.createDirectory(storageDir);
-  const fileUri = resolveTicketEditorUri({ ticket, kind, storageDir });
-  const legacyFileUri = storageResolution.legacyUri
+  const directUri = kind === "primary"
+    ? vscode.Uri.joinPath(storageDir, buildDirectTicketFilename(ticket.id))
+    : undefined;
+  const useDirectUri = directUri && await fileExists(directUri);
+  const fileUri = useDirectUri ? directUri : resolveTicketEditorUri({ ticket, kind, storageDir });
+  const legacyFileUri = !useDirectUri && storageResolution.legacyUri
     ? resolveTicketEditorUri({ ticket, kind, storageDir: storageResolution.legacyUri })
     : undefined;
   await ensureScopedEditorFile({ fileUri, legacyFileUri, initialContent: content });
   const document = await vscode.workspace.openTextDocument(fileUri);
-  const editor = await vscode.window.showTextDocument(document, { preview: false });
+  const editor = await vscode.window.showTextDocument(document, { preview: false, preserveFocus });
   registerTicketEditor(ticket.id, editor, kind, "ticket", ticket.projectId, connectionScope);
   return editor;
 };
 
 export const showTicketPreview = async (
   ticket: Ticket,
-  options?: { kind?: TicketEditorKind; freshStart?: boolean },
+  options?: { kind?: TicketEditorKind; freshStart?: boolean; preserveFocus?: boolean },
 ): Promise<vscode.TextEditor> => {
+  const kind = options?.kind ?? "primary";
+  const preserveFocus = options?.preserveFocus ?? false;
+  if (kind !== "extra" && !options?.freshStart) {
+    const connectionScope = getCurrentConnectionScope();
+    const existingRecord = getTicketEditors(ticket.id, connectionScope).find(
+      (record) => record.kind === "primary" && record.contentType === "ticket",
+    );
+    if (existingRecord) {
+      const existingDocument = vscode.workspace.textDocuments.find(
+        (doc) => doc.uri.toString() === existingRecord.uri,
+      );
+      if (existingDocument) {
+        rememberTicketSummary(ticket);
+        ensureTicketDraft(
+          ticket.id,
+          ticket.subject,
+          ticket.description ?? "",
+          {
+            tracker: ticket.trackerName ?? "",
+            priority: ticket.priorityName ?? "",
+            status: ticket.statusName ?? "",
+            due_date: ticket.dueDate ?? "",
+            start_date: ticket.startDate ?? "",
+            assignee: ticket.assigneeName,
+            assignee_id: ticket.assigneeId,
+            ...(ticket.doneRatio !== undefined ? { done_ratio: ticket.doneRatio } : {}),
+          },
+          ticket.updatedAt,
+          connectionScope,
+        );
+        return vscode.window.showTextDocument(existingDocument, {
+          preview: false,
+          preserveFocus,
+        });
+      }
+    }
+  }
   rememberTicketSummary(ticket);
   const controlFields = {
     mode: "ticket-update" as const,
@@ -320,6 +397,7 @@ export const showTicketPreview = async (
       start_date: ticket.startDate ?? "",
       assignee: ticket.assigneeName,
       assignee_id: ticket.assigneeId,
+      ...(ticket.doneRatio !== undefined ? { done_ratio: ticket.doneRatio } : {}),
     },
     controlFields,
   };
@@ -329,9 +407,10 @@ export const showTicketPreview = async (
   const content = withTrailingEditLines(buildTicketEditorContent(displayContent));
   const editor = await openTicketEditor(
     ticket,
-    options?.kind ?? "primary",
+    kind,
     content,
     options?.freshStart,
+    preserveFocus,
   );
   setEditorContentType(editor, "ticket");
   setEditorProjectId(editor, ticket.projectId);

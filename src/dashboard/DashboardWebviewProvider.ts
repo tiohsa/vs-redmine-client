@@ -109,6 +109,14 @@ export class DashboardWebviewProvider
     this.controller.refreshTickets();
   }
 
+  toggleCompactMode(): void {
+    this.send({ type: "view.toggleCompactMode" });
+  }
+
+  createNewTicketDraft(): Promise<void> {
+    return this.controller.createNewTicketDraft();
+  }
+
   refreshCommentsForTicket(ticketId: number): void {
     this.controller.refreshCommentsForTicket(ticketId);
   }

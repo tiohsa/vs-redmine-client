@@ -29,9 +29,16 @@ suite("Tickets view title actions", () => {
     assert.ok(!entry, "add ticket view/title entry must be removed");
   });
 
-  test("refreshTickets has no view/title entry (legacy view removed)", () => {
-    const entry = findViewTitleEntry("redmine-client.refreshTickets");
-    assert.ok(!entry, "refresh tickets view/title entry must be removed");
+  test("Dashboard view/title has refreshTickets, createTicketFromDashboard, and toggleCompactMode", () => {
+    const refreshEntry = findViewTitleEntry("redmine-client.refreshTickets");
+    const createEntry = findViewTitleEntry("redmine-client.createTicketFromDashboard");
+    const compactEntry = findViewTitleEntry("redmine-client.toggleCompactMode");
+    assert.strictEqual(refreshEntry?.when, "view == redmine-clientActivityDashboard");
+    assert.strictEqual(refreshEntry?.group, "navigation@1");
+    assert.strictEqual(createEntry?.when, "view == redmine-clientActivityDashboard");
+    assert.strictEqual(createEntry?.group, "navigation@2");
+    assert.strictEqual(compactEntry?.when, "view == redmine-clientActivityDashboard");
+    assert.strictEqual(compactEntry?.group, "navigation@3");
   });
 
   test("declares ticket commands with icons", () => {

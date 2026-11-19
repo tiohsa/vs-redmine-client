@@ -34,6 +34,7 @@ export class DashboardTicketService {
   private projectIssueOffset?: number;
   private searchQuery = "";
   private search?: TicketSearch;
+  private cachedProjectTickets?: { projectId: number; includeChildProjects: boolean; tickets: Ticket[] };
   private loadMoreFlight?: { key: string; promise: Promise<void> };
 
   constructor(private readonly deps: {
@@ -61,6 +62,22 @@ export class DashboardTicketService {
     const project = this.deps.getResolvedProject();
     if (scope && (scope.kind === "all" ? !!project : scope.projectId !== project?.id)) {
       return;
+    }
+    if (!this.search && project) {
+      const currentTickets = this.deps.getTickets();
+      const includeChildProjects = getIncludeChildProjects();
+      if (
+        currentTickets.length > 0 &&
+        (!this.cachedProjectTickets ||
+          this.cachedProjectTickets.projectId !== project.id ||
+          this.cachedProjectTickets.includeChildProjects !== includeChildProjects)
+      ) {
+        this.cachedProjectTickets = {
+          projectId: project.id,
+          includeChildProjects,
+          tickets: [...currentTickets],
+        };
+      }
     }
     this.deps.onSearchAccepted?.();
     this.prepareSearch(rawQuery);
@@ -100,9 +117,12 @@ export class DashboardTicketService {
         const result = await this.listIssues({ projectId: project.id, includeChildProjects, limit: getTicketListLimit(), offset: 0 });
         if (generation !== this.ticketLoadGeneration) { return; }
         this.projectIssueOffset = result.offset + result.tickets.length;
-        this.deps.setTickets(mergeTicketsById([], result.tickets));
+        const loaded = mergeTicketsById([], result.tickets);
+        this.cachedProjectTickets = { projectId: project.id, includeChildProjects, tickets: loaded };
+        this.deps.setTickets(loaded);
         this.deps.setTotalCount(result.totalCount);
       } else {
+        this.cachedProjectTickets = undefined;
         this.deps.setTickets([]);
         this.deps.setTotalCount(0);
       }
@@ -144,6 +164,7 @@ export class DashboardTicketService {
     if (clearSearch) {
       this.searchContextRevision++;
       this.searchQuery = "";
+      this.cachedProjectTickets = undefined;
     }
     const { store } = this.deps.context;
     if (store.getState().loading.moreTickets || store.getState().errors.moreTickets) {
@@ -193,7 +214,13 @@ export class DashboardTicketService {
           return;
         }
         this.projectIssueOffset = result.offset + result.tickets.length;
-        this.deps.setTickets(mergeTicketsById(tickets, result.tickets));
+        const merged = mergeTicketsById(tickets, result.tickets);
+        this.cachedProjectTickets = {
+          projectId: project.id,
+          includeChildProjects: getIncludeChildProjects(),
+          tickets: merged,
+        };
+        this.deps.setTickets(merged);
         this.deps.setTotalCount(result.totalCount);
       }
       if (generation !== this.ticketLoadGeneration) { return; }
@@ -242,7 +269,24 @@ export class DashboardTicketService {
       } else if (onlyId) { search[field] = { offset: 0, total: 0 }; }
     }
     if (first) { search.directId = direct?.tickets.find(ticket => ticket.id === id)?.id; }
-    const additions = [...(direct?.tickets ?? []), ...(subject?.tickets ?? []), ...(description?.tickets ?? [])];
+    const needle = search.query.toLowerCase();
+    const localMatches =
+      first &&
+      !onlyId &&
+      search.scope.kind === "project" &&
+      this.cachedProjectTickets?.projectId === search.scope.projectId &&
+      this.cachedProjectTickets.includeChildProjects === search.includeChildProjects
+        ? this.cachedProjectTickets.tickets.filter((ticket) =>
+            (ticket.assigneeName?.toLowerCase().includes(needle) ?? false) ||
+            (ticket.trackerName?.toLowerCase().includes(needle) ?? false),
+          )
+        : [];
+    const additions = [
+      ...(direct?.tickets ?? []),
+      ...(subject?.tickets ?? []),
+      ...(description?.tickets ?? []),
+      ...localMatches,
+    ];
     const tickets = mergeTicketsById(first ? [] : this.deps.getTickets(), additions);
     tickets.sort((a, b) => Number(b.id === search.directId) - Number(a.id === search.directId) || a.id - b.id);
     this.deps.setTickets(tickets);
@@ -265,10 +309,10 @@ export class DashboardTicketService {
     await this.deps.loadComments(ticketId, throwOnCommentError);
   }
 
-  async openEditor(ticketId: number): Promise<void> {
+  async openEditor(ticketId: number, preserveFocus?: boolean): Promise<void> {
     const ticket = this.deps.getTickets().find((t) => t.id === ticketId);
     if (ticket) {
-      await showTicketPreview(ticket);
+      await showTicketPreview(ticket, { preserveFocus });
     }
   }
 

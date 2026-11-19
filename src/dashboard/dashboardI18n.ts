@@ -28,7 +28,11 @@ export interface DashboardStrings {
   clearProjectSearch: string;
   noMatchingProjects: string;
   includeChildren: string;
+  includeChildrenOn: string;
+  includeChildrenOff: string;
+  toggleDensity: string;
   refresh: string;
+  refreshing: string;
   newTicket: string;
   // Tabs
   tabTickets: string;
@@ -46,7 +50,11 @@ export interface DashboardStrings {
   quickMyIssues: string;
   quickOpen: string;
   quickOverdue: string;
+  quickHighPriority: string;
   quickUnsynced: string;
+  clearFilters: string;
+  openSettingsJson: string;
+  unsyncedShort: string;
   quickMyIssuesUnavailable: string;
   quickOpenUnavailable: string;
   quickFilterCapabilityLoading: string;
@@ -257,7 +265,11 @@ export const buildDashboardStrings = (): DashboardStrings => ({
   clearProjectSearch: vscode.l10n.t("Clear project search"),
   noMatchingProjects: vscode.l10n.t("No matching projects"),
   includeChildren: vscode.l10n.t("Include children"),
+  includeChildrenOn: vscode.l10n.t("Include child projects: ON"),
+  includeChildrenOff: vscode.l10n.t("Include child projects: OFF"),
+  toggleDensity: vscode.l10n.t("Toggle density (Standard / Compact)"),
   refresh: vscode.l10n.t("Refresh dashboard"),
+  refreshing: vscode.l10n.t("Refreshing…"),
   newTicket: vscode.l10n.t("New ticket"),
   // Tabs
   tabTickets: vscode.l10n.t("Tickets"),
@@ -275,7 +287,11 @@ export const buildDashboardStrings = (): DashboardStrings => ({
   quickMyIssues: vscode.l10n.t("My Issues"),
   quickOpen: vscode.l10n.t("Open issues"),
   quickOverdue: vscode.l10n.t("Overdue"),
+  quickHighPriority: vscode.l10n.t("High priority"),
   quickUnsynced: vscode.l10n.t("Unsynced"),
+  clearFilters: vscode.l10n.t("Clear filters"),
+  openSettingsJson: vscode.l10n.t("Open settings.json"),
+  unsyncedShort: vscode.l10n.t("Unsynced"),
   quickMyIssuesUnavailable: vscode.l10n.t("Current Redmine user is unavailable"),
   quickOpenUnavailable: vscode.l10n.t("Issue status metadata is unavailable"),
   quickFilterCapabilityLoading: vscode.l10n.t("Filter capability is loading; the saved preference is not currently applied."),

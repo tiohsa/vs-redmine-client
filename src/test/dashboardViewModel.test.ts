@@ -14,6 +14,7 @@ import {
   clearTicketDrafts,
   markDraftStatus,
   initializeTicketDraft,
+  setTicketDraftContent,
 } from "../views/ticketDraftStore";
 import { createInMemoryDraftStorage } from "../views/draftPersistence";
 
@@ -32,6 +33,7 @@ const makeTicket = (overrides: Partial<Ticket> & { id: number }): Ticket => ({
   assigneeId: overrides.assigneeId,
   dueDate: overrides.dueDate,
   startDate: overrides.startDate,
+  doneRatio: overrides.doneRatio,
   parentId: overrides.parentId,
   description: overrides.description,
 });
@@ -118,6 +120,52 @@ suite("Dashboard ViewModel — チケット変換", () => {
     assert.strictEqual(node.assigneeId, 42);
     assert.strictEqual(node.dueDate, "2026-05-01");
     assert.strictEqual(node.startDate, "2026-04-01");
+  });
+
+  test("doneRatio (0, 50, 100, undefined) が DashboardTicketNode に保持される", async () => {
+    const tickets = [
+      makeTicket({ id: 1, doneRatio: 0 }),
+      makeTicket({ id: 2, doneRatio: 50 }),
+      makeTicket({ id: 3, doneRatio: 100, parentId: 2 }),
+      makeTicket({ id: 4 }),
+    ];
+    const nodes = buildTicketDashboardNodes(tickets);
+    assert.strictEqual(nodes.length, 3);
+    assert.strictEqual(nodes[0].doneRatio, 0);
+    assert.strictEqual(nodes[1].doneRatio, 50);
+    assert.strictEqual(nodes[1].children[0].doneRatio, 100);
+    assert.strictEqual(nodes[2].doneRatio, undefined);
+  });
+
+  test("ローカル下書きの done_ratio が DashboardTicketNode にライブオーバーレイされる", async () => {
+    initializeTicketDraft(
+      10,
+      "Initial subject",
+      "desc",
+      {
+        tracker: "Bug",
+        priority: "High",
+        status: "In Progress",
+        due_date: "",
+        done_ratio: 20,
+      },
+      "",
+    );
+    setTicketDraftContent(10, {
+      subject: "Updated subject",
+      description: "desc",
+      metadata: {
+        tracker: "Bug",
+        priority: "High",
+        status: "In Progress",
+        due_date: "",
+        done_ratio: 70,
+      },
+    });
+    markDraftStatus(10, "Dirty");
+    const nodes = buildTicketDashboardNodes([makeTicket({ id: 10, doneRatio: 20 })]);
+    assert.strictEqual(nodes.length, 1);
+    assert.strictEqual(nodes[0].doneRatio, 70);
   });
 
   test("buildTicketDetail でチケット詳細を変換する", async () => {

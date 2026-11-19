@@ -232,7 +232,19 @@ export const validateDashboardMessage = (raw: unknown): ValidationResult => {
       if (!isPositiveInt(ticketId)) {
         return { ok: false, reason: "ticket.select: ticketId must be a positive integer" };
       }
-      return { ok: true, request: { type, requestId, ticketId } };
+      if ("preserveFocus" in raw && raw["preserveFocus"] !== undefined && !isBoolean(raw["preserveFocus"])) {
+        return { ok: false, reason: "ticket.select: preserveFocus must be a boolean" };
+      }
+      const preserveFocus = raw["preserveFocus"] as boolean | undefined;
+      return {
+        ok: true,
+        request: {
+          type,
+          requestId,
+          ticketId,
+          ...(preserveFocus !== undefined ? { preserveFocus } : {}),
+        },
+      };
     }
 
     case "ticket.openEditor": {
@@ -259,8 +271,57 @@ export const validateDashboardMessage = (raw: unknown): ValidationResult => {
       return { ok: true, request: { type, requestId, ticketId } };
     }
 
-    case "ticket.create":
-      return { ok: true, request: { type, requestId } };
+    case "ticket.create": {
+      if ("projectId" in raw && raw["projectId"] !== undefined && !isPositiveInt(raw["projectId"])) {
+        return { ok: false, reason: "ticket.create: projectId must be a positive integer" };
+      }
+      const projectId = raw["projectId"] as number | undefined;
+      return {
+        ok: true,
+        request: {
+          type,
+          requestId,
+          ...(projectId !== undefined ? { projectId } : {}),
+        },
+      };
+    }
+
+    case "ticket.openDraft": {
+      const queueId = raw["queueId"];
+      const documentUri = raw["documentUri"];
+      if (!isNonEmptyString(queueId)) {
+        return { ok: false, reason: "ticket.openDraft: queueId must be a non-empty string" };
+      }
+      if (!isNonEmptyString(documentUri)) {
+        return { ok: false, reason: "ticket.openDraft: documentUri must be a non-empty string" };
+      }
+      if ("preserveFocus" in raw && raw["preserveFocus"] !== undefined && !isBoolean(raw["preserveFocus"])) {
+        return { ok: false, reason: "ticket.openDraft: preserveFocus must be a boolean" };
+      }
+      const preserveFocus = raw["preserveFocus"] as boolean | undefined;
+      return {
+        ok: true,
+        request: {
+          type,
+          requestId,
+          queueId,
+          documentUri,
+          ...(preserveFocus !== undefined ? { preserveFocus } : {}),
+        },
+      };
+    }
+
+    case "ticket.syncDraft": {
+      const queueId = raw["queueId"];
+      const documentUri = raw["documentUri"];
+      if (!isNonEmptyString(queueId)) {
+        return { ok: false, reason: "ticket.syncDraft: queueId must be a non-empty string" };
+      }
+      if (!isNonEmptyString(documentUri)) {
+        return { ok: false, reason: "ticket.syncDraft: documentUri must be a non-empty string" };
+      }
+      return { ok: true, request: { type, requestId, queueId, documentUri } };
+    }
 
     case "ticket.createChild": {
       const parentTicketId = raw["parentTicketId"];
@@ -496,6 +557,7 @@ export const validateDashboardMessage = (raw: unknown): ValidationResult => {
       return { ok: true, request: { type, requestId, patch: patch as import("./dashboardProtocol").DashboardGeneralSettingsPatch } };
     }
 
+    case "settings.openJson":
     case "apiKey.set":
     case "apiKey.clear":
       return { ok: true, request: { type, requestId } };

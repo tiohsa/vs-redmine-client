@@ -69,7 +69,10 @@ const parseMetadataBlockText = (
   const { controlText, issueText } = splitMetadataBlockText(metadataLines);
   const controlFields = parseFrontmatterControlFields(controlText);
   const textToParse = issueText.length > 0 ? issueText : metadataLines;
-  const metadata = parseIssueMetadataYaml(textToParse, options.allowEmptyStatus || controlFields.mode === "new-ticket");
+  const metadata = parseIssueMetadataYaml(
+    textToParse,
+    options.allowEmptyStatus || controlFields.mode === "new-ticket" || controlFields.mode === "ticket-create",
+  );
   return { metadata, controlFields };
 };
 

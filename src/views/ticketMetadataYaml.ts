@@ -7,7 +7,7 @@ import {
 import { FrontmatterControlFields } from "./ticketMetadataControlFields";
 import { TicketMode } from "./ticketSaveTypes";
 
-const VALID_TICKET_MODES: TicketMode[] = ["new-ticket", "ticket-update", "comment"];
+const VALID_TICKET_MODES: TicketMode[] = ["new-ticket", "ticket-create", "ticket-update", "comment"];
 
 /**
  * メタデータブロック全体テキストから `issue:` より前の制御フィールド部分と

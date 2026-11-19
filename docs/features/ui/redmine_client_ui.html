@@ -1,0 +1,1385 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Redmine Client - VS Code Extension Webview</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <!-- VS Code 公式アイコンセット (Codicons) -->
+  <link rel="stylesheet" href="https://unpkg.com/@vscode/codicons@0.0.36/dist/codicon.css" />
+  <style>
+    /* =========================================================================
+       1. VS Code Webview ネイティブテーマ変数定義（デフォルト: Dark+）
+       実機では VS Code 本体から自動注入される変数群です
+       ========================================================================= */
+    :root, [data-vscode-theme="dark"] {
+      --vscode-font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      --vscode-editor-font-family: "JetBrains Mono", "Fira Code", Consolas, "Courier New", monospace;
+      --vscode-font-size: 13px;
+
+      --vscode-foreground: #cccccc;
+      --vscode-descriptionForeground: #8b949e;
+      --vscode-disabledForeground: #6e7681;
+      --vscode-focusBorder: #007fd4;
+
+      --vscode-sideBar-background: #252526;
+      --vscode-sideBar-foreground: #cccccc;
+      --vscode-sideBar-border: #2b2b2b;
+      --vscode-sideBarSectionHeader-background: #252526;
+      --vscode-sideBarSectionHeader-foreground: #cccccc;
+
+      --vscode-editor-background: #1e1e1e;
+      --vscode-editor-foreground: #d4d4d4;
+      --vscode-editorGroupHeader-tabsBackground: #252526;
+      --vscode-tab-activeBackground: #1e1e1e;
+      --vscode-tab-inactiveBackground: #2d2d2d;
+      --vscode-tab-activeForeground: #ffffff;
+      --vscode-tab-inactiveForeground: #969696;
+      --vscode-tab-border: #252526;
+
+      --vscode-activityBar-background: #333333;
+      --vscode-activityBar-foreground: #ffffff;
+      --vscode-activityBar-inactiveForeground: #858585;
+
+      --vscode-input-background: #3c3c3c;
+      --vscode-input-foreground: #cccccc;
+      --vscode-input-border: transparent;
+      --vscode-input-placeholderForeground: #858585;
+
+      --vscode-dropdown-background: #3c3c3c;
+      --vscode-dropdown-foreground: #f0f0f0;
+      --vscode-dropdown-border: #3c3c3c;
+
+      --vscode-button-background: #0e639c;
+      --vscode-button-foreground: #ffffff;
+      --vscode-button-hoverBackground: #1177bb;
+      --vscode-button-secondaryBackground: #3a3d41;
+      --vscode-button-secondaryForeground: #ffffff;
+      --vscode-button-secondaryHoverBackground: #45494e;
+
+      --vscode-badge-background: #4d4d4d;
+      --vscode-badge-foreground: #ffffff;
+
+      --vscode-list-hoverBackground: #2a2d2e;
+      --vscode-list-activeSelectionBackground: #04395e;
+      --vscode-list-activeSelectionForeground: #ffffff;
+      --vscode-list-inactiveSelectionBackground: #37373d;
+      --vscode-tree-indentGuidesStroke: #585858;
+
+      --vscode-textLink-foreground: #3794ff;
+      --vscode-gitDecoration-modifiedResourceForeground: #e2c08d;
+      --vscode-gitDecoration-addedResourceForeground: #73c991;
+      --vscode-editorError-foreground: #f14c4c;
+      --vscode-editorWarning-foreground: #cca700;
+      --vscode-progressBar-background: #0e70c0;
+      --vscode-scrollbarSlider-background: rgba(121, 121, 121, 0.35);
+      --vscode-scrollbarSlider-hoverBackground: rgba(100, 100, 100, 0.65);
+    }
+
+    /* テーマ検証用：Light+ */
+    [data-vscode-theme="light"] {
+      --vscode-foreground: #3b3b3b;
+      --vscode-descriptionForeground: #717171;
+      --vscode-disabledForeground: #a0a0a0;
+      --vscode-focusBorder: #0090f1;
+
+      --vscode-sideBar-background: #f3f3f3;
+      --vscode-sideBar-foreground: #3b3b3b;
+      --vscode-sideBar-border: #e4e4e4;
+      --vscode-sideBarSectionHeader-background: #f3f3f3;
+      --vscode-sideBarSectionHeader-foreground: #3b3b3b;
+
+      --vscode-editor-background: #ffffff;
+      --vscode-editor-foreground: #333333;
+      --vscode-editorGroupHeader-tabsBackground: #f3f3f3;
+      --vscode-tab-activeBackground: #ffffff;
+      --vscode-tab-inactiveBackground: #ececec;
+      --vscode-tab-activeForeground: #333333;
+      --vscode-tab-inactiveForeground: #6e6e6e;
+      --vscode-tab-border: #f3f3f3;
+
+      --vscode-activityBar-background: #2c2c2c;
+      --vscode-activityBar-foreground: #ffffff;
+      --vscode-activityBar-inactiveForeground: #999999;
+
+      --vscode-input-background: #ffffff;
+      --vscode-input-foreground: #3b3b3b;
+      --vscode-input-border: #cecece;
+      --vscode-input-placeholderForeground: #767676;
+
+      --vscode-dropdown-background: #ffffff;
+      --vscode-dropdown-foreground: #3b3b3b;
+      --vscode-dropdown-border: #cecece;
+
+      --vscode-button-background: #007acc;
+      --vscode-button-foreground: #ffffff;
+      --vscode-button-hoverBackground: #0062a3;
+      --vscode-button-secondaryBackground: #e4e6e8;
+      --vscode-button-secondaryForeground: #3b3b3b;
+      --vscode-button-secondaryHoverBackground: #d5d8dc;
+
+      --vscode-badge-background: #c4c4c4;
+      --vscode-badge-foreground: #333333;
+
+      --vscode-list-hoverBackground: #e8e8e8;
+      --vscode-list-activeSelectionBackground: #0060c0;
+      --vscode-list-activeSelectionForeground: #ffffff;
+      --vscode-list-inactiveSelectionBackground: #e4e6f1;
+      --vscode-tree-indentGuidesStroke: #a9a9a9;
+
+      --vscode-textLink-foreground: #006ab1;
+      --vscode-gitDecoration-modifiedResourceForeground: #895503;
+      --vscode-gitDecoration-addedResourceForeground: #587c0c;
+      --vscode-editorError-foreground: #e51400;
+      --vscode-editorWarning-foreground: #bf8803;
+      --vscode-progressBar-background: #0e70c0;
+      --vscode-scrollbarSlider-background: rgba(100, 100, 100, 0.25);
+      --vscode-scrollbarSlider-hoverBackground: rgba(100, 100, 100, 0.5);
+    }
+
+    /* テーマ検証用：Monokai */
+    [data-vscode-theme="monokai"] {
+      --vscode-foreground: #f8f8f2;
+      --vscode-descriptionForeground: #a6a69c;
+      --vscode-disabledForeground: #75715e;
+      --vscode-focusBorder: #75715e;
+
+      --vscode-sideBar-background: #1e1f1c;
+      --vscode-sideBar-foreground: #f8f8f2;
+      --vscode-sideBar-border: #272822;
+
+      --vscode-editor-background: #272822;
+      --vscode-editor-foreground: #f8f8f2;
+      --vscode-editorGroupHeader-tabsBackground: #1e1f1c;
+      --vscode-tab-activeBackground: #272822;
+      --vscode-tab-inactiveBackground: #34352f;
+      --vscode-tab-activeForeground: #ffffff;
+      --vscode-tab-inactiveForeground: #999999;
+      --vscode-tab-border: #1e1f1c;
+
+      --vscode-activityBar-background: #272822;
+      --vscode-activityBar-foreground: #f8f8f2;
+      --vscode-activityBar-inactiveForeground: #75715e;
+
+      --vscode-input-background: #414339;
+      --vscode-input-foreground: #f8f8f2;
+      --vscode-input-border: transparent;
+      --vscode-input-placeholderForeground: #8f908a;
+
+      --vscode-dropdown-background: #414339;
+      --vscode-dropdown-foreground: #f8f8f2;
+      --vscode-dropdown-border: #414339;
+
+      --vscode-button-background: #75715e;
+      --vscode-button-foreground: #ffffff;
+      --vscode-button-hoverBackground: #8f8b76;
+      --vscode-button-secondaryBackground: #3e3d32;
+      --vscode-button-secondaryForeground: #f8f8f2;
+      --vscode-button-secondaryHoverBackground: #4e4d40;
+
+      --vscode-badge-background: #75715e;
+      --vscode-badge-foreground: #f8f8f2;
+
+      --vscode-list-hoverBackground: #3e3d32;
+      --vscode-list-activeSelectionBackground: #49483e;
+      --vscode-list-activeSelectionForeground: #ffffff;
+      --vscode-list-inactiveSelectionBackground: #3e3d32;
+      --vscode-tree-indentGuidesStroke: #57584f;
+
+      --vscode-textLink-foreground: #66d9ef;
+      --vscode-gitDecoration-modifiedResourceForeground: #e6db74;
+      --vscode-gitDecoration-addedResourceForeground: #a6e22e;
+      --vscode-editorError-foreground: #f92672;
+      --vscode-editorWarning-foreground: #fd971f;
+      --vscode-progressBar-background: #a6e22e;
+      --vscode-scrollbarSlider-background: rgba(117, 113, 94, 0.4);
+      --vscode-scrollbarSlider-hoverBackground: rgba(117, 113, 94, 0.7);
+    }
+
+    /* =========================================================================
+       2. Webview 本体スタイル（このまま拡張機能の media/main.css に移植可能）
+       ========================================================================= */
+    body {
+      font-family: var(--vscode-font-family);
+      font-size: var(--vscode-font-size);
+      color: var(--vscode-foreground);
+      background-color: var(--vscode-editor-background);
+    }
+
+    .vscode-sidebar {
+      background-color: var(--vscode-sideBar-background);
+      color: var(--vscode-sideBar-foreground);
+      border-right: 1px solid var(--vscode-sideBar-border);
+    }
+
+    .vscode-input {
+      background-color: var(--vscode-input-background);
+      color: var(--vscode-input-foreground);
+      border: 1px solid var(--vscode-input-border);
+    }
+    .vscode-input::placeholder {
+      color: var(--vscode-input-placeholderForeground);
+    }
+    .vscode-input:focus {
+      outline: none;
+      border-color: var(--vscode-focusBorder);
+    }
+
+    .vscode-btn-primary {
+      background-color: var(--vscode-button-background);
+      color: var(--vscode-button-foreground);
+    }
+    .vscode-btn-primary:hover {
+      background-color: var(--vscode-button-hoverBackground);
+    }
+
+    .vscode-btn-secondary {
+      background-color: var(--vscode-button-secondaryBackground);
+      color: var(--vscode-button-secondaryForeground);
+    }
+    .vscode-btn-secondary:hover {
+      background-color: var(--vscode-button-secondaryHoverBackground);
+    }
+
+    .vscode-badge {
+      background-color: var(--vscode-badge-background);
+      color: var(--vscode-badge-foreground);
+    }
+
+    /* チケット行のホバー＆選択（VS Code Tree / List 準拠） */
+    .ticket-row {
+      position: relative;
+      border-bottom: 1px solid color-mix(in srgb, var(--vscode-sideBar-border) 60%, transparent);
+    }
+    .ticket-row:hover {
+      background-color: var(--vscode-list-hoverBackground);
+    }
+    .ticket-row.is-selected {
+      background-color: var(--vscode-list-inactiveSelectionBackground);
+    }
+    .vscode-sidebar:focus-within .ticket-row.is-selected {
+      background-color: var(--vscode-list-activeSelectionBackground);
+      color: var(--vscode-list-activeSelectionForeground);
+    }
+    .vscode-sidebar:focus-within .ticket-row.is-selected .muted-text {
+      color: color-mix(in srgb, var(--vscode-list-activeSelectionForeground) 80%, transparent);
+    }
+
+    /* 未同期アイテムの左ティント（Git Modified風） */
+    .ticket-row.is-unsynced:not(.is-selected) {
+      background-color: color-mix(in srgb, var(--vscode-gitDecoration-modifiedResourceForeground) 8%, transparent);
+    }
+
+    /* ツリーインデントガイド（VS Code エクスプローラー準拠） */
+    .tree-children-group {
+      position: relative;
+    }
+    .tree-children-group::before {
+      content: '';
+      position: absolute;
+      left: 14px;
+      top: 0;
+      bottom: 4px;
+      width: 1px;
+      background-color: var(--vscode-tree-indentGuidesStroke);
+      opacity: 0.45;
+    }
+    .tree-child-item {
+      padding-left: 26px;
+    }
+    .tree-child-item::after {
+      content: '';
+      position: absolute;
+      left: 14px;
+      top: 16px;
+      width: 8px;
+      height: 1px;
+      background-color: var(--vscode-tree-indentGuidesStroke);
+      opacity: 0.45;
+    }
+
+    /* VS Code 風スクロールバー */
+    ::-webkit-scrollbar {
+      width: 6px;
+      height: 6px;
+    }
+    ::-webkit-scrollbar-track {
+      background: transparent;
+    }
+    ::-webkit-scrollbar-thumb {
+      background: var(--vscode-scrollbarSlider-background);
+    }
+    ::-webkit-scrollbar-thumb:hover {
+      background: var(--vscode-scrollbarSlider-hoverBackground);
+    }
+
+    .no-scrollbar::-webkit-scrollbar {
+      display: none;
+    }
+    .no-scrollbar {
+      -ms-overflow-style: none;
+      scrollbar-width: none;
+    }
+
+    /* Codicon 微調整 */
+    .codicon {
+      font-size: 14px !important;
+      line-height: 1 !important;
+      vertical-align: middle;
+    }
+  </style>
+</head>
+<body class="h-screen flex flex-col overflow-hidden select-none" data-vscode-theme="dark">
+
+  <!-- =========================================================================
+       モック検証用ツールバー（実機のVS Codeには含まれないテスト用ヘッダー）
+       ========================================================================= -->
+  <header class="bg-[#181818] text-[#cccccc] border-b border-[#2b2b2b] px-3 py-1.5 flex flex-wrap items-center justify-between gap-2 text-xs z-30 shrink-0">
+    <div class="flex items-center gap-2">
+      <span class="codicon codicon-extensions text-[#3794ff]"></span>
+      <span class="font-semibold text-white">VS Code Extension Webview モック</span>
+      <span class="text-[#858585] hidden md:inline">| --vscode-* CSS変数 &amp; postMessage 通信準拠</span>
+    </div>
+
+    <div class="flex items-center gap-3 flex-wrap">
+      <!-- VS Code テーマ切替 -->
+      <div class="flex items-center gap-1">
+        <span class="text-[#858585]">テーマ:</span>
+        <button onclick="setVSCodeTheme('dark')" data-theme-btn="dark" class="theme-btn px-2 py-0.5 rounded bg-[#0e639c] text-white transition">Dark+</button>
+        <button onclick="setVSCodeTheme('light')" data-theme-btn="light" class="theme-btn px-2 py-0.5 rounded bg-[#2d2d2d] hover:bg-[#3c3c3c] text-[#cccccc] transition">Light+</button>
+        <button onclick="setVSCodeTheme('monokai')" data-theme-btn="monokai" class="theme-btn px-2 py-0.5 rounded bg-[#2d2d2d] hover:bg-[#3c3c3c] text-[#cccccc] transition">Monokai</button>
+      </div>
+
+      <!-- サイドバー幅切替 -->
+      <div class="flex items-center gap-1">
+        <span class="text-[#858585]">幅:</span>
+        <button onclick="setSidebarWidth('260px')" data-width="260px" class="width-btn px-2 py-0.5 rounded bg-[#2d2d2d] hover:bg-[#3c3c3c] text-[#cccccc] transition">260px</button>
+        <button onclick="setSidebarWidth('330px')" data-width="330px" class="width-btn px-2 py-0.5 rounded bg-[#0e639c] text-white transition">330px</button>
+        <button onclick="setSidebarWidth('420px')" data-width="420px" class="width-btn px-2 py-0.5 rounded bg-[#2d2d2d] hover:bg-[#3c3c3c] text-[#cccccc] transition">420px</button>
+      </div>
+    </div>
+  </header>
+
+  <!-- =========================================================================
+       VS Code ワークベンチ本体
+       ========================================================================= -->
+  <div class="flex-1 flex overflow-hidden">
+
+    <!-- 左端：アクティビティバー -->
+    <aside style="background-color: var(--vscode-activityBar-background);" class="w-12 flex flex-col items-center py-2.5 gap-3 shrink-0 border-r border-black/20">
+      <div style="color: var(--vscode-activityBar-inactiveForeground);" class="w-10 h-10 flex items-center justify-center hover:text-white cursor-pointer" title="エクスプローラー (Ctrl+Shift+E)">
+        <span class="codicon codicon-files" style="font-size: 20px !important;"></span>
+      </div>
+      <div style="color: var(--vscode-activityBar-inactiveForeground);" class="w-10 h-10 flex items-center justify-center hover:text-white cursor-pointer" title="検索 (Ctrl+Shift+F)">
+        <span class="codicon codicon-search" style="font-size: 20px !important;"></span>
+      </div>
+      <div style="color: var(--vscode-activityBar-inactiveForeground);" class="w-10 h-10 flex items-center justify-center hover:text-white cursor-pointer relative" title="ソース管理 (Ctrl+Shift+G)">
+        <span class="codicon codicon-source-control" style="font-size: 20px !important;"></span>
+        <span class="vscode-badge absolute bottom-1 right-1 text-[9px] font-bold px-1 rounded-full">28</span>
+      </div>
+      <!-- Redmine Client アクティブビュー -->
+      <div style="color: var(--vscode-activityBar-foreground); border-left: 2px solid var(--vscode-activityBar-foreground);" class="w-12 h-10 flex items-center justify-center cursor-pointer" title="Redmine Client">
+        <span class="codicon codicon-checklist" style="font-size: 20px !important;"></span>
+      </div>
+    </aside>
+
+    <!-- =======================================================================
+         ★ 拡張機能 Webview View 本体（WebviewViewProvider にそのまま配置するHTML）
+         ======================================================================= -->
+    <section id="webview-root" tabindex="0" onkeydown="handleSidebarKeydown(event)" style="width: 330px;" class="vscode-sidebar flex flex-col h-full shrink-0 transition-[width] duration-150 focus:outline-none">
+
+      <!-- VS Code ネイティブ View Header（タイトルバー + ビューアクション） -->
+      <div class="h-[35px] px-3 flex items-center justify-between text-[11px] font-semibold tracking-wider uppercase shrink-0" style="color: var(--vscode-sideBarSectionHeader-foreground);">
+        <span class="truncate">REDMINE CLIENT: ダッシュボード</span>
+        <div class="flex items-center gap-0.5">
+          <button onclick="postToExtension('refresh')" title="Redmineから最新情報を取得" class="p-1 rounded hover:bg-[var(--vscode-list-hoverBackground)] transition">
+            <span id="refresh-icon" class="codicon codicon-refresh"></span>
+          </button>
+          <button onclick="postToExtension('createTicket')" title="新規チケット作成 (Markdownを開く)" class="p-1 rounded hover:bg-[var(--vscode-list-hoverBackground)] transition">
+            <span class="codicon codicon-add"></span>
+          </button>
+          <button onclick="toggleCompactMode()" id="btn-density" title="表示密度の切替（標準 / コンパクト）" class="p-1 rounded hover:bg-[var(--vscode-list-hoverBackground)] transition">
+            <span class="codicon codicon-list-flat"></span>
+          </button>
+        </div>
+      </div>
+
+      <!-- 1. プロジェクト選択 + 子プロジェクト階層トグル -->
+      <div class="px-2.5 pb-2 flex items-center gap-1.5 shrink-0">
+        <div class="relative flex-1 min-w-0">
+          <select id="project-select" onchange="onFilterStateChanged()" class="vscode-input w-full appearance-none text-xs rounded-[2px] pl-2 pr-6 py-1 truncate cursor-pointer">
+            <option value="all">すべてのプロジェクト</option>
+            <option value="eCookbook" selected>eCookbook</option>
+            <option value="OnlineStore">OnlineStore</option>
+          </select>
+          <span class="codicon codicon-chevron-down absolute right-1.5 top-1/2 -translate-y-1/2 pointer-events-none opacity-70" style="font-size: 12px !important;"></span>
+        </div>
+
+        <button id="btn-subprojects" onclick="toggleSubprojects()" title="子プロジェクトを含める：ON" class="vscode-btn-primary px-2 py-1 rounded-[2px] flex items-center gap-1 text-[11px] shrink-0 transition">
+          <span class="codicon codicon-list-tree"></span>
+        </button>
+      </div>
+
+      <!-- 2. ナビゲーションタブ（未同期件数バッジ統合） -->
+      <div class="px-2.5 border-b flex items-center gap-4 text-xs shrink-0" style="border-color: var(--vscode-sideBar-border);">
+        <button onclick="switchTab('tickets')" id="tab-tickets" class="py-1.5 font-medium border-b-2 flex items-center gap-1.5 transition" style="border-color: var(--vscode-focusBorder);">
+          <span>チケット</span>
+          <span id="badge-total-count" class="vscode-badge text-[10px] px-1.5 rounded-full font-mono">0</span>
+        </button>
+        <button onclick="switchTab('unsynced')" id="tab-unsynced" class="py-1.5 font-medium border-b-2 border-transparent opacity-75 hover:opacity-100 flex items-center gap-1.5 transition">
+          <span>未同期</span>
+          <span id="badge-unsynced-count" class="text-[10px] px-1.5 rounded-full font-mono font-semibold" style="background-color: color-mix(in srgb, var(--vscode-gitDecoration-modifiedResourceForeground) 25%, transparent); color: var(--vscode-gitDecoration-modifiedResourceForeground);">0</span>
+        </button>
+        <button onclick="switchTab('settings')" id="tab-settings" class="py-1.5 font-medium border-b-2 border-transparent opacity-75 hover:opacity-100 transition">
+          設定
+        </button>
+      </div>
+
+      <!-- タブビュー：チケット一覧 -->
+      <div id="view-tickets" class="flex-1 flex flex-col min-h-0">
+
+        <!-- 3. 検索ボックス & クイックフィルタチップ -->
+        <div class="p-2 border-b space-y-1.5 shrink-0" style="border-color: var(--vscode-sideBar-border);">
+          <div class="relative flex items-center">
+            <span class="codicon codicon-search absolute left-2 pointer-events-none opacity-60" style="font-size: 12px !important;"></span>
+            <input id="search-input" oninput="onFilterStateChanged()" type="text" placeholder="チケット番号・件名・担当者で検索..." class="vscode-input w-full text-xs rounded-[2px] pl-7 pr-6 py-1" />
+            <button id="clear-search" onclick="clearSearch()" title="検索をクリア" class="hidden absolute right-1.5 opacity-70 hover:opacity-100">
+              <span class="codicon codicon-close" style="font-size: 12px !important;"></span>
+            </button>
+          </div>
+
+          <!-- クイックフィルタピル -->
+          <div class="flex items-center gap-1 overflow-x-auto no-scrollbar">
+            <button onclick="toggleFilter('mine')" data-filter="mine" class="filter-chip vscode-btn-secondary px-2 py-0.5 rounded-[2px] text-[11px] whitespace-nowrap transition">
+              自分のチケット
+            </button>
+            <button onclick="toggleFilter('open')" data-filter="open" class="filter-chip vscode-btn-primary px-2 py-0.5 rounded-[2px] text-[11px] whitespace-nowrap transition">
+              未完了
+            </button>
+            <button onclick="toggleFilter('overdue')" data-filter="overdue" class="filter-chip vscode-btn-secondary px-2 py-0.5 rounded-[2px] text-[11px] whitespace-nowrap transition">
+              期限超過
+            </button>
+            <button onclick="toggleFilter('high')" data-filter="high" class="filter-chip vscode-btn-secondary px-2 py-0.5 rounded-[2px] text-[11px] whitespace-nowrap transition">
+              高優先度
+            </button>
+          </div>
+        </div>
+
+        <!-- 4. チケットリスト本体 -->
+        <div id="ticket-list-container" class="flex-1 overflow-y-auto">
+          <!-- Webview JS でレンダリング -->
+        </div>
+      </div>
+
+      <!-- タブビュー：設定（Extension Settings 連携イメージ） -->
+      <div id="view-settings" class="hidden flex-1 p-3 space-y-3 overflow-y-auto text-xs">
+        <div class="space-y-1">
+          <div class="font-semibold">Redmine 接続・同期設定</div>
+          <p class="opacity-70 text-[11px]">VS Code の `settings.json` と同期される設定項目です。</p>
+        </div>
+        <div class="space-y-2.5 p-2.5 rounded-[2px] border" style="border-color: var(--vscode-sideBar-border); background-color: color-mix(in srgb, var(--vscode-editor-background) 45%, transparent);">
+          <div>
+            <label class="block text-[11px] opacity-80 mb-1">redmineClient.serverUrl</label>
+            <input type="text" value="https://redmine.example.com" class="vscode-input w-full px-2 py-1 rounded-[2px] text-xs font-mono" />
+          </div>
+          <div>
+            <label class="block text-[11px] opacity-80 mb-1">redmineClient.autoSyncOnSave</label>
+            <label class="flex items-center gap-2 cursor-pointer">
+              <input type="checkbox" checked class="accent-[var(--vscode-button-background)]" />
+              <span>Markdown保存時に自動でRedmineへ同期する</span>
+            </label>
+          </div>
+          <div class="pt-1">
+            <button onclick="postToExtension('openSettingsJson')" class="vscode-btn-secondary w-full py-1.5 rounded-[2px] text-xs flex items-center justify-center gap-1.5">
+              <span class="codicon codicon-json"></span>
+              <span>settings.json を開く</span>
+            </button>
+          </div>
+        </div>
+      </div>
+
+    </section>
+
+    <!-- =======================================================================
+         右側：VS Code 標準テキストエディタ（CodeLens + QuickPick + Title Menu）
+         ======================================================================= -->
+    <main class="relative flex-1 flex flex-col min-w-0" style="background-color: var(--vscode-editor-background); color: var(--vscode-editor-foreground);">
+
+      <!-- VS Code 標準 QuickPick（ドロップダウンメニュー再現：CodeLensクリック時に上部から展開） -->
+      <div id="vscode-quickpick" class="hidden absolute top-1 left-1/2 -translate-x-1/2 w-[92%] max-w-[440px] z-40 rounded-[3px] shadow-2xl border overflow-hidden text-xs" style="background-color: var(--vscode-sideBar-background); border-color: var(--vscode-focusBorder);">
+        <div class="p-1.5 border-b flex items-center gap-1.5" style="border-color: var(--vscode-sideBar-border);">
+          <span class="codicon codicon-chevron-right opacity-70"></span>
+          <input id="quickpick-input" type="text" readonly class="vscode-input w-full px-2 py-1 rounded-[2px] text-xs focus:outline-none" />
+          <button onclick="closeQuickPick()" class="p-1 opacity-70 hover:opacity-100" title="閉じる (Esc)">
+            <span class="codicon codicon-close"></span>
+          </button>
+        </div>
+        <div id="quickpick-items" class="max-h-48 overflow-y-auto py-1">
+          <!-- QuickPick 選択肢が動的に入る -->
+        </div>
+      </div>
+
+      <!-- エディタタブバー（Editor Title Menu 対応） -->
+      <div class="h-[35px] flex items-center justify-between pr-2 border-b overflow-x-auto shrink-0" style="background-color: var(--vscode-editorGroupHeader-tabsBackground); border-color: var(--vscode-tab-border);">
+        <div class="h-full px-3 flex items-center gap-2 text-xs border-t-2" style="background-color: var(--vscode-tab-activeBackground); color: var(--vscode-tab-activeForeground); border-color: var(--vscode-focusBorder);">
+          <span class="codicon codicon-markdown" style="color: var(--vscode-textLink-foreground);"></span>
+          <span id="editor-filename" style="font-family: var(--vscode-editor-font-family);">redmine-client-ticket-3.md</span>
+          <span id="editor-dirty-dot" class="w-2 h-2 rounded-full" style="background-color: var(--vscode-gitDecoration-modifiedResourceForeground);" title="未同期の変更あり"></span>
+        </div>
+
+        <!-- Editor Title Actions（contributes.menus["editor/title"] で実現可能） -->
+        <div class="flex items-center gap-1">
+          <button id="editor-sync-btn" onclick="postToExtension('syncTicket', { issueId: state.selectedTicketId })" title="Redmineへ同期 (redmineClient.syncCurrentTicket)" class="p-1.5 rounded-[2px] hover:bg-[var(--vscode-list-hoverBackground)] flex items-center gap-1 text-[11px] transition" style="color: var(--vscode-gitDecoration-modifiedResourceForeground);">
+            <span class="codicon codicon-sync"></span>
+            <span id="editor-sync-label">同期</span>
+          </button>
+          <button onclick="postToExtension('openExternal', { issueId: state.selectedTicketId })" title="ブラウザでRedmineを開く" class="p-1.5 rounded-[2px] hover:bg-[var(--vscode-list-hoverBackground)] transition">
+            <span class="codicon codicon-link-external"></span>
+          </button>
+        </div>
+      </div>
+
+      <!-- パンくずリスト -->
+      <div class="px-3 py-1 text-[11px] border-b flex items-center justify-between truncate" style="border-color: var(--vscode-sideBar-border); color: var(--vscode-descriptionForeground); font-family: var(--vscode-editor-font-family);">
+        <span class="truncate">workspace &gt; .redmine &gt; <span id="breadcrumb-file" style="color: var(--vscode-foreground);">redmine-client-ticket-3.md</span></span>
+        <span id="unsynced-banner-text" class="text-[11px] font-sans shrink-0 ml-2" style="color: var(--vscode-gitDecoration-modifiedResourceForeground);">● 未同期の変更あり</span>
+      </div>
+
+      <!-- VS Code CodeLens バー再現（CodeLensProvider でYAML行の上に表示可能） -->
+      <div class="px-4 py-1.5 border-b flex items-center flex-wrap gap-x-2 gap-y-1 text-[11px] shrink-0" style="border-color: var(--vscode-sideBar-border); color: var(--vscode-descriptionForeground); background-color: color-mix(in srgb, var(--vscode-editor-background) 92%, var(--vscode-foreground));">
+        <span class="opacity-60 select-none text-[10px] mr-1">[CodeLens]</span>
+        <button onclick="openFieldQuickPick('tracker')" class="hover:underline hover:text-[var(--vscode-textLink-foreground)] transition cursor-pointer">
+          トラッカー: <span id="lens-tracker" class="font-medium">Bug</span>
+        </button>
+        <span class="opacity-40">|</span>
+        <button onclick="openFieldQuickPick('status')" class="hover:underline hover:text-[var(--vscode-textLink-foreground)] transition cursor-pointer">
+          ステータス: <span id="lens-status" class="font-medium">New</span>
+        </button>
+        <span class="opacity-40">|</span>
+        <button onclick="openFieldQuickPick('priority')" class="hover:underline hover:text-[var(--vscode-textLink-foreground)] transition cursor-pointer">
+          優先度: <span id="lens-priority" class="font-medium">High</span>
+        </button>
+        <span class="opacity-40">|</span>
+        <button onclick="openFieldQuickPick('doneRatio')" class="hover:underline hover:text-[var(--vscode-textLink-foreground)] transition cursor-pointer">
+          進捗率: <span id="lens-done" class="font-medium">30%</span>
+        </button>
+        <span class="opacity-40">|</span>
+        <button onclick="openFieldQuickPick('dueDate')" class="hover:underline hover:text-[var(--vscode-textLink-foreground)] transition cursor-pointer">
+          期日: <span id="lens-duedate" class="font-medium">2026-11-17</span>
+        </button>
+      </div>
+
+      <!-- Markdown エディタ領域 -->
+      <div class="flex-1 flex flex-col min-h-0">
+        <textarea id="editor-textarea" oninput="onMarkdownInput()" spellcheck="false" style="background-color: var(--vscode-editor-background); color: var(--vscode-editor-foreground); font-family: var(--vscode-editor-font-family);" class="flex-1 w-full text-xs sm:text-[13px] p-4 leading-relaxed resize-none focus:outline-none"></textarea>
+
+        <!-- VS Code ステータスバー風フッター -->
+        <div class="h-[22px] px-3 flex items-center justify-between text-[11px] shrink-0" style="background-color: var(--vscode-button-background); color: var(--vscode-button-foreground);">
+          <div class="flex items-center gap-3">
+            <span class="flex items-center gap-1"><span class="codicon codicon-plug" style="font-size: 12px !important;"></span> Redmine Connected</span>
+            <span id="statusbar-sync-info">未同期: 1 件</span>
+          </div>
+          <div class="flex items-center gap-3 font-mono text-[10px]">
+            <span>UTF-8</span>
+            <span>Markdown</span>
+          </div>
+        </div>
+      </div>
+
+    </main>
+  </div>
+
+  <!-- VS Code 右下通知トースト再現 -->
+  <div id="toast-container" class="fixed bottom-8 right-4 z-50 flex flex-col gap-2 pointer-events-none"></div>
+
+  <script>
+    // =========================================================================
+    // 1. VS Code Webview API ブリッジ（実機とモックの両方で動作する抽象層）
+    // =========================================================================
+    const vscode = typeof acquireVsCodeApi === 'function'
+      ? acquireVsCodeApi()
+      : {
+          // ブラウザプレビュー用の擬似 Extension Host 応答シミュレータ
+          postMessage(msg) {
+            handleMockExtensionHostMessage(msg);
+          },
+          getState() { return null; },
+          setState() {}
+        };
+
+    function postToExtension(command, payload = {}) {
+      vscode.postMessage({ command, ...payload });
+    }
+
+    // Extension Host からのメッセージ受信リスナー（実機でもそのまま使用）
+    window.addEventListener('message', (event) => {
+      const message = event.data;
+      if (!message || !message.command) return;
+
+      switch (message.command) {
+        case 'ticketsUpdated':
+          renderTickets();
+          break;
+        case 'ticketSynced':
+          markTicketSyncedInUI(message.issueId);
+          break;
+      }
+    });
+
+    // =========================================================================
+    // 2. モックデータ & 状態管理
+    // =========================================================================
+    const mockTickets = [
+      {
+        id: 3,
+        subject: 'Error 281 when updating a recipe',
+        tracker: 'Bug',
+        status: 'New',
+        priority: 'High',
+        assignee: '自分',
+        isMine: true,
+        dueDate: '2026-11-17',
+        isOverdue: true,
+        doneRatio: 30,
+        project: 'eCookbook',
+        unsynced: true,
+        description: 'レシピ更新時にバリデーションエラー281が発生する問題の修正。'
+      },
+      {
+        id: 75,
+        subject: '機能実装フェーズ',
+        tracker: 'Feature',
+        status: 'New',
+        priority: 'Normal',
+        assignee: '自分',
+        isMine: true,
+        dueDate: '2026-11-30',
+        isOverdue: false,
+        doneRatio: 25,
+        project: 'eCookbook',
+        unsynced: false,
+        expanded: true,
+        children: [
+          {
+            id: 57,
+            subject: '詳細設計・APIスキーマ定義',
+            tracker: 'Task',
+            status: 'Resolved',
+            priority: 'Normal',
+            assignee: '佐藤',
+            isMine: false,
+            dueDate: '2026-11-15',
+            isOverdue: false,
+            doneRatio: 100,
+            project: 'eCookbook',
+            unsynced: false,
+            description: 'OpenAPI仕様書の作成とレビュー完了。'
+          },
+          {
+            id: 59,
+            subject: 'バックエンドAPI実装',
+            tracker: 'Feature',
+            status: 'In Progress',
+            priority: 'High',
+            assignee: '自分',
+            isMine: true,
+            dueDate: '2026-11-22',
+            isOverdue: false,
+            doneRatio: 40,
+            project: 'eCookbook',
+            unsynced: false,
+            description: '認証エンドポイントおよびチケット更新APIの実装。'
+          },
+          {
+            id: 60,
+            subject: 'フロントエンドUI実装',
+            tracker: 'Feature',
+            status: 'New',
+            priority: 'Normal',
+            assignee: '田中',
+            isMine: false,
+            dueDate: '2026-11-26',
+            isOverdue: false,
+            doneRatio: 0,
+            project: 'eCookbook',
+            unsynced: false,
+            description: 'サイドバーのツリーコンポーネント実装。'
+          },
+          {
+            id: 61,
+            subject: '結合テスト・QA',
+            tracker: 'Task',
+            status: 'Assigned',
+            priority: 'Normal',
+            assignee: '鈴木',
+            isMine: false,
+            dueDate: '2026-11-29',
+            isOverdue: false,
+            doneRatio: 0,
+            project: 'eCookbook',
+            unsynced: false,
+            description: 'E2Eテストシナリオの作成と実施。'
+          }
+        ]
+      },
+      {
+        id: 10,
+        subject: 'Issue Doing the Blocking',
+        tracker: 'Bug',
+        status: 'In Progress',
+        priority: 'Urgent',
+        assignee: '自分',
+        isMine: true,
+        dueDate: '2026-11-18',
+        isOverdue: false,
+        doneRatio: 60,
+        project: 'eCookbook',
+        unsynced: false,
+        description: '同期キューがロックされる競合状態の解消。'
+      },
+      {
+        id: 71,
+        subject: '要件定義・設計',
+        tracker: 'Task',
+        status: 'New',
+        priority: 'Normal',
+        assignee: '山田',
+        isMine: false,
+        dueDate: '2026-12-05',
+        isOverdue: false,
+        doneRatio: 10,
+        project: 'eCookbook',
+        unsynced: false,
+        description: '次期バージョンのユーザーストーリー整理。'
+      }
+    ];
+
+    let state = {
+      activeTab: 'tickets',
+      selectedTicketId: 3,
+      filters: {
+        mine: false,
+        open: true,
+        overdue: false,
+        high: false
+      },
+      includeSubprojects: true,
+      compactMode: false
+    };
+
+    // =========================================================================
+    // 3. リスト描画ロジック
+    // =========================================================================
+    function getTrackerStyle(tracker) {
+      switch (tracker) {
+        case 'Bug':
+          return { bar: 'var(--vscode-editorError-foreground)', icon: 'codicon-bug' };
+        case 'Feature':
+          return { bar: 'var(--vscode-gitDecoration-addedResourceForeground)', icon: 'codicon-sparkle' };
+        case 'Task':
+        default:
+          return { bar: 'var(--vscode-textLink-foreground)', icon: 'codicon-check' };
+      }
+    }
+
+    function getStatusPill(status) {
+      const base = 'px-1.5 py-[1px] rounded-[2px] text-[10px] font-medium border';
+      switch (status) {
+        case 'New':
+          return `<span class="${base}" style="border-color: color-mix(in srgb, var(--vscode-textLink-foreground) 45%, transparent); color: var(--vscode-textLink-foreground);">New</span>`;
+        case 'In Progress':
+          return `<span class="${base}" style="border-color: color-mix(in srgb, var(--vscode-editorWarning-foreground) 45%, transparent); color: var(--vscode-editorWarning-foreground);">In Progress</span>`;
+        case 'Assigned':
+          return `<span class="${base}" style="border-color: color-mix(in srgb, var(--vscode-foreground) 30%, transparent);">Assigned</span>`;
+        case 'Resolved':
+          return `<span class="${base}" style="border-color: color-mix(in srgb, var(--vscode-gitDecoration-addedResourceForeground) 45%, transparent); color: var(--vscode-gitDecoration-addedResourceForeground);">Resolved</span>`;
+        default:
+          return `<span class="${base}">${status}</span>`;
+      }
+    }
+
+    function matchesFilters(ticket) {
+      const projectVal = document.getElementById('project-select').value;
+      const query = document.getElementById('search-input').value.trim().toLowerCase();
+
+      if (projectVal !== 'all' && ticket.project !== projectVal) return false;
+      if (state.activeTab === 'unsynced' && !ticket.unsynced) return false;
+
+      if (state.filters.mine && !ticket.isMine) return false;
+      if (state.filters.open && ticket.status === 'Resolved') return false;
+      if (state.filters.overdue && !ticket.isOverdue) return false;
+      if (state.filters.high && !['High', 'Urgent'].includes(ticket.priority)) return false;
+
+      if (query) {
+        const target = `#${ticket.id} ${ticket.subject} ${ticket.assignee} ${ticket.tracker}`.toLowerCase();
+        if (!target.includes(query)) return false;
+      }
+      return true;
+    }
+
+    function createTicketRowHTML(ticket, isChild = false) {
+      const isSelected = state.selectedTicketId === ticket.id;
+      const hasChildren = ticket.children && ticket.children.length > 0;
+      const trackerInfo = getTrackerStyle(ticket.tracker);
+
+      const priorityBadge = ticket.priority === 'Urgent'
+        ? `<span class="font-bold text-[11px]" style="color: var(--vscode-editorError-foreground);" title="優先度: Urgent">!!</span>`
+        : ticket.priority === 'High'
+          ? `<span class="font-bold text-[11px]" style="color: var(--vscode-editorWarning-foreground);" title="優先度: High">!</span>`
+          : '';
+
+      const dueDateHtml = ticket.dueDate
+        ? `<span class="inline-flex items-center gap-0.5 ${ticket.isOverdue ? 'font-semibold' : 'muted-text opacity-75'}" style="${ticket.isOverdue ? 'color: var(--vscode-editorError-foreground);' : ''}">
+            <span class="codicon codicon-calendar" style="font-size: 11px !important;"></span>
+            <span>${ticket.dueDate.slice(5).replace('-', '/')}</span>
+          </span>`
+        : '';
+
+      const unsyncedBadge = ticket.unsynced
+        ? `<span class="inline-flex items-center gap-1 text-[10px] font-medium" style="color: var(--vscode-gitDecoration-modifiedResourceForeground);" title="ローカルに未同期の変更があります">
+            <span class="codicon codicon-circle-filled" style="font-size: 8px !important;"></span>未同期
+          </span>`
+        : '';
+
+      // ホバー時クイックアクション（VS Code Tree View Action 準拠）
+      const hoverActions = `
+        <div class="hidden group-hover:flex items-center gap-0.5 pl-1.5 shrink-0">
+          ${ticket.unsynced ? `
+            <button onclick="event.stopPropagation(); postToExtension('syncTicket', { issueId: ${ticket.id} })" title="Redmineへ同期" class="p-1 rounded-[2px] hover:bg-black/20 transition" style="color: var(--vscode-gitDecoration-modifiedResourceForeground);">
+              <span class="codicon codicon-sync"></span>
+            </button>
+          ` : ''}
+          <button onclick="event.stopPropagation(); postToExtension('openExternal', { issueId: ${ticket.id} })" title="ブラウザでRedmineを開く" class="p-1 rounded-[2px] hover:bg-black/20 transition">
+            <span class="codicon codicon-link-external"></span>
+          </button>
+        </div>
+      `;
+
+      const topRow = `
+        <div class="flex items-center justify-between gap-1 min-w-0">
+          <div class="flex items-center gap-1 min-w-0">
+            ${hasChildren ? `
+              <button onclick="event.stopPropagation(); toggleExpand(${ticket.id})" class="p-0.5 -ml-1 rounded-[2px] hover:bg-black/15">
+                <span class="codicon ${ticket.expanded ? 'codicon-chevron-down' : 'codicon-chevron-right'}" style="font-size: 12px !important;"></span>
+              </button>
+            ` : ''}
+            <span class="font-mono text-[11px] muted-text opacity-70 shrink-0">#${ticket.id}</span>
+            ${priorityBadge}
+            <span class="text-xs font-medium truncate">${ticket.subject}</span>
+          </div>
+          ${hoverActions}
+        </div>
+      `;
+
+      const metaRow = !state.compactMode ? `
+        <div class="mt-1 flex items-center justify-between gap-2 text-[11px]">
+          <div class="flex items-center gap-1.5 flex-wrap">
+            ${getStatusPill(ticket.status)}
+            ${unsyncedBadge}
+          </div>
+          <div class="flex items-center gap-2 shrink-0">
+            <span class="muted-text opacity-75 inline-flex items-center gap-0.5">
+              <span class="codicon codicon-account" style="font-size: 11px !important;"></span>${ticket.assignee}
+            </span>
+            ${dueDateHtml}
+          </div>
+        </div>
+      ` : '';
+
+      const progressBar = (!state.compactMode && ticket.doneRatio > 0) ? `
+        <div class="mt-1.5 w-full h-[2px] rounded-full overflow-hidden" style="background-color: color-mix(in srgb, var(--vscode-foreground) 15%, transparent);">
+          <div class="h-full" style="width: ${ticket.doneRatio}%; background-color: ${ticket.doneRatio === 100 ? 'var(--vscode-gitDecoration-addedResourceForeground)' : 'var(--vscode-progressBar-background)'};"></div>
+        </div>
+      ` : '';
+
+      return `
+        <div onclick="postToExtension('openTicket', { issueId: ${ticket.id} })" data-ticket-id="${ticket.id}" class="ticket-row group ${isSelected ? 'is-selected' : ''} ${ticket.unsynced ? 'is-unsynced' : ''} ${isChild ? 'tree-child-item' : 'pl-3'} pr-2 ${state.compactMode ? 'py-1.5' : 'py-2'} cursor-pointer">
+          <!-- トラッカー識別カラーバー -->
+          <span class="absolute left-0 top-1 bottom-1 w-[3px] rounded-r-[1px]" style="background-color: ${trackerInfo.bar};" title="Tracker: ${ticket.tracker}"></span>
+          ${topRow}
+          ${metaRow}
+          ${progressBar}
+        </div>
+      `;
+    }
+
+    function renderTickets() {
+      const container = document.getElementById('ticket-list-container');
+      const searchVal = document.getElementById('search-input').value;
+      document.getElementById('clear-search').classList.toggle('hidden', !searchVal);
+
+      let totalCount = 0;
+      let unsyncedCount = 0;
+      mockTickets.forEach(t => {
+        totalCount++;
+        if (t.unsynced) unsyncedCount++;
+        if (t.children) {
+          t.children.forEach(c => {
+            totalCount++;
+            if (c.unsynced) unsyncedCount++;
+          });
+        }
+      });
+
+      document.getElementById('badge-total-count').textContent = totalCount;
+      const unsyncedBadgeEl = document.getElementById('badge-unsynced-count');
+      unsyncedBadgeEl.textContent = unsyncedCount;
+      unsyncedBadgeEl.classList.toggle('hidden', unsyncedCount === 0);
+      document.getElementById('statusbar-sync-info').textContent = unsyncedCount > 0 ? `未同期: ${unsyncedCount} 件` : '同期済み';
+
+      let html = '';
+      mockTickets.forEach(ticket => {
+        const parentMatch = matchesFilters(ticket);
+        const matchingChildren = (ticket.children || []).filter(c => matchesFilters(c));
+
+        if (parentMatch || matchingChildren.length > 0) {
+          html += createTicketRowHTML(ticket, false);
+
+          if (matchingChildren.length > 0 && (ticket.expanded || !parentMatch)) {
+            html += `<div class="tree-children-group">`;
+            matchingChildren.forEach(child => {
+              html += createTicketRowHTML(child, true);
+            });
+            html += `</div>`;
+          }
+        }
+      });
+
+      if (!html) {
+        html = `
+          <div class="p-6 text-center space-y-2">
+            <p class="text-xs opacity-70">一致するチケットが見つかりません</p>
+            <button onclick="resetAllFilters()" class="text-xs hover:underline" style="color: var(--vscode-textLink-foreground);">フィルタをクリア</button>
+          </div>
+        `;
+      }
+
+      container.innerHTML = html;
+    }
+
+    // =========================================================================
+    // 4. モック Extension Host 側の擬似処理（実機では TypeScript 側に実装）
+    // =========================================================================
+    function handleMockExtensionHostMessage(msg) {
+      switch (msg.command) {
+        case 'openTicket':
+          openTicketInMockEditor(msg.issueId);
+          break;
+        case 'syncTicket':
+          const t = findTicketById(msg.issueId);
+          if (t && t.unsynced) {
+            t.unsynced = false;
+            window.postMessage({ command: 'ticketSynced', issueId: msg.issueId }, '*');
+            showVSCodeNotification(`チケット #${msg.issueId} を Redmine へ同期しました。`);
+          } else {
+            showVSCodeNotification(`チケット #${msg.issueId} はすでに最新です。`);
+          }
+          break;
+        case 'refresh':
+          const icon = document.getElementById('refresh-icon');
+          icon.classList.add('codicon-modifier-spin');
+          setTimeout(() => {
+            icon.classList.remove('codicon-modifier-spin');
+            showVSCodeNotification('Redmine API からチケット一覧を更新しました。');
+          }, 600);
+          break;
+        case 'createTicket':
+          const newId = Math.floor(Math.random() * 90) + 100;
+          mockTickets.unshift({
+            id: newId,
+            subject: '新規チケット（ローカル下書き）',
+            tracker: 'Task',
+            status: 'New',
+            priority: 'Normal',
+            assignee: '自分',
+            isMine: true,
+            dueDate: '2026-11-28',
+            isOverdue: false,
+            doneRatio: 0,
+            project: 'eCookbook',
+            unsynced: true,
+            description: 'Markdownを編集して保存すると同期対象になります。'
+          });
+          if (state.activeTab === 'settings') switchTab('tickets');
+          renderTickets();
+          openTicketInMockEditor(newId);
+          showVSCodeNotification(`新規チケットファイル redmine-client-ticket-${newId}.md を開きました。`);
+          break;
+        case 'openExternal':
+          showVSCodeNotification(`外部ブラウザで https://redmine.example.com/issues/${msg.issueId} を開きました。`);
+          break;
+        case 'openSettingsJson':
+          showVSCodeNotification('ユーザー設定 (settings.json) を開きました。');
+          break;
+      }
+    }
+
+    function markTicketSyncedInUI(id) {
+      renderTickets();
+      if (state.selectedTicketId === id) {
+        const ticket = findTicketById(id);
+        if (ticket) updateEditorHeaderState(ticket);
+      }
+    }
+
+    // =========================================================================
+    // 5. エディタ連動 & UI 操作ハンドラ
+    // =========================================================================
+    function findTicketById(id) {
+      let found = mockTickets.find(t => t.id === id);
+      if (!found) {
+        mockTickets.forEach(t => {
+          if (t.children) {
+            const c = t.children.find(ch => ch.id === id);
+            if (c) found = c;
+          }
+        });
+      }
+      return found;
+    }
+
+    function buildMarkdownFromTicket(ticket) {
+      return `---
+mode: ticket-update
+project_id: 1
+issue_id: ${ticket.id}
+last_synced_at: 2026-11-19T13:58:00.000Z
+issue:
+  tracker:    ${ticket.tracker}
+  priority:   ${ticket.priority}
+  status:     ${ticket.status}
+  assignee:   ${ticket.assignee}
+  due_date:   ${ticket.dueDate || ''}
+  done_ratio: ${ticket.doneRatio}
+---
+
+# ${ticket.subject}
+
+${ticket.description || ''}`;
+    }
+
+    function updateEditorHeaderState(ticket) {
+      document.getElementById('editor-dirty-dot').classList.toggle('hidden', !ticket.unsynced);
+      document.getElementById('unsynced-banner-text').classList.toggle('hidden', !ticket.unsynced);
+      const syncBtn = document.getElementById('editor-sync-btn');
+      const syncLabel = document.getElementById('editor-sync-label');
+      if (ticket.unsynced) {
+        syncBtn.style.color = 'var(--vscode-gitDecoration-modifiedResourceForeground)';
+        syncBtn.classList.remove('opacity-50');
+        syncLabel.textContent = '同期';
+      } else {
+        syncBtn.style.color = 'var(--vscode-foreground)';
+        syncBtn.classList.add('opacity-50');
+        syncLabel.textContent = '同期済';
+      }
+    }
+
+    function updateCodeLensLabels(ticket) {
+      document.getElementById('lens-tracker').textContent = ticket.tracker;
+      document.getElementById('lens-status').textContent = ticket.status;
+      document.getElementById('lens-priority').textContent = ticket.priority;
+      document.getElementById('lens-done').textContent = `${ticket.doneRatio}%`;
+      document.getElementById('lens-duedate').textContent = ticket.dueDate || '未設定';
+    }
+
+    function openTicketInMockEditor(id) {
+      state.selectedTicketId = id;
+      closeQuickPick();
+      renderTickets();
+
+      const found = findTicketById(id);
+      if (!found) return;
+
+      const fname = `redmine-client-ticket-${found.id}.md`;
+      document.getElementById('editor-filename').textContent = fname;
+      document.getElementById('breadcrumb-file').textContent = fname;
+
+      updateCodeLensLabels(found);
+      document.getElementById('editor-textarea').value = buildMarkdownFromTicket(found);
+      updateEditorHeaderState(found);
+    }
+
+    // VS Code 標準 QuickPick（showQuickPick）の動作シミュレーション
+    const quickPickConfigs = {
+      tracker: {
+        placeholder: 'トラッカーを選択 (vscode.window.showQuickPick)',
+        options: [
+          { label: 'Bug', desc: '不具合・バグ修正' },
+          { label: 'Feature', desc: '新機能開発' },
+          { label: 'Task', desc: '作業タスク' }
+        ]
+      },
+      status: {
+        placeholder: 'ステータスを選択 (vscode.window.showQuickPick)',
+        options: [
+          { label: 'New', desc: '新規' },
+          { label: 'In Progress', desc: '進行中' },
+          { label: 'Assigned', desc: '担当者割当済' },
+          { label: 'Resolved', desc: '解決済（完了）' }
+        ]
+      },
+      priority: {
+        placeholder: '優先度を選択 (vscode.window.showQuickPick)',
+        options: [
+          { label: 'Normal', desc: '通常' },
+          { label: 'High', desc: '高め (!)' },
+          { label: 'Urgent', desc: '急ぎ (!!)' }
+        ]
+      },
+      doneRatio: {
+        placeholder: '進捗率を選択 (vscode.window.showQuickPick)',
+        options: [0, 10, 20, 30, 40, 50, 60, 70, 80, 90, 100].map(v => ({
+          label: `${v}%`,
+          value: v,
+          desc: v === 100 ? '完了' : ''
+        }))
+      },
+      dueDate: {
+        placeholder: '期日を選択 (vscode.window.showQuickPick / showInputBox)',
+        options: [
+          { label: '2026-11-17', desc: '昨日（期限超過テスト）' },
+          { label: '2026-11-20', desc: '明日' },
+          { label: '2026-11-27', desc: '来週金曜' },
+          { label: '2026-12-04', desc: '2週間後' },
+          { label: 'クリア（未設定）', value: '', desc: '期日を削除' }
+        ]
+      }
+    };
+
+    function openFieldQuickPick(field) {
+      const ticket = findTicketById(state.selectedTicketId);
+      const config = quickPickConfigs[field];
+      if (!ticket || !config) return;
+
+      const qp = document.getElementById('vscode-quickpick');
+      const input = document.getElementById('quickpick-input');
+      const itemsContainer = document.getElementById('quickpick-items');
+
+      input.value = config.placeholder;
+      itemsContainer.innerHTML = config.options.map(opt => {
+        const val = opt.value !== undefined ? opt.value : opt.label;
+        const isCurrent = String(ticket[field]) === String(val);
+        return `
+          <button onclick="applyQuickPickValue('${field}', '${val}')" class="w-full px-3 py-1.5 text-left flex items-center justify-between hover:bg-[var(--vscode-list-activeSelectionBackground)] hover:text-[var(--vscode-list-activeSelectionForeground)] transition ${isCurrent ? 'font-semibold' : ''}">
+            <span class="flex items-center gap-1.5">
+              <span class="codicon ${isCurrent ? 'codicon-check' : 'codicon-blank'}" style="font-size: 12px !important;"></span>
+              <span>${opt.label}</span>
+            </span>
+            <span class="opacity-65 text-[11px]">${opt.desc || ''}</span>
+          </button>
+        `;
+      }).join('');
+
+      qp.classList.remove('hidden');
+    }
+
+    function closeQuickPick() {
+      document.getElementById('vscode-quickpick').classList.add('hidden');
+    }
+
+    function applyQuickPickValue(field, rawValue) {
+      const ticket = findTicketById(state.selectedTicketId);
+      if (!ticket) return;
+
+      if (field === 'doneRatio') {
+        ticket.doneRatio = parseInt(rawValue, 10) || 0;
+      } else if (field === 'dueDate') {
+        ticket.dueDate = rawValue;
+        ticket.isOverdue = ticket.dueDate ? ticket.dueDate < '2026-11-19' && ticket.status !== 'Resolved' : false;
+      } else {
+        ticket[field] = rawValue;
+        if (field === 'status') {
+          ticket.isOverdue = ticket.dueDate ? ticket.dueDate < '2026-11-19' && ticket.status !== 'Resolved' : false;
+        }
+      }
+
+      ticket.unsynced = true;
+      closeQuickPick();
+      updateCodeLensLabels(ticket);
+      document.getElementById('editor-textarea').value = buildMarkdownFromTicket(ticket);
+      updateEditorHeaderState(ticket);
+      renderTickets();
+    }
+
+    function onMarkdownInput() {
+      const ticket = findTicketById(state.selectedTicketId);
+      if (!ticket) return;
+
+      const text = document.getElementById('editor-textarea').value;
+      const trackerMatch = text.match(/^\s*tracker:\s*(.+)$/m);
+      const statusMatch = text.match(/^\s*status:\s*(.+)$/m);
+      const priorityMatch = text.match(/^\s*priority:\s*(.+)$/m);
+      const dueMatch = text.match(/^\s*due_date:\s*(.*)$/m);
+      const doneMatch = text.match(/^\s*done_ratio:\s*(\d+)/m);
+      const headingMatch = text.match(/^#\s+(.+)$/m);
+
+      if (trackerMatch && ['Bug', 'Feature', 'Task'].includes(trackerMatch[1].trim())) {
+        ticket.tracker = trackerMatch[1].trim();
+      }
+      if (statusMatch && ['New', 'In Progress', 'Assigned', 'Resolved'].includes(statusMatch[1].trim())) {
+        ticket.status = statusMatch[1].trim();
+      }
+      if (priorityMatch && ['Normal', 'High', 'Urgent'].includes(priorityMatch[1].trim())) {
+        ticket.priority = priorityMatch[1].trim();
+      }
+      if (dueMatch) {
+        ticket.dueDate = dueMatch[1].trim();
+        ticket.isOverdue = ticket.dueDate ? ticket.dueDate < '2026-11-19' && ticket.status !== 'Resolved' : false;
+      }
+      if (doneMatch) {
+        ticket.doneRatio = Math.min(100, Math.max(0, parseInt(doneMatch[1], 10)));
+      }
+      if (headingMatch) {
+        ticket.subject = headingMatch[1].trim();
+      }
+
+      const bodySplit = text.split(/^#\s+.+$/m);
+      if (bodySplit.length > 1) {
+        ticket.description = bodySplit[1].trim();
+      }
+
+      ticket.unsynced = true;
+      updateCodeLensLabels(ticket);
+      updateEditorHeaderState(ticket);
+      renderTickets();
+    }
+
+    // キーボードナビゲーション（↑/↓でチケット選択、EscでQuickPick閉じる）
+    function handleSidebarKeydown(e) {
+      if (e.key === 'Escape') {
+        closeQuickPick();
+        return;
+      }
+      if (['INPUT', 'SELECT', 'TEXTAREA'].includes(e.target.tagName)) return;
+      if (e.key !== 'ArrowDown' && e.key !== 'ArrowUp') return;
+
+      e.preventDefault();
+      const rows = Array.from(document.querySelectorAll('.ticket-row'));
+      if (!rows.length) return;
+
+      const idx = rows.findIndex(r => Number(r.dataset.ticketId) === state.selectedTicketId);
+      let nextIdx = e.key === 'ArrowDown' ? idx + 1 : idx - 1;
+      if (nextIdx < 0) nextIdx = 0;
+      if (nextIdx >= rows.length) nextIdx = rows.length - 1;
+
+      const nextId = Number(rows[nextIdx].dataset.ticketId);
+      if (nextId) {
+        postToExtension('openTicket', { issueId: nextId });
+        rows[nextIdx].scrollIntoView({ block: 'nearest' });
+      }
+    }
+
+    function toggleExpand(id) {
+      const t = mockTickets.find(item => item.id === id);
+      if (t) {
+        t.expanded = !t.expanded;
+        renderTickets();
+      }
+    }
+
+    function toggleFilter(key) {
+      state.filters[key] = !state.filters[key];
+      document.querySelectorAll('.filter-chip').forEach(btn => {
+        const f = btn.getAttribute('data-filter');
+        btn.className = state.filters[f]
+          ? 'filter-chip vscode-btn-primary px-2 py-0.5 rounded-[2px] text-[11px] whitespace-nowrap transition'
+          : 'filter-chip vscode-btn-secondary px-2 py-0.5 rounded-[2px] text-[11px] whitespace-nowrap transition';
+      });
+      renderTickets();
+    }
+
+    function resetAllFilters() {
+      state.filters = { mine: false, open: false, overdue: false, high: false };
+      document.getElementById('search-input').value = '';
+      document.querySelectorAll('.filter-chip').forEach(btn => {
+        btn.className = 'filter-chip vscode-btn-secondary px-2 py-0.5 rounded-[2px] text-[11px] whitespace-nowrap transition';
+      });
+      renderTickets();
+    }
+
+    function clearSearch() {
+      document.getElementById('search-input').value = '';
+      renderTickets();
+    }
+
+    function onFilterStateChanged() {
+      renderTickets();
+    }
+
+    function switchTab(tab) {
+      state.activeTab = tab;
+      ['tickets', 'unsynced', 'settings'].forEach(t => {
+        const el = document.getElementById(`tab-${t}`);
+        if (t === tab) {
+          el.style.borderColor = 'var(--vscode-focusBorder)';
+          el.classList.remove('opacity-75');
+        } else {
+          el.style.borderColor = 'transparent';
+          el.classList.add('opacity-75');
+        }
+      });
+
+      const isSettings = tab === 'settings';
+      document.getElementById('view-tickets').classList.toggle('hidden', isSettings);
+      document.getElementById('view-settings').classList.toggle('hidden', !isSettings);
+      if (!isSettings) renderTickets();
+    }
+
+    function toggleSubprojects() {
+      state.includeSubprojects = !state.includeSubprojects;
+      const btn = document.getElementById('btn-subprojects');
+      btn.className = state.includeSubprojects
+        ? 'vscode-btn-primary px-2 py-1 rounded-[2px] flex items-center gap-1 text-[11px] shrink-0 transition'
+        : 'vscode-btn-secondary px-2 py-1 rounded-[2px] flex items-center gap-1 text-[11px] shrink-0 transition';
+      btn.title = `子プロジェクトを含める：${state.includeSubprojects ? 'ON' : 'OFF'}`;
+    }
+
+    function toggleCompactMode() {
+      state.compactMode = !state.compactMode;
+      renderTickets();
+    }
+
+    // プレビュー用：VS Code テーマ切替
+    function setVSCodeTheme(theme) {
+      document.body.setAttribute('data-vscode-theme', theme);
+      document.querySelectorAll('.theme-btn').forEach(btn => {
+        btn.className = btn.getAttribute('data-theme-btn') === theme
+          ? 'theme-btn px-2 py-0.5 rounded bg-[#0e639c] text-white transition'
+          : 'theme-btn px-2 py-0.5 rounded bg-[#2d2d2d] hover:bg-[#3c3c3c] text-[#cccccc] transition';
+      });
+    }
+
+    // プレビュー用：サイドバー幅切替
+    function setSidebarWidth(width) {
+      document.getElementById('webview-root').style.width = width;
+      document.querySelectorAll('.width-btn').forEach(btn => {
+        btn.className = btn.getAttribute('data-width') === width
+          ? 'width-btn px-2 py-0.5 rounded bg-[#0e639c] text-white transition'
+          : 'width-btn px-2 py-0.5 rounded bg-[#2d2d2d] hover:bg-[#3c3c3c] text-[#cccccc] transition';
+      });
+    }
+
+    // VS Code ネイティブ右下通知トースト再現
+    function showVSCodeNotification(message) {
+      const container = document.getElementById('toast-container');
+      const toast = document.createElement('div');
+      toast.style.backgroundColor = 'var(--vscode-sideBar-background)';
+      toast.style.color = 'var(--vscode-foreground)';
+      toast.style.border = '1px solid var(--vscode-sideBar-border)';
+      toast.className = 'text-xs px-3 py-2 rounded-[2px] shadow-xl flex items-center gap-2 transition-opacity duration-300';
+      toast.innerHTML = `<span class="codicon codicon-info" style="color: var(--vscode-textLink-foreground);"></span><span>${message}</span>`;
+      container.appendChild(toast);
+
+      setTimeout(() => {
+        toast.style.opacity = '0';
+        setTimeout(() => toast.remove(), 300);
+      }, 2600);
+    }
+
+    window.addEventListener('DOMContentLoaded', () => {
+      renderTickets();
+      openTicketInMockEditor(3);
+    });
+  </script>
+</body>
+</html>

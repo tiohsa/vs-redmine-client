@@ -2,7 +2,7 @@
   "name": "redmine-client",
   "displayName": "%displayName%",
   "description": "%description%",
-  "version": "0.8.2",
+  "version": "0.9.0",
   "publisher": "tiohsa",
   "author": {
     "name": "tiohsa",
@@ -151,6 +151,16 @@
         "icon": "$(add)"
       },
       {
+        "command": "redmine-client.createTicketFromDashboard",
+        "title": "%command.createTicketFromDashboard.title%",
+        "icon": "$(add)"
+      },
+      {
+        "command": "redmine-client.toggleCompactMode",
+        "title": "%command.toggleCompactMode.title%",
+        "icon": "$(list-flat)"
+      },
+      {
         "command": "redmine-client.createChildTicketFromList",
         "title": "%command.createChildTicketFromList.title%",
         "icon": "$(add)"
@@ -223,6 +233,10 @@
       {
         "command": "redmine-client.referenceExample",
         "title": "%command.referenceExample%"
+      },
+      {
+        "command": "redmine-client.editFieldViaQuickPick",
+        "title": "%command.editFieldViaQuickPick.title%"
       }
     ],
     "views": {
@@ -235,6 +249,35 @@
       ]
     },
     "menus": {
+      "view/title": [
+        {
+          "command": "redmine-client.refreshTickets",
+          "when": "view == redmine-clientActivityDashboard",
+          "group": "navigation@1"
+        },
+        {
+          "command": "redmine-client.createTicketFromDashboard",
+          "when": "view == redmine-clientActivityDashboard",
+          "group": "navigation@2"
+        },
+        {
+          "command": "redmine-client.toggleCompactMode",
+          "when": "view == redmine-clientActivityDashboard",
+          "group": "navigation@3"
+        }
+      ],
+      "editor/title": [
+        {
+          "command": "redmine-client.syncToRedmine",
+          "when": "redmine-client.isTicketEditor",
+          "group": "navigation@1"
+        },
+        {
+          "command": "redmine-client.openTicketInBrowser",
+          "when": "redmine-client.isExistingTicketEditor",
+          "group": "navigation@2"
+        }
+      ],
       "view/item/context": []
     },
     "configuration": {
