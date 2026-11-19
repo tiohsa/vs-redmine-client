@@ -6,7 +6,15 @@ import { isSaveSyncSuppressed } from "../views/saveSyncSuppression";
 import type { NotificationController } from "./notificationController";
 import { performSyncOnSave } from "./saveSyncExecutor";
 import { scheduleSave } from "./saveSyncQueue";
-import { getConnectionScopeForEditor } from "../views/ticketEditorRegistry";
+import { getCurrentConnectionScope } from "../config/connectionScope";
+import {
+  getConnectionScopeForEditor,
+  getProjectIdForEditor,
+  getTicketIdForEditor,
+  NEW_TICKET_DRAFT_ID,
+} from "../views/ticketEditorRegistry";
+import { renameSyncedNewTicketFileIfEligible } from "../views/ticketSync/ticketEditorRewrite";
+import { refreshTicketEditorContexts } from "./editorEventController";
 import type {
   CommentPresentationPort,
   TicketPresentationPort,
@@ -53,6 +61,9 @@ export const createSyncController = (deps: SyncControllerDeps): SyncController =
 
   const syncEditorAndNotify = async (editor: vscode.TextEditor): Promise<SyncStatus> => {
     try {
+      const wasNewTicketDraft = getTicketIdForEditor(editor) === NEW_TICKET_DRAFT_ID;
+      const oldUri = editor.document.uri;
+      const operationScope = getConnectionScopeForEditor(editor) ?? getCurrentConnectionScope();
       const syncResult = await syncEditorToRedmine(editor, {
         trigger: "explicit",
         onSubjectUpdated: updateTicketListSubject,
@@ -76,6 +87,16 @@ export const createSyncController = (deps: SyncControllerDeps): SyncController =
         }
         notifications.notifyTicketSaveResult(result);
         if (result.status === "created") {
+          const createdId = getTicketIdForEditor(editor);
+          if (wasNewTicketDraft && createdId && createdId > 0) {
+            await renameSyncedNewTicketFileIfEligible({
+              oldUri,
+              ticketId: createdId,
+              projectId: getProjectIdForEditor(editor),
+              connectionScope: operationScope,
+            });
+          }
+          refreshTicketEditorContexts(vscode.window.activeTextEditor);
           ticketsPresentation.refresh();
         } else {
           ticketsPresentation.notifyChange();

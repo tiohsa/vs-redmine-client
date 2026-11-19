@@ -10,8 +10,7 @@ import { initializeOfflineSyncStore, switchOfflineSyncStore } from "./views/offl
 import { observeUploadSpoolCleanup } from "./app/ticketSync/uploadSpoolCleanup";
 import { DurableUploadSpoolStore, resolveUploadSpoolOwner, setDefaultUploadSpoolStore } from "./app/ticketSync/uploadSpoolStore";
 import { initializeTicketListSettingsStore } from "./views/ticketListSettingsStore";
-import { isTicketEditor, refreshEditorConnectionScopes } from "./views/ticketEditorRegistry";
-import { setViewContext } from "./views/viewContext";
+import { refreshEditorConnectionScopes } from "./views/ticketEditorRegistry";
 import { registerConflictDiffProvider } from "./views/conflictDiffProvider";
 import { registerViews } from "./app/viewRegistry";
 import { createNotificationController } from "./app/notificationController";
@@ -20,11 +19,12 @@ import { createSyncEngine } from "./app/syncEngine";
 import {
   buildRegisterEditorDocument,
   buildUpdateTicketStatus,
-  TICKET_EDITOR_CONTEXT_KEY,
+  refreshTicketEditorContexts,
   registerEditorEvents,
 } from "./app/editorEventController";
 import { registerCommands } from "./app/commandRegistry";
 import { getConnectionScope } from "./config/connectionScope";
+import { TicketCodeLensProvider } from "./views/ticketCodeLensProvider";
 
 import { registerReferenceExample } from "./layers/extension-host/entry-points/referenceExample";
 
@@ -47,6 +47,14 @@ export async function activate(context: vscode.ExtensionContext) {
   initializeTicketListSettingsStore(context.workspaceState);
   await initializeApiKeyStore(context.secrets, context.subscriptions);
   registerConflictDiffProvider(context);
+  const ticketCodeLensProvider = new TicketCodeLensProvider();
+  context.subscriptions.push(
+    ticketCodeLensProvider,
+    vscode.languages.registerCodeLensProvider(
+      { language: "markdown" },
+      ticketCodeLensProvider,
+    ),
+  );
 
   if (getIgnoreSSLErrors()) {
     showWarning(vscode.l10n.t("ignoreSSLErrors is enabled. Do not use in production."));
@@ -174,10 +182,7 @@ export async function activate(context: vscode.ExtensionContext) {
   views.ticketsPresentation.refresh();
 
   const initialEditor = vscode.window.activeTextEditor;
-  void setViewContext(
-    TICKET_EDITOR_CONTEXT_KEY,
-    !!initialEditor && isTicketEditor(initialEditor),
-  );
+  refreshTicketEditorContexts(initialEditor);
   updateTicketStatus(initialEditor);
 }
 

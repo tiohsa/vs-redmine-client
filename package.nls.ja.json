@@ -27,6 +27,8 @@
   "command.createTicketFromMarkdownHeader.title": "Redmine: Markdownヘッダからチケットを作成",
   "command.insertRedmineTicketFrontmatter.title": "Redmine: チケット用Frontmatterを挿入",
   "command.createTicketFromList.title": "Redmine: 新規チケット",
+  "command.createTicketFromDashboard.title": "Redmine: 新規チケット作成",
+  "command.toggleCompactMode.title": "Redmine: 表示密度を切替",
   "command.createChildTicketFromList.title": "Redmine: 子チケットを追加",
   "command.openProjectInBrowser.title": "Redmine: プロジェクトをブラウザで開く",
   "command.openTicketInBrowser.title": "Redmine: チケットをブラウザで開く",
@@ -57,5 +59,6 @@
   "config.requestTimeoutMs.description": "HTTP リクエストタイムアウト（ミリ秒、デフォルト: 30000ms = 30秒）。",
   "config.ticketList.showStatus.description": "ダッシュボードの各チケット行にステータスバッジを表示します。",
   "config.ticketList.showDueDate.description": "ダッシュボードのチケット行に期日バッジを表示します。無効にすると、期日ウィンドウごとの表示設定に関わらずすべての期日バッジが非表示になります。",
-  "command.referenceExample": "Redmine: 参照例を実行"
+  "command.referenceExample": "Redmine: 参照例を実行",
+  "command.editFieldViaQuickPick.title": "Redmine: フィールド値を編集"
 }

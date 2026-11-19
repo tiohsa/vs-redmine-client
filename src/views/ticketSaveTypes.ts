@@ -36,7 +36,7 @@ export interface TicketSaveResult {
   remoteCommitUnknown?: boolean;
 }
 
-export type TicketMode = "new-ticket" | "ticket-update" | "comment";
+export type TicketMode = "new-ticket" | "ticket-create" | "ticket-update" | "comment";
 
 export type LegacyTicketDraftStatus = "clean" | "dirty" | "conflict";
 export type TicketDraftStatus =

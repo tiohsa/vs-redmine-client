@@ -16,13 +16,15 @@ suite("Dashboard Webview 改善", () => {
     assert.ok(!html.includes('id="panel-comments"'));
     assert.ok(html.includes('id="sync-tray"'));
     assert.ok(html.includes('id="advanced-filter-dialog"'));
-    for (const name of ["mine", "open", "overdue", "unsynced"]) {
+    for (const name of ["mine", "open", "overdue", "high"]) {
       assert.ok(html.includes(`data-quick-filter="${name}"`));
     }
+    assert.ok(!html.includes('data-quick-filter="unsynced"'));
     assert.ok(dashboardWebviewScript.includes('id="detail-tab-overview"'));
     assert.ok(dashboardWebviewScript.includes('id="detail-tab-comments"'));
     assert.ok(dashboardWebviewScript.includes("function renderSyncTray()"));
-    assert.ok(dashboardWebviewScript.includes("runTicketAction(button.dataset.detailAction,ticket.id)"));
+    assert.ok(dashboardWebviewScript.includes("id=\"detail-sync-btn\""));
+    assert.ok(dashboardWebviewScript.includes("id=\"detail-browser-btn\""));
   });
   test("readable muted token と ticket ID badge style を定義する", () => {
     assert.ok(dashboardStyles.includes("--app-text-readable-muted"));
@@ -42,12 +44,17 @@ suite("Dashboard Webview 改善", () => {
     assert.ok(!dashboardWebviewScript.includes("子プロジェクトを含める"));
   });
 
-  test("selected ticket detail card のコンテナと renderer を持つ", () => {
+  test("selected ticket detail card のコンテナと 2段ヘッダー・読み取り専用メタデータを持つ", () => {
     assert.ok(buildDashboardHtml("nonce", buildDashboardStrings()).includes("ticket-detail-card"));
     assert.ok(buildDashboardHtml("nonce", buildDashboardStrings()).includes("ticket-work-panel"));
     assert.ok(dashboardWebviewScript.includes("function renderTicketDetail()"));
     assert.ok(dashboardWebviewScript.includes("function renderComposerPanel(panel)"));
-    assert.ok(dashboardWebviewScript.includes("ticket.metadata.update"));
+    assert.ok(!dashboardWebviewScript.includes("ticket.metadata.update"));
+    assert.ok(!dashboardWebviewScript.includes("metadata-edit-btn"));
+    assert.ok(!dashboardWebviewScript.includes("metadata-apply-btn"));
+    assert.ok(dashboardWebviewScript.includes("detail-head-row1"));
+    assert.ok(dashboardWebviewScript.includes("detail-head-row2"));
+    assert.ok(dashboardWebviewScript.includes("detail-metadata-grid"));
     assert.ok(dashboardWebviewScript.includes("ticket.syncSelected"));
     assert.ok(dashboardWebviewScript.includes("ticket.createDraftFromComposer"));
     assert.ok(dashboardWebviewScript.includes("ticket.syncNewTicketDraftFromComposer"));
@@ -55,14 +62,16 @@ suite("Dashboard Webview 改善", () => {
     assert.ok(!dashboardWebviewScript.includes("Latest comments"));
   });
 
-  test("詳細属性は概要内で開閉し、同期操作は直接表示する", () => {
+  test("詳細ドロワーは2アクション（同期・ブラウザ）と読み取り専用2列メタデータを表示する", () => {
     const tabs = dashboardWebviewScript.indexOf("'<div class=\"detail-tabs\"");
     const overview = dashboardWebviewScript.indexOf("'<div id=\"detail-overview\"");
     assert.ok(tabs >= 0 && overview > tabs);
-    assert.ok(dashboardWebviewScript.includes("id=\"metadata-details\""));
-    assert.ok(dashboardWebviewScript.includes("(metadataExpanded || editing?' open':'')"));
+    assert.ok(!dashboardWebviewScript.includes("id=\"metadata-details\""));
     assert.ok(dashboardWebviewScript.includes("id=\"detail-sync-btn\" type=\"button\""));
+    assert.ok(dashboardWebviewScript.includes("id=\"detail-browser-btn\" type=\"button\""));
+    assert.ok(dashboardWebviewScript.includes("id=\"detail-cancel-btn\""));
     assert.ok(dashboardWebviewScript.includes("req('ticket.syncSelected',{ticketId:ticket.id})"));
+    assert.ok(dashboardWebviewScript.includes("req('ticket.openBrowser',{ticketId:ticket.id})"));
   });
 
   test("チケットレイアウトを自動・1列・2列から手動選択して保持する", () => {
@@ -86,18 +95,20 @@ suite("Dashboard Webview 改善", () => {
     assert.ok(dashboardStyles.includes("min-width: 0; width: 100%; max-width: 100%"));
   });
 
-  test("Dashboard の更新はヘッダーボタンだけに表示する", () => {
+  test("Webview ヘッダーに view/title と重複する更新・新規・密度ボタンを持たない", () => {
     const strings = buildDashboardStrings();
     const html = buildDashboardHtml("nonce", strings);
     assert.ok(strings.refresh);
-    assert.ok(html.includes('id="refresh-btn"'));
-    assert.ok(html.includes(strings.refresh));
+    assert.ok(!html.includes('id="refresh-btn"'));
+    assert.ok(!html.includes('id="new-ticket-btn"'));
+    assert.ok(!html.includes('id="density-btn"'));
     assert.ok(!dashboardWebviewScript.includes("data-ticket-action=\"refresh\""));
   });
 
   test("一覧操作を詳細へ集約し、一覧行に担当者・期日・トラッカーバー・進捗バーを表示する", () => {
     const row = dashboardWebviewScript.slice(dashboardWebviewScript.indexOf("function renderTicketRow("), dashboardWebviewScript.indexOf("function isTicketActionTarget("));
     assert.ok(!row.includes("ticket-actions"));
+    assert.ok(!row.includes("ticket-hover-actions"));
     assert.ok(row.includes("assigneeName"));
     assert.ok(row.includes("ticket-meta-due"));
     assert.ok(row.includes("is-overdue"));
@@ -107,7 +118,7 @@ suite("Dashboard Webview 改善", () => {
     assert.ok(row.includes("ticket-progress"));
     assert.ok(row.includes("doneRatio"));
     assert.ok(dashboardWebviewScript.includes('id="detail-sync-btn"'));
-    assert.ok(dashboardWebviewScript.includes('id="detail-open-btn"'));
+    assert.ok(dashboardWebviewScript.includes('id="detail-browser-btn"'));
   });
 
   test("Phase 1: ヘッダー・クイックフィルター省スペース化とカード視認性スタイルを持つ", () => {
@@ -140,12 +151,9 @@ suite("Dashboard Webview 改善", () => {
     assert.ok(strings.discardLaterChangesTitle);
   });
 
-  test("開始日と日付ピッカー視認性のスタイルを持つ", () => {
-    assert.ok(dashboardWebviewScript.includes("STRINGS.startDate"));
-    assert.ok(buildDashboardStrings().startDate);
-    assert.ok(dashboardWebviewScript.includes("['start_date',STRINGS.startDate]"));
-    assert.ok(dashboardWebviewScript.includes("data-metadata-field=\"'+field[0]+'\""));
-    assert.ok(dashboardStyles.includes('detail-input[type="date"]::-webkit-calendar-picker-indicator'));
+  test("詳細ドロワーは読み取り専用2列メタグリッドとハイコントラストスタイルを持つ", () => {
+    assert.ok(dashboardWebviewScript.includes("detail-metadata-grid"));
+    assert.ok(dashboardStyles.includes(".detail-metadata-grid"));
     assert.ok(dashboardStyles.includes("body.vscode-high-contrast"));
   });
 
@@ -163,17 +171,18 @@ suite("Dashboard Webview 改善", () => {
     assert.ok(dashboardWebviewScript.includes("showDueDate !== false"));
   });
 
-  test("トラッカーと優先度は詳細に集約する", () => {
-    assert.ok(dashboardWebviewScript.includes("['tracker',STRINGS.sortTracker]"));
-    assert.ok(dashboardWebviewScript.includes("['priority',STRINGS.sortPriority]"));
-    assert.ok(dashboardStyles.includes(".detail-metadata[open] .metadata-summary { display:none; }"));
+  test("詳細メタデータはステータス・優先度・担当者・期日を2列グリッドで表示する", () => {
+    assert.ok(dashboardWebviewScript.includes("detail-metadata-grid"));
+    assert.ok(dashboardWebviewScript.includes("STRINGS.sortStatus"));
+    assert.ok(dashboardWebviewScript.includes("STRINGS.sortPriority"));
+    assert.ok(dashboardWebviewScript.includes("STRINGS.sortAssignee"));
+    assert.ok(dashboardWebviewScript.includes("STRINGS.dueDateLabel"));
   });
 
-  test("コメント本文は3行プレビューから全文を展開できる", () => {
-    assert.ok(dashboardWebviewScript.includes("data-expand-comment"));
+  test("コメントはタイムライン形式で表示し、全文と投稿者・日時・注記番号を持つ", () => {
+    assert.ok(dashboardWebviewScript.includes("comment-timeline"));
     assert.ok(dashboardWebviewScript.includes("esc(cm.body)"));
-    assert.ok(dashboardStyles.includes(".comment-body-clamped"));
-    assert.ok(dashboardStyles.includes("-webkit-line-clamp:3"));
+    assert.ok(dashboardStyles.includes(".comment-timeline"));
   });
 
   test("編集パネルは補足文と三点リーダーメニューを表示しない", () => {
@@ -188,17 +197,17 @@ suite("Dashboard Webview 改善", () => {
     assert.ok(dashboardWebviewScript.includes("req('unsynced.syncOne',{key:JSON.parse(btn.getAttribute('data-sync-comment-key'))})"));
   });
 
-  test("ローカル未同期コメントは Redmine 操作を条件付きにする", () => {
-    assert.ok(dashboardWebviewScript.includes("const editBtn=cm.id&&cm.editableByCurrentUser?"));
-    assert.ok(dashboardWebviewScript.includes("const browserBtn=cm.id?"));
+  test("ローカル未同期コメントは Redmine 編集操作を条件付きにする", () => {
+    assert.ok(dashboardWebviewScript.includes("const editable=!!(cm.id && cm.editableByCurrentUser);"));
+    assert.ok(dashboardWebviewScript.includes("const editBtn=editable?"));
     assert.ok(dashboardWebviewScript.includes("const journalId=cm.id?"));
   });
 
-  test("コメントヘッダーはメタ情報と未同期マークを分離して配置する", () => {
+  test("コメントヘッダーはメタ情報とアクションを分離して配置する", () => {
     assert.ok(dashboardWebviewScript.includes("<div class=\"comment-meta\"><span class=\"comment-author\""));
-    assert.ok(dashboardWebviewScript.includes("<div class=\"comment-status\">"));
+    assert.ok(dashboardWebviewScript.includes("<div class=\"comment-header-actions\">"));
     assert.ok(dashboardStyles.includes(".comment-meta{display:flex;align-items:center;gap:6px;min-width:0;flex-wrap:wrap}"));
-    assert.ok(dashboardStyles.includes(".comment-status{display:flex;align-items:center;gap:4px;flex-shrink:0}"));
+    assert.ok(dashboardStyles.includes(".comment-header"));
   });
 
   test("コメント同期ボタンも同期中は無効化対象に含める", () => {
@@ -221,14 +230,12 @@ suite("Dashboard Webview 改善", () => {
     assert.ok(!dashboardStyles.includes(".ticket-detail-card.composer-popover"));
   });
 
-  test("監査補修でフィルター表示・説明文省略・未同期件数を維持する", () => {
+  test("監査補修でフィルター表示・説明文・未同期件数を維持する", () => {
     assert.ok(dashboardWebviewScript.includes("function renderFilterChips()"));
     assert.ok(dashboardWebviewScript.includes("renderFilterChips();"));
     assert.ok(!dashboardWebviewScript.includes("filter-chip-x"));
-    assert.ok(dashboardWebviewScript.includes("detail-description'+(ticketDetailExpanded ? '' : ' detail-description-collapsed')"));
-    assert.ok(dashboardStyles.includes(".detail-description-collapsed"));
-    assert.ok(dashboardStyles.includes("-webkit-line-clamp: 3"));
-    assert.ok(dashboardStyles.includes("max-height: 4.5em"));
+    assert.ok(dashboardWebviewScript.includes("detail-description"));
+    assert.ok(dashboardStyles.includes(".detail-description"));
     assert.ok(dashboardWebviewScript.includes("STRINGS.unsyncedCountLabel"));
     assert.ok(buildDashboardStrings().unsyncedCountLabel);
   });
@@ -252,7 +259,7 @@ suite("Dashboard Webview 改善", () => {
     assert.ok(html.includes('aria-labelledby="tab-tickets"'));
     assert.ok(html.includes('id="sync-all-btn" class="btn btn-primary'));
     assert.ok(dashboardWebviewScript.includes("data-sync-key=\"'+safeJson(item.key)+'\""));
-    assert.ok(dashboardWebviewScript.includes("id=\"add-comment-btn\" type=\"button\">'+actionIcon('comment')+esc(STRINGS.addCommentAction)"));
+    assert.ok(dashboardWebviewScript.includes("id=\"add-comment-btn\" type=\"button\">'+actionIcon('child')+'<span>'+esc(STRINGS.addCommentAction)+'</span>"));
     assert.ok(dashboardWebviewScript.includes("id=\"reload-comments-btn\" type=\"button\""));
     assert.ok(dashboardStyles.includes("body.vscode-high-contrast"));
     assert.ok(dashboardStyles.includes("@media (max-width: 699px)"));

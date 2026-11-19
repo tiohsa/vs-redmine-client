@@ -36,7 +36,7 @@ const extractEditorScopeHash = (uri: vscode.Uri): string | undefined => {
 
 const hasEditorFilename = (uri: vscode.Uri): boolean => {
   const basename = path.posix.basename(uri.path.replace(/\\/g, "/"));
-  return /^(?:project-\d+_ticket-\d+|redmine-client-(?:[a-f0-9]{16}-)?new-(?:ticket|comment-\d+))/.test(basename);
+  return /^(?:project-\d+_ticket-\d+|redmine-client-(?:[a-f0-9]{16}-)?(?:ticket-\d+|new-(?:ticket|comment-\d+)))/.test(basename);
 };
 
 /**

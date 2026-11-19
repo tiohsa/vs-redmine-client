@@ -83,7 +83,7 @@ export const validateMarkdownTicketHeader = (content: string): TicketEditorConte
   if (fields.mode === "ticket-update") {
     throw new Error("This Markdown file is already marked as a ticket update file.");
   }
-  if (fields.mode !== "new-ticket") {
+  if (fields.mode !== "new-ticket" && fields.mode !== "ticket-create") {
     throw new Error(`Unsupported mode for ticket creation: ${fields.mode}`);
   }
 

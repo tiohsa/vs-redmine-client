@@ -32,7 +32,8 @@
         "redmine-client.selectProject",
         "redmine-client.toggleChildProjects",
         "redmine-client.searchTickets",
-        "redmine-client.refreshTickets"
+        "redmine-client.refreshTickets",
+        "redmine-client.toggleCompactMode"
       ],
       "selectors": [
         "#project-select-trigger",
@@ -64,16 +65,20 @@
       "entryPoints": [
         "redmine-clientActivityDashboard",
         "redmine-client.createTicket",
+        "redmine-client.createTicketFromDashboard",
         "redmine-client.createTicketFromMarkdownHeader",
         "redmine-client.createTicketFromList",
         "redmine-client.createChildTicketFromList",
         "redmine-client.openTicketPreview",
-        "redmine-client.syncOpenEditor"
+        "redmine-client.syncOpenEditor",
+        "redmine-client.editFieldViaQuickPick"
       ],
       "selectors": [
-        "#new-ticket-btn",
-        "#metadata-edit-btn",
-        "#metadata-apply-btn"
+        "#ticket-detail-card",
+        "#detail-tab-overview",
+        "#detail-sync-btn",
+        "#detail-browser-btn",
+        "#detail-cancel-btn"
       ],
       "invariants": [
         "作成時は Markdown の見出しとメタデータをチケットの入力に反映する。",
@@ -418,6 +423,24 @@
     {
       "id": "redmine-client.referenceExample",
       "label": "%command.referenceExample%",
+      "navigation": "Command Palette",
+      "shortcuts": []
+    },
+    {
+      "id": "redmine-client.editFieldViaQuickPick",
+      "label": "%command.editFieldViaQuickPick.title%",
+      "navigation": "Command Palette",
+      "shortcuts": []
+    },
+    {
+      "id": "redmine-client.createTicketFromDashboard",
+      "label": "%command.createTicketFromDashboard.title%",
+      "navigation": "Command Palette",
+      "shortcuts": []
+    },
+    {
+      "id": "redmine-client.toggleCompactMode",
+      "label": "%command.toggleCompactMode.title%",
       "navigation": "Command Palette",
       "shortcuts": []
     },

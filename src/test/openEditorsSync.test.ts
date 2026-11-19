@@ -24,13 +24,19 @@ const getCommands = (packageJson: Record<string, unknown>): CommandEntry[] => {
 };
 
 suite("Open Editors sync — package.json contributions", () => {
-  test("syncToRedmine is not in editor/title", () => {
+  test("syncToRedmine and openTicketInBrowser are in editor/title for ticket editors", () => {
     const menus = getMenus(loadPackageJson());
     const editorTitle: MenuEntry[] = (menus["editor/title"] ?? []) as MenuEntry[];
-    const found = editorTitle.some(
+    const syncEntry = editorTitle.find(
       (e) => e.command === "redmine-client.syncToRedmine",
     );
-    assert.strictEqual(found, false, "syncToRedmine must not appear in editor/title");
+    const browserEntry = editorTitle.find(
+      (e) => e.command === "redmine-client.openTicketInBrowser",
+    );
+    assert.ok(syncEntry, "syncToRedmine must appear in editor/title");
+    assert.strictEqual(syncEntry?.when, "redmine-client.isTicketEditor");
+    assert.ok(browserEntry, "openTicketInBrowser must appear in editor/title");
+    assert.strictEqual(browserEntry?.when, "redmine-client.isExistingTicketEditor");
   });
 
   test("syncOpenEditor is no longer tied to redmine-clientActivityOpenTickets", () => {

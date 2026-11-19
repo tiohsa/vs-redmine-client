@@ -14,6 +14,7 @@ import {
   clearTicketDrafts,
   markDraftStatus,
   initializeTicketDraft,
+  setTicketDraftContent,
 } from "../views/ticketDraftStore";
 import { createInMemoryDraftStorage } from "../views/draftPersistence";
 
@@ -134,6 +135,37 @@ suite("Dashboard ViewModel — チケット変換", () => {
     assert.strictEqual(nodes[1].doneRatio, 50);
     assert.strictEqual(nodes[1].children[0].doneRatio, 100);
     assert.strictEqual(nodes[2].doneRatio, undefined);
+  });
+
+  test("ローカル下書きの done_ratio が DashboardTicketNode にライブオーバーレイされる", async () => {
+    initializeTicketDraft(
+      10,
+      "Initial subject",
+      "desc",
+      {
+        tracker: "Bug",
+        priority: "High",
+        status: "In Progress",
+        due_date: "",
+        done_ratio: 20,
+      },
+      "",
+    );
+    setTicketDraftContent(10, {
+      subject: "Updated subject",
+      description: "desc",
+      metadata: {
+        tracker: "Bug",
+        priority: "High",
+        status: "In Progress",
+        due_date: "",
+        done_ratio: 70,
+      },
+    });
+    markDraftStatus(10, "Dirty");
+    const nodes = buildTicketDashboardNodes([makeTicket({ id: 10, doneRatio: 20 })]);
+    assert.strictEqual(nodes.length, 1);
+    assert.strictEqual(nodes[0].doneRatio, 70);
   });
 
   test("buildTicketDetail でチケット詳細を変換する", async () => {

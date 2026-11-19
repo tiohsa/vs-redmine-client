@@ -9,7 +9,8 @@ const persistedUiState = vscode.getState() || {};
 let ticketLayoutMode = ['auto','single','split'].includes(persistedUiState.ticketLayoutMode) ? persistedUiState.ticketLayoutMode : 'auto';
 let detailFocus = persistedUiState.detailFocus === true;
 let detailTab = persistedUiState.detailTab === 'comments' ? 'comments' : 'overview';
-const quickFilters = new Set(Array.isArray(persistedUiState.quickFilters) ? persistedUiState.quickFilters.filter(function(value){ return ['mine','open','overdue','unsynced'].includes(value); }) : []);
+let compactMode = persistedUiState.compactMode === true;
+const quickFilters = new Set(Array.isArray(persistedUiState.quickFilters) ? persistedUiState.quickFilters.filter(function(value){ return ['mine','open','overdue','high'].includes(value); }) : ['open']);
 
 // 業務状態は DashboardState、Webview 固有のレイアウト選択はvscode.setStateで保持する。
 // 以下はそれ以外の表示用一時状態。
@@ -19,34 +20,42 @@ let searchQuery = '';
 let projectSearchQuery = '';
 let searchTimer = null;
 let searchComposing = false;
-let ticketDetailExpanded = false;
-let metadataExpanded = false;
 const expandedComments = new Set();
 let renderedDetailTicketId = null;
 let activeTicketActionMenuId = null;
 let activeTicketActionAnchorTop = null;
 let composerDraftKey = null;
 let composerDraftValues = null;
-let metadataEdit = null;
 let renderedSettingsBaseUrl = null;
 let settingsRenderGeneration = 0;
+let selectedDraftId = null;
 const ticketSyncRequests = new Map();
 const expandedTicketIds = new Set();
 const collapsedTicketIds = new Set();
 const activeSyncRequests = new Set();
+const activeRefreshRequests = new Set();
 const unsyncedFeedbackRequests = new Set();
 
 function esc(value){ return String(value ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
 function send(message){ vscode.postMessage(message); }
 function req(type, extra){
+  if(type === 'dashboard.refresh'){
+    if(activeRefreshRequests.size) return;
+    const requestId='req-'+(++requestCounter);
+    activeRefreshRequests.add(requestId);
+    updateRefreshButtonState();
+    send(Object.assign({type:type,requestId:requestId}, extra || {}));
+    return requestId;
+  }
   const queueAction = ['unsynced.syncOne','unsynced.syncAll','unsynced.discardOne','unsynced.abandonOne','unsynced.forgetAbandoned','unsynced.forgetAllAbandoned','unsynced.startNewTicketEdit'].includes(type);
   const ticketAction = type === 'ticket.syncSelected' || type === 'ticket.reviewConflict';
-  if((queueAction || ticketAction) && activeSyncRequests.size) return;
-  if(ticketAction && (state?.selectedTicket?.syncState === 'Syncing' || metadataEdit?.requestId)) return;
+  const draftSyncAction = type === 'ticket.syncDraft';
+  if((queueAction || ticketAction || draftSyncAction) && activeSyncRequests.size) return;
+  if(ticketAction && state?.selectedTicket?.syncState === 'Syncing') return;
   const requestId='req-'+(++requestCounter);
   if(queueAction) unsyncedFeedbackRequests.add(requestId);
   if(ticketAction) ticketSyncRequests.set(requestId,extra.ticketId);
-  if(queueAction || ticketAction){ activeSyncRequests.add(requestId); updateSyncButtonStates(); }
+  if(queueAction || ticketAction || draftSyncAction){ activeSyncRequests.add(requestId); updateSyncButtonStates(); }
   send(Object.assign({type:type,requestId:requestId}, extra || {}));
   return requestId;
 }
@@ -64,11 +73,12 @@ function captureFocus(root){
   }
   let selector=element.id ? '#'+CSS.escape(element.id) : null;
   if(!selector){
-    const attributes=['data-ticket-action-menu','data-ticket-action','data-expand','data-expand-comment','data-metadata-field','data-id'];
+    const attributes=['data-ticket-action-menu','data-ticket-action','data-draft-action','data-draft-queue-id','data-expand','data-expand-comment','data-metadata-field','data-id'];
     const attribute=attributes.find(function(name){ return element.hasAttribute(name); });
     if(attribute) selector='['+attribute+'="'+CSS.escape(element.getAttribute(attribute))+'"]';
     const row=element.closest('.ticket-row');
-    if(row && attribute !== 'data-id') selector='.ticket-row[data-id="'+row.dataset.id+'"] '+selector;
+    if(row && row.dataset.draftQueueId && attribute !== 'data-draft-queue-id') selector='.ticket-row[data-draft-queue-id="'+CSS.escape(row.dataset.draftQueueId)+'"] '+selector;
+    else if(row && row.dataset.id && attribute !== 'data-id') selector='.ticket-row[data-id="'+row.dataset.id+'"] '+selector;
   }
   return selector ? {selector:selector,start:element.selectionStart,end:element.selectionEnd} : null;
 }
@@ -114,29 +124,37 @@ function showToast(level, message){
   window.setTimeout(function(){ item.classList.add('toast-fade'); }, 3200);
   window.setTimeout(function(){ if(item.parentNode) item.parentNode.removeChild(item); }, 4000);
 }
+function updateRefreshButtonState(){
+  const button = document.getElementById('refresh-btn');
+  if(!button) return;
+  const spinning = activeRefreshRequests.size > 0;
+  button.classList.toggle('is-spinning', spinning);
+  button.setAttribute('aria-busy', String(spinning));
+  button.title = spinning ? STRINGS.refreshing : STRINGS.refresh;
+}
 function updateSyncButtonStates(){
   const busy = activeSyncRequests.size > 0;
-  document.querySelectorAll('[data-sync-key],[data-discard-key],[data-sync-comment-key],[data-abandon-key],[data-forget-key],#forget-all-abandoned-btn,[data-start-ticket],[data-ticket-action="sync"]').forEach(function(button){ button.disabled = busy; });
+  document.querySelectorAll('[data-sync-key],[data-discard-key],[data-sync-comment-key],[data-abandon-key],[data-forget-key],#forget-all-abandoned-btn,[data-start-ticket],[data-ticket-action="sync"],[data-draft-action="sync"]').forEach(function(button){ button.disabled = busy; });
   const detailSync = document.getElementById('detail-sync-btn');
   const selectedSyncing = state?.selectedTicket?.syncState === 'Syncing' || Array.from(ticketSyncRequests.values()).includes(state?.selectedTicket?.id);
   if(detailSync){
-    detailSync.disabled = busy || selectedSyncing || !!metadataEdit?.requestId;
+    detailSync.disabled = busy || selectedSyncing;
     detailSync.setAttribute('aria-busy',String(selectedSyncing));
     detailSync.querySelector('span').textContent = selectedSyncing ? STRINGS.syncSyncing : STRINGS.syncToRedmine;
   }
   const detailState=document.getElementById('detail-sync-state');
   if(detailState && state?.selectedTicket){
-    const metadataDirty=metadataEdit?.ticketId === state.selectedTicket.id && Object.keys(metadataPatch()).length > 0;
-    const recoveryPending=['CommitUnknown','RecoveryPending'].includes(state.selectedTicket.syncState);
-    const value=selectedSyncing ? 'Syncing' : metadataDirty && !recoveryPending ? 'Dirty' : state.selectedTicket.syncState;
-    detailState.className='detail-sync-state '+syncBadgeClass(value);
-    detailState.textContent=syncLabel(value);
+    const value=selectedSyncing ? 'Syncing' : state.selectedTicket.syncState;
+    const unsynced=!!value && value !== 'Synced';
+    detailState.className='detail-sync-state '+syncBadgeClass(value)+(unsynced ? '' : ' hidden');
+    detailState.textContent=unsynced ? (value === 'Dirty' || value === 'Queued' ? STRINGS.unsyncedShort : syncLabel(value)) : '';
   }
   const syncAll = document.getElementById('sync-all-btn');
   if(syncAll){ syncAll.disabled = busy; syncAll.setAttribute('aria-busy', String(busy)); }
   document.querySelectorAll('#sync-tray [data-sync-tray-action]').forEach(function(button){ button.disabled=busy; });
 }
 function startOperation(requestId, label){
+  if(activeRefreshRequests.has(requestId)){ updateRefreshButtonState(); return; }
   activeSyncRequests.add(requestId);
   if(unsyncedFeedbackRequests.has(requestId)) setOperationFeedback('info', label || STRINGS.syncSyncing);
   updateSyncButtonStates();
@@ -186,13 +204,7 @@ function renderSyncTray(){
     addButton(STRINGS.syncAllBtn,true,function(){ req('unsynced.syncAll'); },true);
   }
 }
-function endOperation(requestId){ ticketSyncRequests.delete(requestId); activeSyncRequests.delete(requestId); updateSyncButtonStates(); }
-function finishMetadataOperation(requestId, succeeded){
-  if(metadataEdit?.requestId !== requestId) return;
-  if(succeeded) metadataEdit=null; else metadataEdit.requestId=null;
-  renderTicketDetail();
-  document.getElementById(succeeded ? 'metadata-edit-btn' : 'metadata-apply-btn')?.focus();
-}
+function endOperation(requestId){ ticketSyncRequests.delete(requestId); activeSyncRequests.delete(requestId); activeRefreshRequests.delete(requestId); updateSyncButtonStates(); updateRefreshButtonState(); }
 function finishOperation(level, requestId, message){
   const handled=unsyncedFeedbackRequests.delete(requestId);
   if(handled) setOperationFeedback(level, message);
@@ -231,11 +243,15 @@ document.getElementById('tabs').addEventListener('keydown', function(event){
 });
 
 // ── Header / search ───────────────────────────────────────────────────────
-document.getElementById('refresh-btn').addEventListener('click', function(){ req('dashboard.refresh'); });
-document.getElementById('new-ticket-btn').addEventListener('click', function(){ activateTab('tickets'); req('ticket.create'); });
+function applyCompactMode(){
+  const listEl = document.getElementById('ticket-list');
+  if(listEl) listEl.classList.toggle('is-compact', compactMode);
+}
+applyCompactMode();
 document.getElementById('include-children').addEventListener('click', function(){
   const next = this.getAttribute('aria-pressed') !== 'true';
   this.setAttribute('aria-pressed', String(next));
+  this.title = next ? STRINGS.includeChildrenOn : STRINGS.includeChildrenOff;
   req('project.toggleChildren',{includeChildProjects:next});
 });
 const projectPicker = document.getElementById('project-picker');
@@ -328,7 +344,7 @@ function clearSearch(){
 function scheduleSearch(){
   searchQuery=searchInput.value.trim(); updateSearchClearButton();
   if(searchTimer){ window.clearTimeout(searchTimer); searchTimer=null; }
-  if(!searchComposing) searchTimer=window.setTimeout(submitSearch,300);
+  if(!searchComposing) searchTimer=window.setTimeout(submitSearch,150);
 }
 searchInput.addEventListener('input',scheduleSearch);
 searchInput.addEventListener('compositionstart',function(){ searchComposing=true; if(searchTimer){ window.clearTimeout(searchTimer); searchTimer=null; } });
@@ -337,9 +353,9 @@ searchClearButton.addEventListener('click',clearSearch);
 searchInput.addEventListener('keydown',function(event){
   if(searchComposing || event.isComposing || event.keyCode === 229) return;
   if(event.key === 'Enter'){ submitSearch(); event.preventDefault(); }
-  else if(event.key === 'Escape' && this.value){ clearSearch(); event.preventDefault(); }
+  else if(event.key === 'Escape' && this.value){ clearSearch(); event.preventDefault(); event.stopPropagation(); }
 });
-function persistViewState(){ vscode.setState(Object.assign({},vscode.getState() || {},{ticketLayoutMode:ticketLayoutMode,detailFocus:detailFocus,detailTab:detailTab,quickFilters:Array.from(quickFilters)})); }
+function persistViewState(){ vscode.setState(Object.assign({},vscode.getState() || {},{ticketLayoutMode:ticketLayoutMode,detailFocus:detailFocus,detailTab:detailTab,compactMode:compactMode,quickFilters:Array.from(quickFilters)})); }
 document.querySelectorAll('[data-quick-filter]').forEach(function(button){ button.addEventListener('click',function(){
   const name=button.dataset.quickFilter;
   if(quickFilters.has(name)) quickFilters.delete(name); else quickFilters.add(name);
@@ -466,10 +482,22 @@ function quickFilterCapability(name){
   if(name === 'open') return state?.quickFilterCapabilities?.open || 'loading';
   return 'available';
 }
+function isHighPriority(priorityName){
+  const n=String(priorityName || '').trim().toLowerCase();
+  return n === 'high' || n === 'urgent' || n === 'immediate' || n.includes('高め') || n.includes('急いで') || n.includes('今すぐ') || n.includes('緊急') || n.includes('高');
+}
 function hasEffectiveQuickFilters(){
-  return quickFilters.has('overdue') || quickFilters.has('unsynced') ||
+  return quickFilters.has('overdue') || quickFilters.has('high') ||
     (quickFilters.has('mine') && quickFilterCapability('mine') === 'available') ||
     (quickFilters.has('open') && quickFilterCapability('open') === 'available');
+}
+function isTicketClosed(ticket){
+  const statuses = state?.metadataOptions?.statuses || [];
+  const status = statuses.find(function(item){ return ticket.statusId !== undefined ? item.id === ticket.statusId : item.name === ticket.statusName; }) ||
+    statuses.find(function(item){ return item.name === ticket.statusName; });
+  if(status && typeof status.isClosed === 'boolean') return status.isClosed;
+  const name = String(ticket.statusName || '').trim().toLowerCase();
+  return name === 'closed' || name === 'rejected' || name === '終了' || name === '完了' || name === '却下';
 }
 function matchesQuickFilters(ticket){
   if(quickFilters.has('mine') && quickFilterCapability('mine') === 'available' && ticket.assigneeId !== state.currentUserId) return false;
@@ -477,8 +505,41 @@ function matchesQuickFilters(ticket){
     const status=(state.metadataOptions?.statuses || []).find(function(item){ return item.id === ticket.statusId; });
     if(!status || status.isClosed !== false) return false;
   }
-  if(quickFilters.has('overdue') && !(daysUntilDateOnly(ticket.dueDate,new Date()) < 0)) return false;
-  if(quickFilters.has('unsynced') && !SYNC_META[ticket.syncState]) return false;
+  if(quickFilters.has('overdue') && (isTicketClosed(ticket) || !(daysUntilDateOnly(ticket.dueDate,new Date()) < 0))) return false;
+  if(quickFilters.has('high') && !isHighPriority(ticket.priorityName)) return false;
+  return true;
+}
+function filterTicketTree(nodes){
+  const result = [];
+  for(const node of nodes || []){
+    const filteredChildren = filterTicketTree(node.children);
+    const selfMatch = matchesQuickFilters(node);
+    if(selfMatch || filteredChildren.length){
+      result.push(Object.assign({}, node, { children: filteredChildren, autoExpand: filteredChildren.length > 0 }));
+    }
+  }
+  return result;
+}
+function flattenFilteredTree(nodes, result){
+  const output = result || [];
+  for(const node of nodes || []){
+    output.push(node);
+    if(node.children && node.children.length && (node.autoExpand || expandedTicketIds.has(node.id))){
+      flattenFilteredTree(node.children, output);
+    }
+  }
+  return output;
+}
+function matchesDraftFilters(draft){
+  if(quickFilters.has('mine') && quickFilterCapability('mine') === 'available') return false;
+  if(quickFilters.has('overdue') && !(daysUntilDateOnly(draft.dueDate,new Date()) < 0)) return false;
+  if(quickFilters.has('high') && !isHighPriority(draft.priorityName)) return false;
+  const query = String(state?.ticketSearch?.query || searchQuery || '').trim().toLowerCase();
+  if(query){
+    const haystack = ['#new', 'new', draft.subject, draft.trackerName, draft.statusName, draft.priorityName, draft.assigneeName, draft.detail]
+      .filter(Boolean).join(' ').toLowerCase();
+    if(!haystack.includes(query)) return false;
+  }
   return true;
 }
 function renderQuickFilters(){
@@ -572,27 +633,64 @@ function trackerAccentClass(name){
   if(n.includes('task') || n.includes('todo') || n.includes('chore') || n.includes('タスク') || n.includes('作業')) return 'tracker-task';
   return 'tracker-neutral';
 }
+function statusPillClass(name){
+  const n = String(name || '').trim().toLowerCase();
+  if(n === 'new' || n === '新規') return 'status-new';
+  if(n === 'in progress' || n === '進行中') return 'status-in-progress';
+  if(n === 'resolved' || n === 'closed' || n === '解決' || n === '終了' || n === '完了') return 'status-resolved';
+  return '';
+}
+function priorityIndicator(name){
+  const n = String(name || '').trim().toLowerCase();
+  if(!n) return '';
+  if(n === 'urgent' || n === 'immediate' || n.includes('今すぐ') || n.includes('急いで') || n.includes('緊急')){
+    return '<span class="priority-indicator priority-urgent" title="'+esc(STRINGS.sortPriority+': '+name)+'" aria-label="'+esc(STRINGS.sortPriority+': '+name)+'">!!</span>';
+  }
+  if(n === 'high' || n.includes('高め') || n === '高'){
+    return '<span class="priority-indicator priority-high" title="'+esc(STRINGS.sortPriority+': '+name)+'" aria-label="'+esc(STRINGS.sortPriority+': '+name)+'">!</span>';
+  }
+  return '';
+}
+function formatShortDueDate(dateStr){
+  const match = DATE_ONLY_PATTERN.exec(String(dateStr || ''));
+  return match ? match[2]+'/'+match[3] : String(dateStr || '');
+}
+function renderDraftRow(draft){
+  const selected = draft.queueId === selectedDraftId;
+  const trackerCls = trackerAccentClass(draft.trackerName);
+  const trackerBar = '<span class="ticket-tracker-bar" aria-hidden="true"'+(draft.trackerName ? ' title="'+esc(STRINGS.sortTracker+': '+draft.trackerName)+'"' : '')+'></span>';
+  const status = state.settings.showStatus !== false && draft.statusName ? '<span class="ticket-attribute status-pill '+statusPillClass(draft.statusName)+'">'+esc(draft.statusName)+'</span>' : '';
+  const syncStateText = draft.syncState && draft.syncState !== 'Draft' ? syncLabel(draft.syncState) : STRINGS.unsyncedShort;
+  const unsyncedInline = '<span class="unsynced-inline-badge" title="'+esc(syncLabel(draft.syncState || 'Draft'))+'"><span class="unsynced-dot" aria-hidden="true"></span>'+esc(syncStateText)+'</span>';
+  const assignee = hasAssignee(draft.assigneeName) ? '<span class="ticket-meta-item ticket-meta-assignee" title="'+esc(draft.assigneeName)+'">'+actionIcon('account')+'<span>'+esc(draft.assigneeName)+'</span></span>' : '';
+  const dueDiff = draft.dueDate ? daysUntilDateOnly(draft.dueDate, new Date()) : undefined;
+  const isOverdue = dueDiff !== undefined && dueDiff < 0;
+  const dueDate = draft.dueDate ? '<span class="ticket-meta-item ticket-meta-due'+(isOverdue ? ' is-overdue' : '')+'" title="'+esc(STRINGS.dueDateLabel+': '+draft.dueDate)+'">'+actionIcon('calendar')+'<span>'+esc(formatShortDueDate(draft.dueDate))+'</span></span>' : '';
+  return '<div class="ticket-row '+trackerCls+' is-draft is-unsynced'+(selected ? ' selected' : '')+'" data-draft-queue-id="'+esc(draft.queueId)+'" data-draft-uri="'+esc(draft.documentUri)+'" role="listitem" aria-current="'+selected+'" tabindex="0" data-level="0">'+trackerBar+'<div class="ticket-row-content"><div class="ticket-row-main"><div class="ticket-row-title-group"><span class="ticket-id ticket-id-new">#NEW</span>'+priorityIndicator(draft.priorityName)+'<span class="ticket-subject" title="'+esc(draft.subject)+'">'+esc(draft.subject)+'</span></div></div><div class="ticket-row-meta"><div class="ticket-meta-left">'+status+unsyncedInline+'</div><div class="ticket-meta-right">'+assignee+dueDate+'</div></div></div></div>';
+}
 function renderTicketRow(ticket){
-  const selected=ticket.id === state.selectedTicketId;
+  const selected=selectedDraftId === null && ticket.id === state.selectedTicketId;
   const searching=!!state.ticketSearch?.query;
   const hasChildren=!searching && !!ticket.children?.length;
-  const expanded=expandedTicketIds.has(ticket.id);
-  const sync=ticket.syncState && ticket.syncState !== 'Synced' && ticket.syncState !== 'Draft' ? syncBadge(ticket.syncState) : '';
+  const expanded=!!ticket.autoExpand || expandedTicketIds.has(ticket.id);
   const unsynced=!!ticket.syncState && ticket.syncState !== 'Synced';
   const trackerCls=trackerAccentClass(ticket.trackerName);
-  const status=state.settings.showStatus !== false && ticket.statusName ? '<span class="ticket-attribute">'+esc(ticket.statusName)+'</span>' : '';
+  const trackerBar='<span class="ticket-tracker-bar" aria-hidden="true"'+(ticket.trackerName ? ' title="'+esc(STRINGS.sortTracker+': '+ticket.trackerName)+'"' : '')+'></span>';
+  const status=state.settings.showStatus !== false && ticket.statusName ? '<span class="ticket-attribute status-pill '+statusPillClass(ticket.statusName)+'">'+esc(ticket.statusName)+'</span>' : '';
+  const unsyncedInline=unsynced && ticket.syncState !== 'Draft' ? '<span class="unsynced-inline-badge" title="'+esc(syncLabel(ticket.syncState))+'"><span class="unsynced-dot" aria-hidden="true"></span>'+esc(ticket.syncState === 'Dirty' || ticket.syncState === 'Queued' ? STRINGS.unsyncedShort : syncLabel(ticket.syncState))+'</span>' : '';
   const project=(!state.selectedProject || state.includeChildProjects) && ticket.projectName ? '<span class="ticket-attribute ticket-project">'+esc(ticket.projectName)+'</span>' : '';
-  const assignee=hasAssignee(ticket.assigneeName) ? '<span class="ticket-meta-item ticket-meta-assignee" title="'+esc(ticket.assigneeName)+'">'+esc(ticket.assigneeName)+'</span>' : '';
+  const assignee=hasAssignee(ticket.assigneeName) ? '<span class="ticket-meta-item ticket-meta-assignee" title="'+esc(ticket.assigneeName)+'">'+actionIcon('account')+'<span>'+esc(ticket.assigneeName)+'</span></span>' : '';
   const dueDiff=ticket.dueDate ? daysUntilDateOnly(ticket.dueDate, new Date()) : undefined;
-  const isOverdue=dueDiff !== undefined && dueDiff < 0;
-  const dueDate=ticket.dueDate ? '<span class="ticket-meta-item ticket-meta-due'+(isOverdue ? ' is-overdue' : '')+'" title="'+esc(STRINGS.dueDateLabel+': '+ticket.dueDate)+'">'+esc(ticket.dueDate)+'</span>' : '';
-  const expand=hasChildren ? '<button class="expand-btn" type="button" data-expand="'+ticket.id+'" aria-expanded="'+expanded+'" aria-label="'+esc(expanded ? STRINGS.collapseTitle : STRINGS.expandTitle)+'"><span class="expand-icon '+(expanded?'expanded':'collapsed')+'" aria-hidden="true"></span></button>' : '<span class="expand-placeholder" aria-hidden="true"></span>';
+  const isOverdue=dueDiff !== undefined && dueDiff < 0 && !isTicketClosed(ticket);
+  const dueDate=ticket.dueDate ? '<span class="ticket-meta-item ticket-meta-due'+(isOverdue ? ' is-overdue' : '')+'" title="'+esc(STRINGS.dueDateLabel+': '+ticket.dueDate)+'">'+actionIcon('calendar')+'<span>'+esc(formatShortDueDate(ticket.dueDate))+'</span></span>' : '';
+  const expand=hasChildren ? '<button class="expand-btn" type="button" data-expand="'+ticket.id+'" aria-expanded="'+expanded+'" aria-label="'+esc(expanded ? STRINGS.collapseTitle : STRINGS.expandTitle)+'">'+actionIcon(expanded ? 'chevronDown' : 'chevronRight')+'</button>' : '';
   const level=searching ? 0 : (ticket.level || 0);
   let guides='';
   for(let i=0;i<level;i++) guides+='<span class="ticket-indent-guide" aria-hidden="true"></span>';
-  const hasDoneRatio=typeof ticket.doneRatio === 'number' && !Number.isNaN(ticket.doneRatio) && ticket.doneRatio >= 0 && ticket.doneRatio <= 100;
-  const progress=hasDoneRatio ? '<div class="ticket-progress" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="'+ticket.doneRatio+'" aria-label="'+esc(String(ticket.doneRatio)+'%')+'"><div class="ticket-progress-fill" data-progress="'+ticket.doneRatio+'"></div></div>' : '';
-  return '<div class="ticket-row '+trackerCls+(unsynced ? ' is-unsynced' : '')+(level > 0 ? ' child-row' : '')+(selected ? ' selected' : '')+'" data-id="'+ticket.id+'" role="listitem" aria-current="'+selected+'" tabindex="0" data-level="'+level+'">'+guides+expand+'<div class="ticket-row-content"><div class="ticket-row-main"><span class="ticket-id">#'+ticket.id+'</span><span class="ticket-subject" title="'+esc(ticket.subject)+'">'+esc(ticket.subject)+'</span></div><div class="ticket-row-meta">'+status+project+assignee+dueDate+sync+'</div></div>'+progress+'</div>';
+  if(level > 0) guides+='<span class="ticket-indent-branch" aria-hidden="true"></span>';
+  const hasDoneRatio=typeof ticket.doneRatio === 'number' && !Number.isNaN(ticket.doneRatio) && ticket.doneRatio > 0 && ticket.doneRatio <= 100;
+  const progress=hasDoneRatio ? '<div class="ticket-progress" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="'+ticket.doneRatio+'" aria-label="'+esc(String(ticket.doneRatio)+'%')+'"><div class="ticket-progress-fill'+(ticket.doneRatio === 100 ? ' is-complete' : '')+'" data-progress="'+ticket.doneRatio+'"></div></div>' : '';
+  return '<div class="ticket-row '+trackerCls+(unsynced ? ' is-unsynced' : '')+(level > 0 ? ' child-row' : '')+(selected ? ' selected' : '')+'" data-id="'+ticket.id+'" role="listitem" aria-current="'+selected+'" tabindex="0" data-level="'+level+'">'+trackerBar+guides+'<div class="ticket-row-content"><div class="ticket-row-main"><div class="ticket-row-title-group">'+expand+'<span class="ticket-id">#'+ticket.id+'</span>'+priorityIndicator(ticket.priorityName)+'<span class="ticket-subject" title="'+esc(ticket.subject)+'">'+esc(ticket.subject)+'</span></div></div><div class="ticket-row-meta"><div class="ticket-meta-left">'+status+unsyncedInline+project+'</div><div class="ticket-meta-right">'+assignee+dueDate+'</div></div>'+progress+'</div></div>';
 }
 function isTicketActionTarget(target){ return isElement(target) && !!target.closest('.ticket-action-btn,.ticket-action-menu,.expand-btn'); }
 let renderedTicketMarkup = null;
@@ -624,28 +722,103 @@ function renderTickets(){
     list.querySelector('#retry-tickets').addEventListener('click',function(){ submitSearch(); });
     more.classList.add('hidden'); updateSyncButtonStates(); return;
   }
-  if(!state.selectedProject && !state.tickets.length && !state.loading.tickets && !searchQuery){ renderedTicketMarkup=null; list.innerHTML='<div class="state-msg">'+STRINGS.noProjectSelected+'</div>'; more.classList.add('hidden'); updateSyncButtonStates(); return; }
+  const allDrafts = state.draftTickets || [];
+  if(!state.selectedProject && !state.tickets.length && !allDrafts.length && !state.loading.tickets && !searchQuery){ renderedTicketMarkup=null; list.innerHTML='<div class="state-msg">'+STRINGS.noProjectSelected+'</div>'; more.classList.add('hidden'); updateSyncButtonStates(); return; }
   if(state.loading.tickets){ list.innerHTML='<div class="state-msg loading-state" role="status">'+esc(STRINGS.loadingTickets)+'</div>'; more.classList.add('hidden'); updateSyncButtonStates(); return; }
   const hasActiveQuickFilter=hasEffectiveQuickFilters();
-  const tickets = (state.ticketSearch?.query || hasActiveQuickFilter ? flattenAll(state.tickets) : flattenVisible(state.tickets)).filter(matchesQuickFilters);
-  count.textContent = tickets.length === state.loadedTicketCount ? STRINGS.loadedTickets.replace('{0}',String(state.loadedTicketCount)) : STRINGS.shownLoadedTickets.replace('{0}',String(tickets.length)).replace('{1}',String(state.loadedTicketCount));
-  const markup = tickets.length ? tickets.map(renderTicketRow).join('') : '<div class="state-msg" role="status"><strong>'+esc(STRINGS.noTicketsFound)+'</strong><p>'+esc(STRINGS.searchEmptyHint)+'</p></div>';
+  const drafts = allDrafts.filter(matchesDraftFilters);
+  const tickets = state.ticketSearch?.query
+    ? flattenAll(state.tickets).filter(matchesQuickFilters)
+    : hasActiveQuickFilter
+      ? flattenFilteredTree(filterTicketTree(state.tickets))
+      : flattenVisible(state.tickets);
+  const totalLoaded = (state.loadedTicketCount || 0) + allDrafts.length;
+  const totalShown = drafts.length + tickets.length;
+  count.textContent = totalShown === totalLoaded ? STRINGS.loadedTickets.replace('{0}',String(totalLoaded)) : STRINGS.shownLoadedTickets.replace('{0}',String(totalShown)).replace('{1}',String(totalLoaded));
+  const markup = totalShown ? ((drafts.length ? drafts.map(renderDraftRow).join('') : '') + (tickets.length ? tickets.map(renderTicketRow).join('') : '')) : '<div class="state-msg" role="status"><strong>'+esc(STRINGS.noTicketsFound)+'</strong><p>'+esc(STRINGS.searchEmptyHint)+'</p><button id="clear-filters-btn" class="empty-clear-link" type="button">'+esc(STRINGS.clearFilters || STRINGS.resetFilters)+'</button></div>';
   if(state.hasMoreTickets || state.loading.moreTickets){ more.classList.remove('hidden'); more.textContent=state.loading.moreTickets ? STRINGS.loadingMore : state.errors.moreTickets ? STRINGS.retry : STRINGS.loadMore; } else more.classList.add('hidden');
   // 追加取得の開始・失敗通知だけでは既存行を作り直さない。
   if(markup !== renderedTicketMarkup){
     list.innerHTML=markup; renderedTicketMarkup=markup;
+    const clearBtn = typeof list.querySelector === 'function' ? list.querySelector('#clear-filters-btn') : null;
+    if(clearBtn){
+      clearBtn.addEventListener('click', function(){
+        quickFilters.clear();
+        persistViewState();
+        if(searchInput.value){ clearSearch(); }
+        else { renderTickets(); }
+      });
+    }
+    const updateSelectedRowVisual = function(targetRow){
+      list.querySelectorAll('.ticket-row').forEach(function(candidate){
+        const isCurrent = candidate === targetRow;
+        candidate.classList.toggle('selected', isCurrent);
+        candidate.setAttribute('aria-current', String(isCurrent));
+      });
+    };
     list.querySelectorAll('.ticket-row').forEach(function(row){
       const level = Math.max(0,Number(row.dataset.level) || 0);
       row.style.paddingLeft=(12 + level * 14)+'px';
-      row.querySelectorAll('.ticket-indent-guide').forEach(function(guide, idx){ guide.style.left=(12 + idx * 14 + 6)+'px'; });
+      row.querySelectorAll('.ticket-indent-guide').forEach(function(guide, idx){ guide.style.left=(12 + idx * 14 + 2)+'px'; });
+      const branch = row.querySelector('.ticket-indent-branch');
+      if(branch && level > 0){ branch.style.left=(12 + (level - 1) * 14 + 2)+'px'; }
       row.querySelectorAll('.ticket-progress-fill[data-progress]').forEach(function(bar){ bar.style.width=bar.dataset.progress+'%'; });
-      row.addEventListener('click',function(event){ if(isTicketActionTarget(event.target)) return; const id=Number(row.dataset.id); if(state.selectedTicketId === id){ ticketDetailExpanded=true; renderTicketDetail(); } req('ticket.select',{ticketId:id}); });
-      row.addEventListener('dblclick',function(event){ if(!isTicketActionTarget(event.target)) req('ticket.openEditor',{ticketId:Number(row.dataset.id)}); });
-      row.addEventListener('keydown',function(event){ if(isTicketActionTarget(event.target)) return; if(event.key === 'Enter'){ row.click(); event.preventDefault(); } else if(event.key === ' '){ if(!isTicketActionTarget(event.target)){ row.click(); event.preventDefault(); } } });
+      row.addEventListener('click',function(event){
+        if(isTicketActionTarget(event.target)) return;
+        if(row.dataset.draftQueueId){
+          selectedDraftId = row.dataset.draftQueueId;
+          updateSelectedRowVisual(row);
+          req('ticket.openDraft',{queueId:row.dataset.draftQueueId,documentUri:row.dataset.draftUri});
+          return;
+        }
+        selectedDraftId = null;
+        const id=Number(row.dataset.id);
+        if(state.selectedTicketId === id){ renderTicketDetail(); }
+        req('ticket.select',{ticketId:id});
+      });
+      row.addEventListener('dblclick',function(event){
+        if(isTicketActionTarget(event.target)) return;
+        if(row.dataset.draftQueueId){ req('ticket.openDraft',{queueId:row.dataset.draftQueueId,documentUri:row.dataset.draftUri}); return; }
+        req('ticket.openEditor',{ticketId:Number(row.dataset.id)});
+      });
+      row.addEventListener('keydown',function(event){
+        if(isTicketActionTarget(event.target)) return;
+        if(event.key === 'Enter' || event.key === ' '){ row.click(); event.preventDefault(); return; }
+        if(event.key === 'ArrowDown' || event.key === 'ArrowUp'){
+          const rows = Array.from(list.querySelectorAll('.ticket-row'));
+          const idx = rows.indexOf(row);
+          if(idx < 0) return;
+          const nextIdx = Math.max(0, Math.min(rows.length - 1, idx + (event.key === 'ArrowDown' ? 1 : -1)));
+          if(nextIdx !== idx){
+            const nextRow = rows[nextIdx];
+            updateSelectedRowVisual(nextRow);
+            nextRow.focus();
+            nextRow.scrollIntoView({ block: 'nearest' });
+            if(nextRow.dataset.draftQueueId){
+              selectedDraftId = nextRow.dataset.draftQueueId;
+              req('ticket.openDraft',{queueId:nextRow.dataset.draftQueueId,documentUri:nextRow.dataset.draftUri,preserveFocus:true});
+            } else {
+              selectedDraftId = null;
+              req('ticket.select',{ticketId:Number(nextRow.dataset.id),preserveFocus:true});
+            }
+          }
+          event.preventDefault();
+          return;
+        }
+        if(event.key === 'ArrowRight' || event.key === 'ArrowLeft'){
+          const expandBtn = row.querySelector('.expand-btn');
+          if(!expandBtn) return;
+          const id = Number(row.dataset.id);
+          const isExp = expandBtn.getAttribute('aria-expanded') === 'true';
+          if(event.key === 'ArrowRight' && !isExp){ expandedTicketIds.add(id); collapsedTicketIds.delete(id); renderTickets(); event.preventDefault(); }
+          else if(event.key === 'ArrowLeft' && isExp){ expandedTicketIds.delete(id); collapsedTicketIds.add(id); renderTickets(); event.preventDefault(); }
+        }
+      });
     });
-    list.querySelectorAll('.expand-btn').forEach(function(button){ button.addEventListener('click',function(event){ event.stopPropagation(); const id=Number(button.dataset.expand); if(expandedTicketIds.has(id)){ expandedTicketIds.delete(id); collapsedTicketIds.add(id); } else { expandedTicketIds.add(id); collapsedTicketIds.delete(id); } renderTickets(); }); });
+    list.querySelectorAll('.expand-btn').forEach(function(button){ button.addEventListener('click',function(event){ event.stopPropagation(); const id=Number(button.dataset.expand); if(button.getAttribute('aria-expanded') === 'true'){ expandedTicketIds.delete(id); collapsedTicketIds.add(id); } else { expandedTicketIds.add(id); collapsedTicketIds.delete(id); } renderTickets(); }); });
     list.querySelectorAll('[data-ticket-action-menu]').forEach(function(button){ button.addEventListener('click',function(event){ event.stopPropagation(); toggleTicketActionMenu(Number(button.dataset.ticketActionMenu)); }); });
     list.querySelectorAll('[data-ticket-action]').forEach(function(button){ button.addEventListener('click',function(event){ event.stopPropagation(); runTicketAction(button.dataset.ticketAction,Number(button.dataset.ticket)); }); });
+    list.querySelectorAll('[data-draft-action="sync"]').forEach(function(button){ button.addEventListener('click',function(event){ event.stopPropagation(); req('ticket.syncDraft',{queueId:button.dataset.draftQueueId,documentUri:button.dataset.draftUri}); }); });
   }
   more.onclick = function(){
     if(more.getAttribute('aria-disabled') === 'true') return;
@@ -657,7 +830,7 @@ function renderTickets(){
     const added=Array.from(list.querySelectorAll('.ticket-row')).find(function(row){ return !priorIds.has(row.dataset.id); });
     (added || count).focus({preventScroll:true});
   }
-  const restoredAnchor=anchor && list.querySelector('.ticket-row[data-id="'+CSS.escape(anchor.dataset.id)+'"]');
+  const restoredAnchor=anchor && anchor.dataset.id && list.querySelector('.ticket-row[data-id="'+CSS.escape(anchor.dataset.id)+'"]');
   if(restoredAnchor) scroll.scrollTop+=restoredAnchor.getBoundingClientRect().top-scroll.getBoundingClientRect().top-anchorOffset;
   else scroll.scrollTop=previousTop;
   if(!state.loading.moreTickets) ticketAppendStartIds=null;
@@ -665,92 +838,68 @@ function renderTickets(){
 }
 
 // ── Ticket detail / composer ──────────────────────────────────────────────
-function renderSelect(name,value,options,label,disabled,allowBlank){
-  const current=value || ''; const list=options || []; const disabledAttribute=disabled ? ' disabled' : '';
-  const blank=allowBlank ? '<option value=""'+(!current?' selected':'')+'>'+esc(STRINGS.assigneeUnassigned)+'</option>' : '';
-  const currentOption=current && !list.some(function(option){ return option.name === current; }) ? '<option value="'+esc(current)+'" selected>'+esc(current)+'</option>' : '';
-  const optionsHtml=list.map(function(option){ return '<option value="'+esc(option.name)+'"'+(option.name===current?' selected':'')+'>'+esc(option.name)+'</option>'; }).join('');
-  return '<label class="detail-field"><span>'+esc(label)+'</span><select class="detail-select" data-metadata-field="'+name+'"'+disabledAttribute+'>'+blank+currentOption+optionsHtml+'</select></label>';
-}
-function editOptionsFor(ticketId){ const options=state && state.editOptions; return options && options.ticketId === ticketId ? options : null; }
-function metadataOptionsReady(){ return !!(state && state.metadataOptions && state.metadataOptions.trackers.length && state.metadataOptions.priorities.length && state.metadataOptions.statuses.length); }
-function ticketMetadataValues(ticket){
-  return {tracker:ticket.trackerName || '',priority:ticket.priorityName || '',status:ticket.statusName || '',assignee:ticket.assigneeName || '',start_date:ticket.startDate || '',due_date:ticket.dueDate || ''};
-}
-function metadataPatch(){
-  const patch={};
-  if(metadataEdit) Object.keys(metadataEdit.values).forEach(function(field){ if(metadataEdit.values[field] !== metadataEdit.original[field]) patch[field]=metadataEdit.values[field]; });
-  return patch;
-}
 function renderTicketDetailPanel(ticket){
-  if(renderedDetailTicketId !== ticket.id){ renderedDetailTicketId=ticket.id; metadataExpanded=metadataEdit?.ticketId === ticket.id; ticketDetailExpanded=false; }
+  if(renderedDetailTicketId !== ticket.id){ renderedDetailTicketId=ticket.id; }
   const card=document.getElementById('ticket-detail-card');
-  const options=editOptionsFor(ticket.id);
-  const ready=!!options && !options.loading && !options.error;
-  const editing=metadataEdit?.ticketId === ticket.id;
-  const pending=editing && !!metadataEdit.requestId;
-  const values=editing ? metadataEdit.values : ticketMetadataValues(ticket);
-  const canEdit=ready || (!options && metadataOptionsReady());
-  const lists=options || state.metadataOptions;
-  const fields=[['tracker',STRINGS.sortTracker],['priority',STRINGS.sortPriority],['status',STRINGS.sortStatus],['assignee',STRINGS.sortAssignee],['start_date',STRINGS.startDate],['due_date',STRINGS.dueDateLabel]];
-  card.classList.remove('hidden'); card.removeAttribute('aria-busy');
-  const description=ticket.description ? '<div class="detail-description'+(ticketDetailExpanded ? '' : ' detail-description-collapsed')+'">'+esc(ticket.description)+'</div>' : '<p class="detail-hint">'+esc(STRINGS.noDescription)+'</p>';
-  const warning=['Draft','Dirty','Queued','Syncing','Conflict','Failed','RecoveryPending','CommitUnknown','Abandoned'].includes(ticket.syncState) ? '<p class="detail-description-warning" role="note">'+esc(STRINGS.descriptionUnsyncedWarning)+'</p>' : '';
-  const parent=ticket.parentId ? '<div class="detail-parent">#'+ticket.parentId+(ticket.parentSubject ? ' '+esc(ticket.parentSubject) : '')+'</div>' : '';
-  const statusHint=options?.statusFallback ? '<p class="detail-hint">'+esc(STRINGS.statusFallbackHint)+'</p>' : '';
-  const loadingHint=options?.loading ? '<p class="detail-hint">'+esc(STRINGS.loadingEditOptions)+'</p>' : '';
-  const errorHint=options?.error ? '<p class="detail-hint" role="alert">'+esc(options.error)+'</p>' : '';
-  const metadataFields=editing
-    ? renderSelect('tracker',values.tracker,lists.trackers,STRINGS.sortTracker,pending || !canEdit,false)
-      +renderSelect('priority',values.priority,lists.priorities,STRINGS.sortPriority,pending || !canEdit,false)
-      +renderSelect('status',values.status,lists.statuses,STRINGS.sortStatus,pending || !canEdit,false)
-      +renderSelect('assignee',values.assignee,options?.assignees || [],STRINGS.sortAssignee,pending || !ready,true)
-      +fields.slice(4).map(function(field){ return '<label class="detail-field"><span>'+esc(field[1])+'</span><input class="detail-input" type="date" data-metadata-field="'+field[0]+'" value="'+esc(values[field[0]])+'"'+(pending?' disabled':'')+'></label>'; }).join('')
-    : fields.map(function(field){ const value=values[field[0]] || (field[0] === 'assignee' ? STRINGS.assigneeUnassigned : STRINGS.notSet); return '<div class="detail-meta"><span>'+esc(field[1])+'</span><strong>'+esc(value)+'</strong></div>'; }).join('');
-  const metadata='<details class="detail-section detail-metadata" id="metadata-details"'+(metadataExpanded || editing?' open':'')+'><summary id="metadata-heading">'+esc(STRINGS.ticketMetadata)+'<span class="metadata-summary">'+esc(ticket.statusName || '')+(ticket.priorityName?' · '+esc(ticket.priorityName):'')+'</span></summary><div class="detail-section-head">'+(editing ? '' : '<button id="metadata-edit-btn" class="btn btn-secondary" type="button"'+(!canEdit?' disabled':'')+'>'+esc(STRINGS.editMetadata)+'</button>')+'</div><div class="detail-metadata-grid">'+metadataFields+'</div>'+loadingHint+errorHint+statusHint+(editing ? '<p class="detail-hint">'+esc(STRINGS.metadataApplyHint)+'</p><div class="metadata-actions"><button id="metadata-apply-btn" class="btn btn-primary" type="button"'+(pending || !canEdit || !Object.keys(metadataPatch()).length?' disabled':'')+'>'+esc(pending ? STRINGS.applyingMetadata : STRINGS.applyMetadata)+'</button><button id="metadata-cancel-btn" class="btn btn-secondary" type="button"'+(pending?' disabled':'')+'>'+esc(STRINGS.cancelAction)+'</button></div>' : '')+'</details>';
-  const assigneeAvatar=hasAssignee(ticket.assigneeName) ? avatar(ticket.assigneeName,'detail-avatar') : '';
-  card.innerHTML='<div class="detail-head"><div class="detail-title"><span class="ticket-id">#'+ticket.id+'</span><span>'+esc(ticket.subject)+'</span></div><div class="detail-header-actions"><button class="btn btn-secondary detail-toggle" id="detail-cancel-btn" type="button" title="'+esc(STRINGS.dismissDetail)+'" aria-label="'+esc(STRINGS.dismissDetail)+'">'+actionIcon('cancel')+'</button></div></div>'
-    +'<div class="detail-project">'+esc(ticket.projectName || STRINGS.projectNone)+assigneeAvatar+'</div>'+parent
-    +'<div class="detail-sync-line"><span class="sr-only">'+esc(STRINGS.editingState)+'</span><span id="detail-sync-state" role="status" aria-live="polite"></span></div>'
-    +'<div class="detail-actions"><button class="btn btn-primary" id="detail-open-btn" type="button" title="'+esc(STRINGS.openTicketTooltip)+'">'+actionIcon('open')+'<span>'+esc(STRINGS.openInEditor)+'</span></button><button class="btn btn-secondary detail-sync-button" id="detail-sync-btn" type="button" title="'+esc(STRINGS.syncTicketTooltip)+'">'+actionIcon('sync')+'<span>'+esc(STRINGS.syncToRedmine)+'</span></button><button class="btn btn-secondary detail-icon-button" id="detail-comment-btn" type="button" title="'+esc(STRINGS.addCommentAction)+'" aria-label="'+esc(STRINGS.addCommentAction)+'">'+actionIcon('comment')+'</button><span class="ticket-actions detail-more"><button class="ticket-action-btn" id="detail-more-btn" type="button" aria-haspopup="menu" aria-expanded="false" aria-controls="detail-action-menu" aria-label="'+esc(STRINGS.ticketActionMenu)+'">•••</button><span class="ticket-action-menu hidden" id="detail-action-menu" role="menu"><button role="menuitem" id="detail-browser-btn" data-detail-action="browser" type="button">'+actionIcon('browser')+esc(STRINGS.openInBrowser)+'</button><button role="menuitem" data-detail-action="child" type="button">'+actionIcon('child')+esc(STRINGS.createChildTicket)+'</button></span></span></div>'
-    +'<div class="detail-tabs" role="tablist" aria-label="'+esc(STRINGS.tabTickets)+'"><button id="detail-tab-overview" role="tab" aria-selected="'+(detailTab === 'overview')+'" aria-controls="detail-overview" tabindex="'+(detailTab === 'overview'?'0':'-1')+'" type="button">'+esc(STRINGS.overview)+'</button><button id="detail-tab-comments" role="tab" aria-selected="'+(detailTab === 'comments')+'" aria-controls="detail-comments" tabindex="'+(detailTab === 'comments'?'0':'-1')+'" type="button">'+esc(STRINGS.tabComments)+' <span class="tab-badge">'+(state.comments.ticketId === ticket.id ? state.comments.items.length : 0)+'</span></button></div>'
-    +'<div id="detail-overview" role="tabpanel" aria-labelledby="detail-tab-overview"'+(detailTab === 'overview'?'':' hidden')+'>'+metadata+'<section class="detail-section" aria-labelledby="description-heading"><div class="detail-section-head"><h3 id="description-heading">'+esc(STRINGS.remoteDescription)+'</h3><button class="btn btn-secondary detail-toggle" id="ticket-detail-toggle" type="button" title="'+esc(ticketDetailExpanded?STRINGS.closeDetail:STRINGS.openDetail)+'" aria-label="'+esc(ticketDetailExpanded?STRINGS.closeDetail:STRINGS.openDetail)+'" aria-expanded="'+ticketDetailExpanded+'">'+(ticketDetailExpanded?'⌃':'⌄')+'</button></div>'+warning+description+'</section></div><div id="detail-comments" role="tabpanel" aria-labelledby="detail-tab-comments"'+(detailTab === 'comments'?'':' hidden')+'><div id="comments-list"></div></div>';
-  card.querySelector('#metadata-details').addEventListener('toggle',function(){ metadataExpanded=this.open; });
-  card.querySelector('#ticket-detail-toggle').addEventListener('click',function(){ ticketDetailExpanded=!ticketDetailExpanded; renderTicketDetail(); document.getElementById('ticket-detail-toggle').focus(); });
+  const trackerCls=trackerAccentClass(ticket.trackerName);
+  card.className='ticket-work-panel ticket-detail-card '+trackerCls;
+  card.removeAttribute('aria-busy');
+  const dueDiff=ticket.dueDate ? daysUntilDateOnly(ticket.dueDate, new Date()) : undefined;
+  const isOverdue=dueDiff !== undefined && dueDiff < 0 && !isTicketClosed(ticket);
+  const metaItems=[
+    {label:STRINGS.sortStatus, value:ticket.statusName || STRINGS.notSet, overdue:false},
+    {label:STRINGS.sortPriority, value:ticket.priorityName || STRINGS.notSet, overdue:false},
+    {label:STRINGS.sortAssignee, value:ticket.assigneeName || STRINGS.assigneeUnassigned, overdue:false},
+    {label:STRINGS.dueDateLabel, value:ticket.dueDate || STRINGS.notSet, overdue:isOverdue}
+  ];
+  const metaGrid='<div class="detail-metadata-grid">'+metaItems.map(function(item){
+    return '<div class="detail-meta"><span>'+esc(item.label)+'</span><strong'+(item.overdue?' class="is-overdue"':'')+'>'+esc(item.value)+'</strong></div>';
+  }).join('')+'</div>';
+  const unsynced=['Draft','Dirty','Queued','Syncing','Conflict','Failed','RecoveryPending','CommitUnknown','Abandoned'].includes(ticket.syncState);
+  const warning=unsynced ? '<p class="detail-description-warning" role="note">'+esc(STRINGS.descriptionUnsyncedWarning)+'</p>' : '';
+  const description=ticket.description ? '<div class="detail-description">'+esc(ticket.description)+'</div>' : '<p class="detail-hint">'+esc(STRINGS.noDescription)+'</p>';
+  const commentCount=state.comments.ticketId === ticket.id ? state.comments.items.length : 0;
+  card.innerHTML=
+    '<div class="detail-header-fixed">'
+      +'<div class="detail-head-row1">'
+        +'<span class="detail-tracker-bar" aria-hidden="true"'+(ticket.trackerName?' title="'+esc(STRINGS.sortTracker+': '+ticket.trackerName)+'"':'')+'></span>'
+        +'<span class="ticket-id">#'+ticket.id+'</span>'
+        +'<span class="detail-subject" title="'+esc(ticket.subject)+'">'+esc(ticket.subject)+'</span>'
+        +'<button class="btn btn-secondary detail-toggle" id="detail-cancel-btn" type="button" title="'+esc(STRINGS.dismissDetail)+'" aria-label="'+esc(STRINGS.dismissDetail)+'">'+actionIcon('cancel')+'</button>'
+      +'</div>'
+      +'<div class="detail-head-row2">'
+        +'<div class="detail-head-meta">'
+          +'<span class="detail-project-name" title="'+esc(ticket.projectName || STRINGS.projectNone)+'">'+esc(ticket.projectName || STRINGS.projectNone)+'</span>'
+          +'<span class="sr-only">'+esc(STRINGS.editingState)+'</span>'
+          +'<span id="detail-sync-state" role="status" aria-live="polite"></span>'
+        +'</div>'
+        +'<div class="detail-head-actions">'
+          +'<button class="btn btn-secondary detail-sync-button" id="detail-sync-btn" type="button" title="'+esc(STRINGS.syncTicketTooltip)+'">'+actionIcon('sync')+'<span>'+esc(STRINGS.syncToRedmine)+'</span></button>'
+          +'<button class="btn btn-secondary detail-icon-button" id="detail-browser-btn" type="button" title="'+esc(STRINGS.openInBrowser)+'" aria-label="'+esc(STRINGS.openInBrowser)+'">'+actionIcon('browser')+'</button>'
+        +'</div>'
+      +'</div>'
+      +'<div class="detail-tabs" role="tablist" aria-label="'+esc(STRINGS.tabTickets)+'">'
+        +'<button id="detail-tab-overview" role="tab" aria-selected="'+(detailTab === 'overview')+'" aria-controls="detail-overview" tabindex="'+(detailTab === 'overview'?'0':'-1')+'" type="button">'+esc(STRINGS.overview)+'</button>'
+        +'<button id="detail-tab-comments" role="tab" aria-selected="'+(detailTab === 'comments')+'" aria-controls="detail-comments" tabindex="'+(detailTab === 'comments'?'0':'-1')+'" type="button">'+esc(STRINGS.tabComments)+' <span class="tab-badge">'+commentCount+'</span></button>'
+      +'</div>'
+    +'</div>'
+    +'<div class="detail-tabpanels">'
+      +'<div id="detail-overview" class="detail-tabpanel" role="tabpanel" aria-labelledby="detail-tab-overview"'+(detailTab === 'overview'?'':' hidden')+'>'
+        +metaGrid
+        +warning
+        +'<section class="detail-section detail-description-section" aria-labelledby="description-heading"><h3 id="description-heading" class="sr-only">'+esc(STRINGS.remoteDescription)+'</h3>'+description+'</section>'
+      +'</div>'
+      +'<div id="detail-comments" class="detail-tabpanel" role="tabpanel" aria-labelledby="detail-tab-comments"'+(detailTab === 'comments'?'':' hidden')+'>'
+        +'<div id="comments-list"></div>'
+      +'</div>'
+    +'</div>';
   card.querySelector('#detail-cancel-btn').addEventListener('click',function(){ req('ticket.cancelDetail'); });
-  card.querySelector('#detail-open-btn').addEventListener('click',function(){ req('ticket.openEditor',{ticketId:ticket.id}); });
-  card.querySelector('#detail-comment-btn').addEventListener('click',function(){ req('comment.add',{ticketId:ticket.id}); });
   card.querySelector('#detail-sync-btn').addEventListener('click',function(){ req('ticket.syncSelected',{ticketId:ticket.id}); });
-  card.querySelector('#detail-more-btn').addEventListener('click',function(event){
-    event.stopPropagation(); const menu=card.querySelector('#detail-action-menu'); const opening=menu.classList.contains('hidden'); closeTicketActionMenus();
-    if(!opening) return; menu.classList.remove('hidden'); activeTicketActionMenuId='detail-action-menu';
-    this.setAttribute('aria-expanded','true'); const rect=this.getBoundingClientRect(); const bounds=menu.getBoundingClientRect();
-    menu.style.left=Math.max(8,Math.min(rect.right-bounds.width,window.innerWidth-bounds.width-8))+'px'; menu.style.top=Math.max(8,Math.min(rect.bottom+4,window.innerHeight-bounds.height-8))+'px';
-    activeTicketActionAnchorTop=rect.top; menu.querySelector('[role="menuitem"]')?.focus();
-  });
-  card.querySelectorAll('[data-detail-action]').forEach(function(button){ button.addEventListener('click',function(event){ event.stopPropagation(); runTicketAction(button.dataset.detailAction,ticket.id); }); });
-  const switchDetailTab=function(name,focus){ detailTab=name; persistViewState(); card.querySelectorAll('.detail-tabs [role="tab"]').forEach(function(tab){ const selected=tab.id === 'detail-tab-'+name; tab.setAttribute('aria-selected',String(selected)); tab.tabIndex=selected?0:-1; }); card.querySelector('#detail-overview').hidden=name !== 'overview'; card.querySelector('#detail-comments').hidden=name !== 'comments'; if(name === 'comments') updateCommentExpandButtons(); if(focus) card.querySelector('#detail-tab-'+name).focus(); };
+  card.querySelector('#detail-browser-btn').addEventListener('click',function(){ req('ticket.openBrowser',{ticketId:ticket.id}); });
+  const switchDetailTab=function(name,focus){ detailTab=name; persistViewState(); card.querySelectorAll('.detail-tabs [role="tab"]').forEach(function(tab){ const selected=tab.id === 'detail-tab-'+name; tab.setAttribute('aria-selected',String(selected)); tab.tabIndex=selected?0:-1; }); card.querySelector('#detail-overview').hidden=name !== 'overview'; card.querySelector('#detail-comments').hidden=name !== 'comments'; if(focus) card.querySelector('#detail-tab-'+name).focus(); };
   card.querySelector('#detail-tab-overview').addEventListener('click',function(){ switchDetailTab('overview',false); });
   card.querySelector('#detail-tab-comments').addEventListener('click',function(){ switchDetailTab('comments',false); });
   card.querySelector('.detail-tabs').addEventListener('keydown',function(event){ const next=event.key === 'ArrowRight' || event.key === 'End' ? 'comments' : event.key === 'ArrowLeft' || event.key === 'Home' ? 'overview' : null; if(next){ switchDetailTab(next,true); event.preventDefault(); } });
-  card.querySelector('#metadata-edit-btn')?.addEventListener('click',function(){ const original=ticketMetadataValues(ticket); metadataExpanded=true; metadataEdit={ticketId:ticket.id,original:original,values:Object.assign({},original),requestId:null}; renderTicketDetail(); card.querySelector('[data-metadata-field]')?.focus(); });
-  card.querySelector('#metadata-cancel-btn')?.addEventListener('click',function(){ metadataEdit=null; renderTicketDetail(); document.getElementById('metadata-edit-btn')?.focus(); });
-  card.querySelector('#metadata-apply-btn')?.addEventListener('click',function(){
-    if(!metadataEdit || metadataEdit.requestId) return;
-    const patch=metadataPatch();
-    if(!Object.keys(patch).length) return;
-    metadataEdit.requestId=req('ticket.metadata.update',{ticketId:ticket.id,patch:patch});
-    renderTicketDetail();
-  });
-  card.querySelectorAll('[data-metadata-field]').forEach(function(input){
-    const stage=function(){
-      if(!metadataEdit || metadataEdit.requestId) return;
-      metadataEdit.values[input.dataset.metadataField]=input.value;
-      document.getElementById('metadata-apply-btn').disabled=!canEdit || !Object.keys(metadataPatch()).length;
-      updateSyncButtonStates();
-    };
-    input.addEventListener('input',stage); input.addEventListener('change',stage);
-  });
   updateSyncButtonStates();
   renderComments();
 }
@@ -772,8 +921,8 @@ function renderComposerPanel(panel){
 function renderTicketDetail(){
   if(!state) return; const card=document.getElementById('ticket-detail-card'); const panel=state.workPanel;
   document.getElementById('ticket-detail-empty').classList.toggle('hidden',!!(state.selectedTicket || panel));
-  if(!panel){ composerDraftKey=null; composerDraftValues=null; if(!state.selectedTicket){ renderedDetailTicketId=null; metadataExpanded=false; ticketDetailExpanded=false; card.classList.add('hidden'); card.innerHTML=''; return; } renderTicketDetailPanel(state.selectedTicket); return; }
-  if(panel.mode === 'detail'){ composerDraftKey=null; composerDraftValues=null; if(state.selectedTicket && state.selectedTicket.id === panel.ticketId) renderTicketDetailPanel(state.selectedTicket); else { card.classList.add('hidden'); card.innerHTML=''; } return; }
+  if(!panel){ composerDraftKey=null; composerDraftValues=null; if(!state.selectedTicket){ renderedDetailTicketId=null; card.className='ticket-work-panel ticket-detail-card hidden'; card.innerHTML=''; return; } renderTicketDetailPanel(state.selectedTicket); return; }
+  if(panel.mode === 'detail'){ composerDraftKey=null; composerDraftValues=null; if(state.selectedTicket && state.selectedTicket.id === panel.ticketId) renderTicketDetailPanel(state.selectedTicket); else { card.className='ticket-work-panel ticket-detail-card hidden'; card.innerHTML=''; } return; }
   renderComposerPanel(panel);
 }
 
@@ -850,40 +999,58 @@ function renderUnsynced(){
 }
 
 // ── Comments ───────────────────────────────────────────────────────────────
-function updateCommentExpandButtons(){
-  document.querySelectorAll('.comment-card').forEach(function(card){
-    if(!card.getBoundingClientRect().width) return;
-    const body=card.querySelector('.comment-body-clamped');
-    const button=card.querySelector('.comment-expand');
-    if(body && button) button.classList.toggle('hidden',body.scrollHeight <= body.clientHeight+1);
-  });
-}
-window.addEventListener('resize',updateCommentExpandButtons);
+function updateCommentExpandButtons(){}
 function renderComments(){
-  if(!state) return; const comments=state.comments; const list=document.getElementById('comments-list'); if(!list) return; const ticketId=state.selectedTicketId; list.setAttribute('aria-busy',String(comments.loading));
+  if(!state) return;
+  const comments=state.comments;
+  const list=document.getElementById('comments-list');
+  if(!list) return;
+  const ticketId=state.selectedTicketId;
+  list.setAttribute('aria-busy',String(comments.loading));
   if(ticketId === undefined){ list.innerHTML='<div class="state-msg">'+STRINGS.noTicketSelected+'</div>'; return; }
   if(comments.ticketId !== ticketId){ list.innerHTML='<div class="state-msg">'+esc(STRINGS.loadingComments)+'</div>'; return; }
-  const header='<div class="comments-header"><span class="comments-header-label">'+esc(STRINGS.commentsForTicket)+' #'+ticketId+'</span><div class="comments-header-actions"><button class="btn btn-secondary" id="add-comment-btn" type="button">'+actionIcon('comment')+esc(STRINGS.addCommentAction)+'</button><button class="btn btn-secondary detail-icon-button" id="reload-comments-btn" type="button" title="'+esc(STRINGS.reloadComments)+'" aria-label="'+esc(STRINGS.reloadComments)+'">'+actionIcon('refresh')+'</button></div></div>';
+  const header='<div class="comments-header"><span class="comments-header-label">'+esc(STRINGS.commentsForTicket)+' #'+ticketId+'</span><div class="comments-header-actions"><button class="btn btn-secondary" id="add-comment-btn" type="button">'+actionIcon('child')+'<span>'+esc(STRINGS.addCommentAction)+'</span></button><button class="btn btn-secondary detail-icon-button" id="reload-comments-btn" type="button" title="'+esc(STRINGS.reloadComments)+'" aria-label="'+esc(STRINGS.reloadComments)+'">'+actionIcon('refresh')+'</button></div></div>';
   let content='';
   if(comments.loading) content='<div class="state-msg">'+STRINGS.loadingComments+'</div>';
   else if(comments.error) content='<div class="state-msg error-msg">'+esc(comments.error)+'</div>';
   else if(!comments.items.length) content='<div class="state-msg">'+STRINGS.noComments+'</div>';
-  else content='<div class="comment-list" role="list">'+comments.items.map(function(cm,index){
-    const key=String(ticketId)+':'+String(cm.id || index);
-    const expanded=expandedComments.has(key);
-    const unsynced=cm.hasUnsyncedEdit ? badge(STRINGS.unsyncedEditBadge,'sync-dirty','•') : '';
-    const syncBtn=cm.syncKey?'<button class="btn btn-secondary" type="button" data-sync-comment-key="'+esc(JSON.stringify(cm.syncKey))+'">'+actionIcon('sync')+esc(STRINGS.syncToRedmine)+'</button>':'';
-    const editBtn=cm.id&&cm.editableByCurrentUser?'<button class="btn btn-secondary" type="button" data-edit-comment="'+cm.id+'" data-ticket="'+ticketId+'" aria-label="'+esc(STRINGS.openInEditor)+'">'+actionIcon('open')+esc(STRINGS.openInEditor)+'</button>':'';
-    const browserBtn=cm.id?'<button class="btn btn-secondary" type="button" data-open-comment="'+cm.id+'" data-ticket="'+ticketId+'" aria-label="'+esc(STRINGS.openInBrowser)+'">'+actionIcon('browser')+esc(STRINGS.openInBrowser)+'</button>':'';
+  else content='<div class="comment-list comment-timeline" role="list">'+comments.items.map(function(cm){
+    const editable=!!(cm.id && cm.editableByCurrentUser);
+    const unsynced=cm.hasUnsyncedEdit ? '<span class="unsynced-inline-badge"><span class="unsynced-dot" aria-hidden="true"></span>'+esc(STRINGS.unsyncedEditBadge)+'</span>' : '';
+    const syncBtn=cm.syncKey?'<button class="btn btn-secondary comment-sync-btn" type="button" data-sync-comment-key="'+esc(JSON.stringify(cm.syncKey))+'">'+actionIcon('sync')+esc(STRINGS.syncToRedmine)+'</button>':'';
+    const editBtn=editable?'<button class="comment-edit-icon" type="button" data-edit-comment="'+cm.id+'" data-ticket="'+ticketId+'" title="'+esc(STRINGS.openInEditor)+'" aria-label="'+esc(STRINGS.openInEditor)+'">'+actionIcon('open')+'</button>':'';
     const journalId=cm.id?'<span class="comment-id">#'+cm.id+'</span>':'';
     const date=cm.updatedAt?'<time class="comment-date" title="'+esc(cm.updatedAt)+'">'+esc(cm.updatedAt.substring(0,16).replace('T',' '))+'</time>':'';
-    const expand=cm.body?'<button class="comment-expand" type="button" data-expand-comment="'+esc(key)+'" aria-expanded="'+expanded+'">'+esc(expanded?STRINGS.collapseTitle:STRINGS.expandTitle)+'</button>':'';
-    return '<article class="comment-card" role="listitem"><div class="comment-header"><div class="comment-meta"><span class="comment-author">'+esc(cm.authorName)+'</span>'+date+journalId+'</div><div class="comment-status">'+unsynced+'</div></div><div class="comment-body'+(expanded?'':' comment-body-clamped')+'">'+esc(cm.body)+'</div><div class="comment-actions">'+expand+browserBtn+editBtn+syncBtn+'</div></article>';
+    return '<article class="comment-card'+(editable?' is-editable':'')+'" role="listitem"'+(editable?' tabindex="0" data-editable-comment="'+cm.id+'" data-ticket="'+ticketId+'"':'')+'><div class="comment-header"><div class="comment-meta"><span class="comment-author">'+esc(cm.authorName)+'</span>'+date+journalId+unsynced+'</div><div class="comment-header-actions">'+editBtn+syncBtn+'</div></div><div class="comment-body">'+esc(cm.body)+'</div></article>';
   }).join('')+'</div>';
-  list.innerHTML=header+content; updateCommentExpandButtons(); list.querySelector('#add-comment-btn')?.addEventListener('click',function(){ req('comment.add',{ticketId:ticketId}); }); list.querySelector('#reload-comments-btn')?.addEventListener('click',function(){ req('comment.reload',{ticketId:ticketId}); });
-  list.querySelectorAll('[data-edit-comment]').forEach(function(button){ button.addEventListener('click',function(){ req('comment.edit',{ticketId:Number(button.dataset.ticket),commentId:Number(button.dataset.editComment)}); }); }); list.querySelectorAll('[data-open-comment]').forEach(function(button){ button.addEventListener('click',function(){ req('comment.openBrowser',{ticketId:Number(button.dataset.ticket),commentId:Number(button.dataset.openComment)}); }); });
-  list.querySelectorAll('[data-sync-comment-key]').forEach(function(btn){ btn.addEventListener('click',function(){ try { req('unsynced.syncOne',{key:JSON.parse(btn.getAttribute('data-sync-comment-key'))}); } catch {} }); });
-  list.querySelectorAll('[data-expand-comment]').forEach(function(button){ button.addEventListener('click',function(){ const key=button.dataset.expandComment; if(expandedComments.has(key)) expandedComments.delete(key); else expandedComments.add(key); renderComments(); list.querySelector('[data-expand-comment="'+CSS.escape(key)+'"]')?.focus(); }); });
+  list.innerHTML=header+content;
+  list.querySelector('#add-comment-btn')?.addEventListener('click',function(){ req('comment.add',{ticketId:ticketId}); });
+  list.querySelector('#reload-comments-btn')?.addEventListener('click',function(){ req('comment.reload',{ticketId:ticketId}); });
+  list.querySelectorAll('[data-edit-comment]').forEach(function(button){
+    button.addEventListener('click',function(event){
+      event.stopPropagation();
+      req('comment.edit',{ticketId:Number(button.dataset.ticket),commentId:Number(button.dataset.editComment)});
+    });
+  });
+  list.querySelectorAll('[data-editable-comment]').forEach(function(card){
+    card.addEventListener('click',function(event){
+      if(isElement(event.target) && event.target.closest('[data-sync-comment-key],[data-edit-comment]')) return;
+      req('comment.edit',{ticketId:Number(card.dataset.ticket),commentId:Number(card.dataset.editableComment)});
+    });
+    card.addEventListener('keydown',function(event){
+      if(event.target !== card) return;
+      if(event.key === 'Enter' || event.key === ' '){
+        event.preventDefault();
+        req('comment.edit',{ticketId:Number(card.dataset.ticket),commentId:Number(card.dataset.editableComment)});
+      }
+    });
+  });
+  list.querySelectorAll('[data-sync-comment-key]').forEach(function(btn){
+    btn.addEventListener('click',function(event){
+      event.stopPropagation();
+      try { req('unsynced.syncOne',{key:JSON.parse(btn.getAttribute('data-sync-comment-key'))}); } catch {}
+    });
+  });
   updateSyncButtonStates();
 }
 
@@ -972,19 +1139,21 @@ function renderSettingsBase(){
   document.querySelectorAll('[data-editor-default]').forEach(function(input){ bindSettingInput(input,'settings.updateEditorDefault',function(value){ return {field:input.dataset.editorDefault,value:value}; }); });
   document.getElementById('reset-editor-defaults-btn').addEventListener('click',function(){ requestForRenderedSettings('settings.resetEditorDefaults',{fields:['subject','description','tracker','priority','status','due_date']}); });
   document.getElementById('set-apikey-btn').addEventListener('click',function(){ requestForRenderedSettings('apiKey.set'); }); document.getElementById('clear-api-key-btn')?.addEventListener('click',function(){ requestForRenderedSettings('apiKey.clear'); }); document.getElementById('settings-reset-btn').onclick=function(){ requestForRenderedSettings('settings.reset'); };
+  const openSettingsJsonBtn = document.getElementById('open-settings-json-btn');
+  if(openSettingsJsonBtn){ openSettingsJsonBtn.onclick=function(){ req('settings.openJson'); }; }
   document.getElementById('dashboard-cache-reset-btn').addEventListener('click',function(){ req('dashboard.resetCache'); }); document.getElementById('settings-reset-view-btn').addEventListener('click',resetViewState);
 }
 
 function resetViewState(){
-  ticketLayoutMode='auto'; detailFocus=false; detailTab='overview'; quickFilters.clear();
-  expandedTicketIds.clear(); collapsedTicketIds.clear(); expandedComments.clear(); ticketDetailExpanded=false; metadataExpanded=false;
+  ticketLayoutMode='auto'; detailFocus=false; detailTab='overview'; compactMode=false; quickFilters.clear(); quickFilters.add('open');
+  expandedTicketIds.clear(); collapsedTicketIds.clear(); expandedComments.clear();
   activeTicketActionMenuId=null; activeTicketActionAnchorTop=null; searchQuery=''; closeProjectPicker(false);
   if(searchTimer){ window.clearTimeout(searchTimer); searchTimer=null; }
   searchInput.value=''; updateSearchClearButton(); filterDialog.classList.add('hidden'); closeLayoutPopover();
   document.querySelectorAll('.settings-category').forEach(function(category){ category.open=category.dataset.category === 'tickets'; });
-  vscode.setState(Object.assign({},vscode.getState() || {},{ticketLayoutMode:ticketLayoutMode,detailFocus:detailFocus,detailTab:detailTab,quickFilters:[]}));
+  vscode.setState(Object.assign({},vscode.getState() || {},{ticketLayoutMode:ticketLayoutMode,detailFocus:detailFocus,detailTab:detailTab,compactMode:compactMode,quickFilters:['open']}));
   submitSearch();
-  render(); applyTicketLayoutMode(); showToast('success',STRINGS.viewStateReset);
+  render(); applyTicketLayoutMode(); if(typeof applyCompactMode === 'function') applyCompactMode(); showToast('success',STRINGS.viewStateReset);
 }
 
 function renderSettings(){
@@ -1145,9 +1314,19 @@ function render(){
   renderProjectSelect();
   const includeChildrenBtn = document.getElementById('include-children');
   const includeChildrenWrap = includeChildrenBtn.closest('label');
-  includeChildrenBtn.setAttribute('aria-pressed', String(!!state.includeChildProjects));
+  const includeChildrenOn = !!state.includeChildProjects;
+  includeChildrenBtn.setAttribute('aria-pressed', String(includeChildrenOn));
+  includeChildrenBtn.title = includeChildrenOn ? STRINGS.includeChildrenOn : STRINGS.includeChildrenOff;
   includeChildrenBtn.disabled = !state.selectedProject;
   if(includeChildrenWrap) includeChildrenWrap.hidden = !state.selectedProject;
+  const ticketsBadge = document.getElementById('tickets-badge');
+  if(ticketsBadge){
+    const totalTickets = (Number.isFinite(state.totalTicketCount) && state.totalTicketCount > 0 ? state.totalTicketCount : (state.loadedTicketCount || flattenAll(state.tickets).length)) + (state.draftTickets || []).length;
+    ticketsBadge.textContent = String(totalTickets);
+    ticketsBadge.setAttribute('aria-label', String(totalTickets));
+  }
+  applyCompactMode();
+  updateRefreshButtonState();
   renderTickets(); renderTicketDetail(); renderFilterChips(); renderUnsynced(); renderComments(); renderSettings(); renderSyncTray(); updateSyncButtonStates(); restoreFocus(focus);
 }
 window.addEventListener('message',function(event){ const message=event.data || {}; if(message.type === 'dashboard.state'){
@@ -1155,10 +1334,9 @@ window.addEventListener('message',function(event){ const message=event.data || {
     const projectChanged=previous?.selectedProject?.id !== message.state.selectedProject?.id;
     if(projectChanged){ expandedTicketIds.clear(); collapsedTicketIds.clear(); }
     const connectionChanged=previous?.settings?.baseUrl !== message.state.settings?.baseUrl;
-    if(connectionChanged){ closeProjectPicker(false); if(searchTimer){ window.clearTimeout(searchTimer); searchTimer=null; } searchComposing=false; searchQuery=message.state.ticketSearch?.query || ''; searchInput.value=searchQuery; updateSearchClearButton(); }
+    if(connectionChanged){ closeProjectPicker(false); activeRefreshRequests.clear(); updateRefreshButtonState(); if(searchTimer){ window.clearTimeout(searchTimer); searchTimer=null; } searchComposing=false; searchQuery=message.state.ticketSearch?.query || ''; searchInput.value=searchQuery; updateSearchClearButton(); }
     const ticketChanged=previous?.selectedTicketId !== message.state.selectedTicketId;
-    const leavingDetail=message.state.workPanel && message.state.workPanel.mode !== 'detail';
-    if(projectChanged || connectionChanged || ticketChanged || leavingDetail || !message.state.selectedTicket) metadataEdit=null;
+    if(connectionChanged || !message.state.draftTickets?.some(function(draft){ return draft.queueId === selectedDraftId; }) || (ticketChanged && message.state.selectedTicketId !== undefined)) selectedDraftId = null;
     const previousComposer=previous?.workPanel;
     if(!previous && message.state.ticketSearch){ searchQuery=message.state.ticketSearch.query; searchInput.value=searchQuery; updateSearchClearButton(); }
     state=message.state;
@@ -1168,7 +1346,22 @@ window.addEventListener('message',function(event){ const message=event.data || {
     if(openingComposer) activateTab('tickets');
     render();
     if(panel && panel.mode !== 'detail' && !panel.loading && (openingComposer || previousComposer?.loading)) document.getElementById('work-tracker')?.focus();
-    if(previousComposer?.mode === 'newTicket' && (!panel || panel.mode === 'detail')) document.getElementById('new-ticket-btn').focus();
-  } else if(message.type === 'operation.started'){ startOperation(message.requestId,message.label); } else if(message.type === 'operation.success'){ endOperation(message.requestId); finishMetadataOperation(message.requestId,true); if(!finishOperation(message.level || 'success',message.requestId,message.message)) showToast(message.level || 'success',message.message); } else if(message.type === 'operation.error'){ endOperation(message.requestId); finishMetadataOperation(message.requestId,false); if(!finishOperation('error',message.requestId,message.message)) showToast('error',message.message); } else if(message.type === 'toast'){ showToast(message.level,message.message); } });
+    if(previousComposer?.mode === 'newTicket' && (!panel || panel.mode === 'detail')) document.getElementById('project-select-trigger')?.focus();
+  } else if(message.type === 'view.toggleCompactMode'){ compactMode = !compactMode; persistViewState(); applyCompactMode(); } else if(message.type === 'operation.started'){ startOperation(message.requestId,message.label); } else if(message.type === 'operation.success'){ endOperation(message.requestId); if(!finishOperation(message.level || 'success',message.requestId,message.message)) showToast(message.level || 'success',message.message); } else if(message.type === 'operation.error'){ endOperation(message.requestId); if(!finishOperation('error',message.requestId,message.message)) showToast('error',message.message); } else if(message.type === 'toast'){ showToast(message.level,message.message); } });
+document.addEventListener('keydown',function(event){
+  if(event.defaultPrevented || event.key !== 'Escape') return;
+  if(projectPickerOpen || !layoutPopover.classList.contains('hidden') || !filterDialog.classList.contains('hidden') || activeTicketActionMenuId || document.querySelector('details[open].unsynced-more')) return;
+  const active=document.activeElement;
+  if(active && (active.tagName === 'SELECT' || ((active.tagName === 'INPUT' || active.tagName === 'TEXTAREA') && active.value))) return;
+  const panel=state?.workPanel;
+  const hasComposer=panel && panel.mode !== 'detail';
+  const hasDetail=!!(state?.selectedTicket || panel?.mode === 'detail');
+  if(!hasComposer && !hasDetail) return;
+  event.preventDefault();
+  if(hasComposer) req('ticket.cancelComposer');
+  else req('ticket.cancelDetail');
+  const selectedRow=document.querySelector('#ticket-list .ticket-row.selected') || document.querySelector('#ticket-list .ticket-row');
+  selectedRow?.focus();
+});
 req('dashboard.ready');
 `;

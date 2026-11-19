@@ -571,7 +571,7 @@ export const saveCommentDraftLocally = async (
   ) {
     return buildResult("failed", invalidCommentUpdateMetadataMessage());
   }
-  const body = parsedCommentUpdate?.body ?? documentContent;
+  const body = extractCommentBody(documentContent);
   setCommentDraft(ticketId, body, operationScope);
   const edit = commentId === undefined
     ? undefined
@@ -610,7 +610,7 @@ export const saveCommentDocumentLocally = async (input: {
   ) {
     return buildResult("failed", invalidCommentUpdateMetadataMessage());
   }
-  const body = parsedCommentUpdate?.body ?? input.content;
+  const body = extractCommentBody(input.content);
   await addOfflineCommentUpdateAsync({
     ticketId: input.ticketId,
     commentId: input.commentId,

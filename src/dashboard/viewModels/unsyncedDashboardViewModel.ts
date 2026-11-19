@@ -4,6 +4,7 @@ import {
   evaluateOfflineSyncPolicy,
   getOfflineSyncQueue,
   isAbandoned,
+  sameDocumentIdentity,
 } from "../../views/offlineSyncStore";
 import { getTicketSummary } from "../../views/ticketSummaryStore";
 import { formatTicketLabel } from "../../views/ticketLabel";
@@ -11,6 +12,7 @@ import type { DashboardUnsyncedItem } from "../dashboardProtocol";
 import { getCurrentConnectionScope } from "../../config/connectionScope";
 import { canRetryEffect, getPrimaryEffectForRevision, isRejectedTicketCreate } from "../../app/syncEffects";
 import { createSyncEngine } from "../../app/syncEngine";
+import { extractNewTicketDraftSubject } from "./ticketDashboardViewModel";
 
 const processingRecord = (operation: {
   operationId?: string; phase?: string; revision?: number; attemptGeneration?: number;
@@ -112,9 +114,15 @@ export const buildUnsyncedDashboardItems = (abandoned = false): DashboardUnsynce
       newTicket.projectId ? vscode.l10n.t("Project ID: {0}", newTicket.projectId) : undefined,
       rejected ? vscode.l10n.t("Failed to create issue (HTTP {0}).", 403) : newTicket.preparationFailure ?? describeOfflineSync(newTicket).detail,
     ].filter((value): value is string => value !== undefined);
+    const openDoc = vscode.workspace.textDocuments.find((doc) =>
+      sameDocumentIdentity(doc.uri.toString(), newTicket.documentUri),
+    );
+    const draftSubject = extractNewTicketDraftSubject(
+      openDoc ? openDoc.getText() : newTicket.content,
+    );
     items.push({
       key: { kind: "newTicket", queueId: newTicket.queueId, documentUri: newTicket.documentUri },
-      label: vscode.l10n.t("New ticket"),
+      label: `#NEW ${draftSubject || vscode.l10n.t("New ticket")}`,
       detail: details.length > 0 ? details.join(" · ") : undefined,
       documentUri: newTicket.documentUri,
       lifecycle: policy.lifecycle,

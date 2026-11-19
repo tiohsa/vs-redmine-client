@@ -5,6 +5,7 @@ import type {
 import {
   addOfflineNewTicketAsync,
   completeOfflineTicketUpdateAsync,
+  getOfflineNewTicket,
   getOfflineSyncQueue,
 } from "../../views/offlineSyncStore";
 import {
@@ -313,6 +314,46 @@ export class TicketSyncService {
           createdAt: Date.now(),
           updatedAt: Date.now(),
         }, input.context.connectionScope);
+      } else {
+        const storedNewTicket = getOfflineNewTicket(
+          { documentUri: docUri },
+          input.context.connectionScope,
+        );
+        if (
+          existing.phase === "queued" &&
+          (!existing.effects || existing.effects.length === 0) &&
+          !existing.createdRemoteId &&
+          !storedNewTicket?.disposition &&
+          !storedNewTicket?.createdIssueId &&
+          (!storedNewTicket?.effects || storedNewTicket.effects.length === 0) &&
+          typeof intent.content === "string" &&
+          existing.intent &&
+          "content" in existing.intent &&
+          existing.intent.content !== intent.content
+        ) {
+          if (storedNewTicket) {
+            await addOfflineNewTicketAsync(
+              {
+                content: intent.content,
+                projectId,
+                documentUri: docUri,
+                baseDir: intent.baseDir,
+                preparationFailure: undefined,
+              },
+              input.context.connectionScope,
+            );
+          } else {
+            await repo.saveOperation(
+              {
+                ...existing,
+                projectId,
+                intent,
+                updatedAt: Date.now(),
+              },
+              input.context.connectionScope,
+            );
+          }
+        }
       }
 
       const syncKey = existing?.key ?? { kind: "newTicket", queueId, documentUri: docUri };

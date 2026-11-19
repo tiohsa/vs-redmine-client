@@ -1,3 +1,4 @@
+import * as path from "path";
 import * as vscode from "vscode";
 import { addCommentFromList } from "../commands/addCommentFromList";
 import { createTicketFromEditor } from "../commands/createTicket";
@@ -34,9 +35,16 @@ import {
   assignEditorConnectionScope,
   getAllEditorRecords,
   getTicketIdForEditor,
+  getTicketIdForUri,
   isTicketEditor,
   NEW_TICKET_DRAFT_ID,
 } from "../views/ticketEditorRegistry";
+import {
+  isNewTicketDraftFilename,
+  parseDirectTicketFilename,
+  parseEditorFilename,
+  parseNewCommentDraftFilename,
+} from "../views/editorFilename";
 import { showTicketPreview } from "../views/ticketPreview";
 import type { Comment, Project, Ticket } from "../redmine/types";
 import type {
@@ -50,6 +58,10 @@ import type { SyncEngine } from "./syncEngine";
 import type { DashboardWebviewProvider } from "../dashboard/DashboardWebviewProvider";
 import type { DashboardCommentItem, DashboardState, DashboardUnsyncedKey } from "../dashboard/dashboardProtocol";
 import { validateDashboardUnsyncedKey } from "../dashboard/dashboardMessageValidation";
+import {
+  EDIT_FIELD_VIA_QUICK_PICK_COMMAND,
+  editTicketFieldViaQuickPick,
+} from "../views/ticketCodeLensProvider";
 
 export interface CommandDeps {
   ticketsPresentation: TicketPresentationPort;
@@ -369,6 +381,12 @@ export const registerCommands = (
     vscode.commands.registerCommand("redmine-client.createTicketFromList", async () => {
       await createTicketFromList();
     }),
+    vscode.commands.registerCommand("redmine-client.createTicketFromDashboard", async () => {
+      await dashboardProvider.createNewTicketDraft();
+    }),
+    vscode.commands.registerCommand("redmine-client.toggleCompactMode", () => {
+      dashboardProvider.toggleCompactMode();
+    }),
     vscode.commands.registerCommand("redmine-client.createChildTicketFromList", async () => {
       const selected = requireSelectedTicket(getState(), "Dashboard から親チケットを選択してください。");
       if (!selected) { return; }
@@ -456,11 +474,66 @@ export const registerCommands = (
       const project: Project = { id: selected.id, name: selected.name, identifier: selected.identifier };
       await openProjectInBrowser({ project });
     }),
-    vscode.commands.registerCommand("redmine-client.openTicketInBrowser", async () => {
-      const selected = requireSelectedTicket(getState(), "Dashboard でチケットを選択してください。");
-      if (!selected) { return; }
-      await openTicketInBrowser({ ticket: selected });
+    vscode.commands.registerCommand("redmine-client.openTicketInBrowser", async (uriArg?: unknown) => {
+      if (uriArg instanceof vscode.Uri) {
+        const filename = path.basename(uriArg.path);
+        const registeredId = getTicketIdForUri(uriArg);
+        const parsedEditor = parseEditorFilename(filename);
+        const uriTicketId =
+          registeredId ??
+          parseDirectTicketFilename(filename) ??
+          parseNewCommentDraftFilename(filename) ??
+          parsedEditor?.ticketId;
+        if (uriTicketId === NEW_TICKET_DRAFT_ID || isNewTicketDraftFilename(filename)) {
+          vscode.window.showErrorMessage(
+            vscode.l10n.t("Cannot open an unsynced new ticket draft in the browser."),
+          );
+          return;
+        }
+        if (uriTicketId && uriTicketId > 0) {
+          await openTicketInBrowser({
+            ticket: {
+              id: uriTicketId,
+              subject: "",
+              projectId: 0,
+            },
+          });
+          return;
+        }
+      }
+      const selected = toSelectedTicket(getState());
+      if (selected) {
+        await openTicketInBrowser({ ticket: selected });
+        return;
+      }
+      const activeEditor = vscode.window.activeTextEditor;
+      const activeTicketId = activeEditor && isTicketEditor(activeEditor)
+        ? getTicketIdForEditor(activeEditor)
+        : undefined;
+      if (activeTicketId === NEW_TICKET_DRAFT_ID) {
+        vscode.window.showErrorMessage(
+          vscode.l10n.t("Cannot open an unsynced new ticket draft in the browser."),
+        );
+        return;
+      }
+      if (activeTicketId && activeTicketId > 0) {
+        await openTicketInBrowser({
+          ticket: {
+            id: activeTicketId,
+            subject: "",
+            projectId: 0,
+          },
+        });
+        return;
+      }
+      vscode.window.showErrorMessage("Dashboard でチケットを選択してください。");
     }),
+    vscode.commands.registerCommand(
+      EDIT_FIELD_VIA_QUICK_PICK_COMMAND,
+      async (uriOrField?: vscode.Uri | string, field?: "tracker" | "status" | "priority" | "doneRatio" | "dueDate") => {
+        await editTicketFieldViaQuickPick(uriOrField, field);
+      },
+    ),
     vscode.commands.registerCommand("redmine-client.openCommentInBrowser", async () => {
       const comment = await pickDashboardComment(getState());
       if (!comment) {

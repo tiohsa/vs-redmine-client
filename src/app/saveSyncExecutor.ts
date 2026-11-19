@@ -13,10 +13,13 @@ import {
 } from "../views/ticketSaveSync";
 import {
   getConnectionScopeForDocument,
+  getProjectIdForUri,
   getTicketIdForDocument,
   getTicketIdForUri,
   NEW_TICKET_DRAFT_ID,
 } from "../views/ticketEditorRegistry";
+import { renameSyncedNewTicketFileIfEligible } from "../views/ticketSync/ticketEditorRewrite";
+import { refreshTicketEditorContexts } from "./editorEventController";
 import {
   addOfflineCommentUpdateAsync,
   getActiveScope,
@@ -183,7 +186,19 @@ export const performSyncOnSave = async (
       }
       try {
         const outcome = await deps.syncEngine.syncOne(key, { connectionScope: operationScope });
-        if (key.kind === "newTicket" && outcome.kind === "completed") { ticketsPresentation.refresh(); }
+        if (key.kind === "newTicket" && outcome.kind === "completed") {
+          if (key.documentUri && "ticketId" in outcome && outcome.ticketId) {
+            const oldUri = vscode.Uri.parse(key.documentUri);
+            await renameSyncedNewTicketFileIfEligible({
+              oldUri,
+              ticketId: outcome.ticketId,
+              projectId: getProjectIdForUri(oldUri),
+              connectionScope: operationScope,
+            });
+            refreshTicketEditorContexts(vscode.window.activeTextEditor);
+          }
+          ticketsPresentation.refresh();
+        }
         const conflictHandled = await resolveAutoConflict(key, outcome);
         if (!conflictHandled) {
           if (key.kind === "ticket") {

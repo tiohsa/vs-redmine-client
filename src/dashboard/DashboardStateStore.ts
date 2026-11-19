@@ -7,6 +7,7 @@ const DEFAULT_STATE: DashboardState = {
   includeChildProjects: false,
   projects: [],
   tickets: [],
+  draftTickets: [],
   totalTicketCount: 0,
   loadedTicketCount: 0,
   hasMoreTickets: false,

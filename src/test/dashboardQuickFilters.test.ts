@@ -2,7 +2,7 @@ import * as assert from "assert";
 import { runInNewContext } from "vm";
 import { dashboardWebviewScript } from "../dashboard/dashboardWebviewScript";
 
-type Ticket = { assigneeId?: number; statusId?: number; dueDate?: string; syncState: string };
+type Ticket = { assigneeId?: number; statusId?: number; dueDate?: string; priorityName?: string; syncState: string };
 type Capabilities = { mine: "loading" | "available" | "unavailable"; open: "loading" | "available" | "unavailable" };
 
 const sourceBetween = (start: string, end: string): string => {
@@ -91,12 +91,12 @@ const renderTicketList = (
     STRINGS: { ticketCountLabel: "Ticket count: {0}", loadedTickets: "Loaded {0}", shownLoadedTickets: "Showing {0} / {1}" },
     renderQuickFilters: () => undefined,
     captureFocus: () => null,
-    renderTicketRow: (ticket: typeof tickets[number]) => String(ticket.id),
+    renderTicketRow: (ticket: typeof tickets[number]) => `${ticket.id},`,
     restoreFocus: () => undefined,
     updateSyncButtonStates: () => undefined,
   });
   return {
-    ids: list.innerHTML ? list.innerHTML.split(",").map(Number) : [],
+    ids: list.innerHTML ? list.innerHTML.split(",").filter(Boolean).map(Number) : [],
     count: count.textContent,
     preferences: Array.from(quickFilters),
   };
@@ -112,7 +112,7 @@ const renderFilterButtons = (
     open: statuses.some((status) => typeof status.isClosed === "boolean") ? "available" : "unavailable",
   },
 ): { active: string[]; persisted?: string[]; buttons: Array<{ name: string; disabled: boolean; pressed: string; preferred: string; capability: string }> } => {
-  const buttons = ["mine", "open", "overdue", "unsynced"].map((name) => ({
+  const buttons = ["mine", "open", "overdue", "high"].map((name) => ({
     dataset: { quickFilter: name },
     disabled: false,
     title: "",
@@ -247,8 +247,8 @@ suite("Dashboard quick filters", () => {
     const after = renderTicketList(["mine"], available, tickets);
     assert.deepStrictEqual(before.ids, [1]);
     assert.strictEqual(before.count, "Showing 1 / 2");
-    assert.deepStrictEqual(after.ids, [2]);
-    assert.strictEqual(after.count, "Showing 1 / 2");
+    assert.deepStrictEqual(after.ids, [1, 2]);
+    assert.strictEqual(after.count, "Loaded 2");
     assert.deepStrictEqual(after.preferences, ["mine"]);
   });
 
@@ -265,23 +265,23 @@ suite("Dashboard quick filters", () => {
     assert.strictEqual(matches({ dueDate: "2026-02-30", syncState: "Synced" }, ["overdue"]), false);
   });
 
-  test("Unsynced の対象状態とフィルターの AND 結合", () => {
-    for (const syncState of ["Dirty", "Queued", "Syncing", "RecoveryPending", "CommitUnknown", "Failed", "Conflict"]) {
-      assert.strictEqual(matches({ syncState }, ["unsynced"]), true);
+  test("High priority フィルターの対象優先度と他フィルターとの AND 結合", () => {
+    for (const priorityName of ["High", "Urgent", "Immediate", "高", "緊急", "今すぐ"]) {
+      assert.strictEqual(matches({ priorityName, syncState: "Synced" }, ["high"]), true);
     }
-    for (const syncState of ["Synced", "Draft"]) {
-      assert.strictEqual(matches({ syncState }, ["unsynced"]), false);
+    for (const priorityName of ["Normal", "Low", "通常", "低め", undefined]) {
+      assert.strictEqual(matches({ priorityName, syncState: "Synced" }, ["high"]), false);
     }
     const statuses = [{ id: 1, isClosed: false }];
-    assert.strictEqual(matches({ assigneeId: 7, statusId: 1, dueDate: "2026-09-22", syncState: "Queued" }, ["mine", "open", "overdue", "unsynced"], 7, statuses), true);
-    assert.strictEqual(matches({ assigneeId: 8, statusId: 1, dueDate: "2026-09-22", syncState: "Queued" }, ["mine", "open", "overdue", "unsynced"], 7, statuses), false);
+    assert.strictEqual(matches({ assigneeId: 7, statusId: 1, dueDate: "2026-09-22", priorityName: "High", syncState: "Synced" }, ["mine", "open", "overdue", "high"], 7, statuses), true);
+    assert.strictEqual(matches({ assigneeId: 8, statusId: 1, dueDate: "2026-09-22", priorityName: "High", syncState: "Synced" }, ["mine", "open", "overdue", "high"], 7, statuses), false);
   });
 
-  test("Overdue と Unsynced は metadata capability と無関係に有効", () => {
+  test("Overdue と High は metadata capability と無関係に有効", () => {
     const capabilities = { mine: "loading" as const, open: "unavailable" as const };
     assert.strictEqual(hasEffectiveFilters(["overdue"], capabilities), true);
-    assert.strictEqual(hasEffectiveFilters(["unsynced"], capabilities), true);
+    assert.strictEqual(hasEffectiveFilters(["high"], capabilities), true);
     assert.strictEqual(matches({ dueDate: "2026-09-22", syncState: "Synced" }, ["overdue"], undefined, [], capabilities), true);
-    assert.strictEqual(matches({ syncState: "Queued" }, ["unsynced"], undefined, [], capabilities), true);
+    assert.strictEqual(matches({ priorityName: "Urgent", syncState: "Synced" }, ["high"], undefined, [], capabilities), true);
   });
 });

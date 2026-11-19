@@ -50,6 +50,20 @@ export interface DashboardTicketNode {
   level: number;
 }
 
+export interface DashboardDraftTicketNode {
+  queueId: string;
+  documentUri: string;
+  subject: string;
+  projectId?: number;
+  trackerName?: string;
+  statusName?: string;
+  priorityName?: string;
+  assigneeName?: string;
+  dueDate?: string;
+  syncState: DashboardSyncState;
+  detail?: string;
+}
+
 export interface DashboardTicketDetail {
   id: number;
   subject: string;
@@ -229,6 +243,7 @@ export interface DashboardState {
   includeChildProjects: boolean;
   projects: DashboardProjectNode[];
   tickets: DashboardTicketNode[];
+  draftTickets?: DashboardDraftTicketNode[];
   totalTicketCount: number;
   loadedTicketCount: number;
   hasMoreTickets: boolean;
@@ -309,10 +324,12 @@ export type DashboardRequest =
   | { type: "tickets.searchAllProjects"; requestId: string; query: string }
   | { type: "tickets.search"; requestId: string; query: string; scope: DashboardSearchScope }
   | { type: "tickets.loadMore"; requestId: string }
-  | { type: "ticket.select"; requestId: string; ticketId: number }
+  | { type: "ticket.select"; requestId: string; ticketId: number; preserveFocus?: boolean }
   | { type: "ticket.openEditor"; requestId: string; ticketId: number }
   | { type: "ticket.openBrowser"; requestId: string; ticketId: number }
-  | { type: "ticket.create"; requestId: string }
+  | { type: "ticket.create"; requestId: string; projectId?: number }
+  | { type: "ticket.openDraft"; requestId: string; queueId: string; documentUri: string; preserveFocus?: boolean }
+  | { type: "ticket.syncDraft"; requestId: string; queueId: string; documentUri: string }
   | { type: "ticket.createChild"; requestId: string; parentTicketId: number }
   | { type: "ticket.cancelDetail"; requestId: string }
   | { type: "ticket.cancelComposer"; requestId: string }
@@ -352,6 +369,7 @@ export type DashboardRequest =
   | { type: "settings.updateConnection"; requestId: string; patch: DashboardConnectionSettingsPatch }
   | { type: "settings.updateEditor"; requestId: string; patch: DashboardEditorSettingsPatch }
   | { type: "settings.updateGeneral"; requestId: string; patch: DashboardGeneralSettingsPatch }
+  | { type: "settings.openJson"; requestId: string }
   | { type: "apiKey.set"; requestId: string }
   | { type: "apiKey.clear"; requestId: string };
 
@@ -360,6 +378,7 @@ export type DashboardEvent =
   | { type: "operation.started"; requestId: string; label?: string }
   | { type: "operation.success"; requestId: string; message: string; level?: "success" | "info" | "warning" }
   | { type: "operation.error"; requestId: string; message: string }
-  | { type: "toast"; level: "info" | "warning" | "error" | "success"; message: string };
+  | { type: "toast"; level: "info" | "warning" | "error" | "success"; message: string }
+  | { type: "view.toggleCompactMode" };
 
 export const VIEW_ID_DASHBOARD = "redmine-clientActivityDashboard";

@@ -9,6 +9,7 @@ import {
 } from "../views/ticketEditorRegistry";
 import { buildUniqueUntitledName, buildUniqueUntitledPath } from "../views/untitledPath";
 import { buildNewCommentDraftFilename } from "../views/editorFilename";
+import { buildCommentCreateFileContent } from "../views/commentUpdateFile";
 import { getConnectionScopeHash, getCurrentConnectionScope } from "../config/connectionScope";
 
 const getOpenUntitledNames = (): Set<string> =>
@@ -50,5 +51,14 @@ export const addCommentFromList = async (ticketId?: number): Promise<void> => {
   );
   const document = existing ?? (await vscode.workspace.openTextDocument(draftUri));
   const editor = await vscode.window.showTextDocument(document, { preview: false });
+  if (document.getText().length === 0) {
+    const template = buildCommentCreateFileContent(ticketId);
+    await editor.edit((builder) => {
+      builder.insert(new vscode.Position(0, 0), template);
+    });
+    const end = document.positionAt(document.getText().length);
+    editor.selection = new vscode.Selection(end, end);
+    editor.revealRange(new vscode.Range(end, end));
+  }
   registerNewCommentDraft(ticketId, editor, operationScope);
 };

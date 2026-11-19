@@ -10,6 +10,12 @@ export const dashboardActionPaths = {
   includeChildren: "M5 5h6v4H5V5Zm8 4h6v4h-6V9Zm0 6h6v4h-6v-4ZM8 9v8h5m-5-6h5",
   filter: "M4 6h16M7 12h10M10 18h4",
   layout: "M3 4h18v16H3V4Zm8 0v16",
+  density: "M4 6h16M4 12h16M4 18h10",
+  account: "M12 12a4 4 0 1 0 0-8 4 4 0 0 0 0 8Zm-7 8a7 7 0 0 1 14 0",
+  calendar: "M4 7h16v13H4V7Zm4-3v4m8-4v4M4 11h16",
+  json: "M9 4c-2 0-3 1-3 3v3c0 1-1 2-2 2 1 0 2 1 2 2v3c0 2 1 3 3 3m6-16c2 0 3 1 3 3v3c0 1 1 2 2 2-1 0-2 1-2 2v3c0 2-1 3-3 3",
+  chevronDown: "m6 9 6 6 6-6",
+  chevronRight: "m9 6 6 6-6 6",
 } as const;
 
 export const dashboardActionIcon = (name: keyof typeof dashboardActionPaths): string =>

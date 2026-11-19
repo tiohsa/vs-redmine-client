@@ -1,8 +1,11 @@
+import * as fs from "fs";
 import * as vscode from "vscode";
 import { listIssuePriorities, listIssueStatuses, listTrackers } from "../redmine/issues";
 import { getCurrentUserId } from "../redmine/users";
 import {
+  addOfflineNewTicketAsync,
   getOfflineSyncQueue,
+  isAbandoned,
   onOfflineSyncQueueChanged,
   sameDocumentIdentity,
 } from "../views/offlineSyncStore";
@@ -13,10 +16,14 @@ import { DashboardUnsyncedService } from "./services/DashboardUnsyncedService";
 import { DashboardMetadataService } from "./services/DashboardMetadataService";
 import { DashboardComposerService } from "./services/DashboardComposerService";
 import { Ticket } from "../redmine/types";
-import { buildTicketDetail } from "./viewModels/ticketDashboardViewModel";
+import {
+  buildDraftTicketDashboardNodes,
+  buildTicketDetail,
+} from "./viewModels/ticketDashboardViewModel";
 import { DashboardStateStore } from "./DashboardStateStore";
 import { SettingsController } from "./SettingsController";
 import type {
+  DashboardDraftTicketNode,
   DashboardProjectNode,
   DashboardRequest,
   DashboardMetadataOptions,
@@ -33,7 +40,31 @@ import {
   snapshotTicketSummaries,
 } from "../views/ticketSummaryStore";
 import type { SyncEngine } from "../app/syncEngine";
-import { getCurrentConnectionScope } from "../config/connectionScope";
+import {
+  getConnectionScopeHash,
+  getCurrentConnectionScope,
+} from "../config/connectionScope";
+import { getDefaultProjectId } from "../config/settings";
+import { parseConfiguredProjectId } from "../config/projectSelection";
+import { getTicketEditorDefaults } from "../views/ticketEditorDefaultsStore";
+import {
+  buildTicketEditorContent,
+  parseTicketEditorContent,
+} from "../views/ticketEditorContent";
+import {
+  applyEditorContent,
+  findSubjectTextRange,
+  resolveEditorStorageDir,
+  withTrailingEditLines,
+} from "../views/ticketPreview";
+import { buildNewTicketDraftFilename } from "../views/editorFilename";
+import {
+  NEW_TICKET_DRAFT_ID,
+  registerTicketEditor,
+} from "../views/ticketEditorRegistry";
+import { resolveEditorBaseDir } from "../utils/editorBaseDir";
+import { refreshTicketEditorContexts } from "../app/editorEventController";
+import { releaseSaveSync, suppressSaveSync } from "../views/saveSyncSuppression";
 
 const isKnownUnsyncedDocumentUri = (documentUri: string): boolean => {
   const queue = getOfflineSyncQueue(getCurrentConnectionScope());
@@ -91,6 +122,7 @@ export class DashboardController {
   private readonly disposables: vscode.Disposable[] = [];
   private connectionGeneration = 0;
   private metadataLoadGeneration = 0;
+  private quickDraftSeq = 0;
 
   constructor(private readonly opts: DashboardControllerOptions) {
     this.settingsCtrl = new SettingsController(opts.store);
@@ -119,6 +151,7 @@ export class DashboardController {
             ? { id: project.id, name: project.name }
             : undefined,
           tickets: [],
+          draftTickets: this.buildCurrentDraftTickets(project ? project.id : null),
           totalTicketCount: 0,
           loadedTicketCount: 0,
           hasMoreTickets: false,
@@ -218,7 +251,7 @@ export class DashboardController {
   }
 
   refreshUnsyncedPresentation(): void {
-    this.unsyncedService.refreshUnsynced();
+    this.refreshUnsynced();
   }
 
   refreshSettings(): void {
@@ -247,6 +280,7 @@ export class DashboardController {
 
   notifyTicketChanged(): void {
     this.refreshTicketPresentation();
+    this.refreshUnsynced();
   }
 
   async resetForConnectionChange(): Promise<void> {
@@ -263,6 +297,7 @@ export class DashboardController {
     this.opts.store.update({
       projects: [],
       tickets: [],
+      draftTickets: [],
       totalTicketCount: 0,
       loadedTicketCount: 0,
       hasMoreTickets: false,
@@ -410,8 +445,17 @@ export class DashboardController {
   private async handleRequest(req: DashboardRequest): Promise<void> {
     switch (req.type) {
       case "dashboard.ready":
-      case "dashboard.refresh":
         await Promise.all([this.loadProjects(), this.loadMetadataOptions(), this.loadTickets()]);
+        break;
+      case "dashboard.refresh":
+        this.opts.notifyOperationStarted(req.requestId, vscode.l10n.t("Refreshing…"));
+        try {
+          await Promise.all([this.loadProjects(), this.loadMetadataOptions(), this.loadTickets()]);
+          this.refreshUnsynced();
+          this.opts.notifySuccess(req.requestId, vscode.l10n.t("Dashboard refreshed."), "info");
+        } catch (error) {
+          this.opts.notifyError(req.requestId, error instanceof Error ? error.message : String(error));
+        }
         break;
       case "dashboard.resetCache":
         await this.resetDashboardCache(req.requestId);
@@ -442,6 +486,7 @@ export class DashboardController {
         break;
       case "ticket.select":
         await this.selectTicket(req.ticketId);
+        await this.openEditor(req.ticketId, req.preserveFocus);
         break;
       case "ticket.openEditor":
         void this.selectTicket(req.ticketId);
@@ -452,7 +497,13 @@ export class DashboardController {
         await this.openInBrowser(req.ticketId);
         break;
       case "ticket.create":
-        await this.openNewTicketComposer();
+        await this.createQuickNewTicketDraft(req.requestId, req.projectId);
+        break;
+      case "ticket.openDraft":
+        await this.openDraftTicket(req.requestId, req.queueId, req.documentUri, req.preserveFocus);
+        break;
+      case "ticket.syncDraft":
+        await this.syncDraftTicket(req.requestId, req.queueId, req.documentUri);
         break;
       case "ticket.createChild":
         void this.selectTicket(req.parentTicketId);
@@ -494,7 +545,7 @@ export class DashboardController {
         break;
       case "unsynced.openLocalFile": {
         const uri = vscode.Uri.parse(req.documentUri);
-        if (uri.scheme !== "file" && uri.scheme !== "vscode-userdata") {
+        if (uri.scheme !== "file" && uri.scheme !== "vscode-userdata" && uri.scheme !== "untitled") {
           this.opts.notifyError(req.requestId, vscode.l10n.t("This URI cannot be opened."));
           return;
         }
@@ -550,6 +601,9 @@ export class DashboardController {
         break;
       case "settings.updateGeneral":
         await this.settingsCtrl.updateGeneral(req.patch);
+        break;
+      case "settings.openJson":
+        await vscode.commands.executeCommand("workbench.action.openSettingsJson");
         break;
       case "apiKey.set":
         await vscode.commands.executeCommand("redmine-client.setApiKey");
@@ -703,8 +757,8 @@ export class DashboardController {
     await this.commentService.loadComments(ticketId, throwOnError);
   }
 
-  private async openEditor(ticketId: number): Promise<void> {
-    await this.ticketService.openEditor(ticketId);
+  private async openEditor(ticketId: number, preserveFocus?: boolean): Promise<void> {
+    await this.ticketService.openEditor(ticketId, preserveFocus);
   }
 
   private async openInBrowser(ticketId: number): Promise<void> {
@@ -750,8 +804,255 @@ export class DashboardController {
     await this.unsyncedService.handleSyncAll(requestId);
   }
 
-  private async openNewTicketComposer(): Promise<void> {
-    await this.composerService.openNewTicketComposer();
+  private buildCurrentDraftTickets(
+    projectIdOverride?: number | null,
+  ): DashboardDraftTicketNode[] {
+    const state = this.opts.store.getState();
+    const selectedProjectId =
+      projectIdOverride === undefined
+        ? state.selectedProject?.id
+        : (projectIdOverride ?? undefined);
+    return buildDraftTicketDashboardNodes({
+      selectedProjectId,
+      includeChildProjects: state.includeChildProjects,
+      projects: this.projects,
+    });
+  }
+
+  public async createNewTicketDraft(): Promise<void> {
+    await this.createQuickNewTicketDraft("command-create-ticket");
+  }
+
+  private async createQuickNewTicketDraft(
+    requestId: string,
+    requestedProjectId?: number,
+  ): Promise<void> {
+    try {
+      const state = this.opts.store.getState();
+      const projectId =
+        requestedProjectId ??
+        state.selectedProject?.id ??
+        parseConfiguredProjectId(getDefaultProjectId());
+      const connectionScope = getCurrentConnectionScope();
+      const scopeHash = getConnectionScopeHash(connectionScope);
+      const defaults = getTicketEditorDefaults();
+      const metadata = {
+        tracker:
+          defaults.metadata.tracker ||
+          state.metadataOptions.trackers[0]?.name ||
+          "",
+        priority:
+          defaults.metadata.priority ||
+          state.metadataOptions.priorities[0]?.name ||
+          "",
+        status:
+          defaults.metadata.status ||
+          state.metadataOptions.statuses[0]?.name ||
+          "",
+        assignee: defaults.metadata.assignee || undefined,
+        due_date: defaults.metadata.due_date || "",
+        start_date: defaults.metadata.start_date || "",
+        done_ratio: defaults.metadata.done_ratio ?? 0,
+      };
+      const subject =
+        defaults.subject?.trim() || vscode.l10n.t("Enter new ticket subject");
+      const description =
+        defaults.description || vscode.l10n.t("Describe the ticket details here.");
+      const content = withTrailingEditLines(
+        buildTicketEditorContent({
+          subject,
+          description,
+          metadata,
+          controlFields: {
+            mode: "ticket-create",
+            ...(projectId !== undefined ? { project_id: projectId } : {}),
+          },
+        }),
+      );
+      const draftId = `draft-${Date.now()}-${++this.quickDraftSeq}`;
+      const storageDir = resolveEditorStorageDir({ connectionScope }).uri;
+      let fileUri: vscode.Uri;
+      if (storageDir) {
+        await vscode.workspace.fs.createDirectory(storageDir);
+        fileUri = vscode.Uri.joinPath(
+          storageDir,
+          buildNewTicketDraftFilename(undefined, draftId),
+        );
+        await vscode.workspace.fs.writeFile(fileUri, Buffer.from(content, "utf8"));
+      } else {
+        fileUri = vscode.Uri.parse(
+          `untitled:${buildNewTicketDraftFilename(scopeHash, draftId)}`,
+        );
+      }
+      const document = await vscode.workspace.openTextDocument(fileUri);
+      const editor = await vscode.window.showTextDocument(document, { preview: false });
+      if (fileUri.scheme === "untitled") {
+        await applyEditorContent(editor, content);
+      }
+      registerTicketEditor(
+        NEW_TICKET_DRAFT_ID,
+        editor,
+        "primary",
+        "ticket",
+        projectId,
+        connectionScope,
+      );
+      refreshTicketEditorContexts(editor);
+      const subjectRange = findSubjectTextRange(editor.document.getText());
+      if (subjectRange) {
+        const start = new vscode.Position(subjectRange.line, subjectRange.startChar);
+        const end = new vscode.Position(subjectRange.line, subjectRange.endChar);
+        editor.selection = new vscode.Selection(start, end);
+        editor.revealRange(new vscode.Range(start, end));
+      }
+      await addOfflineNewTicketAsync(
+        {
+          content: editor.document.getText(),
+          projectId,
+          documentUri: editor.document.uri.toString(),
+          baseDir: resolveEditorBaseDir({ editor }),
+        },
+        connectionScope,
+      );
+      this.refreshUnsynced();
+      this.pushTickets();
+    } catch (error) {
+      this.opts.notifyError(
+        requestId,
+        error instanceof Error ? error.message : String(error),
+      );
+    }
+  }
+
+  private async openDraftTicket(
+    requestId: string,
+    queueId: string,
+    documentUri: string,
+    preserveFocus = false,
+  ): Promise<void> {
+    const scope = getCurrentConnectionScope();
+    const entry = getOfflineSyncQueue(scope).newTickets.find(
+      (candidate) =>
+        candidate.queueId === queueId &&
+        sameDocumentIdentity(candidate.documentUri, documentUri) &&
+        !isAbandoned(candidate),
+    );
+    if (!entry || !entry.documentUri) {
+      this.opts.notifyError(requestId, vscode.l10n.t("This URI cannot be opened."));
+      return;
+    }
+    const openDoc = vscode.workspace.textDocuments.find((doc) =>
+      sameDocumentIdentity(doc.uri.toString(), entry.documentUri),
+    );
+    let document: vscode.TextDocument;
+    let shouldApplyStoredContent = false;
+    if (openDoc) {
+      document = openDoc;
+    } else {
+      const uri = vscode.Uri.parse(entry.documentUri);
+      if (uri.scheme !== "file" && uri.scheme !== "vscode-userdata" && uri.scheme !== "untitled") {
+        this.opts.notifyError(requestId, vscode.l10n.t("This URI cannot be opened."));
+        return;
+      }
+      if (uri.scheme === "file" && !fs.existsSync(uri.fsPath)) {
+        this.opts.notifyError(requestId, vscode.l10n.t("This URI cannot be opened."));
+        return;
+      }
+      document = await vscode.workspace.openTextDocument(uri);
+      shouldApplyStoredContent = uri.scheme === "untitled";
+    }
+    const editor = await vscode.window.showTextDocument(document, {
+      preview: false,
+      preserveFocus,
+    });
+    if (
+      shouldApplyStoredContent &&
+      editor.document.getText().length === 0 &&
+      entry.content.length > 0
+    ) {
+      await applyEditorContent(editor, entry.content);
+    }
+    registerTicketEditor(
+      NEW_TICKET_DRAFT_ID,
+      editor,
+      "primary",
+      "ticket",
+      entry.projectId,
+      scope,
+    );
+    refreshTicketEditorContexts(editor);
+  }
+
+  private async syncDraftTicket(
+    requestId: string,
+    queueId: string,
+    documentUri: string,
+  ): Promise<void> {
+    const scope = getCurrentConnectionScope();
+    const entry = getOfflineSyncQueue(scope).newTickets.find(
+      (candidate) =>
+        candidate.queueId === queueId &&
+        sameDocumentIdentity(candidate.documentUri, documentUri) &&
+        !isAbandoned(candidate),
+    );
+    if (!entry || !entry.documentUri) {
+      this.opts.notifyError(
+        requestId,
+        vscode.l10n.t("Queue entry for this new ticket not found."),
+      );
+      return;
+    }
+    if (
+      (entry.phase ?? "queued") === "queued" &&
+      !entry.createdIssueId &&
+      !entry.disposition &&
+      (!entry.effects || entry.effects.length === 0)
+    ) {
+      const openDoc = vscode.workspace.textDocuments.find((doc) =>
+        sameDocumentIdentity(doc.uri.toString(), entry.documentUri),
+      );
+      if (openDoc) {
+        const liveContent = openDoc.getText();
+        let latestProjectId = entry.projectId;
+        try {
+          const parsed = parseTicketEditorContent(liveContent, {
+            allowEmptyStatus: true,
+            allowMissingMetadata: true,
+            allowMissingSubject: true,
+            fallbackMetadata: { tracker: "", priority: "", status: "", due_date: "", start_date: "" },
+          });
+          latestProjectId = parsed.controlFields?.project_id ?? entry.projectId;
+        } catch {
+          latestProjectId = entry.projectId;
+        }
+        if (liveContent !== entry.content || latestProjectId !== entry.projectId) {
+          await addOfflineNewTicketAsync(
+            {
+              content: liveContent,
+              projectId: latestProjectId,
+              documentUri: entry.documentUri,
+              baseDir: entry.baseDir,
+              preparationFailure: undefined,
+            },
+            scope,
+          );
+        }
+        if (openDoc.isDirty && openDoc.uri.scheme === "file") {
+          const docUriStr = openDoc.uri.toString();
+          suppressSaveSync(docUriStr);
+          try {
+            await openDoc.save();
+          } finally {
+            releaseSaveSync(docUriStr);
+          }
+        }
+      }
+    }
+    await this.unsyncedService.handleSyncOne(requestId, {
+      kind: "newTicket",
+      queueId: entry.queueId,
+      documentUri: entry.documentUri,
+    });
   }
 
   private async openChildTicketComposer(parentTicketId: number): Promise<void> {
@@ -795,6 +1096,7 @@ export class DashboardController {
 
   private refreshUnsynced(): void {
     this.unsyncedService.refreshUnsynced();
+    this.opts.store.update({ draftTickets: this.buildCurrentDraftTickets() });
   }
 
   private refreshTicketPresentation(): void {
@@ -811,6 +1113,7 @@ export class DashboardController {
 
   private pushTickets(): void {
     this.ticketService.pushTickets();
+    this.opts.store.update({ draftTickets: this.buildCurrentDraftTickets() });
     const state = this.opts.store.getState();
     if (state.selectedTicketId === undefined) {
       return;
