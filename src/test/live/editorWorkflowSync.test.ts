@@ -2,8 +2,8 @@ import * as assert from "assert";
 import * as fs from "fs";
 import * as path from "path";
 import * as vscode from "vscode";
-import { performSyncOnSave } from "../../app/saveSyncExecutor";
 import { createTicketSyncService } from "../../app/ticketSync";
+import { createTicketFromEditor } from "../../commands/createTicket";
 import { createTicketFromMarkdownHeader } from "../../commands/createTicketFromMarkdownHeader";
 import { syncEditorToRedmine } from "../../commands/syncToRedmine";
 import { resolveEditorBaseDir } from "../../utils/editorBaseDir";
@@ -30,14 +30,6 @@ import {
 } from "../../views/ticketEditorRegistry";
 import { metadataFromTicket } from "../../views/ticketSync/ticketRemoteContent";
 import { liveTest, type LiveFixture } from "./liveFixture";
-
-const presentation = {
-  refresh: () => undefined,
-  notifyChange: () => undefined,
-  refreshForTicket: () => undefined,
-  updateTicketSubject: () => undefined,
-  setSelectedProjectId: async () => undefined,
-};
 
 const lf = (text: string | undefined): string | undefined => text?.replace(/\r\n/g, "\n");
 
@@ -201,28 +193,24 @@ liveTest("LIVE-W03", "実VS Codeエディタで既存チケットを編集しaut
     editBuilder.replace(fullRange, nextContent);
   });
   assert.strictEqual(applied, true);
-  await editor.document.save();
-
-  await performSyncOnSave(editor.document, editor, {
-    ticketsPresentation: presentation,
-    commentsPresentation: presentation,
-    unsyncedPresentation: presentation,
-    notifications: {
-      notifyTicketSaveResult: () => undefined,
-      notifyCommentSaveResult: () => undefined,
-    },
-    updateTicketListSubject: () => undefined,
-    offlineSyncMode: "auto",
-    syncEngine: live.engine(),
-    resolveTicketConflict: async (result) => {
-      assert.fail(`正常な編集同期で競合しました: ${JSON.stringify(result)}`);
-    },
-  });
-
-  const remote = await live.readIssue(id);
-  assert.strictEqual(remote.ticket.subject, updatedSubject);
-  assert.strictEqual(lf(remote.ticket.description), updatedDescription);
-  assert.strictEqual(getOfflineSyncQueue(live.scope).tickets.has(id), false);
+  const configuration = vscode.workspace.getConfiguration("redmine-client");
+  const previousMode = configuration.inspect<string>("offlineSyncMode")?.workspaceValue;
+  try {
+    await configuration.update("offlineSyncMode", "auto", vscode.ConfigurationTarget.Workspace);
+    assert.ok(await editor.document.save());
+    const deadline = Date.now() + 15_000;
+    let remote = await live.readIssue(id);
+    while (Date.now() < deadline &&
+      (remote.ticket.subject !== updatedSubject || getOfflineSyncQueue(live.scope).tickets.has(id))) {
+      await new Promise((resolve) => setTimeout(resolve, 100));
+      remote = await live.readIssue(id);
+    }
+    assert.strictEqual(remote.ticket.subject, updatedSubject);
+    assert.strictEqual(lf(remote.ticket.description), updatedDescription);
+    assert.strictEqual(getOfflineSyncQueue(live.scope).tickets.has(id), false);
+  } finally {
+    await configuration.update("offlineSyncMode", previousMode, vscode.ConfigurationTarget.Workspace);
+  }
 });
 
 liveTest("LIVE-W04", "エディタデフォルト設定を新規チケット作成ワークフローへ適用しリセットできる", async (live) => {
@@ -284,5 +272,53 @@ liveTest("LIVE-W04", "エディタデフォルト設定を新規チケット作�
     assert.strictEqual(afterFullReset.description, "");
   } finally {
     resetTicketEditorDefaults();
+  }
+});
+
+liveTest("LIVE-W05", "実Markdown文書の相対画像をRedmineへ同期する", async (live) => {
+  const filename = "workflow-image.png";
+  fs.writeFileSync(path.join(live.directory, filename), Buffer.from(
+    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/pHsAAAAASUVORK5CYII=",
+    "base64",
+  ));
+  const content = buildTicketEditorContent({
+    ...buildNewTicketDraftContent({ projectId: live.projectId }),
+    subject: "LIVE-W05 Markdown conversion",
+    description: "![diagram](./workflow-image.png)",
+    metadata: live.metadata,
+  });
+  const editor = await openMarkdownEditor(live, "workflow-image.md", content);
+  registerTicketEditor(NEW_TICKET_DRAFT_ID, editor, "primary", "ticket", live.projectId, live.scope);
+  const result = await syncEditorToRedmine(editor, { trigger: "explicit", syncEngine: live.engine() });
+  assert.strictEqual(result?.result.status, "created");
+  const issueId = parseTicketEditorContent(editor.document.getText()).controlFields?.issue_id;
+  assert.ok(issueId);
+  const { issue } = await live.request<{ issue: { description: string; attachments: { filename: string }[] } }>({
+    method: "GET", path: `/issues/${issueId}.json`, query: { include: "attachments" },
+  });
+  assert.deepStrictEqual(issue.attachments.map((attachment) => attachment.filename), [filename]);
+  assert.ok(issue.description.includes(`![diagram](${filename})`));
+});
+
+liveTest("LIVE-W06", "Markdownからの直接作成でMermaidをRedmine用の形式に変換する", async (live) => {
+  const previous = getTicketEditorDefaults();
+  try {
+    setTicketEditorDefaults({ ...previous, metadata: live.metadata });
+    const subject = "LIVE-W06 Mermaid conversion";
+    const editor = await openMarkdownEditor(live, "workflow-mermaid.md",
+      ["```mermaid", "graph LR", "  A --> B", "```"].join("\n"));
+    await createTicketFromEditor({
+      getActiveEditor: () => editor,
+      promptSubject: async () => subject,
+      promptAttachments: async () => [],
+      getDefaultProjectId: () => String(live.projectId),
+    });
+    const issueId = parseTicketEditorContent(editor.document.getText()).controlFields?.issue_id;
+    assert.ok(issueId);
+    const { ticket } = await live.readIssue(issueId);
+    assert.strictEqual(ticket.subject, subject);
+    assert.match(lf(ticket.description) ?? "", /\{\{mermaid\ngraph LR\n\s+A --> B\n\}\}/);
+  } finally {
+    setTicketEditorDefaults(previous);
   }
 });

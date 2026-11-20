@@ -2,6 +2,8 @@ import * as assert from "assert";
 import * as http from "http";
 import * as fs from "fs";
 import * as path from "path";
+import * as vscode from "vscode";
+import { openLiveDashboard } from "./dashboardHarness";
 import { randomUUID } from "crypto";
 import { createSyncEngine } from "../../app/syncEngine";
 import { setApiKeyForScope, clearApiKeyForScope } from "../../config/apiKeyStore";
@@ -117,6 +119,27 @@ liveTest("LIVE-I05", "他人のコメントを更新できないユーザーで�
     assert.strictEqual(outcome.kind, "failed_before_commit");
     assert.ok(proxy.hits().some((hit) => hit.method === "PUT" && hit.status === 403));
     assert.strictEqual((await live.readIssue(id)).comments.find((item) => item.id === comment.id)?.body, comment.body);
+    const configuration = vscode.workspace.getConfiguration("redmine-client");
+    await configuration.update("baseUrl", proxy.origin, vscode.ConfigurationTarget.Workspace);
+    try {
+      const dashboard = await openLiveDashboard(live);
+      try {
+        await dashboard.dom("#tab-tickets");
+        await dashboard.dom("#project-select-trigger");
+        await dashboard.dom(`[role="option"][data-project-id="${live.projectId}"]`);
+        await dashboard.waitFor(() => dashboard.store.getState().tickets.some((ticket) => ticket.id === id), "public ticket");
+        await dashboard.dom(`.ticket-row[data-id="${id}"]`);
+        await dashboard.waitFor(() => dashboard.store.getState().selectedTicket?.id === id, "selected public ticket");
+        await dashboard.dom("#detail-tab-comments");
+        await dashboard.waitFor(() => dashboard.store.getState().comments.items.some((item) => item.id === comment.id), "other user's comment");
+        assert.ok((await dashboard.read("#comments-list .comment-body")).includes(comment.body));
+        assert.deepStrictEqual(await dashboard.read(`[data-edit-comment="${comment.id}"], [data-editable-comment="${comment.id}"]`), []);
+      } finally {
+        dashboard.dispose();
+      }
+    } finally {
+      await configuration.update("baseUrl", live.scope, vscode.ConfigurationTarget.Workspace);
+    }
   } finally {
     await clearApiKeyForScope(proxy.origin);
     await proxy.close();
