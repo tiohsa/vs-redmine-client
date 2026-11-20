@@ -333,7 +333,7 @@ async function runSuite({ fixtureDir, userDataDir, extensionsDir, workspaceDir, 
 
 function normalLiveTestFiles() {
   const liveDirectory = path.join(repoRoot, "out", "test", "live");
-  const names = new Set(["normalSync.test.js", "recoverySync.test.js", "conflictsSync.test.js", "entrypointsSync.test.js", "isolationSync.test.js", "durabilitySync.test.js", "dashboardSync.test.js"]);
+  const names = new Set(["normalSync.test.js", "recoverySync.test.js", "conflictsSync.test.js", "entrypointsSync.test.js", "isolationSync.test.js", "durabilitySync.test.js", "dashboardSync.test.js", "editorWorkflowSync.test.js"]);
   return fs.readdirSync(liveDirectory)
     .filter((name) => names.has(name))
     .map((name) => path.join(liveDirectory, name));

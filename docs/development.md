@@ -15,4 +15,6 @@
 
 ヘッドレス Linux では `xvfb-run -a pnpm run verify:all` を使用できます。コマンドやビューを追加した場合は [機能マップ](../verification/feature-map.json) の入口を更新します。主要操作が変わる場合は、操作に対応するセレクター、確認条件、テストも更新します。
 
-実際の Redmine で同期を確認する場合は、[ライブ検証スクリプト](../scripts/run-live-redmine-tests.cjs) と [テストシナリオ](../src/test/live/) を参照してください。ライブ検証用に用意した環境で `pnpm run test:live-redmine` を実行します。既定の出力先は `docs/reports/` です。
+実際の Redmine で同期を確認する場合は、[ライブ検証スクリプト](../scripts/run-live-redmine-tests.cjs) と [テストシナリオ](../src/test/live/) を参照してください。ライブ検証用に用意した環境で `pnpm run test:live-redmine` を実行します。通常の Extension Host テストの対象から `src/test/live/` を除外しています。専用コマンドではエディター操作のシナリオも実行します。既定の出力先は `docs/reports/` です。
+
+画像付きコメントの同期復旧を個別に確認する場合は、先に `pnpm run test:e2e` で検証用の `e2e-seed` プロジェクトを作成します。テストをコンパイルし、検証用 Redmine の `REDMINE_SYNC_LIVE_URL` と `REDMINE_API_KEY` を環境変数に設定して `pnpm exec vscode-test --config .vscode-test-live-recovery.mjs` を実行します。

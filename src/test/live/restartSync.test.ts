@@ -39,7 +39,6 @@ const markerPath = process.env.REDMINE_LIVE_MARKER_PATH;
 const tracePath = process.env.REDMINE_LIVE_TRACE_PATH;
 const upstream = resolveLiveUpstream() || "http://127.0.0.1:3000/";
 const proxyScope = process.env.REDMINE_LIVE_PROXY_URL;
-const liveTestEnabled = phase === "prepare" || phase === "resume";
 
 const loadState = (): RestartState => {
   if (!statePath || !fs.existsSync(statePath)) { return {}; }
@@ -86,7 +85,7 @@ const createIssueDirect = async (subject: string): Promise<number> => runWithCon
 suite("実Redmine同期プロセス再起動", function () {
   this.timeout(120_000);
 
-  (liveTestEnabled ? test : test.skip)("LIVE-P01: remote write後のhost再起動でoperation・SecretStorage・spoolを復旧する", async () => {
+  test("LIVE-P01: remote write後のhost再起動でoperation・SecretStorage・spoolを復旧する", async () => {
     assert.ok(phase === "prepare" || phase === "resume");
     assert.ok(statePath && markerPath && tracePath);
     assert.ok(proxyScope, "runner常駐proxy URLが設定されていること");

@@ -153,8 +153,8 @@ if (liveEnabled) {
 }
 
 export const liveTest = (id: string, title: string, operation: (fixture: LiveFixture) => Promise<void>): void => {
-  const register = liveEnabled ? test : test.skip;
-  register(`${id}: ${title}`, async function () {
+  if (!liveEnabled) { throw new Error("実Redmine専用ランナーでテストを実行してください。"); }
+  test(`${id}: ${title}`, async function () {
     this.timeout(120_000);
     const current = state;
     if (!current) { throw new Error("実Redmine fixtureが初期化されていません。"); }

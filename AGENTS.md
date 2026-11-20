@@ -72,6 +72,9 @@ pnpm run test:dashboard-ui
 
 ## Feature Verification
 
+- テストを追加する前に、検出する具体的な回帰と観測する結果を決める。対象の実装を意図的に壊したときに失敗することを確認し、既存テストが同じ条件と結果を検証していればそちらを更新する。
+- 外部環境が必要なテストは専用ランナーで選択する。テスト内のスキップ、実行の絞り込み、空のテスト、定数だけの真偽検証は lint で検出する。
+
 - 新規 feature は `src/layers/<runtime>/features/<id>/` に置き、公開 API を `index.ts` に集約する。実装例は `src/layers/extension-host/features/reference-example/` を参照する。
 - コマンドとビューの追加時は `verification/feature-map.json` の `entryPoints` を更新する。主要機能の操作手順に影響する変更では `features` の入口、既存のセレクター、確認条件、対応テストも更新する。
 - `pnpm run verify:all` で静的ゲートと Extension Host の参照シナリオを検証する。ヘッドレス Linux では `xvfb-run -a pnpm run verify:all` を使う。
