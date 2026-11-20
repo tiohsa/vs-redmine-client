@@ -61,6 +61,7 @@ import { validateDashboardUnsyncedKey } from "../dashboard/dashboardMessageValid
 import {
   EDIT_FIELD_VIA_QUICK_PICK_COMMAND,
   editTicketFieldViaQuickPick,
+  type TicketQuickPickField,
 } from "../views/ticketCodeLensProvider";
 
 export interface CommandDeps {
@@ -530,7 +531,7 @@ export const registerCommands = (
     }),
     vscode.commands.registerCommand(
       EDIT_FIELD_VIA_QUICK_PICK_COMMAND,
-      async (uriOrField?: vscode.Uri | string, field?: "tracker" | "status" | "priority" | "doneRatio" | "dueDate") => {
+      async (uriOrField?: vscode.Uri | string, field?: TicketQuickPickField) => {
         await editTicketFieldViaQuickPick(uriOrField, field);
       },
     ),

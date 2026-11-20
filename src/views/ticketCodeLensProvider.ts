@@ -10,7 +10,13 @@ import {
 import { getEditorContentTypeForDocument, getTicketIdForDocument } from "./ticketEditorRegistry";
 import { isCommentUpdateFilename } from "./commentUpdateFile";
 
-export type TicketQuickPickField = "tracker" | "status" | "priority" | "doneRatio" | "dueDate";
+export type TicketQuickPickField =
+  | "tracker"
+  | "status"
+  | "priority"
+  | "doneRatio"
+  | "startDate"
+  | "dueDate";
 
 export const EDIT_FIELD_VIA_QUICK_PICK_COMMAND = "redmine-client.editFieldViaQuickPick";
 
@@ -22,6 +28,7 @@ const FIELD_TO_YAML_KEY: Record<TicketQuickPickField, string> = {
   status: "status",
   priority: "priority",
   doneRatio: "done_ratio",
+  startDate: "start_date",
   dueDate: "due_date",
 };
 
@@ -30,6 +37,7 @@ const YAML_KEY_TO_FIELD: Record<string, TicketQuickPickField> = {
   status: "status",
   priority: "priority",
   done_ratio: "doneRatio",
+  start_date: "startDate",
   due_date: "dueDate",
 };
 
@@ -215,6 +223,7 @@ export class TicketCodeLensProvider implements vscode.CodeLensProvider {
     const doneRatio = parsed.fields.doneRatio && parsed.fields.doneRatio.length > 0
       ? parsed.fields.doneRatio
       : "0";
+    const startDate = parsed.fields.startDate || notSet;
     const dueDate = parsed.fields.dueDate || notSet;
 
     return [
@@ -237,6 +246,11 @@ export class TicketCodeLensProvider implements vscode.CodeLensProvider {
         title: vscode.l10n.t("Progress: {0}%", doneRatio),
         command: EDIT_FIELD_VIA_QUICK_PICK_COMMAND,
         arguments: [document.uri, "doneRatio" satisfies TicketQuickPickField],
+      }),
+      new vscode.CodeLens(range, {
+        title: vscode.l10n.t("Start date: {0}", startDate),
+        command: EDIT_FIELD_VIA_QUICK_PICK_COMMAND,
+        arguments: [document.uri, "startDate" satisfies TicketQuickPickField],
       }),
       new vscode.CodeLens(range, {
         title: vscode.l10n.t("Due date: {0}", dueDate),
@@ -309,6 +323,41 @@ const pickOptionValue = async (
   return picked?.value;
 };
 
+const pickDateFieldValue = async (
+  currentValue: string | undefined,
+  selectPlaceHolder: string,
+  inputPrompt: string,
+): Promise<string | undefined> => {
+  const now = new Date();
+  const today = formatIsoDate(now);
+  const tomorrow = addDays(now, 1);
+  const nextWeek = addDays(now, 7);
+  const twoWeeks = addDays(now, 14);
+  const choice = await pickOptionValue(selectPlaceHolder, [
+    { label: today, value: today, description: vscode.l10n.t("Today") },
+    { label: tomorrow, value: tomorrow, description: vscode.l10n.t("Tomorrow") },
+    { label: nextWeek, value: nextWeek, description: vscode.l10n.t("Next week") },
+    { label: twoWeeks, value: twoWeeks, description: vscode.l10n.t("In 2 weeks") },
+    { label: vscode.l10n.t("Enter date (YYYY-MM-DD)…"), value: "__custom__" },
+    { label: vscode.l10n.t("Clear (Not set)"), value: "" },
+  ]);
+  if (choice === undefined) {
+    return undefined;
+  }
+  if (choice !== "__custom__") {
+    return choice;
+  }
+  const input = await vscode.window.showInputBox({
+    prompt: inputPrompt,
+    value: currentValue || today,
+    validateInput: (val) =>
+      val.trim().length === 0 || DATE_PATTERN.test(val.trim())
+        ? undefined
+        : vscode.l10n.t("Date must be in YYYY-MM-DD format."),
+  });
+  return input === undefined ? undefined : input.trim();
+};
+
 export const editTicketFieldViaQuickPick = async (
   uriOrField?: vscode.Uri | string,
   fieldArg?: TicketQuickPickField,
@@ -321,7 +370,7 @@ export const editTicketFieldViaQuickPick = async (
   if (uriOrField instanceof vscode.Uri) {
     document = await vscode.workspace.openTextDocument(uriOrField);
   } else if (typeof uriOrField === "string") {
-    if (["tracker", "status", "priority", "doneRatio", "dueDate"].includes(uriOrField)) {
+    if (Object.prototype.hasOwnProperty.call(FIELD_TO_YAML_KEY, uriOrField)) {
       field = uriOrField as TicketQuickPickField;
       document = vscode.window.activeTextEditor?.document;
     } else {
@@ -348,6 +397,7 @@ export const editTicketFieldViaQuickPick = async (
       { label: vscode.l10n.t("Status"), value: "status" },
       { label: vscode.l10n.t("Priority"), value: "priority" },
       { label: vscode.l10n.t("Progress: {0}%", parsed.fields.doneRatio ?? "0"), value: "doneRatio" },
+      { label: vscode.l10n.t("Start date"), value: "startDate" },
       { label: vscode.l10n.t("Due date"), value: "dueDate" },
     ]);
     if (!fieldChoice) {
@@ -384,39 +434,18 @@ export const editTicketFieldViaQuickPick = async (
       vscode.l10n.t("Select progress (%)"),
       ratios.map((ratio) => ({ label: `${ratio}%`, value: String(ratio) })),
     );
+  } else if (field === "startDate") {
+    selectedValue = await pickDateFieldValue(
+      parsed.fields.startDate,
+      vscode.l10n.t("Select start date"),
+      vscode.l10n.t("Enter start date in YYYY-MM-DD format"),
+    );
   } else if (field === "dueDate") {
-    const now = new Date();
-    const today = formatIsoDate(now);
-    const tomorrow = addDays(now, 1);
-    const nextWeek = addDays(now, 7);
-    const twoWeeks = addDays(now, 14);
-    const choice = await pickOptionValue(vscode.l10n.t("Select due date"), [
-      { label: today, value: today, description: vscode.l10n.t("Today") },
-      { label: tomorrow, value: tomorrow, description: vscode.l10n.t("Tomorrow") },
-      { label: nextWeek, value: nextWeek, description: vscode.l10n.t("Next week") },
-      { label: twoWeeks, value: twoWeeks, description: vscode.l10n.t("In 2 weeks") },
-      { label: vscode.l10n.t("Enter date (YYYY-MM-DD)…"), value: "__custom__" },
-      { label: vscode.l10n.t("Clear (Not set)"), value: "" },
-    ]);
-    if (choice === undefined) {
-      return;
-    }
-    if (choice === "__custom__") {
-      const input = await vscode.window.showInputBox({
-        prompt: vscode.l10n.t("Enter due date in YYYY-MM-DD format"),
-        value: parsed.fields.dueDate || today,
-        validateInput: (val) =>
-          val.trim().length === 0 || DATE_PATTERN.test(val.trim())
-            ? undefined
-            : vscode.l10n.t("Date must be in YYYY-MM-DD format."),
-      });
-      if (input === undefined) {
-        return;
-      }
-      selectedValue = input.trim();
-    } else {
-      selectedValue = choice;
-    }
+    selectedValue = await pickDateFieldValue(
+      parsed.fields.dueDate,
+      vscode.l10n.t("Select due date"),
+      vscode.l10n.t("Enter due date in YYYY-MM-DD format"),
+    );
   }
 
   if (selectedValue === undefined) {

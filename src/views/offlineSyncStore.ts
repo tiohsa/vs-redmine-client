@@ -14,7 +14,9 @@ import type { TicketUpdateIntent } from "../app/ticketSync/syncOperationTypes";
 import { computeNotesHash } from "../utils/notesHash";
 import {
   getAttemptGeneration,
+  getEffectsForRevision,
   getPrimaryEffectForRevision,
+  isPrimaryEffectKind,
   isRejectedTicketCreate,
   evaluateAttemptClosure,
   hasUncertainDurableSyncEffect,
@@ -1317,6 +1319,40 @@ export const switchOfflineSyncStore = (scope: string): void => {
   notifyQueueChanged();
 };
 
+const resolveRevisionForEditedQueuedFailure = (
+  operation: {
+    revision?: number;
+    intentRevision?: number;
+    attemptGeneration?: number;
+    effects?: DurableSyncEffect[];
+    preparationFailure?: string;
+  },
+): { revision: number; effects: DurableSyncEffect[] } | undefined => {
+  const currentRevision = operation.intentRevision ?? operation.revision ?? 1;
+  const activeEffects = getEffectsForRevision(operation, currentRevision);
+  const hasFailedEffect = activeEffects.some((e) => e.state === "failed");
+  if (!hasFailedEffect && !operation.preparationFailure) {
+    return undefined;
+  }
+  const hasBlockingEffect = activeEffects.some((e) =>
+    e.state === "commit_unknown" ||
+    e.state === "compensation_unknown" ||
+    e.state === "compensation_started" ||
+    (isPrimaryEffectKind(e.kind) && e.state === "committed")
+  );
+  if (hasBlockingEffect) {
+    return undefined;
+  }
+  const nextRevision = Math.max(operation.revision ?? 1, operation.intentRevision ?? 0) + 1;
+  const reusableEffects = (operation.effects ?? []).filter((e) =>
+    e.state === "committed" ||
+    e.state === "commit_unknown" ||
+    e.state === "compensation_unknown" ||
+    e.state === "compensation_started"
+  );
+  return { revision: nextRevision, effects: reusableEffects };
+};
+
 export const mergeOfflineTicketUpdate = (
   ticketId: number,
   existing: OfflineTicketUpdate | undefined,
@@ -1349,6 +1385,21 @@ export const mergeOfflineTicketUpdate = (
     };
   }
   const fallbackContent = update.content ?? existing?.content ?? (update.subject ? buildTicketEditorContent(update) : update.description);
+  const existingContent = existing
+    ? (existing.content ?? (existing.subject ? buildTicketEditorContent(existing) : existing.description))
+    : undefined;
+  const hasPayloadChange = Boolean(
+    existing && (
+      fallbackContent !== existingContent ||
+      update.subject !== existing.subject ||
+      update.description !== existing.description ||
+      !isDeepStrictEqual(update.metadata, existing.metadata)
+    ),
+  );
+  const failedRecovery = existing && hasPayloadChange
+    ? resolveRevisionForEditedQueuedFailure(existing)
+    : undefined;
+  const resolvedRevision = failedRecovery?.revision ?? existing?.revision ?? update.revision ?? 1;
   return {
     ...(existing ?? update),
     ...update,
@@ -1363,7 +1414,10 @@ export const mergeOfflineTicketUpdate = (
     phase: update.phase ?? existing?.phase,
     remoteUpdatedAt: existing?.remoteUpdatedAt ?? update.remoteUpdatedAt,
     createdChildIds: existing?.createdChildIds ?? update.createdChildIds,
-    revision: existing?.revision ?? update.revision ?? 1,
+    revision: resolvedRevision,
+    ...(failedRecovery
+      ? { intentRevision: resolvedRevision, effects: failedRecovery.effects }
+      : {}),
     createdAt: existing?.createdAt ?? update.createdAt ?? Date.now(),
   };
 };
@@ -1538,12 +1592,19 @@ export const addOfflineCommentUpdateAsync = (
         },
       };
     } else {
+      const failedRecovery = update.body !== existing.body
+        ? resolveRevisionForEditedQueuedFailure(existing)
+        : undefined;
+      const resolvedRevision = failedRecovery?.revision ?? existing.revision ?? update.revision ?? 1;
       queue.comments[index] = normalizeComment({
         ...existing,
         ...update,
         operationId: existing.operationId,
         connectionScope: existing.connectionScope ?? scope,
-        revision: existing.revision ?? update.revision ?? 1,
+        revision: resolvedRevision,
+        ...(failedRecovery
+          ? { intentRevision: resolvedRevision, effects: failedRecovery.effects }
+          : {}),
         createdAt: existing.createdAt ?? update.createdAt ?? Date.now(),
       }, scope, index);
     }
@@ -1719,12 +1780,25 @@ export const addOfflineNewTicketAsync = async (
           baseDir: update.baseDir ?? existing.baseDir,
         },
       }
-      : {
-        ...existing,
-        ...update,
-        queueId: existing?.queueId ?? queueId,
-        revision: existing?.revision ?? update.revision ?? 1,
-      };
+      : (() => {
+        const failedRecovery = existing && existing.content !== update.content
+          ? resolveRevisionForEditedQueuedFailure(existing)
+          : undefined;
+        const resolvedRevision = failedRecovery?.revision ?? existing?.revision ?? update.revision ?? 1;
+        return {
+          ...existing,
+          ...update,
+          queueId: existing?.queueId ?? queueId,
+          revision: resolvedRevision,
+          ...(failedRecovery
+            ? {
+              intentRevision: resolvedRevision,
+              effects: failedRecovery.effects,
+              preparationFailure: undefined,
+            }
+            : {}),
+        };
+      })();
   if (index === -1) {
     queue.newTickets.unshift(entry);
   } else {
