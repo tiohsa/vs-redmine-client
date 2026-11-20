@@ -379,6 +379,9 @@
     "test": "vscode-test",
     "test:dashboard-ui": "pnpm run compile-tests && node scripts/check-dashboard-ui.cjs",
     "test:live-redmine": "pnpm run compile-tests && node scripts/run-live-redmine-tests.cjs",
+    "test:e2e:up": "node scripts/redmine-test-env.cjs up",
+    "test:e2e:down": "node scripts/redmine-test-env.cjs down",
+    "test:e2e": "node scripts/redmine-test-env.cjs test",
     "test:unsafe": "bash ./scripts/vscode-test-nosandbox.sh",
     "verify": "node verification/driver-cli.cjs",
     "verify:all": "pnpm run lint && node --test verification/architecture.test.cjs && pnpm run compile-tests && pnpm run compile && pnpm run verify run"
