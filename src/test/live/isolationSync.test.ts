@@ -9,10 +9,10 @@ import { runWithConnectionScope, requestJson } from "../../redmine/client";
 import { extractHttpStatusCode } from "../../redmine/httpError";
 import { getOfflineSyncQueue } from "../../views/offlineSyncStore";
 import { createFaultProxy } from "./faultProxy";
-import { liveTest } from "./liveFixture";
+import { liveTest, resolveLiveUpstream } from "./liveFixture";
 
 liveTest("LIVE-I01", "別の論理接続先へAPI keyを継承しない", async (live) => {
-  const proxy = await createFaultProxy("http://127.0.0.1:3000/");
+  const proxy = await createFaultProxy(resolveLiveUpstream());
   try {
     await assert.rejects(runWithConnectionScope(proxy.origin, () => requestJson({ method: "GET", path: "/users/current.json" })), /API key/);
     assert.strictEqual(proxy.hits().length, 0);
@@ -38,7 +38,7 @@ liveTest("LIVE-I03", "別接続先の同じticket IDのキューとOperationを�
   const key = await live.queueTicket(id, { subject: "LIVE-I03 first scope" });
   const first = live.engine().getRepository().getOperation(key, live.scope);
   assert.ok(first);
-  const proxy = await createFaultProxy("http://127.0.0.1:3000/");
+  const proxy = await createFaultProxy(resolveLiveUpstream());
   const apiKey = process.env.REDMINE_API_KEY;
   assert.ok(apiKey);
   await setApiKeyForScope(proxy.origin, apiKey);
@@ -74,7 +74,7 @@ liveTest("LIVE-I04", "別接続先を指定した復旧callbackは元Operation�
 });
 
 const keyForUser = (login: string, password: string): Promise<string> => new Promise((resolve, reject) => {
-  const request = http.get("http://127.0.0.1:3000/users/current.json", {
+  const request = http.get(new URL("users/current.json", resolveLiveUpstream()), {
     headers: { Authorization: `Basic ${Buffer.from(`${login}:${password}`).toString("base64")}` },
   }, (response) => {
     const chunks: Buffer[] = [];
@@ -100,7 +100,7 @@ liveTest("LIVE-I05", "他人のコメントを更新できないユーザーで�
     user: { login, password, firstname: "Live", lastname: "Sync", mail: `${login}@example.invalid`,
       must_change_passwd: false, mail_notification: "none" },
   } });
-  const proxy = await createFaultProxy("http://127.0.0.1:3000/");
+  const proxy = await createFaultProxy(resolveLiveUpstream());
   try {
     await live.request({ method: "PUT", path: `/projects/${live.projectId}.json`, body: { project: { is_public: true } } });
     const id = await live.createIssue();
@@ -139,7 +139,7 @@ liveTest("LIVE-I07", "Effect復旧は選択中の接続先に依存せず元のs
   const key = await live.queueNewTicket({ attachments: [{ kind: "file", filePath: file }] });
   const operation = live.engine().getRepository().getOperation(key, live.scope);
   assert.ok(operation);
-  const proxy = await createFaultProxy("http://127.0.0.1:3000/");
+  const proxy = await createFaultProxy(resolveLiveUpstream());
   const apiKey = process.env.REDMINE_API_KEY;
   assert.ok(apiKey);
   await setApiKeyForScope(proxy.origin, apiKey);

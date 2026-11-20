@@ -12,6 +12,7 @@ import { createIssue, getIssueDetail } from "../../redmine/issues";
 import { requestJson, runWithConnectionScope } from "../../redmine/client";
 import { initializeOfflineSyncStore } from "../../views/offlineSyncStore";
 import { getLiveHostContext } from "./hostContext";
+import { resolveLiveUpstream } from "./liveFixture";
 
 interface RestartState {
   hostPid?: number;
@@ -36,7 +37,7 @@ const phase = process.env.REDMINE_LIVE_PHASE;
 const statePath = process.env.REDMINE_LIVE_STATE_PATH;
 const markerPath = process.env.REDMINE_LIVE_MARKER_PATH;
 const tracePath = process.env.REDMINE_LIVE_TRACE_PATH;
-const upstream = "http://127.0.0.1:3000/";
+const upstream = resolveLiveUpstream() || "http://127.0.0.1:3000/";
 const proxyScope = process.env.REDMINE_LIVE_PROXY_URL;
 const liveTestEnabled = phase === "prepare" || phase === "resume";
 
