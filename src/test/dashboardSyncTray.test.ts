@@ -100,7 +100,7 @@ const renderUnsynced = (
     document: { getElementById: (id: string) => elements[id] },
     STRINGS: {
       syncQueued: "Queued", syncReviewRequired: "Review Required", syncFailed: "Failed", syncConflict: "Conflict",
-      unsyncedCountLabel: "{0} items", tabUnsynced: "Unsynced", noUnsyncedChanges: "No changes",
+      unsyncedCountLabel: "{0} items", tabUnsynced: "Unsynced",
       unsyncedKindTicket: "Ticket", unsyncedKindNewTicket: "New ticket", unsyncedKindComment: "Comment",
       unsyncedKindFile: "File", resolveRecovery: "Resolve recovery", resolveRecoveryTooltip: "Resolve recovery",
       syncToRedmine: "Sync to Redmine", discardAction: "Discard", discardLaterChangesAction: "Discard later changes",
@@ -118,6 +118,7 @@ const renderUnsynced = (
     req: () => {},
   });
   return {
+    countLabelText: elements["unsynced-count-label"].textContent,
     cardHtml: elements["unsynced-list"].innerHTML,
     summaryHtml: elements["unsynced-summary"].innerHTML,
     syncAllHidden: elements["sync-all-btn"].hidden,
@@ -168,6 +169,13 @@ suite("Dashboard sync attention tray", () => {
       assert.deepStrictEqual(present(state(resolveTicketSyncState(10))).buttons, []);
     });
   }
+
+  test("未同期0件では件数ラベルのみを表示し、空状態メッセージは出さない", () => {
+    const result = renderUnsynced([]);
+    assert.equal(result.countLabelText, "0 items");
+    assert.equal(result.cardHtml, "");
+    assert.equal(result.syncAllHidden, true);
+  });
 
   test("中止済み0件では切替を隠す", () => {
     const result = renderUnsynced([]);

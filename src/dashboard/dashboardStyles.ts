@@ -300,7 +300,7 @@ button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-
 /* Unsynced */
 #unsynced-panel { display: flex; flex: 1 1 auto; min-width: 0; min-height: 0; flex-direction: column; gap: 10px; overflow-y: auto; padding: 16px 14px 20px; }
 .unsynced-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
-.panel-title { margin: 0; color: var(--app-text); font-size: 16px; line-height: 1.25; }
+.panel-title { margin: 0; color: var(--app-text); font-size: 12px; line-height: 1.25; }
 .panel-subtitle { margin: 3px 0 0; color: var(--app-text-readable-muted); font-size: var(--app-font-caption); }
 .unsynced-summary { display: flex; flex-wrap: wrap; gap: 6px; }
 .summary-badge { display: inline-flex; align-items: center; gap: 5px; padding: 4px 8px; border: 1px solid var(--app-border-subtle); border-radius: var(--app-radius-pill); background: var(--app-surface-raised); color: var(--app-text-secondary); font-size: var(--app-font-label); font-weight: 600; }

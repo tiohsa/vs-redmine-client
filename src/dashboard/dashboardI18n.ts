@@ -141,7 +141,6 @@ export interface DashboardStrings {
   filterIncludeUnassigned: string;
   filterStatusCount: string;
   // Unsynced tab
-  noUnsyncedChanges: string;
   unsyncedKindTicket: string;
   unsyncedKindNewTicket: string;
   unsyncedKindComment: string;
@@ -378,7 +377,6 @@ export const buildDashboardStrings = (): DashboardStrings => ({
   filterIncludeUnassigned: vscode.l10n.t("Include unassigned"),
   filterStatusCount: vscode.l10n.t("Status"),
   // Unsynced tab
-  noUnsyncedChanges: vscode.l10n.t("No unsynced changes."),
   unsyncedKindTicket: vscode.l10n.t("Ticket"),
   unsyncedKindNewTicket: vscode.l10n.t("New ticket"),
   unsyncedKindComment: vscode.l10n.t("Comment"),
