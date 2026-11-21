@@ -23,7 +23,14 @@ test("architecture gate rejects new violations and exempts framework-core", t =>
   write(webview, "export const other = 1;");
   write("src/layers/extension-host/features/private/internal/value.ts", "export const value = 1;");
   const feature = "src/layers/extension-host/features/demo/index.ts";
-  write(feature, "export const demo = 1;");
+  const demo = [
+    'export { Other } from "./internal/other";',
+    "export interface DemoOptions { enabled: boolean }",
+    "export class Demo {}",
+    "export const createDemo = () => new Demo();",
+  ].join("\n");
+  write("src/layers/extension-host/features/demo/internal/other.ts", "export class Other {}");
+  write(feature, demo);
   const check = (...args) => spawnSync(process.execPath, ["scripts/check-architecture.cjs", ...args], { cwd: root, encoding: "utf8" });
   const clean = check();
   assert.equal(clean.status, 0, clean.stderr);
@@ -41,18 +48,29 @@ test("architecture gate rejects new violations and exempts framework-core", t =>
     assert.ok(invalid.stderr.includes(`[${rule}]`), `Missing ${rule}: ${invalid.stderr} ${invalid.stdout}`);
   }
 
-  write(feature, "export const demo = 1;");
   write(webview, "export const other = 1;");
+  write(feature, `${demo}\nconst OtherImplementation = class {};`);
+  const multipleClasses = check();
+  assert.equal(multipleClasses.status, 1, multipleClasses.stderr);
+  assert.match(multipleClasses.stderr, /\[multiple-implementation-classes\].*Demo.*OtherImplementation/);
+  write(feature, demo);
   const legacy = "src/legacy.ts";
   const baselineFile = "scripts/architecture-baseline.json";
   const baselinePath = path.join(root, baselineFile);
-  const digest = require("node:crypto").createHash("sha256").update("setTimeout").digest("hex").slice(0, 20);
-  const baseline = JSON.stringify({ [`${legacy}:restricted-api:${digest}`]: 1 });
+  const digest = value => require("node:crypto").createHash("sha256").update(value).digest("hex").slice(0, 20);
+  const existingClasses = "class First {} class Second {}";
+  const baseline = JSON.stringify({
+    [`${legacy}:restricted-api:${digest("setTimeout")}`]: 1,
+    [`${legacy}:multiple-implementation-classes:${digest(JSON.stringify(["First", "Second"]))}`]: 1,
+  });
   write(baselineFile, baseline);
-  write(legacy, "export const timer = setTimeout;");
+  write(legacy, `export const timer = setTimeout; ${existingClasses}`);
   assert.equal(check().status, 0);
-  write(legacy, "export const timer = setTimeout; export const another = setTimeout;");
-  assert.match(check("--record-legacy").stderr, /restricted-api/);
+  write(legacy, `export const timer = setTimeout; export const another = setTimeout; ${existingClasses} class Third {}`);
+  const worsened = check("--record-legacy");
+  assert.equal(worsened.status, 1, worsened.stderr);
+  assert.match(worsened.stderr, /restricted-api/);
+  assert.match(worsened.stderr, /multiple-implementation-classes.*Third/);
   assert.equal(fs.readFileSync(baselinePath, "utf8"), baseline);
   write(legacy, "export const value = 1;");
   assert.equal(check().status, 1);

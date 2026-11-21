@@ -20,6 +20,10 @@
 
 ヘッドレス Linux では `xvfb-run -a pnpm run verify:all` を使用できます。コマンドやビューを追加した場合は [機能マップ](../verification/feature-map.json) の入口を更新します。主要操作が変わる場合は、操作に対応するセレクター、確認条件、テストも更新します。
 
+アーキテクチャーゲートは、製品コードでトップレベルの実装クラスが2つ以上あるファイルを検出します。同じ責務の型や関数は実装クラスと一緒に置けます。公開入口で別ファイルのクラスを再公開できます。既存の違反はベースラインで管理し、解消した項目は `node scripts/check-architecture.cjs --record-legacy` で削除します。関数同士の責務が独立しているかは、コード作成時とレビュー時に判断します。
+
+`pnpm run lint` は Mocha、実 Redmine 用の `liveTest`、検証用の Node.js テストで、空のテスト、検証に到達しない早期終了、`assert.ok(true)` や `assert.strictEqual(result, result)` などの検証、`skip`・`only`・`todo` を検出します。必要な環境に応じた実行対象はランナーで指定します。ヘルパーを使う場合も実装を意図的に壊したときにテストが失敗することを確認してください。
+
 実際の Redmine で同期を確認する場合は、[ライブ検証スクリプト](../scripts/run-live-redmine-tests.cjs) と [テストシナリオ](../src/test/live/) を参照してください。ライブ検証用に用意した環境で `pnpm run test:live-redmine` を実行します。通常の Extension Host テストの対象から `src/test/live/` を除外しています。専用コマンドではエディター操作のシナリオも実行します。既定の出力先は `docs/reports/` です。
 
 Docker Compose が利用できる環境では `pnpm run test:e2e` が Redmine を起動し、起動完了を待ってから共通データを登録します。各スイートが専用のプロジェクトとテストデータを登録し、終了時に削除します。Dashboard の操作だけを確認するには `REDMINE_LIVE_ONLY=dashboardWorkflow pnpm run test:e2e` を実行します。検証用コンテナとボリュームの削除には `pnpm run test:e2e:down` を使用します。

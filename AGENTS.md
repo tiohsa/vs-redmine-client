@@ -5,10 +5,10 @@
 `redmine-client` is a VS Code extension for managing Redmine 6.1 issues, comments, Markdown editing, Dashboard interactions, and offline synchronization.
 
 - **Stack**: TypeScript 5.9 (strict mode), VS Code ^1.107.0, webpack 5, @vscode/test-cli + Mocha, ESLint 9. Entry point: `src/extension.ts`.
-- **Language Policy**: Write responses, review comments, and documentation in Japanese. Preserve commands, API names, identifiers, and source notation as-is.
+- **Language Policy**: Keep `AGENTS.md` in English. Write responses, review comments, and other documentation in Japanese. Preserve commands, API names, identifiers, and source notation as-is.
 - **Authority**:
-  - 機能仕様・アーキテクチャー・永続化の正本は [docs/README.md](docs/README.md) から参照する。
-  - 挙動を変更するときは、該当する機能の正本と関連テストを同じ変更で更新する。
+  - Use [docs/README.md](docs/README.md) to find the authoritative specifications for features, architecture, and persistence.
+  - When changing behavior, update the authoritative feature specification and its related tests in the same change.
   - Dashboard UI / Visual: Local `DESIGN.md` (takes precedence for visual decisions; otherwise preserve existing conventions)
 - **Artifacts**: Do not edit `dist/` or `out/` directly. Regenerate via standard build scripts.
 
@@ -41,6 +41,8 @@ Follow these repository-specific invariants without deviation:
   - You have permission to implement changes, run targeted validation suites, fix regressions caused by your modifications, and iterate until green without seeking user confirmation at each intermediate step.
 - **Scope Discipline**:
   - Make the smallest coherent change that satisfies the request.
+  - Keep one responsibility per source file. When creating or changing files, group code that changes for the same reason. Put independently changing concerns, such as input validation, business decisions, persistence, and presentation, in separate files.
+  - Limit each file to one top-level implementation class. Put additional implementation classes in separate files. The architecture gate enforces this limit.
   - Do not introduce unrelated refactoring, new dependencies, or weaken TypeScript strictness (`any`, broad type assertions, disabled checks).
   - Do not silently broaden destructive behavior (discard, force-sync, compensation, migration).
 - **Definition of Done**:
@@ -59,7 +61,7 @@ Run only the checks relevant to your change:
 pnpm exec tsc --noEmit
 pnpm run lint
 
-# テスト用コンパイル / Webpack Build
+# Test Compilation / Webpack Build
 pnpm run compile-tests
 pnpm run compile
 
@@ -72,10 +74,10 @@ pnpm run test:dashboard-ui
 
 ## Feature Verification
 
-- テストを追加する前に、検出する具体的な回帰と観測する結果を決める。対象の実装を意図的に壊したときに失敗することを確認し、既存テストが同じ条件と結果を検証していればそちらを更新する。
-- 外部環境が必要なテストは専用ランナーで選択する。テスト内のスキップ、実行の絞り込み、空のテスト、定数だけの真偽検証は lint で検出する。
+- Before adding a test, identify the specific regression to detect and the observable result. Confirm that the test fails when you deliberately break the relevant implementation. Update an existing test when it already verifies the same conditions and outcome.
+- Use dedicated runners to select tests that require an external environment. Lint detects empty tests, early returns that make verification unreachable, comparisons of constants or a value with itself, and uses of `skip`, `only`, or `todo` inside tests.
 
-- 新規 feature は `src/layers/<runtime>/features/<id>/` に置き、公開 API を `index.ts` に集約する。実装例は `src/layers/extension-host/features/reference-example/` を参照する。
-- コマンドとビューの追加時は `verification/feature-map.json` の `entryPoints` を更新する。主要機能の操作手順に影響する変更では `features` の入口、既存のセレクター、確認条件、対応テストも更新する。
-- `pnpm run verify:all` で静的ゲートと Extension Host の参照シナリオを検証する。ヘッドレス Linux では `xvfb-run -a pnpm run verify:all` を使う。
-- 既存違反を解消した場合は `node scripts/check-architecture.cjs --record-legacy` でベースラインから該当件数を削減する。新規違反がある場合は更新が失敗する。ベースラインの差分はコードオーナーレビューの対象とする。
+- Place new features in `src/layers/<runtime>/features/<id>/` and expose their public API through `index.ts`. See `src/layers/extension-host/features/reference-example/` for an implementation example.
+- When adding commands or views, update `entryPoints` in `verification/feature-map.json`. When a change affects how users operate a major feature, also update the corresponding entry points, existing selectors, verification conditions, and tests in or referenced by `features`.
+- Run `pnpm run verify:all` to check the static gates and the Extension Host reference scenario. On headless Linux, use `xvfb-run -a pnpm run verify:all`.
+- When resolving existing violations, run `node scripts/check-architecture.cjs --record-legacy` to reduce their counts in the baseline. The update fails if new violations exist. Baseline changes require code owner review.

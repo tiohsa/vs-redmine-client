@@ -66,6 +66,7 @@
   "src/app/ticketSync/ticketSyncService.ts:comment:1dce872873b996be1d88": 1,
   "src/app/ticketSync/ticketSyncService.ts:comment:49741c679d01a29bf0d9": 1,
   "src/app/ticketSync/ticketSyncService.ts:comment:5528448c31ea85f3660d": 1,
+  "src/app/ticketSync/ticketSyncService.ts:multiple-implementation-classes:7bf9e33bae3194c7eac2": 1,
   "src/app/ticketSync/uploadSpoolCleanup.ts:comment:1235d64c2bb9f02a2645": 1,
   "src/app/ticketSync/uploadSpoolCleanup.ts:comment:963ff690e1556f47553f": 1,
   "src/app/ticketSync/uploadSpoolStore.ts:comment:23191f1a8ba4c490a693": 1,
@@ -137,6 +138,7 @@
   "src/redmine/client.ts:restricted-api:e5a1f7170818e652aaa7": 1,
   "src/redmine/httpError.ts:comment:b4438610bc69132271c4": 1,
   "src/redmine/httpError.ts:comment:f2ec0cc1800590a8ad86": 1,
+  "src/redmine/httpError.ts:multiple-implementation-classes:f39a7bffd421fd391e81": 1,
   "src/redmine/issues.ts:comment:070f21122d5583d9203b": 1,
   "src/redmine/issues.ts:comment:32d0dfe6d26aeeb73f38": 1,
   "src/redmine/issues.ts:comment:a0edad7a82c019447bf6": 1,
@@ -151,6 +153,7 @@
   "src/views/commentSaveTypes.ts:comment:666bb586ce377b906438": 1,
   "src/views/commentUpdateFile.ts:comment:88d6e100463346fbd5ff": 1,
   "src/views/commentUpdateFile.ts:comment:f6c963508788c7fcc149": 1,
+  "src/views/commentsView.ts:multiple-implementation-classes:7086c2cf5d20d332819f": 1,
   "src/views/conflictDiffProvider.ts:comment:0fd74547a19ae7ce7f72": 1,
   "src/views/conflictDiffProvider.ts:comment:1f2ff3a348edf43769c0": 1,
   "src/views/conflictDiffProvider.ts:comment:37f721facd8c3aecfcbd": 1,
@@ -167,6 +170,7 @@
   "src/views/conflictDiffProvider.ts:comment:bca4b6504ad7b1ec4526": 1,
   "src/views/conflictDiffProvider.ts:comment:e216de7747b2511f8b82": 1,
   "src/views/conflictDiffProvider.ts:comment:f2c9fba44e7d5fa0945b": 1,
+  "src/views/conflictDiffProvider.ts:multiple-implementation-classes:20b40c8c71f5aa8f69d9": 1,
   "src/views/draftPersistence.ts:comment:1696f0c733cdab5e600e": 1,
   "src/views/draftPersistence.ts:comment:19d6232358afdddff5ee": 1,
   "src/views/draftPersistence.ts:comment:d224abe79f56cd216cca": 1,
@@ -179,6 +183,7 @@
   "src/views/offlineSyncStore.ts:comment:0c1ebea493b0e9fa67aa": 1,
   "src/views/offlineSyncStore.ts:comment:7d5f91752eff83c6e89b": 1,
   "src/views/offlineSyncStore.ts:comment:9564e0b7006e70b6169e": 1,
+  "src/views/projectsView.ts:multiple-implementation-classes:1a02da0a7b8b0c9b15ec": 1,
   "src/views/redmineTicketFrontmatterTemplate.ts:comment:0a070da502aeef098d67": 1,
   "src/views/redmineTicketFrontmatterTemplate.ts:comment:3006a43bb2611b26507f": 1,
   "src/views/redmineTicketFrontmatterTemplate.ts:comment:6dba963260503166781e": 1,
@@ -216,5 +221,6 @@
   "src/views/ticketSync/ticketQueueSync.ts:comment:7fadf45a8fc897552ddc": 1,
   "src/views/ticketSync/ticketSyncResult.ts:comment:932eddd1e8edba2f90e5": 1,
   "src/views/ticketSync/ticketSyncResult.ts:comment:accd6c393217b9507196": 1,
-  "src/views/treeTypes.ts:comment:eb836774ba04f33e37cf": 2
+  "src/views/treeTypes.ts:comment:eb836774ba04f33e37cf": 2,
+  "src/views/unsyncedFilesView.ts:multiple-implementation-classes:91d9a443e1de426acb5d": 1
 }

@@ -375,7 +375,7 @@
     "compile-tests": "node ./scripts/clean-test-output.js && tsc -p . --outDir out",
     "watch-tests": "tsc -p . -w --outDir out",
     "pretest": "pnpm run compile-tests && pnpm run compile && pnpm run lint",
-    "lint": "eslint src && node scripts/check-architecture.cjs",
+    "lint": "eslint src \"verification/**/*.test.cjs\" && node scripts/check-architecture.cjs",
     "test": "vscode-test",
     "test:dashboard-ui": "pnpm run compile-tests && node scripts/check-dashboard-ui.cjs",
     "test:live-redmine": "pnpm run compile-tests && node scripts/run-live-redmine-tests.cjs",
@@ -384,7 +384,7 @@
     "test:e2e": "node scripts/redmine-test-env.cjs test",
     "test:unsafe": "bash ./scripts/vscode-test-nosandbox.sh",
     "verify": "node verification/driver-cli.cjs",
-    "verify:all": "pnpm run lint && node --test verification/architecture.test.cjs && pnpm run compile-tests && pnpm run compile && pnpm run verify run"
+    "verify:all": "pnpm run lint && node --test verification/architecture.test.cjs verification/test-quality.test.cjs && pnpm run compile-tests && pnpm run compile && pnpm run verify run"
   },
   "pnpm": {
     "onlyBuiltDependencies": [
