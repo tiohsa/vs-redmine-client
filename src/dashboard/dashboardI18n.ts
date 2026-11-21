@@ -68,13 +68,6 @@ export interface DashboardStrings {
   shownLoadedTotal: string;
   loadedTickets: string;
   shownLoadedTickets: string;
-  syncTrayAllClear: string;
-  syncTrayItems: string;
-  syncTrayAttention: string;
-  syncTrayReviewConflict: string;
-  syncTrayOpenUnsynced: string;
-  syncTrayOpenEditor: string;
-  syncTrayFailedTicket: string;
   // Sync states
   syncDirty: string;
   syncEditing: string;
@@ -113,7 +106,6 @@ export interface DashboardStrings {
   resolveRecovery: string;
   resolveRecoveryTooltip: string;
   syncTicketTooltip: string;
-  editingState: string;
   remoteDescription: string;
   descriptionUnsyncedWarning: string;
   noDescription: string;
@@ -306,13 +298,6 @@ export const buildDashboardStrings = (): DashboardStrings => ({
   loadedTickets: vscode.l10n.t("{0} tickets loaded"),
   shownLoadedTickets: vscode.l10n.t("{0} shown / {1} tickets loaded"),
   shownLoadedTotal: vscode.l10n.t("{0} shown · {1} loaded · {2} total"),
-  syncTrayAllClear: vscode.l10n.t("No unsynced items in sync queue"),
-  syncTrayItems: vscode.l10n.t("{0} unsynced items"),
-  syncTrayAttention: vscode.l10n.t("Sync attention required"),
-  syncTrayReviewConflict: vscode.l10n.t("Review conflict"),
-  syncTrayOpenUnsynced: vscode.l10n.t("Open Unsynced"),
-  syncTrayOpenEditor: vscode.l10n.t("Open in Editor"),
-  syncTrayFailedTicket: vscode.l10n.t("Ticket #{0} failed to sync"),
   // Sync states
   syncDirty: vscode.l10n.t("Unsynced changes"),
   syncEditing: vscode.l10n.t("Editing"),
@@ -351,7 +336,6 @@ export const buildDashboardStrings = (): DashboardStrings => ({
   resolveRecovery: vscode.l10n.t("Review recovery"),
   resolveRecoveryTooltip: vscode.l10n.t("Review available recovery actions before continuing."),
   syncTicketTooltip: vscode.l10n.t("Sync VS Code editor changes to Redmine"),
-  editingState: vscode.l10n.t("Editing state"),
   remoteDescription: vscode.l10n.t("Description (on Redmine)"),
   descriptionUnsyncedWarning: vscode.l10n.t("Changes may not yet be reflected in the Redmine description below."),
   noDescription: vscode.l10n.t("No description."),

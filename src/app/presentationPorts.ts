@@ -9,6 +9,7 @@ export interface TicketPresentationPort {
 export interface CommentPresentationPort {
   refresh(): void;
   refreshForTicket(ticketId: number): void;
+  revealCreatedComment?(ticketId: number, commentId: number, connectionScope?: string): Promise<void>;
 }
 
 export interface UnsyncedPresentationPort {

@@ -120,7 +120,16 @@ export const createSyncController = (deps: SyncControllerDeps): SyncController =
           );
         }
         notifications.notifyCommentSaveResult(result);
-        if (shouldRefreshComments(result.status)) {
+        if (
+          result.status === "created" &&
+          result.commentId !== undefined &&
+          result.commentId > 0 &&
+          commentsPresentation.revealCreatedComment
+        ) {
+          await commentsPresentation
+            .revealCreatedComment(syncResult.ticketId, result.commentId, operationScope)
+            .catch(() => undefined);
+        } else if (shouldRefreshComments(result.status)) {
           commentsPresentation.refreshForTicket(syncResult.ticketId);
         }
         return toSyncStatus(result.status);

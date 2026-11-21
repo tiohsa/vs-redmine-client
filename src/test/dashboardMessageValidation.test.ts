@@ -122,6 +122,39 @@ suite("Dashboard メッセージバリデーション", () => {
     assert.strictEqual(r.ok, true);
   });
 
+  test("comment.syncSelected: ticketId が正の整数でないと拒否される", () => {
+    assert.strictEqual(validateDashboardMessage({ type: "comment.syncSelected", requestId: "r", ticketId: 0, commentId: 1 }).ok, false);
+    assert.strictEqual(validateDashboardMessage({ type: "comment.syncSelected", requestId: "r", ticketId: "1", commentId: 1 }).ok, false);
+  });
+
+  test("comment.syncSelected: commentId と documentUri が両方ないと拒否される", () => {
+    const r = validateDashboardMessage({ type: "comment.syncSelected", requestId: "r", ticketId: 10 });
+    assert.strictEqual(r.ok, false);
+  });
+
+  test("comment.syncSelected: 不正な commentId や空の documentUri は拒否される", () => {
+    assert.strictEqual(validateDashboardMessage({ type: "comment.syncSelected", requestId: "r", ticketId: 10, commentId: 0 }).ok, false);
+    assert.strictEqual(validateDashboardMessage({ type: "comment.syncSelected", requestId: "r", ticketId: 10, documentUri: "" }).ok, false);
+  });
+
+  test("comment.syncSelected: commentId 指定 / documentUri 指定の正常系", () => {
+    const byId = validateDashboardMessage({ type: "comment.syncSelected", requestId: "r1", ticketId: 10, commentId: 55 });
+    assert.strictEqual(byId.ok, true);
+    if (byId.ok && byId.request.type === "comment.syncSelected") {
+      assert.strictEqual(byId.request.ticketId, 10);
+      assert.strictEqual(byId.request.commentId, 55);
+      assert.strictEqual(byId.request.documentUri, undefined);
+    }
+
+    const byUri = validateDashboardMessage({ type: "comment.syncSelected", requestId: "r2", ticketId: 10, documentUri: "file:///tmp/draft.md" });
+    assert.strictEqual(byUri.ok, true);
+    if (byUri.ok && byUri.request.type === "comment.syncSelected") {
+      assert.strictEqual(byUri.request.ticketId, 10);
+      assert.strictEqual(byUri.request.commentId, undefined);
+      assert.strictEqual(byUri.request.documentUri, "file:///tmp/draft.md");
+    }
+  });
+
   test("unsynced.syncOne: key が無効だと拒否される", () => {
     const r = validateDashboardMessage({ type: "unsynced.syncOne", requestId: "r", key: { kind: "bad" } });
     assert.strictEqual(r.ok, false);

@@ -18,6 +18,13 @@ function activateTab(name){
     if(selectedRow && typeof selectedRow.scrollIntoView === 'function') selectedRow.scrollIntoView({ block: 'nearest' });
     pendingScrollSelectedTicketId = null;
   }
+  if(name === 'tickets' && pendingScrollSelectedCommentKey !== null && pendingScrollSelectedCommentKey === selectedCommentKey(state?.comments) && !state?.comments?.loading && state?.comments?.ticketId === state?.selectedTicketId){
+    const selectedCommentCard=document.querySelector('#comments-list .comment-card.selected');
+    if(selectedCommentCard){
+      if(typeof selectedCommentCard.scrollIntoView === 'function') selectedCommentCard.scrollIntoView({ block: 'nearest' });
+      pendingScrollSelectedCommentKey = null;
+    }
+  }
 }
 tabs.forEach(function(tab){ tab.addEventListener('click', function(){ activateTab(tab.dataset.tab); }); });
 document.getElementById('tabs').addEventListener('keydown', function(event){

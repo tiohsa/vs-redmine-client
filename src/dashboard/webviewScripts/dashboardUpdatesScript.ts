@@ -1,4 +1,10 @@
-export const dashboardUpdatesScript = String.raw`function render(){
+export const dashboardUpdatesScript = String.raw`function selectedCommentKey(comments){
+  if(!comments) return null;
+  if(comments.selectedCommentId !== undefined) return 'id:' + comments.selectedCommentId;
+  if(comments.selectedCommentUri) return 'uri:' + comments.selectedCommentUri;
+  return null;
+}
+function render(){
   if(!state) return; const focus=captureFocus(document); closeTicketActionMenus(); syncExpandedState(state.tickets);
   renderProjectSelect();
   const includeChildrenBtn = document.getElementById('include-children');
@@ -16,15 +22,22 @@ export const dashboardUpdatesScript = String.raw`function render(){
   }
   applyCompactMode();
   updateRefreshButtonState();
-  renderTickets(); renderTicketDetail(); renderFilterChips(); renderUnsynced(); renderComments(); renderSettings(); renderSyncTray(); updateSyncButtonStates(); restoreFocus(focus);
+  renderTickets(); renderTicketDetail(); renderFilterChips(); renderUnsynced(); renderComments(); renderSettings(); updateSyncButtonStates(); restoreFocus(focus);
 }
 window.addEventListener('message',function(event){ const message=event.data || {}; if(message.type === 'dashboard.state'){
     const previous=state;
     const projectChanged=previous?.selectedProject?.id !== message.state.selectedProject?.id;
     if(projectChanged){ expandedTicketIds.clear(); collapsedTicketIds.clear(); }
     const connectionChanged=previous?.settings?.baseUrl !== message.state.settings?.baseUrl;
-    if(connectionChanged){ closeProjectPicker(false); activeRefreshRequests.clear(); updateRefreshButtonState(); if(searchTimer){ window.clearTimeout(searchTimer); searchTimer=null; } searchComposing=false; searchQuery=message.state.ticketSearch?.query || ''; searchInput.value=searchQuery; updateSearchClearButton(); pendingScrollSelectedTicketId = null; }
+    if(connectionChanged){ closeProjectPicker(false); activeRefreshRequests.clear(); updateRefreshButtonState(); if(searchTimer){ window.clearTimeout(searchTimer); searchTimer=null; } searchComposing=false; searchQuery=message.state.ticketSearch?.query || ''; searchInput.value=searchQuery; updateSearchClearButton(); pendingScrollSelectedTicketId = null; pendingScrollSelectedCommentKey = null; }
     const ticketChanged=previous?.selectedTicketId !== message.state.selectedTicketId;
+    const previousCommentKey=selectedCommentKey(previous?.comments);
+    const nextCommentKey=selectedCommentKey(message.state.comments);
+    if(nextCommentKey === null){
+      pendingScrollSelectedCommentKey = null;
+    } else if(nextCommentKey !== previousCommentKey || ticketChanged){
+      pendingScrollSelectedCommentKey = nextCommentKey;
+    }
     if(connectionChanged || !message.state.draftTickets?.some(function(draft){ return draft.queueId === selectedDraftId; }) || (ticketChanged && message.state.selectedTicketId !== undefined)) selectedDraftId = null;
     const previousComposer=previous?.workPanel;
     if(!previous && message.state.ticketSearch){ searchQuery=message.state.ticketSearch.query; searchInput.value=searchQuery; updateSearchClearButton(); }
@@ -45,6 +58,15 @@ window.addEventListener('message',function(event){ const message=event.data || {
       }
     } else if(state.selectedTicketId === undefined){
       pendingScrollSelectedTicketId = null;
+    }
+    if(pendingScrollSelectedCommentKey !== null && pendingScrollSelectedCommentKey === nextCommentKey && !state.comments.loading && state.comments.ticketId === state.selectedTicketId){
+      if(!document.getElementById('panel-tickets')?.hidden){
+        const selectedCommentCard=document.querySelector('#comments-list .comment-card.selected');
+        if(selectedCommentCard){
+          if(typeof selectedCommentCard.scrollIntoView === 'function') selectedCommentCard.scrollIntoView({ block: 'nearest' });
+          pendingScrollSelectedCommentKey = null;
+        }
+      }
     }
     if(panel && panel.mode !== 'detail' && !panel.loading && (openingComposer || previousComposer?.loading)) document.getElementById('work-tracker')?.focus();
     if(previousComposer?.mode === 'newTicket' && (!panel || panel.mode === 'detail')) document.getElementById('project-select-trigger')?.focus();

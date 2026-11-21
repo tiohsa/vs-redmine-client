@@ -17,23 +17,27 @@ function renderComments(){
   else if(!comments.items.length) content='<div class="state-msg">'+STRINGS.noComments+'</div>';
   else content='<div class="comment-list comment-timeline" role="list">'+comments.items.map(function(cm){
     const editable=!!(cm.id && cm.editableByCurrentUser);
-    const unsynced=cm.hasUnsyncedEdit ? '<span class="unsynced-inline-badge"><span class="unsynced-dot" aria-hidden="true"></span>'+esc(STRINGS.unsyncedEditBadge)+'</span>' : '';
-    const syncBtn=cm.syncKey?'<button class="btn btn-secondary comment-sync-btn" type="button" data-sync-comment-key="'+esc(JSON.stringify(cm.syncKey))+'">'+actionIcon('sync')+esc(STRINGS.syncToRedmine)+'</button>':'';
-    const editBtn=editable?'<button class="comment-edit-icon" type="button" data-edit-comment="'+cm.id+'" data-ticket="'+ticketId+'" title="'+esc(STRINGS.openInEditor)+'" aria-label="'+esc(STRINGS.openInEditor)+'">'+actionIcon('open')+'</button>':'';
+    const isSelected=cm.id !== undefined
+      ? comments.selectedCommentId === cm.id
+      : !!(cm.syncKey?.documentUri && comments.selectedCommentUri === cm.syncKey.documentUri);
+    const unsynced=cm.isEditing ? '<span class="unsynced-inline-badge"><span class="unsynced-dot" aria-hidden="true"></span>'+esc(STRINGS.syncEditing)+'</span>' : cm.hasUnsyncedEdit ? '<span class="unsynced-inline-badge"><span class="unsynced-dot" aria-hidden="true"></span>'+esc(STRINGS.unsyncedEditBadge)+'</span>' : '';
+    const canSync=cm.id !== undefined || !!cm.syncKey?.documentUri;
+    const syncBtn=canSync
+      ? '<button class="comment-action-btn comment-hover-action-btn" type="button" data-comment-action="sync" data-ticket="'+ticketId+'"'+(cm.id !== undefined ? ' data-comment-id="'+cm.id+'"' : '')+(cm.id === undefined && cm.syncKey?.documentUri ? ' data-comment-uri="'+esc(cm.syncKey.documentUri)+'"' : '')+' title="'+esc(STRINGS.syncToRedmine)+'" aria-label="'+esc(STRINGS.syncToRedmine)+'">'+actionIcon('sync')+'</button>'
+      : '';
+    const browserBtn=cm.id !== undefined
+      ? '<button class="comment-action-btn comment-hover-action-btn" type="button" data-comment-action="browser" data-ticket="'+ticketId+'" data-comment-id="'+cm.id+'"'+(cm.noteIndex !== undefined ? ' data-note-index="'+cm.noteIndex+'"' : '')+' title="'+esc(STRINGS.openInBrowser)+'" aria-label="'+esc(STRINGS.openInBrowser)+'">'+actionIcon('browser')+'</button>'
+      : '';
+    const hoverActions=(syncBtn || browserBtn) ? '<div class="comment-hover-actions">'+syncBtn+browserBtn+'</div>' : '';
     const journalId=cm.id?'<span class="comment-id">#'+cm.id+'</span>':'';
     const date=cm.updatedAt?'<time class="comment-date" title="'+esc(cm.updatedAt)+'">'+esc(cm.updatedAt.substring(0,16).replace('T',' '))+'</time>':'';
-    return '<article class="comment-card'+(editable?' is-editable':'')+'" role="listitem"'+(editable?' tabindex="0" data-editable-comment="'+cm.id+'" data-ticket="'+ticketId+'"':'')+'><div class="comment-header"><div class="comment-meta"><span class="comment-author">'+esc(cm.authorName)+'</span>'+date+journalId+unsynced+'</div><div class="comment-header-actions">'+editBtn+syncBtn+'</div></div><div class="comment-body">'+esc(cm.body)+'</div></article>';
+    const cardIdentityAttrs=(cm.id !== undefined ? ' data-comment-id="'+cm.id+'"' : (cm.syncKey?.documentUri ? ' data-comment-uri="'+esc(cm.syncKey.documentUri)+'"' : ''));
+    return '<article class="comment-card'+(editable?' is-editable':'')+(isSelected?' selected':'')+'" role="listitem" aria-current="'+isSelected+'" tabindex="0"'+cardIdentityAttrs+(editable?' data-editable-comment="'+cm.id+'" data-ticket="'+ticketId+'"':'')+'><div class="comment-header"><div class="comment-meta"><span class="comment-author">'+esc(cm.authorName)+'</span>'+date+journalId+unsynced+'</div></div><div class="comment-body">'+esc(cm.body)+'</div>'+hoverActions+'</article>';
   }).join('')+'</div>';
   list.innerHTML=content;
-  list.querySelectorAll('[data-edit-comment]').forEach(function(button){
-    button.addEventListener('click',function(event){
-      event.stopPropagation();
-      req('comment.edit',{ticketId:Number(button.dataset.ticket),commentId:Number(button.dataset.editComment)});
-    });
-  });
   list.querySelectorAll('[data-editable-comment]').forEach(function(card){
     card.addEventListener('click',function(event){
-      if(isElement(event.target) && event.target.closest('[data-sync-comment-key],[data-edit-comment]')) return;
+      if(isElement(event.target) && event.target.closest('.comment-hover-actions,[data-comment-action]')) return;
       req('comment.edit',{ticketId:Number(card.dataset.ticket),commentId:Number(card.dataset.editableComment)});
     });
     card.addEventListener('keydown',function(event){
@@ -44,10 +48,21 @@ function renderComments(){
       }
     });
   });
-  list.querySelectorAll('[data-sync-comment-key]').forEach(function(btn){
+  list.querySelectorAll('[data-comment-action]').forEach(function(btn){
     btn.addEventListener('click',function(event){
       event.stopPropagation();
-      try { req('unsynced.syncOne',{key:JSON.parse(btn.getAttribute('data-sync-comment-key'))}); } catch {}
+      const action=btn.dataset.commentAction;
+      const targetTicketId=Number(btn.dataset.ticket);
+      if(action === 'sync'){
+        const payload={ticketId:targetTicketId};
+        if(btn.dataset.commentId) payload.commentId=Number(btn.dataset.commentId);
+        else if(btn.dataset.commentUri) payload.documentUri=btn.dataset.commentUri;
+        req('comment.syncSelected',payload);
+      } else if(action === 'browser'){
+        const payload={ticketId:targetTicketId,commentId:Number(btn.dataset.commentId)};
+        if(btn.dataset.noteIndex) payload.noteIndex=Number(btn.dataset.noteIndex);
+        req('comment.openBrowser',payload);
+      }
     });
   });
   updateSyncButtonStates();

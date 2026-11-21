@@ -219,7 +219,7 @@ liveTest("LIVE-B04", "詳細画面からコメントMarkdownを開き追加・�
     dashboard.reveal();
     await dashboard.dom("#reload-comments-btn");
     await dashboard.waitFor(() => dashboard.store.getState().comments.items.some((comment) => comment.id === created[0].id), "saved comment");
-    await dashboard.dom(`[data-edit-comment="${original.id}"]`);
+    await dashboard.dom(`[data-editable-comment="${original.id}"]`);
     await dashboard.waitFor(() => {
       const editor = vscode.window.activeTextEditor;
       return Boolean(editor && parseCommentUpdateFile(editor.document.getText())?.fields.journalId === original.id);

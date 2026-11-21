@@ -158,7 +158,7 @@ body.vscode-high-contrast .tab.active { border-bottom-width: 3px; }
 @media (prefers-reduced-motion: reduce) { *, *::before, *::after { scroll-behavior: auto !important; transition-duration: .01ms !important; animation-duration: .01ms !important; } }
 
 `,
-  narrowControls: String.raw`@media (max-width:480px) { #filter-dialog-fields { grid-template-columns:minmax(0,1fr); } .sync-tray { flex-wrap:wrap; } }
+  narrowControls: String.raw`@media (max-width:480px) { #filter-dialog-fields { grid-template-columns:minmax(0,1fr); } }
 
 `,
   compactTicketPanels: String.raw`#tabs { gap:0; min-height:30px; padding:0 8px; }

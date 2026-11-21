@@ -33,6 +33,16 @@ export const registerSyncCommands = (
         ticketsPresentation.revealCreatedTickets
       ) {
         await ticketsPresentation.revealCreatedTickets(result.createdTicketIds).catch(() => undefined);
+      } else if (
+        result.createdComments &&
+        result.createdComments.length > 0 &&
+        commentsPresentation.revealCreatedComment
+      ) {
+        ticketsPresentation.refresh();
+        const lastComment = result.createdComments[result.createdComments.length - 1];
+        await commentsPresentation
+          .revealCreatedComment(lastComment.ticketId, lastComment.commentId)
+          .catch(() => undefined);
       } else {
         ticketsPresentation.refresh();
       }
@@ -45,7 +55,7 @@ export const registerSyncCommands = (
       }
       let ticketCreated = false;
       let createdTicketId: number | undefined;
-      await syncUnsyncedFile(
+      const result = await syncUnsyncedFile(
         { syncKey: withKey.syncKey },
         {
           onTicketCreated: (ticketId) => {
@@ -62,6 +72,18 @@ export const registerSyncCommands = (
         ticketsPresentation.revealCreatedTickets
       ) {
         await ticketsPresentation.revealCreatedTickets([createdTicketId]).catch(() => undefined);
+      } else if (
+        withKey.syncKey.kind === "comment" &&
+        withKey.syncKey.commentId === undefined &&
+        result?.kind === "comment" &&
+        result.status === "success" &&
+        typeof result.id === "number" &&
+        result.id > 0 &&
+        commentsPresentation.revealCreatedComment
+      ) {
+        await commentsPresentation
+          .revealCreatedComment(withKey.syncKey.ticketId, result.id)
+          .catch(() => undefined);
       } else if (ticketCreated) {
         ticketsPresentation.refresh();
       }

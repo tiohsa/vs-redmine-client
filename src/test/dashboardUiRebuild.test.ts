@@ -95,7 +95,19 @@ suite("Dashboard の表示と操作", () => {
     assert.match(drawerAndTimelineCss, /#detail-cancel-btn\s*\{[^}]*border-radius:\s*2px;/);
     assert.match(drawerAndTimelineCss, /#add-comment-btn\s*\{[^}]*border-radius:\s*2px;/);
     assert.match(drawerAndTimelineCss, /#reload-comments-btn\s*\{[^}]*border-radius:\s*2px;/);
-    assert.match(drawerAndTimelineCss, /\.comment-sync-btn\s*\{[^}]*border-radius:\s*2px;/);
+    assert.match(drawerAndTimelineCss, /\.comment-hover-action-btn\s*\{[^}]*border-radius:\s*2px;/);
+  });
+
+  test("コメント追加ボタンは＋アイコンのみで、コメント一覧のホバー編集アイコンを持たない", () => {
+    assert.ok(
+      dashboardWebviewScript.includes(
+        `id="add-comment-btn" type="button" title="'+esc(STRINGS.addCommentAction)+'" aria-label="'+esc(STRINGS.addCommentAction)+'">'+actionIcon('child')+'</button>`
+      )
+    );
+    assert.ok(!dashboardWebviewScript.includes("<span>'+esc(STRINGS.addCommentAction)+'</span>"));
+    assert.ok(!dashboardWebviewScript.includes("comment-edit-icon"));
+    assert.ok(!dashboardWebviewScript.includes("data-edit-comment"));
+    assert.ok(!dashboardStyles.includes(".comment-edit-icon"));
   });
 
   test("コンパクトモード・高優先度フィルタ・キーボード操作・150msデバウンス・新規下書き行を実装する", () => {

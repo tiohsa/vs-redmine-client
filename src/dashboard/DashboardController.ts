@@ -133,6 +133,8 @@ export class DashboardController {
           comments: {
             ...state.comments,
             ticketId: undefined,
+            selectedCommentId: undefined,
+            selectedCommentUri: undefined,
             items: [],
             loading: false,
             error: undefined,
@@ -153,7 +155,8 @@ export class DashboardController {
         this.cache.totalCount = count;
       },
       getSettings: () => this.settingsCtrl.getSettings(),
-      loadComments: (ticketId, throwOnError) => this.commentService.loadComments(ticketId, throwOnError),
+      loadComments: (ticketId, throwOnError, selection) =>
+        this.commentService.loadComments(ticketId, throwOnError, selection),
       refreshUnsynced: () => this.refreshUnsynced(),
       onSearchAccepted: () => {
         this.commentService.invalidate();
@@ -169,6 +172,8 @@ export class DashboardController {
       loadComments: (ticketId) => this.commentService.loadComments(ticketId),
       openTicketEditor: (ticketId) => this.ticketService.openEditor(ticketId),
       revealCreatedTickets: (ticketIds) => this.revealCreatedTickets(ticketIds),
+      revealCreatedComment: (ticketId, commentId, options) =>
+        this.revealCreatedComment(ticketId, commentId, options),
       syncEngine: opts.syncEngine,
     });
     this.metadataService = new DashboardMetadataService({
@@ -240,6 +245,27 @@ export class DashboardController {
     void this.ticketService.loadTickets();
   }
 
+  private async ensureTicketsLoadedForReveal(
+    ticketIds: readonly number[],
+    initialScope: string,
+  ): Promise<boolean> {
+    if (this.cache.projects.length === 0) {
+      await this.projectService.loadProjects();
+    }
+    if (initialScope !== getCurrentConnectionScope()) {
+      return false;
+    }
+    if (!this.dataService.hasMetadataOptions) {
+      await Promise.all([
+        this.dataService.loadMetadataOptions(),
+        this.ticketService.loadTickets(false, { ensureTicketIds: ticketIds }),
+      ]);
+    } else {
+      await this.ticketService.loadTickets(false, { ensureTicketIds: ticketIds });
+    }
+    return initialScope === getCurrentConnectionScope();
+  }
+
   async revealCreatedTickets(
     ticketIds: readonly number[],
     options?: { connectionScope?: string },
@@ -252,21 +278,7 @@ export class DashboardController {
       new Set(ticketIds.filter((id) => Number.isInteger(id) && id > 0)),
     );
     const targetId = normalizedIds.at(-1);
-    if (this.cache.projects.length === 0) {
-      await this.projectService.loadProjects();
-    }
-    if (initialScope !== getCurrentConnectionScope()) {
-      return;
-    }
-    if (!this.dataService.hasMetadataOptions) {
-      await Promise.all([
-        this.dataService.loadMetadataOptions(),
-        this.ticketService.loadTickets(false, { ensureTicketIds: normalizedIds }),
-      ]);
-    } else {
-      await this.ticketService.loadTickets(false, { ensureTicketIds: normalizedIds });
-    }
-    if (initialScope !== getCurrentConnectionScope()) {
+    if (!(await this.ensureTicketsLoadedForReveal(normalizedIds, initialScope))) {
       return;
     }
     if (targetId === undefined) {
@@ -276,6 +288,35 @@ export class DashboardController {
     if (collectTicketNodeIds(state.tickets).has(targetId)) {
       await this.selectTicket(targetId);
     }
+  }
+
+  async revealCreatedComment(
+    ticketId: number,
+    commentId: number,
+    options?: { connectionScope?: string },
+  ): Promise<void> {
+    const initialScope = options?.connectionScope ?? getCurrentConnectionScope();
+    if (options?.connectionScope !== undefined && options.connectionScope !== getCurrentConnectionScope()) {
+      return;
+    }
+    if (!Number.isInteger(ticketId) || ticketId <= 0 || !Number.isInteger(commentId) || commentId <= 0) {
+      return;
+    }
+    let state = this.opts.store.getState();
+    if (!collectTicketNodeIds(state.tickets).has(ticketId)) {
+      if (!(await this.ensureTicketsLoadedForReveal([ticketId], initialScope))) {
+        return;
+      }
+      state = this.opts.store.getState();
+      if (!collectTicketNodeIds(state.tickets).has(ticketId)) {
+        return;
+      }
+    }
+    if (state.selectedTicketId !== ticketId) {
+      await this.selectTicket(ticketId, false, { commentId });
+      return;
+    }
+    await this.commentService.loadComments(ticketId, false, { commentId });
   }
 
   refreshCommentsForTicket(ticketId: number): void {
@@ -406,11 +447,22 @@ export class DashboardController {
         await this.commentService.addComment(req.ticketId);
         break;
       case "comment.edit":
-        void this.selectTicket(req.ticketId);
+        if (this.opts.store.getState().selectedTicketId === req.ticketId) {
+          this.commentService.selectComment(req.ticketId, { commentId: req.commentId });
+        } else {
+          void this.selectTicket(req.ticketId, false, { commentId: req.commentId });
+        }
         await this.commentService.editTicketComment(req.ticketId, req.commentId);
         break;
       case "comment.openBrowser":
         await this.commentService.openCommentInBrowser(req.ticketId, req.commentId, req.noteIndex);
+        break;
+      case "comment.syncSelected":
+        await this.unsyncedService.handleSyncSelectedComment(req.requestId, {
+          ticketId: req.ticketId,
+          commentId: req.commentId,
+          documentUri: req.documentUri,
+        });
         break;
       case "comment.reload":
         await this.commentService.loadComments(req.ticketId);
@@ -490,8 +542,12 @@ export class DashboardController {
 
   // ── Private ────────────────────────────────────────────────────────────
 
-  private async selectTicket(ticketId: number, throwOnLoadError = false): Promise<void> {
-    await this.ticketService.selectTicket(ticketId, throwOnLoadError);
+  private async selectTicket(
+    ticketId: number,
+    throwOnLoadError = false,
+    commentSelection?: { commentId?: number; documentUri?: string },
+  ): Promise<void> {
+    await this.ticketService.selectTicket(ticketId, throwOnLoadError, commentSelection);
     const ticket = this.cache.tickets.find((t) => t.id === ticketId);
     if (ticket?.projectId) {
       const editOptions = this.metadataService.loadEditOptions(ticketId, ticket.projectId, throwOnLoadError);
@@ -548,6 +604,39 @@ export class DashboardController {
     await this.selectTicket(ticketId);
   }
 
+  public async selectCommentForEditor(
+    target: { ticketId: number; commentId?: number; documentUri?: string },
+    editorConnectionScope?: string,
+  ): Promise<void> {
+    if (!getTicketListFollowActiveEditor()) {
+      return;
+    }
+    if (!Number.isInteger(target.ticketId) || target.ticketId <= 0) {
+      return;
+    }
+    if (
+      editorConnectionScope !== undefined &&
+      editorConnectionScope !== getCurrentConnectionScope()
+    ) {
+      return;
+    }
+    const state = this.opts.store.getState();
+    if (!collectTicketNodeIds(state.tickets).has(target.ticketId)) {
+      return;
+    }
+    if (state.selectedTicketId !== target.ticketId) {
+      await this.selectTicket(target.ticketId, false, {
+        commentId: target.commentId,
+        documentUri: target.documentUri,
+      });
+      return;
+    }
+    this.commentService.selectComment(target.ticketId, {
+      commentId: target.commentId,
+      documentUri: target.documentUri,
+    });
+  }
+
   private cancelDetail(): void {
     const state = this.opts.store.getState();
     this.opts.store.update({
@@ -557,6 +646,8 @@ export class DashboardController {
       comments: {
         ...state.comments,
         ticketId: undefined,
+        selectedCommentId: undefined,
+        selectedCommentUri: undefined,
         items: [],
         loading: false,
         error: undefined,
@@ -567,6 +658,10 @@ export class DashboardController {
   private refreshUnsynced(): void {
     this.unsyncedService.refreshUnsynced();
     this.opts.store.update({ draftTickets: this.buildCurrentDraftTickets() });
+    const selectedTicketId = this.opts.store.getState().selectedTicketId;
+    if (selectedTicketId !== undefined) {
+      this.commentService.refreshPresentation(selectedTicketId);
+    }
   }
 
   private refreshTicketPresentation(): void {
@@ -579,6 +674,7 @@ export class DashboardController {
     if (selectedTicket) {
       this.opts.store.update({ selectedTicket: buildTicketDetail(selectedTicket, this.cache.tickets) });
     }
+    this.commentService.refreshPresentation(selectedTicketId);
   }
 
   private pushTickets(): void {
@@ -594,7 +690,14 @@ export class DashboardController {
         selectedTicketId: undefined,
         selectedTicket: undefined,
         workPanel: undefined,
-        comments: { ...state.comments, ticketId: undefined, items: [], error: undefined },
+        comments: {
+          ...state.comments,
+          ticketId: undefined,
+          selectedCommentId: undefined,
+          selectedCommentUri: undefined,
+          items: [],
+          error: undefined,
+        },
       });
     }
   }

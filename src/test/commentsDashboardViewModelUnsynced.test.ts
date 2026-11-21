@@ -5,6 +5,7 @@ import {
   clearOfflineSyncQueueAsync,
   initializeOfflineSyncStore,
 } from "../views/offlineSyncStore";
+import { clearCommentEdits, setCommentEditingState } from "../views/commentEditStore";
 import { Comment } from "../redmine/types";
 import { createTestMemento } from "./helpers/vscodeMemento";
 
@@ -21,9 +22,11 @@ suite("commentsDashboardViewModel – hasUnsyncedEdit", () => {
   setup(async () => {
     initializeOfflineSyncStore(createTestMemento());
     await clearOfflineSyncQueueAsync();
+    clearCommentEdits();
   });
   teardown(async () => {
     await clearOfflineSyncQueueAsync();
+    clearCommentEdits();
   });
 
   test("未同期エントリがなければ hasUnsyncedEdit = false", async () => {
@@ -112,5 +115,35 @@ suite("commentsDashboardViewModel – hasUnsyncedEdit", () => {
     const items = buildCommentDashboardItems([makeComment(3)], 10);
     assert.strictEqual(items.length, 1);
     assert.strictEqual(items[0]!.id, 3);
+  });
+
+  test("編集中のコメントは isEditing = true になり、キュー済み本文と一致すれば false に戻る", async () => {
+    setCommentEditingState(10, 2, true, "editing body");
+    let items = buildCommentDashboardItems([makeComment(1), makeComment(2)]);
+    assert.strictEqual(items[0]!.isEditing, false);
+    assert.strictEqual(items[1]!.isEditing, true);
+
+    await addOfflineCommentUpdateAsync({
+      ticketId: 10,
+      commentId: 2,
+      body: "editing body",
+      documentUri: "file:///tmp/x.md",
+      sourceNotesHash: "sha256:abc",
+    });
+    items = buildCommentDashboardItems([makeComment(1), makeComment(2)]);
+    assert.strictEqual(items[1]!.isEditing, false);
+    assert.strictEqual(items[1]!.hasUnsyncedEdit, true);
+
+    setCommentEditingState(10, 2, true, "editing body 2");
+    items = buildCommentDashboardItems([makeComment(1), makeComment(2)]);
+    assert.strictEqual(items[1]!.isEditing, true);
+  });
+
+  test("編集不可コメントや別スコープの編集中状態は isEditing = false", () => {
+    setCommentEditingState(10, 2, true, "editing body", "https://other.example/");
+    const items = buildCommentDashboardItems([
+      { ...makeComment(2), editableByCurrentUser: false },
+    ]);
+    assert.strictEqual(items[0]!.isEditing, false);
   });
 });

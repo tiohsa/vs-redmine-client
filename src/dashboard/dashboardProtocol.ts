@@ -141,12 +141,14 @@ export interface DashboardUnsyncedItem {
 
 export interface DashboardCommentItem {
   id?: number;
+  noteIndex?: number;
   authorName: string;
   body: string;
   createdAt?: string;
   updatedAt?: string;
   editableByCurrentUser: boolean;
   hasUnsyncedEdit: boolean;
+  isEditing?: boolean;
   syncKey?: DashboardUnsyncedKey;
   isLocalUnsynced?: boolean;
 }
@@ -260,6 +262,8 @@ export interface DashboardState {
   };
   comments: {
     ticketId?: number;
+    selectedCommentId?: number;
+    selectedCommentUri?: string;
     loading: boolean;
     items: DashboardCommentItem[];
     error?: string;
@@ -355,6 +359,7 @@ export type DashboardRequest =
   | { type: "comment.add"; requestId: string; ticketId: number }
   | { type: "comment.edit"; requestId: string; ticketId: number; commentId: number }
   | { type: "comment.openBrowser"; requestId: string; ticketId: number; commentId: number; noteIndex?: number }
+  | { type: "comment.syncSelected"; requestId: string; ticketId: number; commentId?: number; documentUri?: string }
   | { type: "comment.reload"; requestId: string; ticketId: number }
   | { type: "unsynced.openLocalFile"; requestId: string; documentUri: string }
   | { type: "unsynced.syncOne"; requestId: string; key: DashboardUnsyncedKey }

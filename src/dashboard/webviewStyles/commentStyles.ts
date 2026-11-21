@@ -79,10 +79,12 @@ export const commentStyles = {
   overflow-wrap: anywhere;
 }
 #add-comment-btn {
+  min-width: 24px;
   min-height: 24px;
-  padding: 2px 8px;
+  width: 26px;
+  height: 26px;
+  padding: 0;
   border-radius: 2px;
-  font-size: var(--app-font-label);
 }
 #reload-comments-btn {
   min-width: 24px;
@@ -105,6 +107,7 @@ export const commentStyles = {
 #detail-comments .comment-card,
 .comment-timeline .comment-card,
 .comment-card {
+  position: relative;
   display: flex;
   flex-direction: column;
   flex: 0 0 auto;
@@ -122,6 +125,11 @@ export const commentStyles = {
 .comment-timeline .comment-card {
   background: transparent;
 }
+#detail-comments .comment-card:hover,
+.comment-timeline .comment-card:hover,
+.comment-card:hover {
+  background-color: var(--vscode-list-hoverBackground, var(--app-surface-hover));
+}
 .comment-card.is-editable {
   cursor: pointer;
 }
@@ -131,6 +139,27 @@ export const commentStyles = {
 .comment-card.is-editable:focus-visible {
   border-color: var(--vscode-focusBorder, var(--app-focus));
   background: var(--app-surface-hover);
+}
+#detail-comments .comment-card.selected,
+.comment-timeline .comment-card.selected,
+.comment-card.selected {
+  background-color: color-mix(in oklab, var(--vscode-list-inactiveSelectionBackground, var(--app-surface-hover)) 86%, var(--app-focus));
+  color: var(--vscode-foreground, var(--app-text));
+  box-shadow: inset 3px 0 0 var(--vscode-focusBorder, var(--app-focus));
+}
+body:focus-within #detail-comments .comment-card.selected,
+body:focus-within .comment-timeline .comment-card.selected,
+body:focus-within .comment-card.selected {
+  background-color: color-mix(in oklab, var(--vscode-list-activeSelectionBackground, var(--app-surface-hover)) 78%, var(--app-focus));
+  color: var(--vscode-list-activeSelectionForeground, var(--app-selected-fg));
+}
+body:focus-within .comment-card.selected .comment-author,
+body:focus-within .comment-card.selected .comment-body {
+  color: inherit;
+}
+body:focus-within .comment-card.selected .comment-date,
+body:focus-within .comment-card.selected .comment-id {
+  color: color-mix(in srgb, var(--vscode-list-activeSelectionForeground, var(--app-selected-fg)) 80%, transparent);
 }
 .comment-header {
   display: flex;
@@ -163,33 +192,46 @@ export const commentStyles = {
   color: var(--app-text-readable-muted);
   font-size: var(--app-font-label);
 }
-.comment-edit-icon {
+.comment-hover-actions {
+  display: none;
+  position: absolute;
+  top: 4px;
+  right: 6px;
+  z-index: 2;
+  align-items: center;
+  gap: 2px;
+  padding: 2px;
+  border: 1px solid var(--vscode-widget-border, var(--app-border-subtle));
+  border-radius: 3px;
+  background-color: var(--vscode-editorWidget-background, var(--app-surface-raised));
+  box-shadow: var(--app-shadow);
+}
+.comment-card:hover .comment-hover-actions,
+.comment-card:focus-within .comment-hover-actions {
+  display: inline-flex;
+}
+.comment-hover-action-btn {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  min-width: 24px;
-  min-height: 24px;
-  width: 24px;
-  height: 24px;
+  width: 22px;
+  height: 22px;
   padding: 0;
   border: 0;
-  border-radius: var(--app-radius-sm);
-  background: transparent;
-  color: var(--app-text-secondary);
-  opacity: 0;
-  cursor: pointer;
-}
-.comment-card.is-editable:hover .comment-edit-icon,
-.comment-card.is-editable:focus-within .comment-edit-icon,
-.comment-edit-icon:focus-visible {
-  opacity: 1;
-  color: var(--app-text);
-}
-.comment-sync-btn {
-  min-height: 24px;
-  padding: 2px 6px;
   border-radius: 2px;
-  font-size: var(--app-font-label);
+  background: transparent;
+  color: var(--vscode-foreground, var(--app-text));
+  cursor: pointer;
+  opacity: 0.9;
+}
+.comment-hover-action-btn:hover {
+  opacity: 1;
+  background-color: var(--vscode-toolbar-hoverBackground, var(--app-surface-hover));
+  color: var(--vscode-foreground, var(--app-text));
+}
+.comment-hover-action-btn:disabled {
+  opacity: 0.45;
+  cursor: progress;
 }
 .comment-body {
   display: block;

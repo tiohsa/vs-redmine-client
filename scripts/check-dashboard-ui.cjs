@@ -670,7 +670,7 @@ async function main() {
   await evaluate(`document.getElementById('tab-tickets').click()`);
   assert.deepEqual(await evaluate(`Array.from(document.querySelectorAll('#tabs [role="tab"]')).map(tab=>tab.dataset.tab)`), ['tickets','unsynced','settings']);
   assert.equal(await evaluate(`document.getElementById('tab-comments')`), null);
-  assert.ok(await evaluate(`document.getElementById('sync-tray') !== null`));
+  assert.equal(await evaluate(`document.getElementById('sync-tray')`), null);
   state.currentUserId = 7;
   state.quickFilterCapabilities = { mine: 'available', open: 'available' };
   state.metadataOptions.statuses = [{ id: 1, name: '進行中', isClosed: false }, { id: 2, name: '完了', isClosed: true }];
@@ -697,9 +697,8 @@ async function main() {
     { key: { kind: 'newTicket', queueId: 'failed-create' }, label: 'New ticket', lifecycle: 'queued', canRetrySync: true, canSync: true },
   ] };
   await push();
-  assert.equal(await evaluate(`document.querySelector('#sync-tray button').textContent`), strings.retrySync);
   assert.ok(await evaluate(`document.querySelector('[data-sync-key]').textContent.includes(${JSON.stringify(strings.retrySync)})`));
-  await evaluate(`document.querySelector('#sync-tray button').click()`);
+  await evaluate(`document.querySelector('[data-sync-key]').click()`);
   const retryMessage = await evaluate(`window.messages.filter(m=>m.type==='unsynced.syncOne').at(-1)`);
   assert.equal(retryMessage.key.queueId, 'failed-create');
   await evaluate(`window.dispatchEvent(new MessageEvent('message',{data:{type:'operation.success',requestId:${JSON.stringify(retryMessage.requestId)},message:'OK'}}))`);
@@ -711,8 +710,6 @@ async function main() {
     { key: { kind: 'newTicket', queueId: 'queued-unsafe' }, label: 'New ticket', lifecycle: 'queued', canDiscard: false, discardMode: 'none', canSync: true },
   ] };
   await push();
-  assert.ok(await evaluate(`document.getElementById('sync-tray').textContent.includes('3')`));
-  assert.equal(await evaluate(`document.querySelectorAll('#sync-tray button').length`), 1);
   await evaluate(`document.getElementById('tab-unsynced').click()`);
   assert.equal(await evaluate(`document.querySelectorAll('#unsynced-list .unsynced-actions button:disabled').length`), 3);
   assert.equal(await evaluate(`document.querySelectorAll('#unsynced-list [data-discard-key]').length`), 0);
@@ -812,7 +809,6 @@ async function main() {
   state.unsynced = { totalCount: 0, items: [] };
   await push();
   assert.equal(await evaluate(`document.activeElement.id`), 'unsynced-list', 'empty queue keeps focus even before result feedback arrives');
-  assert.ok(await evaluate(`document.getElementById('sync-tray').textContent.includes(${JSON.stringify(strings.syncTrayAllClear)})`));
   await evaluate(`document.getElementById('tab-tickets').click()`);
   assert.equal(await evaluate(`document.querySelectorAll('#search-clear-btn').length`), 1);
   assert.equal(await evaluate(`getComputedStyle(document.querySelector('.ticket-row[data-id="10"]')).paddingLeft`), '12px');
@@ -854,9 +850,12 @@ async function main() {
   assert.equal(await evaluate(`document.querySelector('#detail-browser-btn')`), null);
   assert.equal(await evaluate(`document.querySelector('.ticket-row[data-id="10"] [data-ticket-action="sync"]') !== null`), true);
   assert.equal(await evaluate(`document.querySelector('.ticket-row[data-id="10"] [data-ticket-action="browser"]') !== null`), true);
+  assert.equal(await evaluate(`document.querySelector('.comment-card[data-comment-id="20"] [data-comment-action="sync"]') !== null`), true);
+  assert.equal(await evaluate(`document.querySelector('.comment-card[data-comment-id="20"] [data-comment-action="browser"]') !== null`), true);
   assert.equal(await evaluate(`document.querySelector('#add-comment-btn') !== null`), true);
-  await assertSameAction(['[data-sync-key]', '[data-sync-comment-key]']);
   assert.equal(await evaluate(`document.querySelector('#sync-all-btn svg').outerHTML`), await evaluate(`document.querySelector('.ticket-row[data-id="10"] [data-ticket-action="sync"] svg').outerHTML`));
+  assert.equal(await evaluate(`document.querySelector('.comment-card[data-comment-id="20"] [data-comment-action="sync"] svg').outerHTML`), await evaluate(`document.querySelector('.ticket-row[data-id="10"] [data-ticket-action="sync"] svg').outerHTML`));
+  assert.equal(await evaluate(`document.querySelector('.comment-card[data-comment-id="20"] [data-comment-action="browser"] svg').outerHTML`), await evaluate(`document.querySelector('.ticket-row[data-id="10"] [data-ticket-action="browser"] svg').outerHTML`));
   state.comments.items = [];
   state.unsynced = { totalCount: 0, items: [] };
   await push();
@@ -934,13 +933,7 @@ async function main() {
   assert.equal(await evaluate(`document.querySelector('#ticket-detail-card .detail-header-fixed') !== null && document.querySelectorAll('#ticket-detail-card .detail-subject, #ticket-detail-card .detail-project-name, #ticket-detail-card .detail-head-row2').length === 0`), true);
   assert.equal(await evaluate(`document.getElementById('detail-comments').hidden`), false);
   assert.equal(await evaluate(`document.getElementById('detail-comment-count').textContent`), '0');
-  state.tickets[0].syncState = 'Conflict';
-  await push();
-  assert.ok(await evaluate(`document.getElementById('sync-tray').textContent.includes(${JSON.stringify(strings.syncTrayAttention)})`));
-  await evaluate(`document.querySelector('#sync-tray [data-sync-tray-action]').click()`);
-  assert.equal(await evaluate(`window.messages.at(-1).type`), 'ticket.reviewConflict');
   state.tickets[0].syncState = 'Queued';
-  await evaluate(`window.dispatchEvent(new MessageEvent('message',{data:{type:'operation.success',requestId:window.messages.at(-1).requestId,message:'完了'}}))`);
   await push();
   assert.equal(await evaluate(`document.querySelector('.ticket-row[data-id="10"]').getAttribute('aria-current')`), 'true');
   assert.equal(await evaluate(`document.querySelectorAll('#ticket-detail-card textarea, #comments-list img, #comments-list [contenteditable]').length`), 0);
@@ -983,6 +976,43 @@ async function main() {
     await evaluate(`document.querySelector(${JSON.stringify(selector)}).click()`);
     assert.deepEqual(await evaluate(`({type:window.messages.at(-1).type,ticketId:window.messages.at(-1).ticketId})`), { type, ticketId: 10 });
   }
+  state.comments.items = [
+    { id: 31, noteIndex: 1, authorName: 'Taro', body: '編集中のコメント', editableByCurrentUser: true, isEditing: true, hasUnsyncedEdit: false },
+    { id: 32, noteIndex: 2, authorName: 'Hanako', body: '未同期編集のコメント', editableByCurrentUser: true, isEditing: false, hasUnsyncedEdit: true },
+    { authorName: 'Local draft', body: 'ローカル下書きコメント', editableByCurrentUser: false, hasUnsyncedEdit: true, isLocalUnsynced: true, syncKey: { kind: 'comment', ticketId: 10, documentUri: 'file:///tmp/comment-draft.md' } },
+  ];
+  state.comments.selectedCommentId = 32;
+  state.comments.selectedCommentUri = undefined;
+  await push();
+  assert.equal(await evaluate(`document.querySelectorAll('#comments-list .comment-card .unsynced-inline-badge')[0]?.textContent`), strings.syncEditing);
+  assert.equal(await evaluate(`document.querySelectorAll('#comments-list .comment-card .unsynced-inline-badge')[1]?.textContent`), strings.unsyncedEditBadge);
+  assert.equal(await evaluate(`document.querySelector('.comment-card[data-comment-id="31"]').classList.contains('selected')`), false);
+  assert.equal(await evaluate(`document.querySelector('.comment-card[data-comment-id="31"]').getAttribute('aria-current')`), 'false');
+  assert.equal(await evaluate(`document.querySelector('.comment-card[data-comment-id="32"]').classList.contains('selected')`), true);
+  assert.equal(await evaluate(`document.querySelector('.comment-card[data-comment-id="32"]').getAttribute('aria-current')`), 'true');
+  assert.equal(await evaluate(`document.querySelector('.comment-card[data-comment-uri="file:///tmp/comment-draft.md"] [data-comment-action="sync"]') !== null`), true);
+  assert.equal(await evaluate(`document.querySelector('.comment-card[data-comment-uri="file:///tmp/comment-draft.md"] [data-comment-action="browser"]')`), null);
+  assert.equal(await evaluate(`getComputedStyle(document.querySelector('.comment-card[data-comment-id="32"] .comment-hover-actions')).display`), 'none');
+  await evaluate(`document.querySelector('.comment-card[data-comment-id="32"]').focus()`);
+  assert.equal(await evaluate(`getComputedStyle(document.querySelector('.comment-card[data-comment-id="32"] .comment-hover-actions')).display`), 'flex');
+  await evaluate(`document.querySelector('.comment-card[data-comment-id="32"]').blur()`);
+  assert.equal(await evaluate(`getComputedStyle(document.querySelector('.comment-card[data-comment-id="32"] .comment-hover-actions')).display`), 'none');
+  await evaluate(`window.messages.length=0;document.querySelector('.comment-card[data-comment-id="32"] [data-comment-action="sync"]').click()`);
+  assert.deepEqual(await evaluate(`window.messages.map(m=>({type:m.type,ticketId:m.ticketId,commentId:m.commentId}))`), [{ type: 'comment.syncSelected', ticketId: 10, commentId: 32 }]);
+  assert.equal(await evaluate(`document.querySelector('.comment-card[data-comment-id="32"] [data-comment-action="sync"]').disabled`), true);
+  await evaluate(`window.dispatchEvent(new MessageEvent('message',{data:{type:'operation.success',requestId:window.messages.at(-1).requestId,message:'同期しました'}}))`);
+  assert.equal(await evaluate(`document.querySelector('.comment-card[data-comment-id="32"] [data-comment-action="sync"]').disabled`), false);
+  await evaluate(`window.messages.length=0;document.querySelector('.comment-card[data-comment-id="32"] [data-comment-action="browser"]').click()`);
+  assert.deepEqual(await evaluate(`window.messages.map(m=>({type:m.type,ticketId:m.ticketId,commentId:m.commentId,noteIndex:m.noteIndex}))`), [{ type: 'comment.openBrowser', ticketId: 10, commentId: 32, noteIndex: 2 }]);
+  await evaluate(`window.messages.length=0;document.querySelector('.comment-card[data-comment-uri="file:///tmp/comment-draft.md"] [data-comment-action="sync"]').click()`);
+  assert.deepEqual(await evaluate(`window.messages.map(m=>({type:m.type,ticketId:m.ticketId,documentUri:m.documentUri}))`), [{ type: 'comment.syncSelected', ticketId: 10, documentUri: 'file:///tmp/comment-draft.md' }]);
+  await evaluate(`window.dispatchEvent(new MessageEvent('message',{data:{type:'operation.success',requestId:window.messages.at(-1).requestId,message:'同期しました'}}))`);
+  state.comments.selectedCommentId = undefined;
+  state.comments.selectedCommentUri = 'file:///tmp/comment-draft.md';
+  await push();
+  assert.equal(await evaluate(`document.querySelector('.comment-card[data-comment-uri="file:///tmp/comment-draft.md"]').classList.contains('selected')`), true);
+  assert.equal(await evaluate(`document.querySelector('.comment-card[data-comment-uri="file:///tmp/comment-draft.md"]').getAttribute('aria-current')`), 'true');
+  state.comments.selectedCommentUri = undefined;
   state.comments.items = [];
   await push();
   assert.equal(await evaluate(`document.querySelectorAll('[data-ticket-action-menu="detail-10"]').length`), 0);
@@ -1006,7 +1036,6 @@ async function main() {
   await push();
   assert.equal(await evaluate(`document.querySelector(${JSON.stringify(rowSyncSelector)}).disabled`), true);
   await evaluate(`window.dispatchEvent(new MessageEvent('message',{data:{type:'operation.started',requestId:'${syncRequest.requestId}',label:'同期中…'}}))`);
-  assert.equal(await evaluate(`document.getElementById('detail-sync-state').textContent`), strings.syncSyncing);
   state.selectedTicket.syncState = 'Synced';
   await push();
   await evaluate(`window.dispatchEvent(new MessageEvent('message',{data:{type:'operation.success',requestId:'${syncRequest.requestId}',message:'同期が完了しました'}}))`);
@@ -1036,7 +1065,6 @@ async function main() {
       state.tickets[0].syncState = syncState;
     }
     await push();
-    assert.equal(await evaluate(`document.getElementById('detail-sync-state').textContent`), label);
     assert.equal(await evaluate(`document.querySelector(${JSON.stringify(rowSyncSelector)}).disabled`), syncState === 'Syncing');
     if (syncState === 'Dirty' || syncState === 'Queued') {
       assert.equal(await evaluate(`document.querySelector('.ticket-row[data-id="${state.tickets[0].id}"] .unsynced-inline-badge')?.textContent`), label);
@@ -1412,7 +1440,7 @@ async function main() {
   assert.notEqual(await evaluate(`getComputedStyle(document.querySelector('.tickets-master')).display`), 'none');
   await evaluate(`window.dispatchEvent(new MessageEvent('message',{data:{type:'toast',level:'info',message:'位置確認'}}))`);
   await evaluate('new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)))');
-  assert.equal(await evaluate(`document.getElementById('toast-area').getBoundingClientRect().bottom < document.getElementById('sync-tray').getBoundingClientRect().top`), true);
+  assert.equal(await evaluate(`document.getElementById('toast-area').getBoundingClientRect().bottom <= window.innerHeight`), true);
   await evaluate(`document.getElementById('toast-area').replaceChildren()`);
   const preview = await call('Page.captureScreenshot', { format: 'png' });
   fs.writeFileSync(path.join(directory, 'dashboard-preview.png'), Buffer.from(preview.data, 'base64'));

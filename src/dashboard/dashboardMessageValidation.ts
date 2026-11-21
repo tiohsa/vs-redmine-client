@@ -440,6 +440,34 @@ export const validateDashboardMessage = (raw: unknown): ValidationResult => {
       return { ok: true, request: { type, requestId, ticketId, commentId, noteIndex: isPositiveInt(noteIndex) ? noteIndex : undefined } };
     }
 
+    case "comment.syncSelected": {
+      const ticketId = raw["ticketId"];
+      if (!isPositiveInt(ticketId)) {
+        return { ok: false, reason: "comment.syncSelected: ticketId must be a positive integer" };
+      }
+      const rawCommentId = raw["commentId"];
+      if (rawCommentId !== undefined && !isPositiveInt(rawCommentId)) {
+        return { ok: false, reason: "comment.syncSelected: commentId must be a positive integer" };
+      }
+      const rawDocumentUri = raw["documentUri"];
+      if (rawDocumentUri !== undefined && !isNonEmptyString(rawDocumentUri)) {
+        return { ok: false, reason: "comment.syncSelected: documentUri must be a non-empty string" };
+      }
+      if (rawCommentId === undefined && rawDocumentUri === undefined) {
+        return { ok: false, reason: "comment.syncSelected: commentId or documentUri is required" };
+      }
+      return {
+        ok: true,
+        request: {
+          type,
+          requestId,
+          ticketId,
+          ...(rawCommentId !== undefined ? { commentId: rawCommentId } : {}),
+          ...(rawDocumentUri !== undefined ? { documentUri: rawDocumentUri } : {}),
+        },
+      };
+    }
+
     case "comment.reload": {
       const ticketId = raw["ticketId"];
       if (!isPositiveInt(ticketId)) {

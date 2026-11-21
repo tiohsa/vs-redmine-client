@@ -132,7 +132,7 @@ liveTest("LIVE-I05", "他人のコメントを更新できないユーザーで�
         await dashboard.waitFor(() => dashboard.store.getState().selectedTicket?.id === id, "selected public ticket");
         await dashboard.waitFor(() => dashboard.store.getState().comments.items.some((item) => item.id === comment.id), "other user's comment");
         assert.ok((await dashboard.read("#comments-list .comment-body")).includes(comment.body));
-        assert.deepStrictEqual(await dashboard.read(`[data-edit-comment="${comment.id}"], [data-editable-comment="${comment.id}"]`), []);
+        assert.deepStrictEqual(await dashboard.read(`[data-editable-comment="${comment.id}"]`), []);
       } finally {
         dashboard.dispose();
       }

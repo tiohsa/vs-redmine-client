@@ -45,7 +45,11 @@ export class DashboardTicketService {
     getTotalCount: () => number;
     setTotalCount: (count: number) => void;
     getSettings: () => TicketListSettings;
-    loadComments: (ticketId: number, throwOnError?: boolean) => Promise<void>;
+    loadComments: (
+      ticketId: number,
+      throwOnError?: boolean,
+      selection?: { commentId?: number; documentUri?: string },
+    ) => Promise<void>;
     refreshUnsynced: () => void;
     onSearchAccepted?: () => void;
     listIssues?: typeof fetchIssues;
@@ -331,7 +335,11 @@ export class DashboardTicketService {
     this.deps.setTotalCount(tickets.length);
   }
 
-  async selectTicket(ticketId: number, throwOnCommentError = false): Promise<void> {
+  async selectTicket(
+    ticketId: number,
+    throwOnCommentError = false,
+    commentSelection?: { commentId?: number; documentUri?: string },
+  ): Promise<void> {
     const { store } = this.deps.context;
     const tickets = this.deps.getTickets();
     const ticket = tickets.find((t) => t.id === ticketId);
@@ -343,7 +351,7 @@ export class DashboardTicketService {
       selectedTicket: buildTicketDetail(ticket, tickets),
       workPanel: { mode: "detail", ticketId },
     });
-    await this.deps.loadComments(ticketId, throwOnCommentError);
+    await this.deps.loadComments(ticketId, throwOnCommentError, commentSelection);
   }
 
   async openEditor(ticketId: number, preserveFocus?: boolean): Promise<void> {
@@ -408,6 +416,8 @@ export class DashboardTicketService {
             comments: {
               ...state.comments,
               ticketId: undefined,
+              selectedCommentId: undefined,
+              selectedCommentUri: undefined,
               items: [],
               loading: false,
               error: undefined,

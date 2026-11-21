@@ -12,6 +12,7 @@ import {
   queueTicketDraft,
 } from "../views/ticketSaveSync";
 import {
+  getCommentIdForEditor,
   getConnectionScopeForDocument,
   getProjectIdForUri,
   getTicketIdForDocument,
@@ -179,7 +180,10 @@ export const performSyncOnSave = async (
     return false;
   };
 
-  const syncIfAuto = async (key: SyncEngineKey): Promise<void> => {
+  const syncIfAuto = async (
+    key: SyncEngineKey,
+    options?: { isNewComment?: boolean },
+  ): Promise<void> => {
     if (syncMode === "auto" && deps.syncEngine) {
       if (key.kind === "ticket") {
         markDraftStatus(key.ticketId, "Syncing", operationScope);
@@ -193,6 +197,17 @@ export const performSyncOnSave = async (
           typeof outcome.ticketId === "number" &&
           outcome.ticketId > 0
             ? outcome.ticketId
+            : undefined;
+        const isNewComment =
+          key.kind === "comment" &&
+          (options?.isNewComment ?? (key.commentId === undefined));
+        const createdCommentId =
+          isNewComment &&
+          outcome.kind === "completed" &&
+          "commentId" in outcome &&
+          typeof outcome.commentId === "number" &&
+          outcome.commentId > 0
+            ? outcome.commentId
             : undefined;
         if (key.kind === "newTicket" && outcome.kind === "completed") {
           if (key.documentUri && createdTicketId !== undefined) {
@@ -240,6 +255,20 @@ export const performSyncOnSave = async (
             } else {
               ticketsPresentation.refresh();
             }
+          } catch {
+          }
+        }
+        if (
+          key.kind === "comment" &&
+          createdCommentId !== undefined &&
+          commentsPresentation.revealCreatedComment
+        ) {
+          try {
+            await commentsPresentation.revealCreatedComment(
+              key.ticketId,
+              createdCommentId,
+              operationScope,
+            );
           } catch {
           }
         }
@@ -300,6 +329,7 @@ export const performSyncOnSave = async (
       return;
     }
 
+    const existingCommentId = getCommentIdForEditor(editor);
     let commentResult = await handleCommentEditorSave(editor, undefined, operationScope);
     if (commentResult) {
       if (commentResult.status === "conflict" && commentResult.conflictContext) {
@@ -317,11 +347,14 @@ export const performSyncOnSave = async (
       if (ticketId) {
         if (commentResult.status === "queued") {
           refreshQueuedComment(ticketId);
-          await syncIfAuto({
-            kind: "comment",
-            ticketId,
-            documentUri: editor.document.uri.toString(),
-          });
+          await syncIfAuto(
+            {
+              kind: "comment",
+              ticketId,
+              documentUri: editor.document.uri.toString(),
+            },
+            { isNewComment: existingCommentId === undefined },
+          );
         } else if (shouldRefreshComments(commentResult.status)) {
           commentsPresentation.refreshForTicket(ticketId);
           unsyncedPresentation.refresh();

@@ -6,7 +6,7 @@ import { runOfflineSync } from "../../commands/offlineSync";
 import { syncUnsyncedFile, type SyncUnsyncedFileResult } from "../../commands/syncUnsyncedFile";
 import { getCurrentConnectionScope } from "../../config/connectionScope";
 import type { getIssueDetail } from "../../redmine/issues";
-import { getOfflineSyncQueue, isAbandoned } from "../../views/offlineSyncStore";
+import { getOfflineSyncQueue, isAbandoned, sameDocumentIdentity } from "../../views/offlineSyncStore";
 import { getTicketEditors } from "../../views/ticketEditorRegistry";
 import type { DashboardUnsyncedKey } from "../dashboardProtocol";
 import { buildUnsyncedDashboardItems } from "../viewModels/unsyncedDashboardViewModel";
@@ -26,6 +26,11 @@ export class DashboardUnsyncedService {
     loadComments: (ticketId: number) => Promise<void>;
     openTicketEditor?: (ticketId: number) => Promise<void>;
     revealCreatedTickets?: (ticketIds: readonly number[]) => Promise<void>;
+    revealCreatedComment?: (
+      ticketId: number,
+      commentId: number,
+      options?: { connectionScope?: string },
+    ) => Promise<void>;
     getIssueDetail?: typeof getIssueDetail;
     syncEngine?: SyncEngine;
   }) {
@@ -84,7 +89,71 @@ export class DashboardUnsyncedService {
       typeof result.id === "number" &&
       result.id > 0 &&
       Boolean(this.deps.revealCreatedTickets);
-    this.notifications.notifySyncOneResult(requestId, result, { skipRefresh: createdTicketRevealed });
+    const createdCommentRevealed =
+      key.kind === "comment" &&
+      key.commentId === undefined &&
+      result?.status === "success" &&
+      typeof result.id === "number" &&
+      result.id > 0 &&
+      Boolean(this.deps.revealCreatedComment);
+    this.notifications.notifySyncOneResult(requestId, result, {
+      skipRefresh: createdTicketRevealed || createdCommentRevealed,
+    });
+  }
+
+  async handleSyncSelectedComment(
+    requestId: string,
+    target: { ticketId: number; commentId?: number; documentUri?: string },
+  ): Promise<void> {
+    const scope = getCurrentConnectionScope();
+    const queue = getOfflineSyncQueue(scope);
+    const queuedEntry = queue.comments.find((entry) => {
+      if (entry.ticketId !== target.ticketId || isAbandoned(entry)) {
+        return false;
+      }
+      if (target.commentId !== undefined) {
+        return entry.commentId === target.commentId;
+      }
+      return Boolean(
+        target.documentUri &&
+          entry.commentId === undefined &&
+          sameDocumentIdentity(entry.documentUri, target.documentUri),
+      );
+    });
+    if (queuedEntry) {
+      await this.handleSyncOne(requestId, {
+        kind: "comment",
+        ticketId: target.ticketId,
+        operationId: queuedEntry.operationId,
+        commentId: queuedEntry.commentId,
+        documentUri: queuedEntry.documentUri,
+      });
+      return;
+    }
+
+    const openCommentRecord = getTicketEditors(target.ticketId, scope)
+      .filter((record) => {
+        if (target.commentId !== undefined) {
+          return record.contentType === "comment" && record.commentId === target.commentId;
+        }
+        return Boolean(
+          target.documentUri &&
+            record.contentType === "commentDraft" &&
+            sameDocumentIdentity(record.uri, target.documentUri),
+        );
+      })
+      .sort((a, b) => b.lastActiveAt - a.lastActiveAt)[0];
+    if (!openCommentRecord) {
+      this.deps.context.notifySuccess(requestId, vscode.l10n.t("No unsynced changes to sync."));
+      return;
+    }
+
+    this.deps.context.notifyOperationStarted(requestId, vscode.l10n.t("Syncing…"));
+    const status = await vscode.commands.executeCommand<SyncStatus | undefined>(
+      "redmine-client.syncOpenEditor",
+      { uri: openCommentRecord.uri },
+    );
+    this.notifications.notifySyncStatusResult(requestId, status);
   }
 
   async handleSyncSelectedTicket(requestId: string, ticketId: number): Promise<void> {
@@ -162,6 +231,17 @@ export class DashboardUnsyncedService {
         await this.deps.revealCreatedTickets(createdTicketIds);
       } catch {
         this.deps.refreshTicketPresentation();
+      }
+    } else if (
+      result.createdComments &&
+      result.createdComments.length > 0 &&
+      this.deps.revealCreatedComment
+    ) {
+      this.deps.refreshTicketPresentation();
+      const lastComment = result.createdComments[result.createdComments.length - 1];
+      try {
+        await this.deps.revealCreatedComment(lastComment.ticketId, lastComment.commentId);
+      } catch {
       }
     } else {
       this.deps.context.onTicketsRefreshed();
@@ -262,6 +342,19 @@ export class DashboardUnsyncedService {
       (result.status !== "success" && result.status !== "no_change")
     ) {
       return;
+    }
+    if (
+      key.commentId === undefined &&
+      result.status === "success" &&
+      typeof result.id === "number" &&
+      result.id > 0 &&
+      this.deps.revealCreatedComment
+    ) {
+      try {
+        await this.deps.revealCreatedComment(key.ticketId, result.id);
+        return;
+      } catch {
+      }
     }
     await this.deps.loadComments(key.ticketId);
   }

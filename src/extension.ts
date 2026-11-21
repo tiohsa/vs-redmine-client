@@ -25,6 +25,7 @@ import {
   buildUpdateTicketStatus,
   refreshTicketEditorContexts,
   registerEditorEvents,
+  resolveActiveCommentForEditor,
   resolveActiveTicketForEditor,
 } from "./app/editorEventController";
 import { registerCommands } from "./app/commandRegistry";
@@ -105,6 +106,9 @@ export async function activate(context: vscode.ExtensionContext) {
     onActiveTicketChanged: (ticketId, connectionScope) => {
       void views.dashboardProvider.selectTicketForEditor(ticketId, connectionScope);
     },
+    onActiveCommentChanged: (target, connectionScope) => {
+      void views.dashboardProvider.selectCommentForEditor(target, connectionScope);
+    },
   });
 
   // ── コマンド登録 ─────────────────────────────────────────────────────────
@@ -158,12 +162,24 @@ export async function activate(context: vscode.ExtensionContext) {
         event.affectsConfiguration("redmine-client.ticketList.followActiveEditor") &&
         getTicketListFollowActiveEditor()
       ) {
-        const activeTicket = resolveActiveTicketForEditor(vscode.window.activeTextEditor);
-        if (activeTicket) {
-          void views.dashboardProvider.selectTicketForEditor(
-            activeTicket.ticketId,
-            activeTicket.connectionScope,
+        const activeComment = resolveActiveCommentForEditor(vscode.window.activeTextEditor);
+        if (activeComment) {
+          void views.dashboardProvider.selectCommentForEditor(
+            {
+              ticketId: activeComment.ticketId,
+              commentId: activeComment.commentId,
+              documentUri: activeComment.documentUri,
+            },
+            activeComment.connectionScope,
           );
+        } else {
+          const activeTicket = resolveActiveTicketForEditor(vscode.window.activeTextEditor);
+          if (activeTicket) {
+            void views.dashboardProvider.selectTicketForEditor(
+              activeTicket.ticketId,
+              activeTicket.connectionScope,
+            );
+          }
         }
       }
       if (

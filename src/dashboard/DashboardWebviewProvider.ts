@@ -113,6 +113,10 @@ export class DashboardWebviewProvider
     return this.controller.revealCreatedTickets(ticketIds, { connectionScope });
   }
 
+  revealCreatedComment(ticketId: number, commentId: number, connectionScope?: string): Promise<void> {
+    return this.controller.revealCreatedComment(ticketId, commentId, { connectionScope });
+  }
+
   toggleCompactMode(): void {
     this.send({ type: "view.toggleCompactMode" });
   }
@@ -151,6 +155,13 @@ export class DashboardWebviewProvider
 
   selectTicketForEditor(ticketId: number, connectionScope?: string): Promise<void> {
     return this.controller.selectTicketForEditor(ticketId, connectionScope);
+  }
+
+  selectCommentForEditor(
+    target: { ticketId: number; commentId?: number; documentUri?: string },
+    connectionScope?: string,
+  ): Promise<void> {
+    return this.controller.selectCommentForEditor(target, connectionScope);
   }
 
   getStateSnapshot(): DashboardState {

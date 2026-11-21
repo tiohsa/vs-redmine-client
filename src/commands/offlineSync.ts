@@ -38,6 +38,7 @@ export type OfflineSyncRunResult = {
   remainingChanges?: number;
   newTicketDiagnostics?: readonly string[];
   createdTicketIds?: readonly number[];
+  createdComments?: ReadonlyArray<{ ticketId: number; commentId: number }>;
 } & (
   | { status: "nothing_to_sync"; total: 0; synced: 0; failed: 0; conflicts: 0 }
   | { status: "success"; total: number; synced: number; failed: 0; conflicts: 0 }
@@ -94,6 +95,7 @@ const runOfflineSyncAtScope = async (
 
   const newTicketSnapshot = queue.newTickets.map((item) => ({ ...item }));
   const createdTicketIds: number[] = [];
+  const createdComments: Array<{ ticketId: number; commentId: number }> = [];
   const newTicketErrors = new Set<string>();
   let synced = 0;
   let conflicts = 0;
@@ -155,6 +157,17 @@ const runOfflineSyncAtScope = async (
               refreshTicketEditorContexts();
             }
           }
+        }
+
+        if (
+          key.kind === "comment" &&
+          key.commentId === undefined &&
+          outcome.kind === "completed" &&
+          "commentId" in outcome &&
+          typeof outcome.commentId === "number" &&
+          outcome.commentId > 0
+        ) {
+          createdComments.push({ ticketId: key.ticketId, commentId: outcome.commentId });
         }
 
         if (outcome.kind !== "completed" && outcome.kind !== "no_change") {
@@ -221,6 +234,7 @@ const runOfflineSyncAtScope = async (
       conflicts,
       ...(diagnostics.length > 0 ? { newTicketDiagnostics: diagnostics } : {}),
       ...(createdTicketIds.length > 0 ? { createdTicketIds } : {}),
+      ...(createdComments.length > 0 ? { createdComments } : {}),
     };
     const parts: string[] = [];
     if (synced > 0) { parts.push(vscode.l10n.t("Synced: {0}", synced)); }
@@ -258,5 +272,6 @@ const runOfflineSyncAtScope = async (
     conflicts: 0,
     ...(remainingChanges > 0 ? { remainingChanges } : {}),
     ...(createdTicketIds.length > 0 ? { createdTicketIds } : {}),
+    ...(createdComments.length > 0 ? { createdComments } : {}),
   };
 };

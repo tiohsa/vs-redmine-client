@@ -137,8 +137,7 @@
       "selectors": [
         "#tab-unsynced",
         "#unsynced-list",
-        "#sync-all-btn",
-        "#sync-tray"
+        "#sync-all-btn"
       ],
       "invariants": [
         "リモート書き込み後に再取得・照合してからローカル状態を確定する。",

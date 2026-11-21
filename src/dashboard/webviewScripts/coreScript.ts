@@ -27,6 +27,7 @@ let renderedSettingsBaseUrl = null;
 let settingsRenderGeneration = 0;
 let selectedDraftId = null;
 let pendingScrollSelectedTicketId = null;
+let pendingScrollSelectedCommentKey = null;
 const ticketSyncRequests = new Map();
 const expandedTicketIds = new Set();
 const collapsedTicketIds = new Set();
@@ -48,12 +49,13 @@ function req(type, extra){
   const queueAction = ['unsynced.syncOne','unsynced.syncAll','unsynced.discardOne','unsynced.abandonOne','unsynced.forgetAbandoned','unsynced.forgetAllAbandoned','unsynced.startNewTicketEdit'].includes(type);
   const ticketAction = type === 'ticket.syncSelected' || type === 'ticket.reviewConflict';
   const draftSyncAction = type === 'ticket.syncDraft';
-  if((queueAction || ticketAction || draftSyncAction) && activeSyncRequests.size) return;
+  const commentSyncAction = type === 'comment.syncSelected';
+  if((queueAction || ticketAction || draftSyncAction || commentSyncAction) && activeSyncRequests.size) return;
   if(ticketAction && state?.selectedTicket?.syncState === 'Syncing') return;
   const requestId='req-'+(++requestCounter);
   if(queueAction) unsyncedFeedbackRequests.add(requestId);
   if(ticketAction) ticketSyncRequests.set(requestId,extra.ticketId);
-  if(queueAction || ticketAction || draftSyncAction){ activeSyncRequests.add(requestId); updateSyncButtonStates(); }
+  if(queueAction || ticketAction || draftSyncAction || commentSyncAction){ activeSyncRequests.add(requestId); updateSyncButtonStates(); }
   send(Object.assign({type:type,requestId:requestId}, extra || {}));
   return requestId;
 }
@@ -71,12 +73,15 @@ function captureFocus(root){
   }
   let selector=element.id ? '#'+CSS.escape(element.id) : null;
   if(!selector){
-    const attributes=['data-ticket-action-menu','data-ticket-action','data-draft-action','data-draft-queue-id','data-expand','data-expand-comment','data-metadata-field','data-id'];
+    const attributes=['data-ticket-action-menu','data-ticket-action','data-comment-action','data-draft-action','data-draft-queue-id','data-expand','data-expand-comment','data-metadata-field','data-id','data-comment-id','data-comment-uri'];
     const attribute=attributes.find(function(name){ return element.hasAttribute(name); });
     if(attribute) selector='['+attribute+'="'+CSS.escape(element.getAttribute(attribute))+'"]';
     const row=element.closest('.ticket-row');
     if(row && row.dataset.draftQueueId && attribute !== 'data-draft-queue-id') selector='.ticket-row[data-draft-queue-id="'+CSS.escape(row.dataset.draftQueueId)+'"] '+selector;
     else if(row && row.dataset.id && attribute !== 'data-id') selector='.ticket-row[data-id="'+row.dataset.id+'"] '+selector;
+    const commentCard=element.closest('.comment-card');
+    if(commentCard && commentCard.dataset.commentId && attribute !== 'data-comment-id') selector='.comment-card[data-comment-id="'+CSS.escape(commentCard.dataset.commentId)+'"] '+selector;
+    else if(commentCard && commentCard.dataset.commentUri && attribute !== 'data-comment-uri') selector='.comment-card[data-comment-uri="'+CSS.escape(commentCard.dataset.commentUri)+'"] '+selector;
   }
   return selector ? {selector:selector,start:element.selectionStart,end:element.selectionEnd} : null;
 }

@@ -50,7 +50,7 @@ export const filterStyles = {
 #filter-dialog-fields .filter-check { flex-direction:row; align-items:center; }
 #filter-dialog-fields .filter-check input { width:auto; }
 .filter-dialog-actions { justify-content:flex-end; }
-body.vscode-high-contrast .quick-filter,body.vscode-high-contrast-light .quick-filter,body.vscode-high-contrast .toggle-children-btn,body.vscode-high-contrast-light .toggle-children-btn,body.vscode-high-contrast .sync-tray,body.vscode-high-contrast-light .sync-tray,body.vscode-high-contrast .filter-dialog-card,body.vscode-high-contrast-light .filter-dialog-card,body.vscode-high-contrast .settings-category,body.vscode-high-contrast-light .settings-category { border-color:var(--vscode-contrastBorder,var(--app-border-strong)); box-shadow:none; }
+body.vscode-high-contrast .quick-filter,body.vscode-high-contrast-light .quick-filter,body.vscode-high-contrast .toggle-children-btn,body.vscode-high-contrast-light .toggle-children-btn,body.vscode-high-contrast .filter-dialog-card,body.vscode-high-contrast-light .filter-dialog-card,body.vscode-high-contrast .settings-category,body.vscode-high-contrast-light .settings-category { border-color:var(--vscode-contrastBorder,var(--app-border-strong)); box-shadow:none; }
 `,
   compactFilters: String.raw`#filter-bar { padding:5px 8px 4px; }
 #search-row { gap:5px; }

@@ -46,6 +46,8 @@ export const registerViews = (
       dashboardProvider.refreshTickets();
     },
     refreshForTicket: (ticketId) => dashboardProvider.refreshCommentsForTicket(ticketId),
+    revealCreatedComment: (ticketId, commentId, connectionScope) =>
+      dashboardProvider.revealCreatedComment(ticketId, commentId, connectionScope),
   };
   const unsyncedPresentation: UnsyncedPresentationPort = {
     refresh: () => dashboardProvider.refreshUnsynced(),
