@@ -363,6 +363,11 @@
           "type": "boolean",
           "default": true,
           "description": "%config.ticketList.showAssignee.description%"
+        },
+        "redmine-client.ticketList.followActiveEditor": {
+          "type": "boolean",
+          "default": false,
+          "description": "%config.ticketList.followActiveEditor.description%"
         }
       }
     }

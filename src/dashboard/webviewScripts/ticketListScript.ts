@@ -11,6 +11,17 @@ function flattenVisible(nodes, result){
 function syncExpandedState(nodes){
   for(const node of nodes || []){ if(node.children && node.children.length && !collapsedTicketIds.has(node.id)) expandedTicketIds.add(node.id); syncExpandedState(node.children); }
 }
+function expandAncestorsOfTicket(nodes, targetId, ancestors){
+  const path = ancestors || [];
+  for(const node of nodes || []){
+    if(node.id === targetId){
+      path.forEach(function(ancestorId){ expandedTicketIds.add(ancestorId); collapsedTicketIds.delete(ancestorId); });
+      return true;
+    }
+    if(node.children && node.children.length && expandAncestorsOfTicket(node.children, targetId, path.concat([node.id]))) return true;
+  }
+  return false;
+}
 `,
   rendering: String.raw`// ── Ticket list ───────────────────────────────────────────────────────────
 function closeTicketActionMenus(){

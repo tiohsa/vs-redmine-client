@@ -20,13 +20,31 @@ import type {
   DashboardDraftTicketNode,
   DashboardProjectNode,
   DashboardRequest,
+  DashboardTicketNode,
 } from "./dashboardProtocol";
 import type { TicketSaveResult } from "../views/ticketSaveTypes";
 import type { DashboardServiceContext } from "./services/DashboardServiceContext";
 import type { SyncEngine } from "../app/syncEngine";
 import { getCurrentConnectionScope } from "../config/connectionScope";
+import { getTicketListFollowActiveEditor } from "../config/settings";
 import { DashboardDataService, type DashboardDataCache, type DashboardMetadataTestHooks } from "./services/DashboardDataService";
 import { DashboardDraftService } from "./services/DashboardDraftService";
+
+const collectTicketNodeIds = (nodes: DashboardTicketNode[]): Set<number> => {
+  const ids = new Set<number>();
+  const stack = [...nodes];
+  while (stack.length > 0) {
+    const node = stack.pop();
+    if (!node) {
+      continue;
+    }
+    ids.add(node.id);
+    if (node.children.length > 0) {
+      stack.push(...node.children);
+    }
+  }
+  return ids;
+};
 
 const isKnownUnsyncedDocumentUri = (documentUri: string): boolean => {
   const queue = getOfflineSyncQueue(getCurrentConnectionScope());
@@ -464,6 +482,32 @@ export class DashboardController {
     await this.draftService.createQuickNewTicketDraft("command-create-ticket");
   }
 
+  public async selectTicketForEditor(
+    ticketId: number,
+    editorConnectionScope?: string,
+  ): Promise<void> {
+    if (!getTicketListFollowActiveEditor()) {
+      return;
+    }
+    if (!Number.isInteger(ticketId) || ticketId <= 0) {
+      return;
+    }
+    if (
+      editorConnectionScope !== undefined &&
+      editorConnectionScope !== getCurrentConnectionScope()
+    ) {
+      return;
+    }
+    const state = this.opts.store.getState();
+    if (state.selectedTicketId === ticketId) {
+      return;
+    }
+    if (!collectTicketNodeIds(state.tickets).has(ticketId)) {
+      return;
+    }
+    await this.selectTicket(ticketId);
+  }
+
   private cancelDetail(): void {
     const state = this.opts.store.getState();
     this.opts.store.update({
@@ -504,18 +548,7 @@ export class DashboardController {
     if (state.selectedTicketId === undefined) {
       return;
     }
-    const visibleIds = new Set<number>();
-    const stack = [...state.tickets];
-    while (stack.length > 0) {
-      const node = stack.pop();
-      if (!node) {
-        continue;
-      }
-      visibleIds.add(node.id);
-      if (node.children.length > 0) {
-        stack.push(...node.children);
-      }
-    }
+    const visibleIds = collectTicketNodeIds(state.tickets);
     if (!visibleIds.has(state.selectedTicketId)) {
       this.opts.store.update({
         selectedTicketId: undefined,

@@ -167,6 +167,7 @@ export interface DashboardTicketSettingsViewModel {
   showTracker: boolean;
   showPriority: boolean;
   showAssignee: boolean;
+  followActiveEditor: boolean;
   editorStorageDirectory: string;
   editorDefaults: {
     subject: string;
@@ -311,6 +312,7 @@ export interface DashboardGeneralSettingsPatch {
   showTracker?: boolean;
   showPriority?: boolean;
   showAssignee?: boolean;
+  followActiveEditor?: boolean;
 }
 
 export type DashboardRequest =

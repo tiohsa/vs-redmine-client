@@ -50,6 +50,7 @@ const DEFAULT_STATE: DashboardState = {
     showTracker: true,
     showPriority: true,
     showAssignee: true,
+    followActiveEditor: false,
     editorStorageDirectory: "",
     editorDefaults: {
       subject: "",

@@ -21,6 +21,7 @@ Activity Bar の Webview に Tickets、Unsynced、Settings があります。Tic
 - 期日（`dueDate`）と開始日（`startDate`）は、選択した項目の有効な暦日（`YYYY-MM-DD`）を比較します。同日は昇順・降順に応じて ID で並べ、未設定・空・不正な日付は両方向とも末尾で ID 昇順に並べます。
 - 並び替えは取得済みの絞り込み結果に適用します。通常一覧では同じ階層の兄弟同士を並べ、親子関係を維持します。検索では直接一致の優先を維持します。項目や方向の変更による Redmine への追加リクエストはありません。
 - Webview からの入力は [プロトコル](../../src/dashboard/dashboardProtocol.ts) と [検証](../../src/dashboard/dashboardMessageValidation.ts) を通してから処理します。許可外の並び替え項目や方向を持つ `settings.update` は設定を変更しません。
+- `redmine-client.ticketList.followActiveEditor`（既定値 `false`）を有効にすると、チケット編集・コメント作成/編集 Markdown エディタへフォーカスを移した際、同一 `connectionScope` かつ現在の Dashboard 一覧に含まれている該当チケットを自動的に選択して詳細ドロワーを更新し、折りたたまれた親チケットの展開と選択行へのスクロールを行います（エディタのフォーカスは奪いません）。新規チケット下書き・無関係なファイル・異なる `connectionScope`・一覧に未表示のチケットの場合は選択を変更せずスキップし、追加の Redmine API リクエストやプロジェクト切り替えは行いません。設定タブのチェックボックスと VS Code 設定は双方向に同期します。
 - **Reset Dashboard Cache** は Redmine から再構築可能なデータとメタデータを取り直します。下書き・同期状態・認証情報・設定は保持します。**Reset View State** はレイアウトとクイックフィルターを初期化し、永続のチケット一覧設定を保持します。
 - 接続先を変更した場合は切り替え前の取得結果を破棄します。キャッシュ再取得と属性候補の読み込みは [Dashboard のデータ取得](../../src/dashboard/services/DashboardDataService.ts) が扱います。検証は [再取得中の接続切り替え](../../src/test/dashboardCacheInterruption.test.ts) を参照してください。
 

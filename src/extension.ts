@@ -1,7 +1,11 @@
 import * as vscode from "vscode";
 import { refreshOfflineSyncContext } from "./commands/offlineSyncMode";
 import { initializeApiKeyStore } from "./config/apiKeyStore";
-import { getBaseUrl, getIgnoreSSLErrors } from "./config/settings";
+import {
+  getBaseUrl,
+  getIgnoreSSLErrors,
+  getTicketListFollowActiveEditor,
+} from "./config/settings";
 import { showWarning } from "./utils/notifications";
 import { initializeDraftStore } from "./views/ticketDraftStore";
 import { createGlobalStateDraftStorage } from "./views/draftPersistence";
@@ -21,6 +25,7 @@ import {
   buildUpdateTicketStatus,
   refreshTicketEditorContexts,
   registerEditorEvents,
+  resolveActiveTicketForEditor,
 } from "./app/editorEventController";
 import { registerCommands } from "./app/commandRegistry";
 import { getConnectionScope } from "./config/connectionScope";
@@ -97,6 +102,9 @@ export async function activate(context: vscode.ExtensionContext) {
     updateTicketStatus,
     notifyTicketChanged: () => views.ticketsPresentation.notifyChange(),
     sync,
+    onActiveTicketChanged: (ticketId, connectionScope) => {
+      void views.dashboardProvider.selectTicketForEditor(ticketId, connectionScope);
+    },
   });
 
   // ── コマンド登録 ─────────────────────────────────────────────────────────
@@ -141,9 +149,22 @@ export async function activate(context: vscode.ExtensionContext) {
         event.affectsConfiguration("redmine-client.ticketList.showDueDate") ||
         event.affectsConfiguration("redmine-client.ticketList.showTracker") ||
         event.affectsConfiguration("redmine-client.ticketList.showPriority") ||
-        event.affectsConfiguration("redmine-client.ticketList.showAssignee");
+        event.affectsConfiguration("redmine-client.ticketList.showAssignee") ||
+        event.affectsConfiguration("redmine-client.ticketList.followActiveEditor");
       if (affectsDashboardSettings) {
         views.dashboardProvider.refreshSettings();
+      }
+      if (
+        event.affectsConfiguration("redmine-client.ticketList.followActiveEditor") &&
+        getTicketListFollowActiveEditor()
+      ) {
+        const activeTicket = resolveActiveTicketForEditor(vscode.window.activeTextEditor);
+        if (activeTicket) {
+          void views.dashboardProvider.selectTicketForEditor(
+            activeTicket.ticketId,
+            activeTicket.connectionScope,
+          );
+        }
       }
       if (
         event.affectsConfiguration("redmine-client.defaultProjectId") ||

@@ -33,7 +33,12 @@ window.addEventListener('message',function(event){ const message=event.data || {
     const panel=state.workPanel;
     const openingComposer=panel && panel.mode !== 'detail' && (!previousComposer || previousComposer.mode !== panel.mode || previousComposer.projectId !== panel.projectId);
     if(openingComposer) activateTab('tickets');
+    if(ticketChanged && state.selectedTicketId !== undefined) expandAncestorsOfTicket(state.tickets, state.selectedTicketId, []);
     render();
+    if(ticketChanged && state.selectedTicketId !== undefined){
+      const selectedRow=document.querySelector('#ticket-list .ticket-row[data-id="'+CSS.escape(String(state.selectedTicketId))+'"]');
+      if(selectedRow && typeof selectedRow.scrollIntoView === 'function') selectedRow.scrollIntoView({ block: 'nearest' });
+    }
     if(panel && panel.mode !== 'detail' && !panel.loading && (openingComposer || previousComposer?.loading)) document.getElementById('work-tracker')?.focus();
     if(previousComposer?.mode === 'newTicket' && (!panel || panel.mode === 'detail')) document.getElementById('project-select-trigger')?.focus();
   } else if(message.type === 'view.toggleCompactMode'){ compactMode = !compactMode; persistViewState(); applyCompactMode(); } else if(message.type === 'operation.started'){ startOperation(message.requestId,message.label); } else if(message.type === 'operation.success'){ endOperation(message.requestId); if(!finishOperation(message.level || 'success',message.requestId,message.message)) showToast(message.level || 'success',message.message); } else if(message.type === 'operation.error'){ endOperation(message.requestId); if(!finishOperation('error',message.requestId,message.message)) showToast('error',message.message); } else if(message.type === 'toast'){ showToast(message.level,message.message); } });

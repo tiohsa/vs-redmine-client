@@ -13,6 +13,7 @@ import {
   getTicketListShowAssignee,
   getTicketListShowStatus,
   getTicketListShowTracker,
+  getTicketListFollowActiveEditor,
 } from "../../config/settings";
 import { isApiKeyConfigured } from "../../config/apiKeyStore";
 import { getTicketEditorDefaults } from "../../views/ticketEditorDefaultsStore";
@@ -36,6 +37,7 @@ export const buildSettingsDashboardViewModel = (
   showTracker: getTicketListShowTracker(),
   showPriority: getTicketListShowPriority(),
   showAssignee: getTicketListShowAssignee(),
+  followActiveEditor: getTicketListFollowActiveEditor(),
   editorStorageDirectory: getEditorStorageDirectory(),
   editorDefaults: (() => {
     const defaults = getTicketEditorDefaults();

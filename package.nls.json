@@ -62,6 +62,7 @@
   "config.ticketList.showTracker.description": "Show the tracker badge on each ticket row in the dashboard.",
   "config.ticketList.showPriority.description": "Show the priority badge on each ticket row in the dashboard.",
   "config.ticketList.showAssignee.description": "Show assignee names in the ticket list.",
+  "config.ticketList.followActiveEditor.description": "Automatically select the corresponding ticket in the dashboard list when switching to a ticket or comment editor.",
   "command.referenceExample": "Redmine: Run Reference Example",
   "command.editFieldViaQuickPick.title": "Redmine: Edit Ticket Field"
 }

@@ -145,6 +145,10 @@ export class DashboardWebviewProvider
     return this.controller.resetForConnectionChange();
   }
 
+  selectTicketForEditor(ticketId: number, connectionScope?: string): Promise<void> {
+    return this.controller.selectTicketForEditor(ticketId, connectionScope);
+  }
+
   getStateSnapshot(): DashboardState {
     return this.store.getState();
   }

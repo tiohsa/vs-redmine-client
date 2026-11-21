@@ -61,6 +61,22 @@ export const isExistingTicketEditor = (editor?: vscode.TextEditor): boolean => {
   return ticketId !== undefined && ticketId !== NEW_TICKET_DRAFT_ID && ticketId > 0;
 };
 
+export const resolveActiveTicketForEditor = (
+  editor?: vscode.TextEditor,
+): { ticketId: number; connectionScope?: string } | undefined => {
+  if (!editor || !isExistingTicketEditor(editor)) {
+    return undefined;
+  }
+  const ticketId = getTicketIdForEditor(editor);
+  if (ticketId === undefined || ticketId <= 0) {
+    return undefined;
+  }
+  return {
+    ticketId,
+    connectionScope: getConnectionScopeForEditor(editor),
+  };
+};
+
 export const refreshTicketEditorContexts = (
   editor: vscode.TextEditor | undefined = vscode.window.activeTextEditor,
 ): void => {
@@ -190,6 +206,7 @@ export interface EditorEventDeps {
   updateTicketStatus: (editor?: vscode.TextEditor) => void;
   notifyTicketChanged: () => void;
   sync: Pick<SyncController, "syncOnSave">;
+  onActiveTicketChanged?: (ticketId: number, connectionScope?: string) => void;
 }
 
 export const updateTicketDraftStatusFromDocument = (
@@ -273,7 +290,13 @@ export const registerEditorEvents = (
   context: vscode.ExtensionContext,
   deps: EditorEventDeps,
 ): void => {
-  const { registerEditorDocument, updateTicketStatus, notifyTicketChanged, sync } = deps;
+  const {
+    registerEditorDocument,
+    updateTicketStatus,
+    notifyTicketChanged,
+    sync,
+    onActiveTicketChanged,
+  } = deps;
 
   let previousActiveEditor = vscode.window.activeTextEditor;
   const pendingChanges = new Map<
@@ -366,6 +389,10 @@ export const registerEditorEvents = (
       previousActiveEditor = editor;
       refreshTicketEditorContexts(editor);
       updateTicketStatus(editor);
+      const activeTicket = resolveActiveTicketForEditor(editor);
+      if (activeTicket) {
+        onActiveTicketChanged?.(activeTicket.ticketId, activeTicket.connectionScope);
+      }
     }),
   );
 

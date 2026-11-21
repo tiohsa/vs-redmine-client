@@ -1231,7 +1231,40 @@ async function main() {
   assert.equal(await evaluate(`document.querySelectorAll('.ticket-row[data-id="101"]').length`), 0);
   await evaluate(`document.querySelector('[data-quick-filter="overdue"]').click()`);
 
-  await evaluate(`window.messages.length=0;document.getElementById('tab-settings').click();document.getElementById('open-settings-json-btn').click()`);
+  state.tickets = [{
+    id: 200,
+    subject: '連動親チケット',
+    level: 0,
+    statusId: 1,
+    statusName: 'Open',
+    syncState: 'Synced',
+    children: [{
+      id: 201,
+      subject: '連動子チケット',
+      level: 1,
+      statusId: 1,
+      statusName: 'Open',
+      syncState: 'Synced',
+      children: [],
+    }],
+  }];
+  state.selectedTicketId = undefined;
+  state.selectedTicket = undefined;
+  state.loadedTicketCount = 2;
+  state.totalTicketCount = 2;
+  await push();
+  await evaluate(`document.querySelector('[data-expand="200"]').click()`);
+  assert.equal(await evaluate(`document.querySelector('[data-expand="200"]').getAttribute('aria-expanded')`), 'false');
+  assert.equal(await evaluate(`document.querySelectorAll('.ticket-row[data-id="201"]').length`), 0);
+  state.selectedTicketId = 201;
+  state.selectedTicket = { id: 201, subject: '連動子チケット', syncState: 'Synced' };
+  await push();
+  assert.equal(await evaluate(`document.querySelector('[data-expand="200"]').getAttribute('aria-expanded')`), 'true');
+  assert.equal(await evaluate(`document.querySelector('.ticket-row[data-id="201"]').classList.contains('selected')`), true);
+
+  await evaluate(`window.messages.length=0;document.getElementById('tab-settings').click();document.getElementById('settings-tickets').open=true;document.getElementById('set-follow-active-editor').click()`);
+  assert.deepEqual(await evaluate(`window.messages.find(m=>m.type==='settings.updateGeneral'&&m.patch&&'followActiveEditor' in m.patch)?.patch`), { followActiveEditor: true });
+  await evaluate(`window.messages.length=0;document.getElementById('open-settings-json-btn').click()`);
   assert.equal(await evaluate(`window.messages.at(-1).type`), 'settings.openJson');
   assert.deepEqual(errors, []);
   console.log('PASS: Detail操作/状態9種/読み取り専用preview、Metadata一括適用/キャンセル/失敗/接続切替、同期二重送信防止/成功/失敗、日本語/IME/入力待機、番号・本文検索の要求/範囲切替、検索中の新規/子チケット入力保持、追加取得の一覧/スクロール/フォーカス保持/再試行、一覧の情報集約/表示件数、Settings セクション/編集/キーボード操作、折りたたみ維持、子チケット検索、メニューのキーボード操作/表示領域、タブ横断の新規作成、入力/フォーカス維持、下書き前の同期抑止、ローディング/エラー再試行、7画面幅、4テーマ');
