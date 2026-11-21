@@ -146,7 +146,7 @@ export const commentStyles = {
 .comment-timeline .comment-card.selected,
 .comment-card.selected {
   --selected-fg: var(--vscode-list-activeSelectionForeground, var(--vscode-foreground, #ffffff));
-  background-color: color-mix(in srgb, var(--vscode-list-activeSelectionBackground, #04395e) 72%, var(--vscode-sideBar-background, var(--app-bg)));
+  background-color: color-mix(in srgb, color-mix(in srgb, var(--vscode-list-activeSelectionBackground, #04395e) 65%, #1177bb) 80%, var(--vscode-sideBar-background, var(--app-bg)));
   color: var(--selected-fg);
 }
 body:focus-within #detail-comments .comment-card.selected,
@@ -155,7 +155,7 @@ body:focus-within #detail-comments .comment-card.is-editable.selected:focus-visi
 body:focus-within .comment-timeline .comment-card.selected,
 body:focus-within .comment-card.selected {
   --selected-fg: var(--vscode-list-activeSelectionForeground, #ffffff);
-  background-color: var(--vscode-list-activeSelectionBackground, #04395e);
+  background-color: color-mix(in srgb, var(--vscode-list-activeSelectionBackground, #04395e) 60%, #1177bb);
   color: var(--selected-fg);
 }
 body.vscode-light #detail-comments .comment-card.selected,
@@ -164,7 +164,7 @@ body.vscode-light #detail-comments .comment-card.is-editable.selected:focus-visi
 body.vscode-light .comment-timeline .comment-card.selected,
 body.vscode-light .comment-card.selected {
   --selected-fg: var(--vscode-editor-foreground, var(--vscode-foreground, #1f1f1f));
-  background-color: color-mix(in srgb, var(--vscode-list-activeSelectionBackground, #0060c0) 18%, var(--vscode-sideBar-background, var(--app-bg)));
+  background-color: color-mix(in srgb, color-mix(in srgb, var(--vscode-list-activeSelectionBackground, #0060c0) 55%, #0066cc) 28%, var(--vscode-sideBar-background, var(--app-bg)));
   color: var(--selected-fg);
 }
 body.vscode-light:focus-within #detail-comments .comment-card.selected,
@@ -173,7 +173,7 @@ body.vscode-light:focus-within #detail-comments .comment-card.is-editable.select
 body.vscode-light:focus-within .comment-timeline .comment-card.selected,
 body.vscode-light:focus-within .comment-card.selected {
   --selected-fg: var(--vscode-editor-foreground, var(--vscode-foreground, #1f1f1f));
-  background-color: color-mix(in srgb, var(--vscode-list-activeSelectionBackground, #0060c0) 28%, var(--vscode-sideBar-background, var(--app-bg)));
+  background-color: color-mix(in srgb, color-mix(in srgb, var(--vscode-list-activeSelectionBackground, #0060c0) 55%, #0066cc) 38%, var(--vscode-sideBar-background, var(--app-bg)));
   color: var(--selected-fg);
 }
 .comment-card.selected .comment-author,

@@ -105,22 +105,22 @@ export const ticketListStyles = {
 }
 .ticket-row.selected, .ticket-row.is-unsynced.selected {
   --selected-fg: var(--vscode-list-activeSelectionForeground, var(--vscode-foreground, #ffffff));
-  background-color: color-mix(in srgb, var(--vscode-list-activeSelectionBackground, #04395e) 72%, var(--vscode-sideBar-background, var(--app-bg)));
+  background-color: color-mix(in srgb, color-mix(in srgb, var(--vscode-list-activeSelectionBackground, #04395e) 65%, #1177bb) 80%, var(--vscode-sideBar-background, var(--app-bg)));
   color: var(--selected-fg);
 }
 body:focus-within .ticket-row.selected, body:focus-within .ticket-row.is-unsynced.selected {
   --selected-fg: var(--vscode-list-activeSelectionForeground, #ffffff);
-  background-color: var(--vscode-list-activeSelectionBackground, #04395e);
+  background-color: color-mix(in srgb, var(--vscode-list-activeSelectionBackground, #04395e) 60%, #1177bb);
   color: var(--selected-fg);
 }
 body.vscode-light .ticket-row.selected, body.vscode-light .ticket-row.is-unsynced.selected {
   --selected-fg: var(--vscode-editor-foreground, var(--vscode-foreground, #1f1f1f));
-  background-color: color-mix(in srgb, var(--vscode-list-activeSelectionBackground, #0060c0) 18%, var(--vscode-sideBar-background, var(--app-bg)));
+  background-color: color-mix(in srgb, color-mix(in srgb, var(--vscode-list-activeSelectionBackground, #0060c0) 55%, #0066cc) 28%, var(--vscode-sideBar-background, var(--app-bg)));
   color: var(--selected-fg);
 }
 body.vscode-light:focus-within .ticket-row.selected, body.vscode-light:focus-within .ticket-row.is-unsynced.selected {
   --selected-fg: var(--vscode-editor-foreground, var(--vscode-foreground, #1f1f1f));
-  background-color: color-mix(in srgb, var(--vscode-list-activeSelectionBackground, #0060c0) 28%, var(--vscode-sideBar-background, var(--app-bg)));
+  background-color: color-mix(in srgb, color-mix(in srgb, var(--vscode-list-activeSelectionBackground, #0060c0) 55%, #0066cc) 38%, var(--vscode-sideBar-background, var(--app-bg)));
   color: var(--selected-fg);
 }
 

@@ -56,7 +56,7 @@ suite("Dashboard の表示と操作", () => {
     assert.ok(!dashboardStyles.includes("color-mix(in oklab,"));
     assert.ok(
       dashboardStyles.includes(
-        "background-color: color-mix(in srgb, var(--vscode-list-activeSelectionBackground, #04395e) 72%, var(--vscode-sideBar-background, var(--app-bg)));",
+        "background-color: color-mix(in srgb, color-mix(in srgb, var(--vscode-list-activeSelectionBackground, #04395e) 65%, #1177bb) 80%, var(--vscode-sideBar-background, var(--app-bg)));",
       ),
     );
     assert.ok(
@@ -66,7 +66,7 @@ suite("Dashboard の表示と操作", () => {
     );
     assert.ok(
       dashboardStyles.includes(
-        "background-color: var(--vscode-list-activeSelectionBackground, #04395e);",
+        "background-color: color-mix(in srgb, var(--vscode-list-activeSelectionBackground, #04395e) 60%, #1177bb);",
       ),
     );
     assert.ok(
@@ -76,7 +76,7 @@ suite("Dashboard の表示と操作", () => {
     );
     assert.ok(
       dashboardStyles.includes(
-        "background-color: color-mix(in srgb, var(--vscode-list-activeSelectionBackground, #0060c0) 18%, var(--vscode-sideBar-background, var(--app-bg)));",
+        "background-color: color-mix(in srgb, color-mix(in srgb, var(--vscode-list-activeSelectionBackground, #0060c0) 55%, #0066cc) 28%, var(--vscode-sideBar-background, var(--app-bg)));",
       ),
     );
     assert.ok(
@@ -86,7 +86,7 @@ suite("Dashboard の表示と操作", () => {
     );
     assert.ok(
       dashboardStyles.includes(
-        "background-color: color-mix(in srgb, var(--vscode-list-activeSelectionBackground, #0060c0) 28%, var(--vscode-sideBar-background, var(--app-bg)));",
+        "background-color: color-mix(in srgb, color-mix(in srgb, var(--vscode-list-activeSelectionBackground, #0060c0) 55%, #0066cc) 38%, var(--vscode-sideBar-background, var(--app-bg)));",
       ),
     );
     assert.ok(dashboardStyles.includes("#detail-comments .comment-card.selected,"));
