@@ -1196,6 +1196,7 @@ async function main() {
     statusId: 1,
     statusName: 'Open',
     dueDate: '2099-12-31',
+    doneRatio: 50,
     syncState: 'Synced',
     children: [{
       id: 101,
@@ -1205,6 +1206,7 @@ async function main() {
       statusName: 'Closed',
       priorityName: 'High',
       dueDate: '2020-01-01',
+      doneRatio: 100,
       syncState: 'Synced',
       children: [],
     }],
@@ -1212,6 +1214,7 @@ async function main() {
   state.loadedTicketCount = 2;
   state.totalTicketCount = 2;
   await push();
+  assert.equal(await evaluate(`document.querySelectorAll('.ticket-progress, [role="progressbar"]').length`), 0, 'doneRatio があっても進捗線を表示しない');
   await evaluate(`document.querySelector('[data-expand="100"]').click()`);
   assert.equal(await evaluate(`document.querySelector('[data-expand="100"]').getAttribute('aria-expanded')`), 'false');
   await evaluate(`document.querySelector('[data-quick-filter="high"]').click()`);

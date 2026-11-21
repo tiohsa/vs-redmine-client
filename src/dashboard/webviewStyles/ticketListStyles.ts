@@ -81,10 +81,6 @@ export const ticketListStyles = {
 .ticket-row-meta .badge { flex:0 0 auto; padding:1px 5px; font-size: var(--app-font-label); }
 .ticket-row.selected .ticket-attribute, .ticket-row.selected .ticket-meta-item { color:inherit; }
 .ticket-row.selected .ticket-meta-due.is-overdue { color:var(--app-danger); background:color-mix(in srgb, var(--app-surface) 85%, transparent); padding:0 4px; border-radius:var(--app-radius-sm); }
-.ticket-progress { position:absolute; right:0; bottom:0; left:0; height:2px; overflow:hidden; background:color-mix(in srgb, var(--app-text) 10%, transparent); pointer-events:none; }
-.ticket-progress-fill { width:0; height:100%; background:var(--app-accent); }
-.ticket-row.selected .ticket-progress { background:color-mix(in srgb, var(--app-selected-fg) 22%, transparent); }
-.ticket-row.selected .ticket-progress-fill { background:var(--app-selected-fg); }
 .ticket-action-btn { opacity:1; border:1px solid var(--app-border-subtle); border-radius:var(--app-radius-sm); background:var(--app-surface); color:var(--app-text); }
 .expand-btn,.expand-placeholder { flex-basis:24px; width:24px; }
 .expand-btn { height:28px; }
@@ -288,26 +284,8 @@ body:focus-within .ticket-row.selected .ticket-meta-item:not(.is-overdue) {
   font-weight: 600;
 }
 
-.ticket-progress {
-  position: static;
-  margin-top: 6px;
-  width: 100%;
-  height: 2px;
-  border-radius: 9999px;
-  overflow: hidden;
-  background-color: color-mix(in srgb, var(--vscode-foreground, var(--app-text)) 15%, transparent);
-}
-.ticket-progress-fill {
-  height: 100%;
-  background-color: var(--vscode-progressBar-background, var(--app-accent));
-}
-.ticket-progress-fill.is-complete {
-  background-color: var(--vscode-gitDecoration-addedResourceForeground, var(--app-success));
-}
-
 #ticket-list.is-compact .ticket-row { min-height: 30px; padding-top: 5px; padding-bottom: 5px; }
-#ticket-list.is-compact .ticket-row-meta,
-#ticket-list.is-compact .ticket-progress { display: none; }
+#ticket-list.is-compact .ticket-row-meta { display: none; }
 
 .empty-clear-link {
   margin-top: 6px;

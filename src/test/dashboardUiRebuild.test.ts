@@ -34,6 +34,7 @@ suite("Dashboard の表示と操作", () => {
     assert.ok(dashboardStyles.includes(".status-pill.status-in-progress"));
     assert.ok(dashboardStyles.includes(".status-pill.status-resolved"));
     assert.ok(!dashboardStyles.includes(".ticket-hover-actions"));
+    assert.ok(!dashboardStyles.includes(".ticket-progress"));
     assert.ok(dashboardStyles.includes("#ticket-list.is-compact"));
     assert.ok(dashboardStyles.includes(".ticket-indent-branch"));
     assert.ok(dashboardStyles.includes(".unsynced-inline-badge"));
@@ -78,5 +79,6 @@ suite("Dashboard の表示と操作", () => {
     assert.ok(dashboardWebviewScript.includes("ticket.openDraft"));
     assert.ok(dashboardWebviewScript.includes("ticket.syncDraft"));
     assert.ok(dashboardWebviewScript.includes("#NEW"));
+    assert.ok(!dashboardWebviewScript.includes("ticket-progress"));
   });
 });

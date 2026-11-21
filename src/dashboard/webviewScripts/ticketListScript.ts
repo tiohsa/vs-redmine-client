@@ -135,9 +135,7 @@ function renderTicketRow(ticket){
   let guides='';
   for(let i=0;i<level;i++) guides+='<span class="ticket-indent-guide" aria-hidden="true"></span>';
   if(level > 0) guides+='<span class="ticket-indent-branch" aria-hidden="true"></span>';
-  const hasDoneRatio=typeof ticket.doneRatio === 'number' && !Number.isNaN(ticket.doneRatio) && ticket.doneRatio > 0 && ticket.doneRatio <= 100;
-  const progress=hasDoneRatio ? '<div class="ticket-progress" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="'+ticket.doneRatio+'" aria-label="'+esc(String(ticket.doneRatio)+'%')+'"><div class="ticket-progress-fill'+(ticket.doneRatio === 100 ? ' is-complete' : '')+'" data-progress="'+ticket.doneRatio+'"></div></div>' : '';
-  return '<div class="ticket-row '+trackerCls+(unsynced ? ' is-unsynced' : '')+(level > 0 ? ' child-row' : '')+(selected ? ' selected' : '')+'" data-id="'+ticket.id+'" role="listitem" aria-current="'+selected+'" tabindex="0" data-level="'+level+'">'+trackerBar+guides+'<div class="ticket-row-content"><div class="ticket-row-main"><div class="ticket-row-title-group">'+expand+'<span class="ticket-id">#'+ticket.id+'</span>'+priorityIndicator(ticket.priorityName)+'<span class="ticket-subject" title="'+esc(ticket.subject)+'">'+esc(ticket.subject)+'</span></div></div><div class="ticket-row-meta"><div class="ticket-meta-left">'+status+unsyncedInline+project+'</div><div class="ticket-meta-right">'+assignee+dueDate+'</div></div>'+progress+'</div></div>';
+  return '<div class="ticket-row '+trackerCls+(unsynced ? ' is-unsynced' : '')+(level > 0 ? ' child-row' : '')+(selected ? ' selected' : '')+'" data-id="'+ticket.id+'" role="listitem" aria-current="'+selected+'" tabindex="0" data-level="'+level+'">'+trackerBar+guides+'<div class="ticket-row-content"><div class="ticket-row-main"><div class="ticket-row-title-group">'+expand+'<span class="ticket-id">#'+ticket.id+'</span>'+priorityIndicator(ticket.priorityName)+'<span class="ticket-subject" title="'+esc(ticket.subject)+'">'+esc(ticket.subject)+'</span></div></div><div class="ticket-row-meta"><div class="ticket-meta-left">'+status+unsyncedInline+project+'</div><div class="ticket-meta-right">'+assignee+dueDate+'</div></div></div></div>';
 }
 function isTicketActionTarget(target){ return isElement(target) && !!target.closest('.ticket-action-btn,.ticket-action-menu,.expand-btn'); }
 let renderedTicketMarkup = null;
@@ -209,7 +207,6 @@ function renderTickets(){
       row.querySelectorAll('.ticket-indent-guide').forEach(function(guide, idx){ guide.style.left=(12 + idx * 14 + 2)+'px'; });
       const branch = row.querySelector('.ticket-indent-branch');
       if(branch && level > 0){ branch.style.left=(12 + (level - 1) * 14 + 2)+'px'; }
-      row.querySelectorAll('.ticket-progress-fill[data-progress]').forEach(function(bar){ bar.style.width=bar.dataset.progress+'%'; });
       row.addEventListener('click',function(event){
         if(isTicketActionTarget(event.target)) return;
         if(row.dataset.draftQueueId){
