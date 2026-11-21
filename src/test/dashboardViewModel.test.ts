@@ -315,6 +315,7 @@ suite("Dashboard ViewModel — 未同期アイテム変換", () => {
       tickets: new Map([[6, {
         ticketId: 6,
         phase: "reconciliation_pending",
+        documentUri: "file:///ticket-6.md",
       } as never]]),
       comments: [],
       newTickets: [],
@@ -325,6 +326,7 @@ suite("Dashboard ViewModel — 未同期アイテム変換", () => {
     assert.strictEqual(item.lifecycle, "recovery_pending");
     assert.strictEqual(item.canDiscard, false);
     assert.strictEqual(item.canSync, true);
+    assert.strictEqual(item.documentUri, "file:///ticket-6.md");
   });
 
   test("コメント更新が変換される", async () => {

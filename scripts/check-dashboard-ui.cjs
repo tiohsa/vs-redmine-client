@@ -573,13 +573,13 @@ async function main() {
   // 日付は詳細へ集約し、一覧では重複しない。
   assert.equal(await evaluate(`document.querySelectorAll('.ticket-row .due-overdue').length`), 0);
 
-  // 担当者は詳細の2列メタグリッドで示す。
+  // 一覧に担当者表示や旧表示設定トグルを出さず、詳細ドロワーはコメント専用パネルとして表示する。
   state.selectedTicketId = 10;
   state.tickets[0].assigneeName = 'Taro Yamada';
   state.selectedTicket = { ...state.tickets[0], projectName: '検証プロジェクト', description: '担当者表示を確認します。' };
   await push();
   assert.equal(await evaluate(`document.querySelectorAll('.ticket-assignee').length`), 0);
-  assert.equal(await evaluate(`document.querySelector('.detail-metadata-grid').textContent.includes('Taro Yamada')`), true);
+  assert.equal(await evaluate(`document.querySelectorAll('.detail-metadata-grid, .detail-tabs, .detail-description-section, .detail-description-warning').length`), 0);
   assert.equal(await evaluate(`document.querySelectorAll('#set-show-assignee,#set-show-tracker,#set-show-priority,#set-show-due-date').length`), 0);
 
   // 一覧・詳細・コメント・未同期の同じ操作はラベルと SVG が一致する。
@@ -662,13 +662,16 @@ async function main() {
   assert.equal(await evaluate(`window.messages.at(-1).type`),'ticket.select');
   assert.equal(await evaluate(`window.messages.at(-1).ticketId`),10);
 
-  // Detail の主要操作は既存 request のまま。Markdown preview は安全な読み取り専用。
+  // Detail の主要操作は既存 request のまま。コメント専用パネルと安全なコメント表示を確認する。
   state.selectedProject = { id: 1, name: '検証プロジェクト' };
   state.selectedTicketId = 10;
   state.selectedTicket = { id: 10, subject: '詳細操作の検証', projectName: '検証プロジェクト', trackerName: 'Bug', priorityName: 'Normal', statusName: 'Open', assigneeName: 'Taro', startDate: '2026-09-21', dueDate: '2026-09-30', syncState: 'Synced', description: '<img src=x onerror=alert(1)>\nRedmine の説明\n3行目\n4行目' };
   state.editOptions = { ticketId: 10, projectId: 1, loading: false, statusFallback: false, trackers: [{ id: 1, name: 'Bug' }, { id: 2, name: 'Task' }], priorities: [{ id: 1, name: 'Normal' }, { id: 2, name: 'High' }], statuses: [{ id: 1, name: 'Open' }, { id: 2, name: 'Closed' }], assignees: [{ id: 1, name: 'Taro' }] };
   await push();
-  assert.equal(await evaluate(`document.querySelectorAll('#ticket-detail-card .detail-tabs [role="tab"]').length`), 2);
+  assert.equal(await evaluate(`document.querySelectorAll('#ticket-detail-card .detail-tabs, #detail-tab-overview, #detail-tab-comments, .detail-metadata-grid, .detail-description, .detail-description-warning').length`), 0);
+  assert.equal(await evaluate(`document.querySelector('#ticket-detail-card .detail-head-row1') !== null && document.querySelector('#ticket-detail-card .detail-head-row2') !== null`), true);
+  assert.equal(await evaluate(`document.getElementById('detail-comments').hidden`), false);
+  assert.equal(await evaluate(`document.getElementById('detail-comment-count').textContent`), '0');
   state.tickets[0].syncState = 'Conflict';
   await push();
   assert.ok(await evaluate(`document.getElementById('sync-tray').textContent.includes(${JSON.stringify(strings.syncTrayAttention)})`));
@@ -677,33 +680,24 @@ async function main() {
   state.tickets[0].syncState = 'Queued';
   await evaluate(`window.dispatchEvent(new MessageEvent('message',{data:{type:'operation.success',requestId:window.messages.at(-1).requestId,message:'完了'}}))`);
   await push();
-  await evaluate(`document.getElementById('detail-tab-overview').focus()`);
-  await key('ArrowRight');
-  assert.equal(await evaluate(`document.activeElement.id`), 'detail-tab-comments');
-  assert.equal(await evaluate(`document.getElementById('detail-comments').hidden`), false);
-  await key('Home');
-  assert.equal(await evaluate(`document.activeElement.id`), 'detail-tab-overview');
   assert.equal(await evaluate(`document.querySelector('.ticket-row[data-id="10"]').getAttribute('aria-current')`), 'true');
-  assert.equal(await evaluate(`document.querySelector('.detail-description').textContent`), state.selectedTicket.description);
-  assert.equal(await evaluate(`document.querySelectorAll('#ticket-detail-card textarea, .detail-description img, .detail-description [contenteditable]').length`), 0);
+  assert.equal(await evaluate(`document.querySelectorAll('#ticket-detail-card textarea, #comments-list img, #comments-list [contenteditable]').length`), 0);
   state.comments.ticketId = 10;
   state.comments.items = [{ id: 31, authorName: 'Taro', body: '1行目\n2行目\n3行目\n4行目', editableByCurrentUser: true }];
   await push();
-  await evaluate(`document.getElementById('detail-tab-comments').click()`);
+  assert.equal(await evaluate(`document.getElementById('detail-comment-count').textContent`), '1');
   assert.equal(await evaluate(`document.querySelector('.comment-body').textContent`), state.comments.items[0].body);
   assert.equal(await evaluate(`document.querySelector('.comment-timeline') !== null`), true);
   await evaluate(`document.querySelector('.comment-card.is-editable').click()`);
   assert.deepEqual(await evaluate(`({type:window.messages.at(-1).type,ticketId:window.messages.at(-1).ticketId,commentId:window.messages.at(-1).commentId})`), { type: 'comment.edit', ticketId: 10, commentId: 31 });
-  await evaluate(`document.getElementById('detail-tab-overview').click()`);
-  state.comments.items = [];
-  await push();
-  for (const [id, type] of [['detail-browser-btn', 'ticket.openBrowser']]) {
+  for (const [id, type] of [['add-comment-btn', 'comment.add'], ['reload-comments-btn', 'comment.reload'], ['detail-browser-btn', 'ticket.openBrowser']]) {
     await evaluate(`document.getElementById('${id}').click()`);
     assert.deepEqual(await evaluate(`({type:window.messages.at(-1).type,ticketId:window.messages.at(-1).ticketId})`), { type, ticketId: 10 });
   }
+  state.comments.items = [];
+  await push();
   assert.equal(await evaluate(`document.querySelectorAll('[data-ticket-action-menu="detail-10"]').length`), 0);
   assert.equal(await evaluate(`document.querySelectorAll('[data-ticket-action="refresh"]').length`), 0);
-  assert.equal(await evaluate(`document.querySelectorAll('.detail-metadata-grid').length`), 1);
   assert.equal(await evaluate(`document.querySelectorAll('[data-metadata-field]').length`), 0);
 
   // Escape キーで詳細ドロワーを閉じる。
@@ -750,7 +744,6 @@ async function main() {
     state.selectedTicket.syncState = syncState;
     await push();
     assert.equal(await evaluate(`document.getElementById('detail-sync-state').textContent`), label);
-    assert.equal(await evaluate(`document.querySelectorAll('.detail-description-warning').length`), syncState === 'Synced' ? 0 : 1);
     assert.equal(await evaluate(`document.getElementById('detail-sync-btn').disabled`), syncState === 'Syncing');
   }
 
@@ -774,7 +767,7 @@ async function main() {
     await evaluate(`document.body.className=${JSON.stringify(theme)}`);
     await push();
     assert.equal(await evaluate(`document.getElementById('ticket-detail-card').scrollWidth <= document.getElementById('ticket-detail-card').clientWidth`), true, `detail overflow: ${theme} ${width}`);
-    assert.equal(await evaluate(`(()=>{const card=document.getElementById('ticket-detail-card').getBoundingClientRect();return [...document.querySelectorAll('.detail-head-actions button, #detail-cancel-btn')].filter(el=>el.getClientRects().length>0).every(el=>{const r=el.getBoundingClientRect();return r.left>=card.left && r.right<=card.right;});})()`), true, `control overflow: ${theme} ${width}`);
+    assert.equal(await evaluate(`(()=>{const card=document.getElementById('ticket-detail-card').getBoundingClientRect();return [...document.querySelectorAll('.detail-head-actions button, #detail-cancel-btn, #add-comment-btn, #reload-comments-btn')].filter(el=>el.getClientRects().length>0).every(el=>{const r=el.getBoundingClientRect();return r.left>=card.left && r.right<=card.right;});})()`), true, `control overflow: ${theme} ${width}`);
     await evaluate(`document.querySelector('.ticket-row[data-id="10"]').focus()`);
     assert.notEqual(await evaluate(`getComputedStyle(document.querySelector('.ticket-row[data-id="10"]')).outlineStyle`), 'none');
     assert.notEqual(await evaluate(`getComputedStyle(document.querySelector('.ticket-row[data-id="10"]'),'::before').backgroundColor`), 'rgba(0, 0, 0, 0)');

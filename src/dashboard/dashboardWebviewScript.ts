@@ -8,7 +8,6 @@ const STRINGS = window.STRINGS;
 const persistedUiState = vscode.getState() || {};
 let ticketLayoutMode = ['auto','single','split'].includes(persistedUiState.ticketLayoutMode) ? persistedUiState.ticketLayoutMode : 'auto';
 let detailFocus = persistedUiState.detailFocus === true;
-let detailTab = persistedUiState.detailTab === 'comments' ? 'comments' : 'overview';
 let compactMode = persistedUiState.compactMode === true;
 const quickFilters = new Set(Array.isArray(persistedUiState.quickFilters) ? persistedUiState.quickFilters.filter(function(value){ return ['mine','open','overdue','high'].includes(value); }) : ['open']);
 
@@ -355,7 +354,11 @@ searchInput.addEventListener('keydown',function(event){
   if(event.key === 'Enter'){ submitSearch(); event.preventDefault(); }
   else if(event.key === 'Escape' && this.value){ clearSearch(); event.preventDefault(); event.stopPropagation(); }
 });
-function persistViewState(){ vscode.setState(Object.assign({},vscode.getState() || {},{ticketLayoutMode:ticketLayoutMode,detailFocus:detailFocus,detailTab:detailTab,compactMode:compactMode,quickFilters:Array.from(quickFilters)})); }
+function persistViewState(){
+  const nextState=Object.assign({},vscode.getState() || {},{ticketLayoutMode:ticketLayoutMode,detailFocus:detailFocus,compactMode:compactMode,quickFilters:Array.from(quickFilters)});
+  delete nextState.detailTab;
+  vscode.setState(nextState);
+}
 document.querySelectorAll('[data-quick-filter]').forEach(function(button){ button.addEventListener('click',function(){
   const name=button.dataset.quickFilter;
   if(quickFilters.has(name)) quickFilters.delete(name); else quickFilters.add(name);
@@ -844,20 +847,6 @@ function renderTicketDetailPanel(ticket){
   const trackerCls=trackerAccentClass(ticket.trackerName);
   card.className='ticket-work-panel ticket-detail-card '+trackerCls;
   card.removeAttribute('aria-busy');
-  const dueDiff=ticket.dueDate ? daysUntilDateOnly(ticket.dueDate, new Date()) : undefined;
-  const isOverdue=dueDiff !== undefined && dueDiff < 0 && !isTicketClosed(ticket);
-  const metaItems=[
-    {label:STRINGS.sortStatus, value:ticket.statusName || STRINGS.notSet, overdue:false},
-    {label:STRINGS.sortPriority, value:ticket.priorityName || STRINGS.notSet, overdue:false},
-    {label:STRINGS.sortAssignee, value:ticket.assigneeName || STRINGS.assigneeUnassigned, overdue:false},
-    {label:STRINGS.dueDateLabel, value:ticket.dueDate || STRINGS.notSet, overdue:isOverdue}
-  ];
-  const metaGrid='<div class="detail-metadata-grid">'+metaItems.map(function(item){
-    return '<div class="detail-meta"><span>'+esc(item.label)+'</span><strong'+(item.overdue?' class="is-overdue"':'')+'>'+esc(item.value)+'</strong></div>';
-  }).join('')+'</div>';
-  const unsynced=['Draft','Dirty','Queued','Syncing','Conflict','Failed','RecoveryPending','CommitUnknown','Abandoned'].includes(ticket.syncState);
-  const warning=unsynced ? '<p class="detail-description-warning" role="note">'+esc(STRINGS.descriptionUnsyncedWarning)+'</p>' : '';
-  const description=ticket.description ? '<div class="detail-description">'+esc(ticket.description)+'</div>' : '<p class="detail-hint">'+esc(STRINGS.noDescription)+'</p>';
   const commentCount=state.comments.ticketId === ticket.id ? state.comments.items.length : 0;
   card.innerHTML=
     '<div class="detail-header-fixed">'
@@ -878,28 +867,22 @@ function renderTicketDetailPanel(ticket){
           +'<button class="btn btn-secondary detail-icon-button" id="detail-browser-btn" type="button" title="'+esc(STRINGS.openInBrowser)+'" aria-label="'+esc(STRINGS.openInBrowser)+'">'+actionIcon('browser')+'</button>'
         +'</div>'
       +'</div>'
-      +'<div class="detail-tabs" role="tablist" aria-label="'+esc(STRINGS.tabTickets)+'">'
-        +'<button id="detail-tab-overview" role="tab" aria-selected="'+(detailTab === 'overview')+'" aria-controls="detail-overview" tabindex="'+(detailTab === 'overview'?'0':'-1')+'" type="button">'+esc(STRINGS.overview)+'</button>'
-        +'<button id="detail-tab-comments" role="tab" aria-selected="'+(detailTab === 'comments')+'" aria-controls="detail-comments" tabindex="'+(detailTab === 'comments'?'0':'-1')+'" type="button">'+esc(STRINGS.tabComments)+' <span class="tab-badge">'+commentCount+'</span></button>'
+    +'</div>'
+    +'<div class="comments-header">'
+      +'<span class="comments-header-label">'+actionIcon('comment')+'<span>'+esc(STRINGS.tabComments)+'</span><span id="detail-comment-count" class="tab-badge">'+commentCount+'</span></span>'
+      +'<div class="comments-header-actions">'
+        +'<button class="btn btn-primary" id="add-comment-btn" type="button">'+actionIcon('child')+'<span>'+esc(STRINGS.addCommentAction)+'</span></button>'
+        +'<button class="btn btn-secondary detail-icon-button" id="reload-comments-btn" type="button" title="'+esc(STRINGS.reloadComments)+'" aria-label="'+esc(STRINGS.reloadComments)+'">'+actionIcon('refresh')+'</button>'
       +'</div>'
     +'</div>'
-    +'<div class="detail-tabpanels">'
-      +'<div id="detail-overview" class="detail-tabpanel" role="tabpanel" aria-labelledby="detail-tab-overview"'+(detailTab === 'overview'?'':' hidden')+'>'
-        +metaGrid
-        +warning
-        +'<section class="detail-section detail-description-section" aria-labelledby="description-heading"><h3 id="description-heading" class="sr-only">'+esc(STRINGS.remoteDescription)+'</h3>'+description+'</section>'
-      +'</div>'
-      +'<div id="detail-comments" class="detail-tabpanel" role="tabpanel" aria-labelledby="detail-tab-comments"'+(detailTab === 'comments'?'':' hidden')+'>'
-        +'<div id="comments-list"></div>'
-      +'</div>'
+    +'<div id="detail-comments" class="detail-comments-panel">'
+      +'<div id="comments-list"></div>'
     +'</div>';
   card.querySelector('#detail-cancel-btn').addEventListener('click',function(){ req('ticket.cancelDetail'); });
   card.querySelector('#detail-sync-btn').addEventListener('click',function(){ req('ticket.syncSelected',{ticketId:ticket.id}); });
   card.querySelector('#detail-browser-btn').addEventListener('click',function(){ req('ticket.openBrowser',{ticketId:ticket.id}); });
-  const switchDetailTab=function(name,focus){ detailTab=name; persistViewState(); card.querySelectorAll('.detail-tabs [role="tab"]').forEach(function(tab){ const selected=tab.id === 'detail-tab-'+name; tab.setAttribute('aria-selected',String(selected)); tab.tabIndex=selected?0:-1; }); card.querySelector('#detail-overview').hidden=name !== 'overview'; card.querySelector('#detail-comments').hidden=name !== 'comments'; if(focus) card.querySelector('#detail-tab-'+name).focus(); };
-  card.querySelector('#detail-tab-overview').addEventListener('click',function(){ switchDetailTab('overview',false); });
-  card.querySelector('#detail-tab-comments').addEventListener('click',function(){ switchDetailTab('comments',false); });
-  card.querySelector('.detail-tabs').addEventListener('keydown',function(event){ const next=event.key === 'ArrowRight' || event.key === 'End' ? 'comments' : event.key === 'ArrowLeft' || event.key === 'Home' ? 'overview' : null; if(next){ switchDetailTab(next,true); event.preventDefault(); } });
+  card.querySelector('#add-comment-btn').addEventListener('click',function(){ req('comment.add',{ticketId:ticket.id}); });
+  card.querySelector('#reload-comments-btn').addEventListener('click',function(){ req('comment.reload',{ticketId:ticket.id}); });
   updateSyncButtonStates();
   renderComments();
 }
@@ -1006,10 +989,11 @@ function renderComments(){
   const list=document.getElementById('comments-list');
   if(!list) return;
   const ticketId=state.selectedTicketId;
+  const countEl=document.getElementById('detail-comment-count');
+  if(countEl) countEl.textContent=String(ticketId !== undefined && comments.ticketId === ticketId ? comments.items.length : 0);
   list.setAttribute('aria-busy',String(comments.loading));
   if(ticketId === undefined){ list.innerHTML='<div class="state-msg">'+STRINGS.noTicketSelected+'</div>'; return; }
   if(comments.ticketId !== ticketId){ list.innerHTML='<div class="state-msg">'+esc(STRINGS.loadingComments)+'</div>'; return; }
-  const header='<div class="comments-header"><span class="comments-header-label">'+esc(STRINGS.commentsForTicket)+' #'+ticketId+'</span><div class="comments-header-actions"><button class="btn btn-secondary" id="add-comment-btn" type="button">'+actionIcon('child')+'<span>'+esc(STRINGS.addCommentAction)+'</span></button><button class="btn btn-secondary detail-icon-button" id="reload-comments-btn" type="button" title="'+esc(STRINGS.reloadComments)+'" aria-label="'+esc(STRINGS.reloadComments)+'">'+actionIcon('refresh')+'</button></div></div>';
   let content='';
   if(comments.loading) content='<div class="state-msg">'+STRINGS.loadingComments+'</div>';
   else if(comments.error) content='<div class="state-msg error-msg">'+esc(comments.error)+'</div>';
@@ -1023,9 +1007,7 @@ function renderComments(){
     const date=cm.updatedAt?'<time class="comment-date" title="'+esc(cm.updatedAt)+'">'+esc(cm.updatedAt.substring(0,16).replace('T',' '))+'</time>':'';
     return '<article class="comment-card'+(editable?' is-editable':'')+'" role="listitem"'+(editable?' tabindex="0" data-editable-comment="'+cm.id+'" data-ticket="'+ticketId+'"':'')+'><div class="comment-header"><div class="comment-meta"><span class="comment-author">'+esc(cm.authorName)+'</span>'+date+journalId+unsynced+'</div><div class="comment-header-actions">'+editBtn+syncBtn+'</div></div><div class="comment-body">'+esc(cm.body)+'</div></article>';
   }).join('')+'</div>';
-  list.innerHTML=header+content;
-  list.querySelector('#add-comment-btn')?.addEventListener('click',function(){ req('comment.add',{ticketId:ticketId}); });
-  list.querySelector('#reload-comments-btn')?.addEventListener('click',function(){ req('comment.reload',{ticketId:ticketId}); });
+  list.innerHTML=content;
   list.querySelectorAll('[data-edit-comment]').forEach(function(button){
     button.addEventListener('click',function(event){
       event.stopPropagation();
@@ -1145,13 +1127,15 @@ function renderSettingsBase(){
 }
 
 function resetViewState(){
-  ticketLayoutMode='auto'; detailFocus=false; detailTab='overview'; compactMode=false; quickFilters.clear(); quickFilters.add('open');
+  ticketLayoutMode='auto'; detailFocus=false; compactMode=false; quickFilters.clear(); quickFilters.add('open');
   expandedTicketIds.clear(); collapsedTicketIds.clear(); expandedComments.clear();
   activeTicketActionMenuId=null; activeTicketActionAnchorTop=null; searchQuery=''; closeProjectPicker(false);
   if(searchTimer){ window.clearTimeout(searchTimer); searchTimer=null; }
   searchInput.value=''; updateSearchClearButton(); filterDialog.classList.add('hidden'); closeLayoutPopover();
   document.querySelectorAll('.settings-category').forEach(function(category){ category.open=category.dataset.category === 'tickets'; });
-  vscode.setState(Object.assign({},vscode.getState() || {},{ticketLayoutMode:ticketLayoutMode,detailFocus:detailFocus,detailTab:detailTab,compactMode:compactMode,quickFilters:['open']}));
+  const nextState=Object.assign({},vscode.getState() || {},{ticketLayoutMode:ticketLayoutMode,detailFocus:detailFocus,compactMode:compactMode,quickFilters:['open']});
+  delete nextState.detailTab;
+  vscode.setState(nextState);
   submitSearch();
   render(); applyTicketLayoutMode(); if(typeof applyCompactMode === 'function') applyCompactMode(); showToast('success',STRINGS.viewStateReset);
 }

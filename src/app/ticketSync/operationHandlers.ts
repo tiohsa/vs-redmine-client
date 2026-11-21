@@ -574,6 +574,7 @@ export interface OperationHandlerDeps {
   repository?: SyncOperationRepository;
   uploadSpoolStore?: UploadSpoolStore;
   localState?: any;
+  skipDocumentRewrite?: boolean;
 }
 
 export interface OperationHandler<TIntent extends SyncIntent = any, TPrepared = any> {
@@ -3190,7 +3191,7 @@ export class TicketUpdateHandler implements OperationHandler<TicketUpdateIntent,
     );
 
     const documentUri = operation.documentUri ?? operation.intent?.documentUri;
-    if (documentUri) {
+    if (documentUri && !deps?.skipDocumentRewrite) {
       const replacement = operation.nextIntent
         ? rebaseTicketEditorContent(
             {

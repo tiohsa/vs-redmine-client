@@ -181,7 +181,6 @@ liveTest("LIVE-B04", "詳細画面からコメントMarkdownを開き追加・�
       new RegExp(`^issue_id: ${issueId}$`, "m").test(vscode.window.activeTextEditor?.document.getText() ?? ""),
     "selected ticket and editor");
     dashboard.reveal();
-    await dashboard.dom("#detail-tab-comments");
     await dashboard.waitFor(() => dashboard.store.getState().comments.items.some((comment) => comment.id === original.id), "existing comment");
     assert.ok((await dashboard.read("#comments-list .comment-body")).includes(existing));
     await dashboard.dom("#add-comment-btn");

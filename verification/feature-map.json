@@ -77,7 +77,6 @@
       ],
       "selectors": [
         "#ticket-detail-card",
-        "#detail-tab-overview",
         "#detail-sync-btn",
         "#detail-browser-btn",
         "#detail-cancel-btn"
@@ -105,9 +104,10 @@
         "redmine-client.editComment"
       ],
       "selectors": [
-        "#detail-tab-comments",
         "#comments-list",
-        "#add-comment-btn"
+        "#detail-comment-count",
+        "#add-comment-btn",
+        "#reload-comments-btn"
       ],
       "invariants": [
         "選択チケットのコメントを表示する。",

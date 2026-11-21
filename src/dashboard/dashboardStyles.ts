@@ -672,7 +672,7 @@ body.vscode-high-contrast .quick-filter,body.vscode-high-contrast-light .quick-f
   .tickets-layout:not(.layout-split):not(.layout-single) { flex-direction:column; overflow:hidden; }
   .tickets-layout:not(.layout-split):not(.layout-single) .tickets-master { flex:1 1 52%; min-height:100px; max-height:none; margin:0; }
   .tickets-layout:not(.layout-split):not(.layout-single):has(.ticket-detail-card:not(.hidden)) .tickets-master { flex:1 1 52%; max-height:none; }
-  .tickets-layout:not(.layout-split):not(.layout-single) .tickets-detail { flex:0 0 48%; height:48%; min-height:0; margin:0; overflow:hidden; display:flex; flex-direction:column; border-top:1px solid var(--app-border); }
+  .tickets-layout:not(.layout-split):not(.layout-single) .tickets-detail { flex:0 0 48%; height:48%; min-height:0; margin:0; overflow:hidden; display:flex; flex-direction:column; border-top:0; }
   .tickets-layout:not(.layout-split):not(.layout-single) .tickets-detail:has(.ticket-detail-card.hidden) { display:none; }
   .comments-header { flex-direction:row; }
   .comment-actions { grid-column:auto; grid-row:auto; }
@@ -1157,7 +1157,7 @@ body.vscode-high-contrast-light .ticket-row.selected {
   letter-spacing: 0.02em;
 }
 
-/* Option A Detail Drawer (48% bottom split, fixed header+tabs, scrollable tabpanel) */
+/* Comments-only Detail Drawer (48% bottom split, fixed 2-row header + comments header, scrollable comments) */
 .tickets-layout:not(.layout-split):not(.layout-single) .tickets-detail {
   overflow: hidden;
   display: flex;
@@ -1172,9 +1172,10 @@ body.vscode-high-contrast-light .ticket-row.selected {
   overflow: hidden;
   padding: 0;
   border: 0;
-  border-top: 2px solid var(--app-accent);
+  border-top: 1px solid var(--vscode-panel-border, var(--app-border-strong));
   border-radius: 0;
-  background: var(--app-surface);
+  background: var(--vscode-editorWidget-background, var(--app-surface-raised));
+  box-shadow: 0 -4px 12px rgba(0, 0, 0, 0.18);
 }
 .ticket-detail-card:has(.composer-grid) {
   overflow-y: auto;
@@ -1187,8 +1188,9 @@ body.vscode-high-contrast-light .ticket-row.selected {
 
 .detail-header-fixed {
   flex: 0 0 auto;
-  padding: 8px 10px 0;
-  background: var(--app-surface);
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--vscode-panel-border, var(--app-border-subtle));
+  background: transparent;
 }
 .detail-head-row1 {
   display: flex;
@@ -1271,73 +1273,42 @@ body.vscode-high-contrast-light .ticket-row.selected {
   padding: 2px 8px;
   font-size: var(--app-font-label);
 }
-.detail-tabs {
+/* Comments section header & timeline */
+.comments-header {
+  flex: 0 0 auto;
   display: flex;
-  gap: 12px;
-  margin-top: 6px;
-  border-bottom: 1px solid var(--app-border-subtle);
+  flex-direction: row;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 0;
+  padding: 6px 10px;
+  border-bottom: 1px solid var(--vscode-panel-border, var(--app-border-subtle));
 }
-.detail-tabs button {
-  min-height: 28px;
-  padding: 4px 2px;
-  border: 0;
-  border-bottom: 2px solid transparent;
-  background: transparent;
-  color: var(--app-text-secondary);
-  font-size: var(--app-font-caption);
-  font-weight: 600;
-  cursor: pointer;
-}
-.detail-tabs button[aria-selected="true"] {
+.comments-header-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
   color: var(--app-text);
-  border-bottom-color: var(--vscode-focusBorder, var(--app-focus));
+  font-size: var(--app-font-body);
+  font-weight: 600;
 }
-.detail-tabpanels {
+.comments-header-label .action-icon {
+  flex: 0 0 auto;
+  opacity: 0.8;
+}
+.comments-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex: 0 0 auto;
+}
+#detail-comments {
   flex: 1 1 auto;
   min-height: 0;
   overflow-y: auto;
   padding: 8px 10px 12px;
-}
-.detail-tabpanel[hidden] {
-  display: none;
-}
-.detail-metadata-grid {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 6px 12px;
-}
-.detail-meta strong.is-overdue {
-  color: var(--vscode-editorError-foreground, var(--app-danger));
-  font-weight: 600;
-}
-.detail-description-warning {
-  margin: 8px 0 0;
-  padding: 4px 8px;
-  border-left: 3px solid var(--vscode-editorWarning-foreground, var(--app-warning));
-  background: color-mix(in srgb, var(--vscode-editorWarning-foreground, var(--app-warning)) 10%, transparent);
-  color: var(--vscode-editorWarning-foreground, var(--app-warning));
-  font-size: var(--app-font-label);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-.detail-description-section {
-  margin-top: 8px;
-  padding-top: 8px;
-  border-top: 1px solid var(--app-border-subtle);
-}
-.detail-description {
-  margin: 0;
-  color: var(--app-text-secondary);
-  font-size: var(--app-font-body);
-  line-height: 1.5;
-  white-space: pre-wrap;
-  overflow-wrap: anywhere;
-}
-
-/* Comments timeline */
-#detail-comments {
-  padding-top: 0;
 }
 #add-comment-btn {
   min-height: 24px;
@@ -1444,7 +1415,6 @@ body.vscode-high-contrast-light .ticket-row.selected {
 }
 
 /* Focus & High Contrast / Forced Colors */
-.detail-tabs button:focus-visible,
 .comment-card.is-editable:focus-visible,
 .comment-edit-icon:focus-visible,
 #detail-cancel-btn:focus-visible,
@@ -1457,13 +1427,8 @@ body.vscode-high-contrast-light .ticket-row.selected {
   outline: 2px solid var(--vscode-focusBorder, var(--app-focus));
   outline-offset: 2px;
 }
-body.vscode-high-contrast .detail-tabs button[aria-selected="true"],
-body.vscode-high-contrast-light .detail-tabs button[aria-selected="true"] {
-  border-bottom-width: 3px;
-}
 @media (forced-colors: active) {
-  .tab.active,
-  .detail-tabs button[aria-selected="true"] {
+  .tab.active {
     border-bottom: 3px solid Highlight;
   }
 }

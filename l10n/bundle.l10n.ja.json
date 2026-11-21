@@ -550,5 +550,8 @@
     "Enter new ticket subject": "新規チケットの件名を入力",
     "Describe the ticket details here.": "ここにチケットの詳細を記述してください。",
     "Ticket #{0} created.": "チケット #{0} を作成しました。",
-    "Cannot open an unsynced new ticket draft in the browser.": "未同期の新規チケット下書きはブラウザで開けません。"
+    "Cannot open an unsynced new ticket draft in the browser.": "未同期の新規チケット下書きはブラウザで開けません。",
+    "Local file is unavailable or modified.": "ローカルファイルが見つからないか、内容が変更されています。",
+    "Complete without updating local file": "ローカルファイルの更新をスキップして同期を完了",
+    "Changes are already on Redmine, but the local file could not be updated automatically ({0}). Complete sync without updating the local file?": "変更はすでに Redmine に反映済みですが、ローカルファイルを自動更新できませんでした（{0}）。ローカルファイルの更新をスキップして同期を完了しますか？"
 }

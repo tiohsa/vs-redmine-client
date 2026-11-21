@@ -428,6 +428,66 @@ export const syncUnsyncedFile = async (
   );
 };
 
+const resolveTicketLocalFinalizeInteractive = async (
+  engine: ReturnType<typeof createSyncEngine>,
+  key: Extract<UnsyncedFileSyncKey, { kind: "ticket" }>,
+  operationScope: string,
+  currentOutcome: { kind: "remote_committed"; pending?: string; message?: string },
+): Promise<Awaited<ReturnType<typeof engine.syncOne>> | RecoveryCancelled | undefined> => {
+  let outcome: Awaited<ReturnType<typeof engine.syncOne>> = currentOutcome as any;
+  const currentOp = getOfflineSyncQueue(operationScope).tickets.get(key.ticketId);
+  const documentUri = currentOp?.documentUri;
+  const shouldOpenDocument =
+    Boolean(documentUri) &&
+    (currentOutcome.message === "Document is closed or not available" ||
+      currentOutcome.message === "Editor rewrite pending: not_available");
+
+  if (documentUri && shouldOpenDocument) {
+    try {
+      const doc = await vscode.workspace.openTextDocument(vscode.Uri.parse(documentUri));
+      await vscode.window.showTextDocument(doc, { preview: false });
+      outcome = await engine.syncOne(key, { connectionScope: operationScope });
+      if (outcome.kind !== "remote_committed" || outcome.pending !== "local_finalize") {
+        return outcome;
+      }
+    } catch {
+      // ファイルが存在しない・開けない場合は下の確認モーダルへ進む
+    }
+  }
+
+  if (typeof engine.resolveLocalFinalize !== "function") {
+    return outcome;
+  }
+
+  const latestOp = getOfflineSyncQueue(operationScope).tickets.get(key.ticketId);
+  if (!latestOp || latestOp.phase !== "local_finalize_pending" || !latestOp.operationId) {
+    return outcome;
+  }
+
+  const reason = (outcome.kind === "remote_committed" ? outcome.message : undefined)
+    ?? currentOutcome.message
+    ?? vscode.l10n.t("Local file is unavailable or modified.");
+  const completeLabel = vscode.l10n.t("Complete without updating local file");
+  const choice = await vscode.window.showWarningMessage(
+    vscode.l10n.t(
+      "Changes are already on Redmine, but the local file could not be updated automatically ({0}). Complete sync without updating the local file?",
+      reason,
+    ),
+    { modal: true },
+    completeLabel,
+  );
+  if (choice !== completeLabel) {
+    return { kind: "cancelled" };
+  }
+  return engine.resolveLocalFinalize({
+    key,
+    operationId: latestOp.operationId,
+    operationRevision: latestOp.intentRevision ?? latestOp.revision ?? 1,
+    attemptGeneration: latestOp.attemptGeneration ?? 1,
+    context: { connectionScope: operationScope },
+  });
+};
+
 const syncUnsyncedFileAtScope = async (
   item: { syncKey: UnsyncedFileSyncKey },
   options: SyncUnsyncedFileOptions,
@@ -443,11 +503,14 @@ const syncUnsyncedFileAtScope = async (
     return !!remaining && !isAbandoned(remaining);
   };
   const pendingResult = (outcome: { kind: "commit_unknown" | "remote_committed"; message?: string; pending?: string }): SyncUnsyncedFileResult => {
-    const message = outcome.kind === "commit_unknown"
+    const baseMessage = outcome.kind === "commit_unknown"
       ? vscode.l10n.t("The Redmine write outcome is unknown. Open recovery to check before retrying.")
       : outcome.pending === "local_finalize"
         ? vscode.l10n.t("Changes are on Redmine. Resume recovery to finish updating the local file.")
         : vscode.l10n.t("The Redmine write was recorded. Resume recovery to verify the result and finish synchronization.");
+    const message = outcome.kind === "remote_committed" && outcome.pending === "local_finalize" && outcome.message
+      ? `${baseMessage} (${outcome.message})`
+      : baseMessage;
     showWarningResult(message);
     return { status: outcome.kind === "commit_unknown" ? "commit_unknown" : "recovery_pending", kind: syncKey.kind, message };
   };
@@ -492,6 +555,17 @@ const syncUnsyncedFileAtScope = async (
         if (secOutcome) {
           outcome = secOutcome;
         }
+      }
+    }
+    if (
+      previousPhase === "local_finalize_pending" &&
+      outcome.kind === "remote_committed" &&
+      outcome.pending === "local_finalize"
+    ) {
+      const finalizedOutcome = await resolveTicketLocalFinalizeInteractive(engine, syncKey, operationScope, outcome);
+      if (finalizedOutcome?.kind === "cancelled") { return cancelled(); }
+      if (finalizedOutcome) {
+        outcome = finalizedOutcome;
       }
     }
     if (outcome.kind === "commit_unknown" || outcome.kind === "remote_committed") { return pendingResult(outcome); }
