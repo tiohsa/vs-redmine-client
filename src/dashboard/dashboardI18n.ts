@@ -77,6 +77,7 @@ export interface DashboardStrings {
   syncTrayFailedTicket: string;
   // Sync states
   syncDirty: string;
+  syncEditing: string;
   syncQueued: string;
   syncRecoveryPending: string;
   syncOutcomeUnknown: string;
@@ -313,6 +314,7 @@ export const buildDashboardStrings = (): DashboardStrings => ({
   syncTrayFailedTicket: vscode.l10n.t("Ticket #{0} failed to sync"),
   // Sync states
   syncDirty: vscode.l10n.t("Unsynced changes"),
+  syncEditing: vscode.l10n.t("Editing"),
   syncQueued: vscode.l10n.t("Waiting to sync"),
   syncRecoveryPending: vscode.l10n.t("Recovery pending"),
   syncOutcomeUnknown: vscode.l10n.t("Remote outcome unknown"),

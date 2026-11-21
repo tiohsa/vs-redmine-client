@@ -146,7 +146,7 @@ function updateSyncButtonStates(){
     const value=selectedSyncing ? 'Syncing' : state.selectedTicket.syncState;
     const unsynced=!!value && value !== 'Synced';
     detailState.className='detail-sync-state '+syncBadgeClass(value)+(unsynced ? '' : ' hidden');
-    detailState.textContent=unsynced ? (value === 'Dirty' || value === 'Queued' ? STRINGS.unsyncedShort : syncLabel(value)) : '';
+    detailState.textContent=unsynced ? ticketSyncBadgeLabel(value) : '';
   }
   const syncAll = document.getElementById('sync-all-btn');
   if(syncAll){ syncAll.disabled = busy; syncAll.setAttribute('aria-busy', String(busy)); }
@@ -411,6 +411,7 @@ const SYNC_META = {
   Syncing: {label:STRINGS.syncSyncing, badge:'sync-syncing', icon:'↻'},
 };
 function syncLabel(value){ return SYNC_META[value] ? SYNC_META[value].label : value === 'Synced' ? STRINGS.synced : value === 'Draft' ? STRINGS.draft : String(value || ''); }
+function ticketSyncBadgeLabel(value){ return value === 'Dirty' ? STRINGS.syncEditing : value === 'Queued' ? STRINGS.syncQueued : syncLabel(value); }
 function syncBadgeClass(value){ return SYNC_META[value] ? SYNC_META[value].badge : ''; }
 function badge(label, className, icon){
   return '<span class="badge '+(className || '')+'"><span class="badge-icon" aria-hidden="true">'+esc(icon || '•')+'</span><span>'+esc(label)+'</span></span>';
@@ -680,7 +681,7 @@ function renderTicketRow(ticket){
   const trackerCls=trackerAccentClass(ticket.trackerName);
   const trackerBar='<span class="ticket-tracker-bar" aria-hidden="true"'+(ticket.trackerName ? ' title="'+esc(STRINGS.sortTracker+': '+ticket.trackerName)+'"' : '')+'></span>';
   const status=state.settings.showStatus !== false && ticket.statusName ? '<span class="ticket-attribute status-pill '+statusPillClass(ticket.statusName)+'">'+esc(ticket.statusName)+'</span>' : '';
-  const unsyncedInline=unsynced && ticket.syncState !== 'Draft' ? '<span class="unsynced-inline-badge" title="'+esc(syncLabel(ticket.syncState))+'"><span class="unsynced-dot" aria-hidden="true"></span>'+esc(ticket.syncState === 'Dirty' || ticket.syncState === 'Queued' ? STRINGS.unsyncedShort : syncLabel(ticket.syncState))+'</span>' : '';
+  const unsyncedInline=unsynced && ticket.syncState !== 'Draft' ? '<span class="unsynced-inline-badge" title="'+esc(syncLabel(ticket.syncState))+'"><span class="unsynced-dot" aria-hidden="true"></span>'+esc(ticketSyncBadgeLabel(ticket.syncState))+'</span>' : '';
   const project=(!state.selectedProject || state.includeChildProjects) && ticket.projectName ? '<span class="ticket-attribute ticket-project">'+esc(ticket.projectName)+'</span>' : '';
   const assignee=hasAssignee(ticket.assigneeName) ? '<span class="ticket-meta-item ticket-meta-assignee" title="'+esc(ticket.assigneeName)+'">'+actionIcon('account')+'<span>'+esc(ticket.assigneeName)+'</span></span>' : '';
   const dueDiff=ticket.dueDate ? daysUntilDateOnly(ticket.dueDate, new Date()) : undefined;

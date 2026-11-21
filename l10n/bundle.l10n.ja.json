@@ -442,6 +442,7 @@
     "Status": "ステータス",
     "Unassigned": "未担当",
     "Unsynced changes": "未同期の変更あり",
+    "Editing": "編集中",
     "Waiting to sync": "同期待ち",
     "Sync failed": "同期失敗",
     "Conflicting changes": "競合あり",

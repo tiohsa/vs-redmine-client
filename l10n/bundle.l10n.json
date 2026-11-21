@@ -438,6 +438,7 @@
     "Status": "Status",
     "Unassigned": "Unassigned",
     "Unsynced changes": "Unsynced changes",
+    "Editing": "Editing",
     "Waiting to sync": "Waiting to sync",
     "Sync failed": "Sync failed",
     "Conflicting changes": "Conflicting changes",

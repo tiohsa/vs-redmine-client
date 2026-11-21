@@ -740,11 +740,19 @@ async function main() {
   assert.equal(await evaluate('window.messages.length'), messagesAfterReset + 1);
   assert.equal(await evaluate('window.messages.at(-1).type'), 'ticket.syncSelected');
   await evaluate(`window.dispatchEvent(new MessageEvent('message',{data:{type:'operation.success',requestId:window.messages.at(-1).requestId,message:'完了'}}))`);
-  for (const [syncState, label] of [['Synced', ''], ['Draft', strings.draft], ['Dirty', strings.unsyncedShort], ['Queued', strings.unsyncedShort], ['Syncing', strings.syncSyncing], ['Failed', strings.syncFailed], ['Conflict', strings.syncConflict], ['RecoveryPending', strings.syncRecoveryPending], ['CommitUnknown', strings.syncOutcomeUnknown]]) {
+  for (const [syncState, label] of [['Synced', ''], ['Draft', strings.draft], ['Dirty', strings.syncEditing], ['Queued', strings.syncQueued], ['Syncing', strings.syncSyncing], ['Failed', strings.syncFailed], ['Conflict', strings.syncConflict], ['RecoveryPending', strings.syncRecoveryPending], ['CommitUnknown', strings.syncOutcomeUnknown]]) {
     state.selectedTicket.syncState = syncState;
+    if (syncState === 'Dirty' || syncState === 'Queued' || syncState === 'Synced') {
+      state.tickets[0].syncState = syncState;
+    }
     await push();
     assert.equal(await evaluate(`document.getElementById('detail-sync-state').textContent`), label);
     assert.equal(await evaluate(`document.getElementById('detail-sync-btn').disabled`), syncState === 'Syncing');
+    if (syncState === 'Dirty' || syncState === 'Queued') {
+      assert.equal(await evaluate(`document.querySelector('.ticket-row[data-id="${state.tickets[0].id}"] .unsynced-inline-badge')?.textContent`), label);
+    } else if (syncState === 'Synced') {
+      assert.equal(await evaluate(`document.querySelector('.ticket-row[data-id="${state.tickets[0].id}"] .unsynced-inline-badge')`), null);
+    }
   }
 
   // 手動レイアウトは画面幅より優先され、Webview state に保持される。
