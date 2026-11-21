@@ -41,6 +41,24 @@ suite("Dashboard の表示と操作", () => {
     assert.ok(dashboardStyles.includes("@keyframes dashboard-spin"));
   });
 
+  test("詳細コメント一覧が余白なし・全幅・上下境界線リスト用 CSS を持つ", () => {
+    const timelineStart = dashboardStyles.indexOf("/* Comments section header & timeline */");
+    assert.ok(timelineStart >= 0);
+    const timelineCss = dashboardStyles.slice(timelineStart);
+    assert.ok(timelineCss.includes("padding: 0;"));
+    assert.ok(timelineCss.includes("#detail-comments .state-msg"));
+    assert.ok(timelineCss.includes("padding: 12px 10px;"));
+    assert.ok(timelineCss.includes("#detail-comments .comment-list"));
+    assert.ok(timelineCss.includes("gap: 0;"));
+    assert.ok(timelineCss.includes("padding-left: 0;"));
+    assert.ok(timelineCss.includes("border-left: 0;"));
+    assert.ok(timelineCss.includes("border: 0;"));
+    assert.ok(timelineCss.includes("border-bottom: 1px solid var(--app-border-subtle);"));
+    assert.ok(timelineCss.includes("border-radius: 0;"));
+    assert.ok(timelineCss.includes(".comment-card.is-editable:hover"));
+    assert.ok(timelineCss.includes("overflow-wrap: anywhere;"));
+  });
+
   test("コンパクトモード・高優先度フィルタ・キーボード操作・150msデバウンス・新規下書き行を実装する", () => {
     assert.ok(dashboardWebviewScript.includes("let compactMode = persistedUiState.compactMode === true;"));
     assert.ok(dashboardWebviewScript.includes("view.toggleCompactMode"));

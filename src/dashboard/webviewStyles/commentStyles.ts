@@ -67,9 +67,16 @@ export const commentStyles = {
 }
 #detail-comments {
   flex: 1 1 auto;
+  min-width: 0;
   min-height: 0;
   overflow-y: auto;
-  padding: 8px 10px 12px;
+  overflow-x: hidden;
+  padding: 0;
+}
+#detail-comments .state-msg {
+  min-width: 0;
+  padding: 12px 10px;
+  overflow-wrap: anywhere;
 }
 #add-comment-btn {
   min-height: 24px;
@@ -83,26 +90,34 @@ export const commentStyles = {
   height: 26px;
   padding: 0;
 }
+#detail-comments .comment-list,
 .comment-timeline {
   position: relative;
   display: flex;
   flex-direction: column;
-  gap: 8px;
-  padding-left: 12px;
-  border-left: 2px solid var(--app-border-subtle);
+  gap: 0;
+  min-width: 0;
+  padding-left: 0;
+  border-left: 0;
 }
+#detail-comments .comment-card,
+.comment-timeline .comment-card,
 .comment-card {
   display: flex;
   flex-direction: column;
   gap: 4px;
+  min-width: 0;
   padding: 8px 10px;
-  border: 1px solid var(--app-border-subtle);
-  border-radius: var(--app-radius-sm);
+  border: 0;
+  border-bottom: 1px solid var(--app-border-subtle);
+  border-radius: 0;
   background: var(--app-surface);
 }
 .comment-card.is-editable {
   cursor: pointer;
 }
+#detail-comments .comment-card.is-editable:hover,
+#detail-comments .comment-card.is-editable:focus-visible,
 .comment-card.is-editable:hover,
 .comment-card.is-editable:focus-visible {
   border-color: var(--vscode-focusBorder, var(--app-focus));
@@ -167,6 +182,7 @@ export const commentStyles = {
 }
 .comment-body {
   display: block;
+  min-width: 0;
   overflow: visible;
   font-size: var(--app-font-body);
   line-height: 1.45;
