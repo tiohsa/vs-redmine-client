@@ -686,6 +686,7 @@ export class TicketUpdateHandler implements OperationHandler<TicketUpdateIntent,
       metadata,
       remoteUpdatedAt,
       context.connectionScope,
+      detail.ticket,
     );
 
     const documentUri = operation.documentUri ?? operation.intent?.documentUri;
