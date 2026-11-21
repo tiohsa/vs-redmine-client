@@ -42,6 +42,27 @@ suite("Dashboard の表示と操作", () => {
     assert.ok(dashboardStyles.includes("@keyframes dashboard-spin"));
   });
 
+  test("選択行ハイライトが VS Code 選択色とフォーカス色の混色・High Contrast・Forced Colors を備える", () => {
+    assert.ok(
+      dashboardStyles.includes(
+        "color-mix(in oklab, var(--vscode-list-inactiveSelectionBackground, var(--app-surface-hover)) 86%, var(--app-focus))",
+      ),
+    );
+    assert.ok(
+      dashboardStyles.includes(
+        "color-mix(in oklab, var(--vscode-list-activeSelectionBackground, var(--app-surface-hover)) 78%, var(--app-focus))",
+      ),
+    );
+    assert.ok(dashboardStyles.includes("body.vscode-high-contrast .ticket-row.selected"));
+    assert.ok(dashboardStyles.includes("body.vscode-high-contrast:focus-within .ticket-row.selected"));
+    assert.ok(dashboardStyles.includes("body.vscode-high-contrast-light .ticket-row.selected"));
+    const forcedColorsStart = dashboardStyles.indexOf("@media (forced-colors: active)");
+    assert.ok(forcedColorsStart >= 0);
+    const forcedColorsCss = dashboardStyles.slice(forcedColorsStart);
+    assert.ok(forcedColorsCss.includes(".ticket-row.selected"));
+    assert.ok(forcedColorsCss.includes("Highlight"));
+  });
+
   test("詳細コメント一覧が余白なし・全幅・上下境界線リスト用 CSS を持つ", () => {
     const timelineStart = dashboardStyles.indexOf("/* Comments section header & timeline */");
     assert.ok(timelineStart >= 0);

@@ -1,8 +1,17 @@
 export const accessibilityStyles = {
   selectedTicketContrast: String.raw`body.vscode-high-contrast .ticket-row.selected,
-body.vscode-high-contrast-light .ticket-row.selected {
+body.vscode-high-contrast .ticket-row.is-unsynced.selected,
+body.vscode-high-contrast-light .ticket-row.selected,
+body.vscode-high-contrast-light .ticket-row.is-unsynced.selected {
+  background-color: var(--vscode-list-inactiveSelectionBackground, var(--app-selected));
   outline: 1px solid var(--vscode-contrastBorder, var(--app-focus));
   outline-offset: -1px;
+}
+body.vscode-high-contrast:focus-within .ticket-row.selected,
+body.vscode-high-contrast:focus-within .ticket-row.is-unsynced.selected,
+body.vscode-high-contrast-light:focus-within .ticket-row.selected,
+body.vscode-high-contrast-light:focus-within .ticket-row.is-unsynced.selected {
+  background-color: var(--vscode-list-activeSelectionBackground, var(--app-selected));
 }
 
 `,
@@ -22,6 +31,10 @@ body.vscode-high-contrast-light .ticket-row.selected {
 @media (forced-colors: active) {
   .tab.active {
     border-bottom: 3px solid Highlight;
+  }
+  .ticket-row.selected {
+    outline: 2px solid Highlight;
+    outline-offset: -2px;
   }
 }
 `,

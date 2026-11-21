@@ -141,6 +141,265 @@ async function checkLoadMoreState() {
   // 長い一覧から戻した際の scroll イベントが、次の picker 操作へ残らないよう待つ。
   await evaluate(`new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)))`);
 }
+async function checkTicketSelectionHighlight() {
+  const originalState = structuredClone(state);
+  const originalBodyClass = await evaluate(`document.body.className`);
+  const originalCompact = await evaluate(`document.getElementById('ticket-list').classList.contains('is-compact')`);
+  const tokenNames = [
+    '--vscode-list-hoverBackground',
+    '--vscode-list-inactiveSelectionBackground',
+    '--vscode-list-activeSelectionBackground',
+    '--vscode-list-activeSelectionForeground',
+  ];
+  await evaluate(`(() => {
+    if (window.__selectionColorHelper) return;
+    const canvas = document.createElement('canvas');
+    canvas.width = 1;
+    canvas.height = 1;
+    const ctx = canvas.getContext('2d');
+    const parse = (cssColor) => {
+      ctx.clearRect(0, 0, 1, 1);
+      ctx.fillStyle = 'rgba(0, 0, 0, 0)';
+      ctx.fillStyle = cssColor;
+      ctx.fillRect(0, 0, 1, 1);
+      const [r, g, b, a] = ctx.getImageData(0, 0, 1, 1).data;
+      return { r, g, b, a };
+    };
+    const over = (fg, bg) => {
+      const t = fg.a / 255;
+      return {
+        r: Math.round(fg.r * t + bg.r * (1 - t)),
+        g: Math.round(fg.g * t + bg.g * (1 - t)),
+        b: Math.round(fg.b * t + bg.b * (1 - t)),
+        a: 255,
+      };
+    };
+    const linear = (v) => { const s = v / 255; return s <= 0.03928 ? s / 12.92 : ((s + 0.055) / 1.055) ** 2.4; };
+    const luminance = (c) => 0.2126 * linear(c.r) + 0.7152 * linear(c.g) + 0.0722 * linear(c.b);
+    const contrast = (a, b) => { const la = luminance(a), lb = luminance(b); return (Math.max(la, lb) + 0.05) / (Math.min(la, lb) + 0.05); };
+    const distance = (a, b) => Math.hypot(a.r - b.r, a.g - b.g, a.b - b.b);
+    const key = (c) => c.r + ',' + c.g + ',' + c.b + ',' + c.a;
+    window.__selectionColorHelper = { parse, over, contrast, distance, key };
+  })()`);
+
+  const setTokens = async (tokens) => {
+    await evaluate(`(() => {
+      const root = document.documentElement.style;
+      for (const name of ${JSON.stringify(tokenNames)}) {
+        const value = ${JSON.stringify(tokens)}[name];
+        if (value === undefined) root.removeProperty(name);
+        else root.setProperty(name, value);
+      }
+    })()`);
+  };
+
+  const measureSelection = async (selector) => evaluate(`(() => {
+    const helper = window.__selectionColorHelper;
+    const scroll = document.getElementById('ticket-scroll');
+    const row = document.querySelector(${JSON.stringify(selector)});
+    const subject = row.querySelector('.ticket-subject');
+    const scrollBg = helper.parse(getComputedStyle(scroll).backgroundColor);
+    const rawRowBg = helper.parse(getComputedStyle(row).backgroundColor);
+    const resolvedRowBg = helper.over(rawRowBg, scrollBg);
+    const subjectColor = helper.parse(getComputedStyle(subject).color);
+    return {
+      focusWithin: document.querySelector('body:focus-within') !== null,
+      rawAlpha: rawRowBg.a,
+      bgKey: helper.key(resolvedRowBg),
+      scrollBgKey: helper.key(scrollBg),
+      distanceFromScroll: helper.distance(resolvedRowBg, scrollBg),
+      subjectContrast: helper.contrast(subjectColor, resolvedRowBg),
+      outlineStyle: getComputedStyle(row).outlineStyle,
+    };
+  })()`);
+
+  try {
+    await call('Emulation.setDeviceMetricsOverride', { width: 440, height: 900, deviceScaleFactor: 1, mobile: false });
+    await evaluate(`document.getElementById('tab-tickets').click()`);
+    state.selectedProject = { id: 1, name: '検証プロジェクト' };
+    state.projects = [{ id: 1, name: '検証プロジェクト', level: 0 }];
+    state.metadataOptions.statuses = [{ id: 1, name: '進行中', isClosed: false }];
+    state.draftTickets = [{
+      queueId: 'sel-draft',
+      documentUri: 'file:///tmp/selection-draft.md',
+      subject: '選択確認ドラフト',
+      projectId: 1,
+      trackerName: 'Bug',
+      statusName: '進行中',
+      priorityName: 'Normal',
+      syncState: 'Draft',
+    }];
+    state.tickets = [
+      {
+        id: 510,
+        subject: '通常選択確認チケット',
+        level: 0,
+        statusId: 1,
+        statusName: '進行中',
+        syncState: 'Synced',
+        children: [{
+          id: 511,
+          subject: '子チケット選択確認',
+          level: 1,
+          statusId: 1,
+          statusName: '進行中',
+          syncState: 'Synced',
+          children: [],
+        }],
+      },
+      {
+        id: 512,
+        subject: '未同期選択確認チケット',
+        level: 0,
+        statusId: 1,
+        statusName: '進行中',
+        syncState: 'Dirty',
+        children: [],
+      },
+    ];
+    state.loadedTicketCount = 3;
+    state.totalTicketCount = 3;
+    state.selectedTicketId = 510;
+    state.selectedTicket = { ...state.tickets[0], projectName: '検証プロジェクト' };
+    await push();
+
+    const themedCases = [
+      {
+        theme: 'vscode-light',
+        tokens: {
+          '--vscode-list-hoverBackground': '#e8e8e8',
+          '--vscode-list-inactiveSelectionBackground': '#e4e6f1',
+          '--vscode-list-activeSelectionBackground': '#0060c0',
+          '--vscode-list-activeSelectionForeground': '#ffffff',
+        },
+      },
+      {
+        theme: 'vscode-dark',
+        tokens: {
+          '--vscode-list-hoverBackground': '#2a2d2e',
+          '--vscode-list-inactiveSelectionBackground': '#37373d',
+          '--vscode-list-activeSelectionBackground': '#094771',
+          '--vscode-list-activeSelectionForeground': '#ffffff',
+        },
+      },
+    ];
+
+    for (const { theme, tokens } of themedCases) {
+      await evaluate(`document.body.className=${JSON.stringify(theme)}`);
+      await setTokens(tokens);
+      await evaluate(`document.activeElement?.blur?.()`);
+      const inactive = await measureSelection('.ticket-row[data-id="510"].selected');
+      assert.equal(inactive.focusWithin, false, `${theme}: inactive focusWithin`);
+      assert.ok(inactive.rawAlpha > 0, `${theme}: inactive alpha`);
+      assert.notEqual(inactive.bgKey, inactive.scrollBgKey, `${theme}: inactive differs from list`);
+      const baseline = await evaluate(`(() => {
+        const helper = window.__selectionColorHelper;
+        const scrollBg = helper.parse(getComputedStyle(document.getElementById('ticket-scroll')).backgroundColor);
+        const hover = helper.parse(${JSON.stringify(tokens['--vscode-list-hoverBackground'])});
+        const rawInactive = helper.parse(${JSON.stringify(tokens['--vscode-list-inactiveSelectionBackground'])});
+        return {
+          hoverKey: helper.key(hover),
+          rawInactiveKey: helper.key(rawInactive),
+          rawInactiveDistance: helper.distance(rawInactive, scrollBg),
+        };
+      })()`);
+      assert.notEqual(inactive.bgKey, baseline.hoverKey, `${theme}: inactive differs from hover`);
+      assert.notEqual(inactive.bgKey, baseline.rawInactiveKey, `${theme}: inactive differs from raw token`);
+      assert.ok(inactive.distanceFromScroll > baseline.rawInactiveDistance, `${theme}: inactive strengthens contrast`);
+      assert.ok(inactive.subjectContrast >= 4.5, `${theme}: inactive contrast ${inactive.subjectContrast}`);
+
+      await evaluate(`document.querySelector('.ticket-row[data-id="510"]').focus()`);
+      const active = await measureSelection('.ticket-row[data-id="510"].selected');
+      assert.equal(active.focusWithin, true, `${theme}: active focusWithin`);
+      assert.notEqual(active.bgKey, active.scrollBgKey, `${theme}: active differs from list`);
+      assert.notEqual(active.bgKey, inactive.bgKey, `${theme}: active differs from inactive`);
+      assert.ok(active.distanceFromScroll >= inactive.distanceFromScroll, `${theme}: active >= inactive`);
+      assert.ok(active.subjectContrast >= 4.5, `${theme}: active contrast ${active.subjectContrast}`);
+
+      // 未定義トークン時のフォールバック検証
+      await setTokens({
+        '--vscode-list-hoverBackground': 'initial',
+        '--vscode-list-inactiveSelectionBackground': 'initial',
+        '--vscode-list-activeSelectionBackground': 'initial',
+        '--vscode-list-activeSelectionForeground': 'initial',
+      });
+      await evaluate(`document.activeElement?.blur?.()`);
+      const fallbackInactive = await measureSelection('.ticket-row[data-id="510"].selected');
+      assert.equal(fallbackInactive.focusWithin, false);
+      assert.ok(fallbackInactive.rawAlpha > 0, `${theme}: fallback inactive alpha`);
+      assert.notEqual(fallbackInactive.bgKey, fallbackInactive.scrollBgKey, `${theme}: fallback inactive differs from list`);
+      assert.ok(fallbackInactive.subjectContrast >= 4.5, `${theme}: fallback inactive contrast ${fallbackInactive.subjectContrast}`);
+
+      await evaluate(`document.querySelector('.ticket-row[data-id="510"]').focus()`);
+      const fallbackActive = await measureSelection('.ticket-row[data-id="510"].selected');
+      assert.equal(fallbackActive.focusWithin, true);
+      assert.ok(fallbackActive.rawAlpha > 0, `${theme}: fallback active alpha`);
+      assert.notEqual(fallbackActive.bgKey, fallbackActive.scrollBgKey, `${theme}: fallback active differs from list`);
+      assert.notEqual(fallbackActive.bgKey, fallbackInactive.bgKey, `${theme}: fallback active differs from inactive`);
+      assert.ok(fallbackActive.subjectContrast >= 4.5, `${theme}: fallback active contrast ${fallbackActive.subjectContrast}`);
+    }
+
+    // 全行種別・コンパクトモードの一貫性
+    await evaluate(`document.body.className='vscode-dark'`);
+    await setTokens(themedCases[1].tokens);
+    for (const compact of [false, true]) {
+      await evaluate(`document.getElementById('ticket-list').classList.toggle('is-compact', ${compact})`);
+      state.selectedTicketId = 510;
+      state.selectedTicket = { ...state.tickets[0], projectName: '検証プロジェクト' };
+      await push();
+      await evaluate(`document.activeElement?.blur?.()`);
+      const normalInactive = await measureSelection('.ticket-row[data-id="510"].selected');
+      const unsyncedUnselected = await measureSelection('.ticket-row[data-id="512"]');
+      await evaluate(`document.querySelector('.ticket-row[data-id="510"]').focus()`);
+      const normalActive = await measureSelection('.ticket-row[data-id="510"].selected');
+
+      for (const ticket of [state.tickets[0].children[0], state.tickets[1]]) {
+        state.selectedTicketId = ticket.id;
+        state.selectedTicket = { ...ticket, projectName: '検証プロジェクト' };
+        await push();
+        await evaluate(`document.activeElement?.blur?.()`);
+        const rowInactive = await measureSelection(`.ticket-row[data-id="${ticket.id}"].selected`);
+        assert.equal(rowInactive.bgKey, normalInactive.bgKey, `compact=${compact} id=${ticket.id} inactive`);
+        assert.notEqual(rowInactive.bgKey, unsyncedUnselected.bgKey, `compact=${compact} id=${ticket.id} != unsynced`);
+        await evaluate(`document.querySelector('.ticket-row[data-id="${ticket.id}"]').focus()`);
+        const rowActive = await measureSelection(`.ticket-row[data-id="${ticket.id}"].selected`);
+        assert.equal(rowActive.bgKey, normalActive.bgKey, `compact=${compact} id=${ticket.id} active`);
+      }
+
+      await evaluate(`document.querySelector('.ticket-row.is-draft').click()`);
+      await evaluate(`document.activeElement?.blur?.()`);
+      const draftInactive = await measureSelection('.ticket-row.is-draft.selected');
+      assert.equal(draftInactive.bgKey, normalInactive.bgKey, `compact=${compact} draft inactive`);
+      assert.notEqual(draftInactive.bgKey, unsyncedUnselected.bgKey, `compact=${compact} draft != unsynced`);
+      await evaluate(`document.querySelector('.ticket-row.is-draft').focus()`);
+      const draftActive = await measureSelection('.ticket-row.is-draft.selected');
+      assert.equal(draftActive.bgKey, normalActive.bgKey, `compact=${compact} draft active`);
+    }
+
+    // High Contrast 維持
+    await evaluate(`document.getElementById('ticket-list').classList.remove('is-compact')`);
+    state.selectedTicketId = 510;
+    state.selectedTicket = { ...state.tickets[0], projectName: '検証プロジェクト' };
+    await push();
+    await setTokens({});
+    for (const hcTheme of ['vscode-high-contrast', 'vscode-high-contrast-light']) {
+      await evaluate(`document.body.className=${JSON.stringify(hcTheme)}`);
+      await evaluate(`document.activeElement?.blur?.()`);
+      const hcInactive = await measureSelection('.ticket-row[data-id="510"].selected');
+      assert.notEqual(hcInactive.outlineStyle, 'none', `${hcTheme}: outline`);
+      assert.ok(hcInactive.rawAlpha > 0, `${hcTheme}: alpha`);
+    }
+  } finally {
+    await setTokens({});
+    await evaluate(`document.body.className=${JSON.stringify(originalBodyClass)}`);
+    await evaluate(`document.getElementById('ticket-list').classList.toggle('is-compact', ${originalCompact})`);
+    for (const k of Object.keys(state)) delete state[k];
+    Object.assign(state, originalState);
+    await push();
+    await evaluate(`document.activeElement?.blur?.()`);
+    await evaluate(`new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)))`);
+  }
+}
 async function main() {
   const url = await new Promise((resolve, reject) => {
     let output = '';
@@ -1266,7 +1525,9 @@ async function main() {
   assert.deepEqual(await evaluate(`window.messages.find(m=>m.type==='settings.updateGeneral'&&m.patch&&'followActiveEditor' in m.patch)?.patch`), { followActiveEditor: true });
   await evaluate(`window.messages.length=0;document.getElementById('open-settings-json-btn').click()`);
   assert.equal(await evaluate(`window.messages.at(-1).type`), 'settings.openJson');
+  await checkTicketSelectionHighlight();
   assert.deepEqual(errors, []);
+  assert.deepEqual(await evaluate('window.cspViolations'), [], 'Dashboard は CSP 違反を発生させない');
   console.log('PASS: Detail操作/状態9種/読み取り専用preview、Metadata一括適用/キャンセル/失敗/接続切替、同期二重送信防止/成功/失敗、日本語/IME/入力待機、番号・本文検索の要求/範囲切替、検索中の新規/子チケット入力保持、追加取得の一覧/スクロール/フォーカス保持/再試行、一覧の情報集約/表示件数、Settings セクション/編集/キーボード操作、折りたたみ維持、子チケット検索、メニューのキーボード操作/表示領域、タブ横断の新規作成、入力/フォーカス維持、下書き前の同期抑止、ローディング/エラー再試行、7画面幅、4テーマ');
   console.log('検証用 HTML: ' + fixture);
   console.log('Project picker screenshots: ' + path.join(directory, 'project-picker-search-440.png') + ', ' + path.join(directory, 'project-picker-search-320.png') + ', ' + path.join(directory, 'project-picker-search-440-dark.png'));

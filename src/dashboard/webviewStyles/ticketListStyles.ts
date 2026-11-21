@@ -109,11 +109,11 @@ export const ticketListStyles = {
   background-color: color-mix(in srgb, var(--vscode-gitDecoration-modifiedResourceForeground, var(--app-warning)) 12%, var(--vscode-list-hoverBackground, var(--app-surface-hover)));
 }
 .ticket-row.selected, .ticket-row.is-unsynced.selected {
-  background-color: var(--vscode-list-inactiveSelectionBackground, var(--app-selected));
+  background-color: color-mix(in oklab, var(--vscode-list-inactiveSelectionBackground, var(--app-surface-hover)) 86%, var(--app-focus));
   color: var(--vscode-foreground, var(--app-text));
 }
 body:focus-within .ticket-row.selected, body:focus-within .ticket-row.is-unsynced.selected {
-  background-color: var(--vscode-list-activeSelectionBackground, var(--app-selected));
+  background-color: color-mix(in oklab, var(--vscode-list-activeSelectionBackground, var(--app-surface-hover)) 78%, var(--app-focus));
   color: var(--vscode-list-activeSelectionForeground, var(--app-selected-fg));
 }
 .ticket-row.selected::before { content: none; }
