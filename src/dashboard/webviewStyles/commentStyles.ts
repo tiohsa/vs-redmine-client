@@ -105,13 +105,16 @@ export const commentStyles = {
 .comment-card {
   display: flex;
   flex-direction: column;
+  flex: 0 0 auto;
   gap: 4px;
   min-width: 0;
+  height: 80px;
   padding: 8px 10px;
   border: 0;
   border-bottom: 1px solid var(--app-border-subtle);
   border-radius: 0;
   background: var(--app-surface);
+  overflow: hidden;
 }
 .comment-card.is-editable {
   cursor: pointer;
@@ -125,6 +128,7 @@ export const commentStyles = {
 }
 .comment-header {
   display: flex;
+  flex: 0 0 auto;
   align-items: center;
   justify-content: space-between;
   gap: 6px;
@@ -182,8 +186,11 @@ export const commentStyles = {
 }
 .comment-body {
   display: block;
+  flex: 1 1 auto;
   min-width: 0;
-  overflow: visible;
+  min-height: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
   font-size: var(--app-font-body);
   line-height: 1.45;
   white-space: pre-wrap;

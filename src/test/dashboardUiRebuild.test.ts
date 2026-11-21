@@ -56,6 +56,9 @@ suite("Dashboard の表示と操作", () => {
     assert.ok(timelineCss.includes("border-bottom: 1px solid var(--app-border-subtle);"));
     assert.ok(timelineCss.includes("border-radius: 0;"));
     assert.ok(timelineCss.includes(".comment-card.is-editable:hover"));
+    assert.ok(timelineCss.includes("height: 80px;"));
+    assert.ok(timelineCss.includes("overflow-y: auto;"));
+    assert.ok(timelineCss.includes("overflow-x: hidden;"));
     assert.ok(timelineCss.includes("overflow-wrap: anywhere;"));
   });
 

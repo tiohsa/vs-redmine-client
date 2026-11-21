@@ -690,6 +690,33 @@ async function main() {
   assert.equal(await evaluate(`document.querySelector('.comment-timeline') !== null`), true);
   await evaluate(`document.querySelector('.comment-card.is-editable').click()`);
   assert.deepEqual(await evaluate(`({type:window.messages.at(-1).type,ticketId:window.messages.at(-1).ticketId,commentId:window.messages.at(-1).commentId})`), { type: 'comment.edit', ticketId: 10, commentId: 31 });
+  state.comments.items = [
+    { id: 31, authorName: 'Taro', body: Array.from({ length: 12 }, (_, i) => `長文行${i + 1}`).join('\n'), editableByCurrentUser: true },
+    { id: 32, authorName: 'Hanako', body: '短いコメント', editableByCurrentUser: false },
+  ];
+  await push();
+  const commentLayout = await evaluate(`(() => {
+    const cards = Array.from(document.querySelectorAll('#comments-list .comment-card'));
+    const longBody = cards[0].querySelector('.comment-body');
+    const shortBody = cards[1].querySelector('.comment-body');
+    longBody.scrollTop = 20;
+    return {
+      longCardHeight: cards[0].getBoundingClientRect().height,
+      shortCardHeight: cards[1].getBoundingClientRect().height,
+      longScrollable: longBody.scrollHeight > longBody.clientHeight,
+      longOverflowY: getComputedStyle(longBody).overflowY,
+      longScrollTop: longBody.scrollTop,
+      shortOverflowY: getComputedStyle(shortBody).overflowY,
+      shortScrollable: shortBody.scrollHeight > shortBody.clientHeight,
+    };
+  })()`);
+  assert.equal(commentLayout.longCardHeight, 80);
+  assert.equal(commentLayout.shortCardHeight, 80);
+  assert.equal(commentLayout.longScrollable, true);
+  assert.equal(commentLayout.longOverflowY, 'auto');
+  assert.ok(commentLayout.longScrollTop > 0);
+  assert.equal(commentLayout.shortOverflowY, 'auto');
+  assert.equal(commentLayout.shortScrollable, false);
   for (const [id, type] of [['add-comment-btn', 'comment.add'], ['reload-comments-btn', 'comment.reload'], ['detail-browser-btn', 'ticket.openBrowser']]) {
     await evaluate(`document.getElementById('${id}').click()`);
     assert.deepEqual(await evaluate(`({type:window.messages.at(-1).type,ticketId:window.messages.at(-1).ticketId})`), { type, ticketId: 10 });
