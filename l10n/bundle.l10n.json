@@ -466,5 +466,10 @@
     "Deleted {0} abandoned sync records.": "Deleted {0} abandoned sync records.",
     "Could not delete the records. All records were retained.": "Could not delete the records. All records were retained.",
     "The abandoned records changed. Nothing was deleted. Refresh and try again.": "The abandoned records changed. Nothing was deleted. Refresh and try again.",
-    "Resize comment panel height": "Resize comment panel height"
+    "Resize comment panel height": "Resize comment panel height",
+    "Sync state": "Sync state",
+    "All": "All",
+    "Editing (existing tickets only)": "Editing (existing tickets only)",
+    "Editing (including #NEW drafts)": "Editing (including #NEW drafts)",
+    "All unsynced": "All unsynced"
 }

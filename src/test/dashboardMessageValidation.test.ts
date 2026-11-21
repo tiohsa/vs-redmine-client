@@ -252,6 +252,19 @@ suite("Dashboard メッセージバリデーション", () => {
     assert.strictEqual(r.ok, true);
   });
 
+  test("settings.update: syncFilter は許可値のみ受け入れ、不正値は拒否する", () => {
+    for (const syncFilter of ["all", "dirty", "editing", "unsynced"]) {
+      assert.strictEqual(
+        validateDashboardMessage({ type: "settings.update", requestId: "r", patch: { filters: { syncFilter } } }).ok,
+        true,
+      );
+    }
+    assert.strictEqual(
+      validateDashboardMessage({ type: "settings.update", requestId: "r", patch: { filters: { syncFilter: "invalid" } } }).ok,
+      false,
+    );
+  });
+
   test("settings.update: 正常", () => {
     const r = validateDashboardMessage({ type: "settings.update", requestId: "r", patch: {} });
     assert.strictEqual(r.ok, true);

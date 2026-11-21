@@ -127,6 +127,7 @@ export const syncTicketDraft = async (
       remoteContent.metadata,
       remoteDetail.ticket.updatedAt ?? draft.lastKnownRemoteUpdatedAt,
       input.operationScope,
+      remoteDetail.ticket,
     );
     if (input.editor) {
       await applyEditorContent(
@@ -233,6 +234,7 @@ export const syncTicketDraft = async (
   }
 
   let updatedAt = draft.lastKnownRemoteUpdatedAt;
+  let syncedTicket = remoteDetail?.ticket;
   let savedContent = buildTicketEditorContent({
     subject,
     description,
@@ -245,6 +247,7 @@ export const syncTicketDraft = async (
   if (Object.keys(changes).length > 0 || children.length > 0) {
     try {
       const detail = await deps.getIssueDetail(input.ticketId);
+      syncedTicket = detail.ticket;
       updatedAt = detail.ticket.updatedAt ?? updatedAt;
       const remoteContent = editorContentFromTicket(detail.ticket, parsed);
       savedContent = buildTicketEditorContent(remoteContent);
@@ -264,6 +267,7 @@ export const syncTicketDraft = async (
     clearedMetadata,
     updatedAt,
     input.operationScope,
+    syncedTicket,
   );
   if (input.editor) {
     await applyEditorContent(input.editor, savedContent);
@@ -300,6 +304,7 @@ export const reloadTicketEditor = async (
       metadata,
       detail.ticket.updatedAt,
       input.operationScope,
+      detail.ticket,
     );
     return buildResult("success", "Reloaded from Redmine.");
   } catch (error) {

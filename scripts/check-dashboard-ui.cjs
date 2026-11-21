@@ -1111,6 +1111,8 @@ async function main() {
   state.tickets[0].statusId = 1;
   await push();
   assert.equal(await evaluate(`document.querySelector('[data-quick-filter="unsynced"]') === null`), true);
+  assert.equal(await evaluate(`document.querySelector('[data-quick-filter="editing"]') !== null`), true);
+  assert.equal(await evaluate(`document.querySelector('[data-quick-filter="editing"]').getAttribute('aria-pressed')`), 'false');
   assert.equal(await evaluate(`document.querySelector('[data-quick-filter="open"]').getAttribute('aria-pressed')`), 'true');
   await evaluate(`document.querySelector('[data-quick-filter="mine"]').click()`);
   assert.equal(await evaluate(`document.querySelector('[data-quick-filter="mine"]').getAttribute('aria-pressed')`), 'true');

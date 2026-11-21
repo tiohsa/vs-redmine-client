@@ -4,6 +4,10 @@ import {
   onOfflineSyncQueueChanged,
   sameDocumentIdentity,
 } from "../views/offlineSyncStore";
+import {
+  onTicketDraftSaved,
+  type TicketDraftSavedEvent,
+} from "../views/ticketDraftStore";
 import { DashboardProjectService } from "./services/DashboardProjectService";
 import { DashboardTicketService } from "./services/DashboardTicketService";
 import { DashboardCommentService } from "./services/DashboardCommentService";
@@ -217,6 +221,7 @@ export class DashboardController {
     });
     this.disposables.push(
       { dispose: onOfflineSyncQueueChanged(() => this.refreshUnsynced()) },
+      { dispose: onTicketDraftSaved((event) => this.handleTicketDraftSaved(event)) },
     );
   }
 
@@ -662,6 +667,65 @@ export class DashboardController {
     if (selectedTicketId !== undefined) {
       this.commentService.refreshPresentation(selectedTicketId);
     }
+  }
+
+  private handleTicketDraftSaved(event: TicketDraftSavedEvent): void {
+    if (event.connectionScope !== getCurrentConnectionScope()) {
+      return;
+    }
+    const cached = this.cache.tickets.find((ticket) => ticket.id === event.ticketId);
+    if (!cached) {
+      return;
+    }
+    const { remoteTicket, draft } = event;
+    if (remoteTicket) {
+      cached.subject = remoteTicket.subject;
+      cached.description = remoteTicket.description;
+      cached.statusId = remoteTicket.statusId;
+      cached.statusName = remoteTicket.statusName;
+      cached.priorityId = remoteTicket.priorityId;
+      cached.priorityName = remoteTicket.priorityName;
+      cached.trackerId = remoteTicket.trackerId;
+      cached.trackerName = remoteTicket.trackerName;
+      cached.assigneeId = remoteTicket.assigneeId;
+      cached.assigneeName = remoteTicket.assigneeName;
+      cached.dueDate = remoteTicket.dueDate;
+      cached.startDate = remoteTicket.startDate;
+      cached.doneRatio = remoteTicket.doneRatio;
+      cached.updatedAt = remoteTicket.updatedAt ?? cached.updatedAt;
+      cached.parentId = remoteTicket.parentId;
+    } else {
+      const state = this.opts.store.getState();
+      const editOptions = state.editOptions?.ticketId === event.ticketId ? state.editOptions : undefined;
+      const meta = draft.baseMetadata;
+      const statuses = editOptions ? editOptions.statuses : state.metadataOptions.statuses;
+      const priorities = editOptions ? editOptions.priorities : state.metadataOptions.priorities;
+      const trackers = editOptions ? editOptions.trackers : state.metadataOptions.trackers;
+      const assignees = editOptions?.assignees ?? [];
+
+      cached.subject = draft.baseSubject;
+      cached.description = draft.baseDescription;
+      cached.statusName = meta.status || undefined;
+      cached.statusId = statuses.find((item) => item.name === meta.status)?.id;
+      cached.priorityName = meta.priority || undefined;
+      cached.priorityId = priorities.find((item) => item.name === meta.priority)?.id;
+      cached.trackerName = meta.tracker || undefined;
+      cached.trackerId = trackers.find((item) => item.name === meta.tracker)?.id;
+      cached.assigneeName = meta.assignee ? meta.assignee : undefined;
+      cached.assigneeId = meta.assignee
+        ? (meta.assignee_id ?? assignees.find((item) => item.name === meta.assignee)?.id)
+        : undefined;
+      cached.dueDate = meta.due_date ? meta.due_date : undefined;
+      cached.startDate = meta.start_date ? meta.start_date : undefined;
+      if (meta.done_ratio !== undefined) {
+        cached.doneRatio = meta.done_ratio;
+      }
+      if (meta.parent !== undefined) {
+        cached.parentId = meta.parent;
+      }
+      cached.updatedAt = draft.lastKnownRemoteUpdatedAt ?? cached.updatedAt;
+    }
+    this.refreshTicketPresentation();
   }
 
   private refreshTicketPresentation(): void {

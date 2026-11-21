@@ -26,6 +26,7 @@ const UNSYNCED_KINDS = new Set(["ticket", "newTicket", "comment"]);
 const OFFLINE_SYNC_MODES = new Set(["auto", "manual"]);
 const SORT_DIRECTIONS = new Set(["asc", "desc"]);
 const SORT_FIELDS = new Set(["priority", "status", "tracker", "assignee", "dueDate", "startDate"]);
+const SYNC_FILTERS = new Set(["all", "dirty", "editing", "unsynced"]);
 const METADATA_PATCH_FIELDS = new Set(["tracker", "priority", "status", "due_date", "start_date", "assignee"]);
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 
@@ -73,6 +74,7 @@ const validateSettingsPatch = (v: unknown): boolean => {
     if ("trackerIds" in f && !isPositiveIntArray(f["trackerIds"])) { return false; }
     if ("assigneeIds" in f && !isPositiveIntArray(f["assigneeIds"])) { return false; }
     if ("includeUnassigned" in f && !isBoolean(f["includeUnassigned"])) { return false; }
+    if ("syncFilter" in f && !SYNC_FILTERS.has(f["syncFilter"] as string)) { return false; }
   }
   if ("sort" in v) {
     const s = v["sort"];

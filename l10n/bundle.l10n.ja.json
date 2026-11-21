@@ -548,5 +548,10 @@
     "Local file is unavailable or modified.": "ローカルファイルが見つからないか、内容が変更されています。",
     "Complete without updating local file": "ローカルファイルの更新をスキップして同期を完了",
     "Changes are already on Redmine, but the local file could not be updated automatically ({0}). Complete sync without updating the local file?": "変更はすでに Redmine に反映済みですが、ローカルファイルを自動更新できませんでした（{0}）。ローカルファイルの更新をスキップして同期を完了しますか？",
-    "Resize comment panel height": "コメントパネルの高さを変更"
+    "Resize comment panel height": "コメントパネルの高さを変更",
+    "Sync state": "同期状態",
+    "All": "すべて",
+    "Editing (existing tickets only)": "編集中（既存チケットのみ）",
+    "Editing (including #NEW drafts)": "編集中（#NEW 下書きを含む）",
+    "All unsynced": "すべての未同期"
 }

@@ -319,13 +319,17 @@ export const updateTicketDraftStatusFromDocument = (
     setTicketDraftContent(ticketId, content, connectionScope);
     const nextDisplay = getTicketDraftContent(ticketId, connectionScope);
     const nextSubject = nextDisplay?.subject ?? draft.baseSubject;
+    const prevDescription = prevDisplay?.description ?? draft.baseDescription;
+    const nextDescription = nextDisplay?.description ?? draft.baseDescription;
     const nextMeta = nextDisplay?.metadata ?? draft.baseMetadata;
     displayChanged =
       prevSubject !== nextSubject ||
+      prevDescription !== nextDescription ||
       prevMeta.tracker !== nextMeta.tracker ||
       prevMeta.status !== nextMeta.status ||
       prevMeta.priority !== nextMeta.priority ||
       (prevMeta.assignee ?? "") !== (nextMeta.assignee ?? "") ||
+      (prevMeta.start_date ?? "") !== (nextMeta.start_date ?? "") ||
       (prevMeta.due_date ?? "") !== (nextMeta.due_date ?? "") ||
       (prevMeta.done_ratio ?? 0) !== (nextMeta.done_ratio ?? 0);
   } catch {

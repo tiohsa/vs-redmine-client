@@ -51,6 +51,7 @@ export interface DashboardStrings {
   quickOpen: string;
   quickOverdue: string;
   quickHighPriority: string;
+  quickEditing: string;
   quickUnsynced: string;
   clearFilters: string;
   openSettingsJson: string;
@@ -194,6 +195,11 @@ export interface DashboardStrings {
   filterIncludeUnassignedLabel: string;
   filterStatusLabel: string;
   filterStatusAria: string;
+  filterSyncStateLabel: string;
+  filterSyncAll: string;
+  filterSyncDirtyOnly: string;
+  filterSyncEditing: string;
+  filterSyncUnsynced: string;
   sectionSort: string;
   sortFieldLabel: string;
   sortDefaultOption: string;
@@ -282,6 +288,7 @@ export const buildDashboardStrings = (): DashboardStrings => ({
   quickOpen: vscode.l10n.t("Open issues"),
   quickOverdue: vscode.l10n.t("Overdue"),
   quickHighPriority: vscode.l10n.t("High priority"),
+  quickEditing: vscode.l10n.t("Editing"),
   quickUnsynced: vscode.l10n.t("Unsynced"),
   clearFilters: vscode.l10n.t("Clear filters"),
   openSettingsJson: vscode.l10n.t("Open settings.json"),
@@ -425,6 +432,11 @@ export const buildDashboardStrings = (): DashboardStrings => ({
   filterIncludeUnassignedLabel: vscode.l10n.t("Include unassigned"),
   filterStatusLabel: vscode.l10n.t("Status"),
   filterStatusAria: vscode.l10n.t("Status filter"),
+  filterSyncStateLabel: vscode.l10n.t("Sync state"),
+  filterSyncAll: vscode.l10n.t("All"),
+  filterSyncDirtyOnly: vscode.l10n.t("Editing (existing tickets only)"),
+  filterSyncEditing: vscode.l10n.t("Editing (including #NEW drafts)"),
+  filterSyncUnsynced: vscode.l10n.t("All unsynced"),
   sectionSort: vscode.l10n.t("Sort"),
   sortFieldLabel: vscode.l10n.t("Sort field"),
   sortDefaultOption: vscode.l10n.t("Default"),

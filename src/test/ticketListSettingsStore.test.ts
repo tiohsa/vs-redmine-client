@@ -86,6 +86,7 @@ suite("ticketListSettingsStore", () => {
     assert.strictEqual(s.filters.subjectQuery, "");
     assert.deepStrictEqual(s.filters.priorityIds, []);
     assert.strictEqual(s.filters.includeUnassigned, true);
+    assert.strictEqual(s.filters.syncFilter, "all");
     assert.strictEqual(s.sort.field, undefined);
     assert.strictEqual(s.sort.direction, "asc");
     assert.strictEqual(s.dueDate.showWithin7Days, true);

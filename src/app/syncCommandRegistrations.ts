@@ -86,6 +86,8 @@ export const registerSyncCommands = (
           .catch(() => undefined);
       } else if (ticketCreated) {
         ticketsPresentation.refresh();
+      } else if (withKey.syncKey.kind === "ticket") {
+        ticketsPresentation.notifyChange();
       }
     }),
   );

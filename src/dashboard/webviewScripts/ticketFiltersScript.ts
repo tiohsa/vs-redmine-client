@@ -17,6 +17,12 @@ function openFilterDialog(){
     '<label>'+esc(STRINGS.sortPriority)+'<select id="advanced-priority" multiple size="4">'+choices(options.priorities,filters.priorityIds)+'</select></label>'+
     '<label>'+esc(STRINGS.sortTracker)+'<select id="advanced-tracker" multiple size="4">'+choices(options.trackers,filters.trackerIds)+'</select></label>'+
     '<label>'+esc(STRINGS.sortAssignee)+'<select id="advanced-assignee" multiple size="4">'+choices(state.ticketFilterOptions.assignees,filters.assigneeIds)+'</select></label>'+
+    '<label>'+esc(STRINGS.filterSyncStateLabel)+'<select id="advanced-sync-filter">'
+      +'<option value="all"'+((filters.syncFilter || 'all') === 'all' ? ' selected' : '')+'>'+esc(STRINGS.filterSyncAll)+'</option>'
+      +'<option value="editing"'+(filters.syncFilter === 'editing' ? ' selected' : '')+'>'+esc(STRINGS.filterSyncEditing)+'</option>'
+      +'<option value="dirty"'+(filters.syncFilter === 'dirty' ? ' selected' : '')+'>'+esc(STRINGS.filterSyncDirtyOnly)+'</option>'
+      +'<option value="unsynced"'+(filters.syncFilter === 'unsynced' ? ' selected' : '')+'>'+esc(STRINGS.filterSyncUnsynced)+'</option>'
+    +'</select></label>'+
     '<label class="filter-check"><input id="advanced-unassigned" type="checkbox"'+(filters.includeUnassigned?' checked':'')+'>'+esc(STRINGS.filterIncludeUnassignedLabel)+'</label>';
   filterDialog.classList.remove('hidden'); document.getElementById('advanced-status').focus();
 }
@@ -33,10 +39,10 @@ filterDialog.addEventListener('keydown',function(event){
 });
 function selectedIds(id){ return Array.from(document.getElementById(id).selectedOptions).map(function(option){ return Number(option.value); }); }
 document.getElementById('filter-dialog-apply').addEventListener('click',function(){
-  req('settings.update',{patch:{filters:{subjectQuery:'', statusIds:selectedIds('advanced-status'),priorityIds:selectedIds('advanced-priority'),trackerIds:selectedIds('advanced-tracker'),assigneeIds:selectedIds('advanced-assignee'),includeUnassigned:document.getElementById('advanced-unassigned').checked}}}); closeFilterDialog();
+  req('settings.update',{patch:{filters:{subjectQuery:'', statusIds:selectedIds('advanced-status'),priorityIds:selectedIds('advanced-priority'),trackerIds:selectedIds('advanced-tracker'),assigneeIds:selectedIds('advanced-assignee'),includeUnassigned:document.getElementById('advanced-unassigned').checked,syncFilter:document.getElementById('advanced-sync-filter').value}}}); closeFilterDialog();
 });
 document.getElementById('filter-dialog-reset').addEventListener('click',function(){
-  req('settings.update',{patch:{filters:{subjectQuery:'',statusIds:[],priorityIds:[],trackerIds:[],assigneeIds:[],includeUnassigned:true}}}); closeFilterDialog();
+  req('settings.update',{patch:{filters:{subjectQuery:'',statusIds:[],priorityIds:[],trackerIds:[],assigneeIds:[],includeUnassigned:true,syncFilter:'all'}}}); closeFilterDialog();
 });
 
 `,
@@ -49,8 +55,19 @@ function isHighPriority(priorityName){
   const n=String(priorityName || '').trim().toLowerCase();
   return n === 'high' || n === 'urgent' || n === 'immediate' || n.includes('高め') || n.includes('急いで') || n.includes('今すぐ') || n.includes('緊急') || n.includes('高');
 }
+function activeSyncFilter(){
+  return state?.settings?.filters?.syncFilter || 'all';
+}
+function matchesSyncFilter(syncState, isDraft){
+  const syncFilter = activeSyncFilter();
+  if(syncFilter === 'dirty') return !isDraft && syncState === 'Dirty';
+  if(syncFilter === 'editing') return isDraft ? (syncState === 'Draft' || syncState === 'Dirty') : syncState === 'Dirty';
+  if(syncFilter === 'unsynced') return syncState !== 'Synced';
+  return true;
+}
 function hasEffectiveQuickFilters(){
-  return quickFilters.has('overdue') || quickFilters.has('high') ||
+  return quickFilters.has('overdue') || quickFilters.has('high') || quickFilters.has('editing') ||
+    activeSyncFilter() !== 'all' ||
     (quickFilters.has('mine') && quickFilterCapability('mine') === 'available') ||
     (quickFilters.has('open') && quickFilterCapability('open') === 'available');
 }
@@ -70,6 +87,8 @@ function matchesQuickFilters(ticket){
   }
   if(quickFilters.has('overdue') && (isTicketClosed(ticket) || !(daysUntilDateOnly(ticket.dueDate,new Date()) < 0))) return false;
   if(quickFilters.has('high') && !isHighPriority(ticket.priorityName)) return false;
+  if(quickFilters.has('editing') && ticket.syncState !== 'Dirty') return false;
+  if(!matchesSyncFilter(ticket.syncState, false)) return false;
   return true;
 }
 function filterTicketTree(nodes){
@@ -97,6 +116,8 @@ function matchesDraftFilters(draft){
   if(quickFilters.has('mine') && quickFilterCapability('mine') === 'available') return false;
   if(quickFilters.has('overdue') && !(daysUntilDateOnly(draft.dueDate,new Date()) < 0)) return false;
   if(quickFilters.has('high') && !isHighPriority(draft.priorityName)) return false;
+  if(quickFilters.has('editing') && draft.syncState !== 'Draft' && draft.syncState !== 'Dirty') return false;
+  if(!matchesSyncFilter(draft.syncState, true)) return false;
   const query = String(state?.ticketSearch?.query || searchQuery || '').trim().toLowerCase();
   if(query){
     const haystack = ['#new', 'new', draft.subject, draft.trackerName, draft.statusName, draft.priorityName, draft.assigneeName, draft.detail]
@@ -133,7 +154,7 @@ function renderQuickFilters(){
 function renderFilterChips(){
   if(!state) return;
   const filters=state.settings.filters;
-  const count=(filters.assigneeIds || []).length+(filters.statusIds || []).length+(filters.priorityIds || []).length+(filters.trackerIds || []).length+Number(filters.includeUnassigned === false);
+  const count=(filters.assigneeIds || []).length+(filters.statusIds || []).length+(filters.priorityIds || []).length+(filters.trackerIds || []).length+Number(filters.includeUnassigned === false)+Number(Boolean(filters.syncFilter && filters.syncFilter !== 'all'));
   const badge=document.getElementById('advanced-filter-count'); badge.textContent=String(count); badge.classList.toggle('hidden',count === 0);
   filterTrigger.setAttribute('aria-label',STRINGS.advancedFilters+(count ? ' '+count : ''));
   const element=document.getElementById('filter-chips');

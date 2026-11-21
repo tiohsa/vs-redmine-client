@@ -281,7 +281,79 @@ suite("Dashboard quick filters", () => {
     const capabilities = { mine: "loading" as const, open: "unavailable" as const };
     assert.strictEqual(hasEffectiveFilters(["overdue"], capabilities), true);
     assert.strictEqual(hasEffectiveFilters(["high"], capabilities), true);
+    assert.strictEqual(hasEffectiveFilters(["editing"], capabilities), true);
     assert.strictEqual(matches({ dueDate: "2026-09-22", syncState: "Synced" }, ["overdue"], undefined, [], capabilities), true);
     assert.strictEqual(matches({ priorityName: "Urgent", syncState: "Synced" }, ["high"], undefined, [], capabilities), true);
+  });
+
+  test("Editing クイックフィルターは既存チケットの Dirty と新規下書きの Draft/Dirty のみに一致する", () => {
+    const capabilities = { mine: "available" as const, open: "available" as const };
+    const statuses = [{ id: 1, isClosed: false }];
+    assert.strictEqual(matches({ statusId: 1, syncState: "Dirty" }, ["editing"], 7, statuses, capabilities), true);
+    for (const syncState of ["Synced", "Draft", "Queued", "Syncing", "Failed", "Conflict", "RecoveryPending", "CommitUnknown"]) {
+      assert.strictEqual(matches({ statusId: 1, syncState }, ["editing"], 7, statuses, capabilities), false, `syncState=${syncState}`);
+    }
+    assert.strictEqual(matches({ statusId: 1, syncState: "Dirty" }, ["editing", "open"], 7, statuses, capabilities), true);
+    assert.strictEqual(matches({ statusId: 2, syncState: "Dirty" }, ["editing", "open"], 7, [{ id: 1, isClosed: false }, { id: 2, isClosed: true }], capabilities), false);
+
+    const matchDraft = (draft: { syncState: string; dueDate?: string; priorityName?: string }, selected: string[], syncFilter = "all"): boolean =>
+      runInNewContext(`${dateSource}\n${predicateSource}\nmatchesDraftFilters(draft)`, {
+        draft,
+        quickFilters: new Set(selected),
+        searchQuery: "",
+        state: { quickFilterCapabilities: capabilities, settings: { filters: { syncFilter } } },
+      }) as boolean;
+    assert.strictEqual(matchDraft({ syncState: "Draft" }, ["editing"]), true);
+    assert.strictEqual(matchDraft({ syncState: "Dirty" }, ["editing"]), true);
+    assert.strictEqual(matchDraft({ syncState: "Queued" }, ["editing"]), false);
+    assert.strictEqual(matchDraft({ syncState: "Failed" }, ["editing"]), false);
+  });
+
+  test("Editing クイックフィルターで子チケットのみ Dirty の場合は親を保持して自動展開する", () => {
+    const capabilities = { mine: "available" as const, open: "available" as const };
+    const rendered = renderTicketList(["editing"], capabilities, [
+      { id: 1, syncState: "Synced", children: [{ id: 2, syncState: "Dirty", children: [] }] },
+      { id: 3, syncState: "Queued", children: [] },
+    ]);
+    assert.deepStrictEqual(rendered.ids, [1, 2]);
+    assert.strictEqual(rendered.count, "Loaded 2");
+  });
+
+  test("詳細フィルターの syncFilter は各モードに応じてチケットと新規下書きを絞り込む", () => {
+    const capabilities = { mine: "available" as const, open: "available" as const };
+    const matchTicketWithSyncFilter = (syncState: string, syncFilter: string): boolean =>
+      runInNewContext(`${dateSource}\n${predicateSource}\nmatchesQuickFilters(ticket)`, {
+        ticket: { syncState },
+        quickFilters: new Set<string>(),
+        state: { metadataOptions: { statuses: [] }, quickFilterCapabilities: capabilities, settings: { filters: { syncFilter } } },
+      }) as boolean;
+    const matchDraftWithSyncFilter = (syncState: string, syncFilter: string): boolean =>
+      runInNewContext(`${dateSource}\n${predicateSource}\nmatchesDraftFilters(draft)`, {
+        draft: { syncState },
+        quickFilters: new Set<string>(),
+        searchQuery: "",
+        state: { quickFilterCapabilities: capabilities, settings: { filters: { syncFilter } } },
+      }) as boolean;
+
+    // dirty: 既存チケットの Dirty のみ（#NEW 下書きは除外）
+    assert.strictEqual(matchTicketWithSyncFilter("Dirty", "dirty"), true);
+    assert.strictEqual(matchTicketWithSyncFilter("Queued", "dirty"), false);
+    assert.strictEqual(matchDraftWithSyncFilter("Draft", "dirty"), false);
+    assert.strictEqual(matchDraftWithSyncFilter("Dirty", "dirty"), false);
+
+    // editing: 既存 Dirty + #NEW の Draft / Dirty
+    assert.strictEqual(matchTicketWithSyncFilter("Dirty", "editing"), true);
+    assert.strictEqual(matchTicketWithSyncFilter("Queued", "editing"), false);
+    assert.strictEqual(matchDraftWithSyncFilter("Draft", "editing"), true);
+    assert.strictEqual(matchDraftWithSyncFilter("Dirty", "editing"), true);
+    assert.strictEqual(matchDraftWithSyncFilter("Queued", "editing"), false);
+
+    // unsynced: Synced 以外すべて
+    assert.strictEqual(matchTicketWithSyncFilter("Synced", "unsynced"), false);
+    assert.strictEqual(matchTicketWithSyncFilter("Dirty", "unsynced"), true);
+    assert.strictEqual(matchTicketWithSyncFilter("Queued", "unsynced"), true);
+    assert.strictEqual(matchTicketWithSyncFilter("Failed", "unsynced"), true);
+    assert.strictEqual(matchDraftWithSyncFilter("Draft", "unsynced"), true);
+    assert.strictEqual(matchDraftWithSyncFilter("Queued", "unsynced"), true);
   });
 });

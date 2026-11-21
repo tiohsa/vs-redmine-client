@@ -55,6 +55,12 @@ const mergeWithDefaults = (stored: Partial<TicketListSettings>): TicketListSetti
       includeUnassigned: typeof stored.filters?.includeUnassigned === "boolean"
         ? stored.filters.includeUnassigned
         : def.filters.includeUnassigned,
+      syncFilter: stored.filters?.syncFilter === "all" ||
+        stored.filters?.syncFilter === "dirty" ||
+        stored.filters?.syncFilter === "editing" ||
+        stored.filters?.syncFilter === "unsynced"
+        ? stored.filters.syncFilter
+        : def.filters.syncFilter,
     },
     sort: {
       field: stored.sort?.field === "priority" || stored.sort?.field === "status" ||

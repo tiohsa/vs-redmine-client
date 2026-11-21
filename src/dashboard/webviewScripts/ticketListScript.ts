@@ -196,6 +196,10 @@ function renderTickets(){
       clearBtn.addEventListener('click', function(){
         quickFilters.clear();
         persistViewState();
+        const currentFilters = state?.settings?.filters;
+        if(currentFilters && currentFilters.syncFilter && currentFilters.syncFilter !== 'all'){
+          req('settings.update',{patch:{filters:Object.assign({},currentFilters,{syncFilter:'all'})}});
+        }
         if(searchInput.value){ clearSearch(); }
         else { renderTickets(); }
       });

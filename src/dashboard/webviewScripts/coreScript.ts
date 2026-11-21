@@ -12,7 +12,7 @@ let compactMode = persistedUiState.compactMode === true;
 const DEFAULT_DETAIL_HEIGHT_PERCENT = ${DEFAULT_DETAIL_HEIGHT_PERCENT};
 function normalizeDetailHeightPercent(value){ return typeof value === 'number' && Number.isFinite(value) && value > 0 && value < 100 ? value : DEFAULT_DETAIL_HEIGHT_PERCENT; }
 let detailHeightPercent = normalizeDetailHeightPercent(persistedUiState.detailHeightPercent);
-const quickFilters = new Set(Array.isArray(persistedUiState.quickFilters) ? persistedUiState.quickFilters.filter(function(value){ return ['mine','open','overdue','high'].includes(value); }) : ['open']);
+const quickFilters = new Set(Array.isArray(persistedUiState.quickFilters) ? persistedUiState.quickFilters.filter(function(value){ return ['mine','open','overdue','high','editing'].includes(value); }) : ['open']);
 
 // 業務状態は DashboardState、Webview 固有のレイアウト選択はvscode.setStateで保持する。
 // 以下はそれ以外の表示用一時状態。

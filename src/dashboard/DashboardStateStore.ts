@@ -30,6 +30,7 @@ const DEFAULT_STATE: DashboardState = {
       trackerIds: [],
       assigneeIds: [],
       includeUnassigned: true,
+      syncFilter: "all",
     },
     sort: { direction: "asc" },
     dueDate: {

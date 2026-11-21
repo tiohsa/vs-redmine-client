@@ -16,6 +16,12 @@ import {
   registerNewTicketDraft,
   registerTicketDocument,
 } from "../views/ticketEditorRegistry";
+import {
+  clearTicketDrafts,
+  initializeTicketDraft,
+  updateDraftAfterSave,
+} from "../views/ticketDraftStore";
+import { buildIssueMetadataFixture } from "./helpers/ticketMetadataFixtures";
 import { createEditorStub } from "./helpers/editorStubs";
 
 const makeController = (store: DashboardStateStore): DashboardController => {
@@ -259,6 +265,113 @@ suite("editor active ticket follow", () => {
       controller.dispose();
     } finally {
       await config.update("ticketList.followActiveEditor", prevFollow, vscode.ConfigurationTarget.Global);
+      await config.update("baseUrl", prevBaseUrl, vscode.ConfigurationTarget.Global);
+    }
+  });
+
+  test("updateDraftAfterSave による同期完了後も Dashboard のチケット属性が維持・更新される", async () => {
+    const config = vscode.workspace.getConfiguration("redmine-client");
+    const prevBaseUrl = config.get<string>("baseUrl");
+    try {
+      await config.update("baseUrl", "https://redmine.example.com", vscode.ConfigurationTarget.Global);
+      const currentScope = getConnectionScope("https://redmine.example.com");
+      const store = new DashboardStateStore();
+      const controller = makeController(store);
+      const initialTicket: Ticket = {
+        ...makeTicket(42),
+        statusId: 1,
+        statusName: "New",
+        priorityId: 2,
+        priorityName: "Normal",
+        trackerId: 1,
+        trackerName: "Bug",
+        assigneeId: 5,
+        assigneeName: "Alice",
+        startDate: "2026-11-20",
+        dueDate: "2026-11-25",
+        doneRatio: 10,
+      };
+      controller["cache"].tickets = [initialTicket];
+      controller["pushTickets"]();
+      await controller["selectTicket"](42);
+
+      initializeTicketDraft(
+        42,
+        initialTicket.subject,
+        initialTicket.description ?? "",
+        buildIssueMetadataFixture({
+          tracker: "Bug",
+          priority: "Normal",
+          status: "New",
+          assignee: "Alice",
+          assignee_id: 5,
+          start_date: "2026-11-20",
+          due_date: "2026-11-25",
+          done_ratio: 10,
+        }),
+        initialTicket.updatedAt,
+        currentScope,
+      );
+
+      const syncedTicket: Ticket = {
+        ...initialTicket,
+        subject: "Updated Subject",
+        description: "Updated Description",
+        statusId: 2,
+        statusName: "In Progress",
+        priorityId: 4,
+        priorityName: "High",
+        assigneeId: 7,
+        assigneeName: "Bob",
+        startDate: "2026-11-22",
+        dueDate: "2026-11-30",
+        doneRatio: 80,
+        updatedAt: "2026-11-22T01:00:00Z",
+      };
+
+      updateDraftAfterSave(
+        42,
+        syncedTicket.subject,
+        syncedTicket.description ?? "",
+        buildIssueMetadataFixture({
+          tracker: "Bug",
+          priority: "High",
+          status: "In Progress",
+          assignee: "Bob",
+          assignee_id: 7,
+          start_date: "2026-11-22",
+          due_date: "2026-11-30",
+          done_ratio: 80,
+        }),
+        syncedTicket.updatedAt,
+        currentScope,
+        syncedTicket,
+      );
+
+      const node = store.getState().tickets[0];
+      assert.strictEqual(node.syncState, "Synced");
+      assert.strictEqual(node.subject, "Updated Subject");
+      assert.strictEqual(node.statusName, "In Progress");
+      assert.strictEqual(node.statusId, 2);
+      assert.strictEqual(node.priorityName, "High");
+      assert.strictEqual(node.priorityId, 4);
+      assert.strictEqual(node.assigneeName, "Bob");
+      assert.strictEqual(node.assigneeId, 7);
+      assert.strictEqual(node.startDate, "2026-11-22");
+      assert.strictEqual(node.dueDate, "2026-11-30");
+      assert.strictEqual(node.doneRatio, 80);
+
+      const detail = store.getState().selectedTicket;
+      assert.strictEqual(detail?.subject, "Updated Subject");
+      assert.strictEqual(detail?.statusName, "In Progress");
+      assert.strictEqual(detail?.priorityName, "High");
+      assert.strictEqual(detail?.assigneeName, "Bob");
+      assert.strictEqual(detail?.startDate, "2026-11-22");
+      assert.strictEqual(detail?.dueDate, "2026-11-30");
+
+      controller.dispose();
+      clearTicketDrafts(currentScope);
+    } finally {
       await config.update("baseUrl", prevBaseUrl, vscode.ConfigurationTarget.Global);
     }
   });

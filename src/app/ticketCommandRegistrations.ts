@@ -61,7 +61,9 @@ export const registerTicketEditorCommands = (
       showSuccess(vscode.l10n.t("Ticket #{0} is active in the editor.", ticketId));
     }),
     vscode.commands.registerCommand("redmine-client.reloadTicket", async () => {
-      await reloadTicketFromEditor();
+      if (await reloadTicketFromEditor()) {
+        ticketsPresentation.notifyChange();
+      }
     }),
     registerStubMessage(
       "redmine-client.toggleRelevantTickets",

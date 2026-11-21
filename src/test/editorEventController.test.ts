@@ -353,4 +353,32 @@ suite("editorEventController registerEditorDocument", () => {
     assert.strictEqual(clearCommentEditingFromDocument(commentDoc), true);
     assert.strictEqual(isCommentEditing(10, 20), false);
   });
+
+  test("Dirty 中に start_date や description のみを変更した場合も true を返す", () => {
+    const ticketId = 135;
+    const scope = "test:dirty-start-date-description";
+    const { document, metadata } = createRegisteredTicketDocument(ticketId, scope);
+
+    document.setText(buildTicketEditorContent({
+      subject: "Changed",
+      description: "Body",
+      metadata,
+    }));
+    assert.strictEqual(updateTicketDraftStatusFromDocument(document), true);
+    assert.strictEqual(getTicketDraft(ticketId, scope)?.status, "Dirty");
+
+    document.setText(buildTicketEditorContent({
+      subject: "Changed",
+      description: "Body",
+      metadata: { ...metadata, start_date: "2026-11-25" },
+    }));
+    assert.strictEqual(updateTicketDraftStatusFromDocument(document), true);
+
+    document.setText(buildTicketEditorContent({
+      subject: "Changed",
+      description: "Updated Body",
+      metadata: { ...metadata, start_date: "2026-11-25" },
+    }));
+    assert.strictEqual(updateTicketDraftStatusFromDocument(document), true);
+  });
 });
