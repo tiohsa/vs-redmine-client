@@ -81,6 +81,7 @@ export const commentStyles = {
 #add-comment-btn {
   min-height: 24px;
   padding: 2px 8px;
+  border-radius: 2px;
   font-size: var(--app-font-label);
 }
 #reload-comments-btn {
@@ -89,6 +90,7 @@ export const commentStyles = {
   width: 26px;
   height: 26px;
   padding: 0;
+  border-radius: 2px;
 }
 #detail-comments .comment-list,
 .comment-timeline {
@@ -186,6 +188,7 @@ export const commentStyles = {
 .comment-sync-btn {
   min-height: 24px;
   padding: 2px 6px;
+  border-radius: 2px;
   font-size: var(--app-font-label);
 }
 .comment-body {

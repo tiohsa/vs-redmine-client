@@ -162,6 +162,7 @@ body.vscode-high-contrast-light .ticket-detail-card {
   width: 26px;
   height: 26px;
   padding: 0;
+  border-radius: 2px;
 }
 .detail-head-row2 {
   display: flex;
@@ -204,6 +205,7 @@ body.vscode-high-contrast-light .ticket-detail-card {
 #detail-sync-btn {
   min-height: 24px;
   padding: 2px 8px;
+  border-radius: 2px;
   font-size: var(--app-font-label);
 }
 `,
