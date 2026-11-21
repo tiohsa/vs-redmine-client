@@ -118,6 +118,7 @@ export interface DashboardStrings {
   notSet: string;
   closeDetail: string;
   openDetail: string;
+  resizeCommentPanel: string;
   statusFallbackHint: string;
   loadingEditOptions: string;
   trackerUnavailable: string;
@@ -348,6 +349,7 @@ export const buildDashboardStrings = (): DashboardStrings => ({
   notSet: vscode.l10n.t("Not set"),
   closeDetail: vscode.l10n.t("Close detail"),
   openDetail: vscode.l10n.t("Open detail"),
+  resizeCommentPanel: vscode.l10n.t("Resize comment panel height"),
   statusFallbackHint: vscode.l10n.t("Status options using global fallback."),
   loadingEditOptions: vscode.l10n.t("Loading edit options…"),
   trackerUnavailable: vscode.l10n.t("Cannot edit: tracker options unavailable."),

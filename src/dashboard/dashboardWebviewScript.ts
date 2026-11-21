@@ -2,6 +2,7 @@ import { coreScript } from "./webviewScripts/coreScript";
 import { operationFeedbackScript } from "./webviewScripts/operationFeedbackScript";
 import { tabsScript } from "./webviewScripts/tabsScript";
 import { layoutScript } from "./webviewScripts/layoutScript";
+import { detailResizeScript } from "./webviewScripts/detailResizeScript";
 import { projectPickerScript } from "./webviewScripts/projectPickerScript";
 import { ticketSearchScript } from "./webviewScripts/ticketSearchScript";
 import { ticketFiltersScript } from "./webviewScripts/ticketFiltersScript";
@@ -22,6 +23,7 @@ export const dashboardWebviewScript = [
   ticketSearchScript.controls,
   layoutScript.popover,
   projectPickerScript.dismissal,
+  detailResizeScript,
   layoutScript.layoutSelection,
   ticketSearchScript.actions,
   coreScript.persistViewState,

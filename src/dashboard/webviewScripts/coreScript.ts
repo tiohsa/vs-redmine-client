@@ -1,3 +1,5 @@
+import { DEFAULT_DETAIL_HEIGHT_PERCENT } from "../detailPanelResize";
+
 export const coreScript = {
   initialization: String.raw`
 'use strict';
@@ -7,6 +9,9 @@ const persistedUiState = vscode.getState() || {};
 let ticketLayoutMode = ['auto','single','split'].includes(persistedUiState.ticketLayoutMode) ? persistedUiState.ticketLayoutMode : 'auto';
 let detailFocus = persistedUiState.detailFocus === true;
 let compactMode = persistedUiState.compactMode === true;
+const DEFAULT_DETAIL_HEIGHT_PERCENT = ${DEFAULT_DETAIL_HEIGHT_PERCENT};
+function normalizeDetailHeightPercent(value){ return typeof value === 'number' && Number.isFinite(value) && value > 0 && value < 100 ? value : DEFAULT_DETAIL_HEIGHT_PERCENT; }
+let detailHeightPercent = normalizeDetailHeightPercent(persistedUiState.detailHeightPercent);
 const quickFilters = new Set(Array.isArray(persistedUiState.quickFilters) ? persistedUiState.quickFilters.filter(function(value){ return ['mine','open','overdue','high'].includes(value); }) : ['open']);
 
 // 業務状態は DashboardState、Webview 固有のレイアウト選択はvscode.setStateで保持する。
@@ -110,7 +115,7 @@ function flattenAll(nodes){
 
 `,
   persistViewState: String.raw`function persistViewState(){
-  const nextState=Object.assign({},vscode.getState() || {},{ticketLayoutMode:ticketLayoutMode,detailFocus:detailFocus,compactMode:compactMode,quickFilters:Array.from(quickFilters)});
+  const nextState=Object.assign({},vscode.getState() || {},{ticketLayoutMode:ticketLayoutMode,detailFocus:detailFocus,compactMode:compactMode,quickFilters:Array.from(quickFilters),detailHeightPercent:detailHeightPercent});
   delete nextState.detailTab;
   vscode.setState(nextState);
 }

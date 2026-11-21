@@ -6,7 +6,6 @@ export const ticketListStyles = {
 .ticket-row:hover { background: var(--app-surface-hover); }
 .ticket-row:focus-visible { outline-offset: -2px; }
 .ticket-row.selected { background: var(--app-selected); color: var(--app-selected-fg); }
-.ticket-row.selected::before { position: absolute; top: 3px; bottom: 3px; left: 0; width: 4px; border-radius: var(--app-radius-pill); background: var(--app-focus); content: ""; }
 .ticket-row.selected .ticket-id, .ticket-row.selected .ticket-action-btn, .ticket-row.selected .expand-btn { color: inherit; }
 .ticket-id { flex: 0 0 auto; padding: 2px 6px; border: 1px solid var(--app-border-subtle); border-radius: var(--app-radius-pill); color: var(--app-text-secondary); font-size: var(--app-font-label); font-variant-numeric: tabular-nums; font-weight: 700; }
 .ticket-subject { min-width: 0; flex: 1 1 auto; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--app-font-body); }
@@ -59,11 +58,7 @@ export const ticketListStyles = {
 `,
   scrollContainer: String.raw`#ticket-scroll{flex:1;overflow-y:auto;min-height:0;border-bottom:1px solid var(--app-border-subtle)}
 `,
-  compactRows: String.raw`.ticket-row { gap:5px; min-height:50px; padding:5px 8px 6px; border-left:3px solid var(--tracker-color, transparent); border-bottom:1px solid color-mix(in srgb, var(--app-text) 5%, transparent); }
-.ticket-row.tracker-bug { --tracker-color: var(--app-tracker-bug); }
-.ticket-row.tracker-feature { --tracker-color: var(--app-tracker-feature); }
-.ticket-row.tracker-task { --tracker-color: var(--app-tracker-task); }
-.ticket-row.tracker-neutral { --tracker-color: var(--app-tracker-neutral); }
+  compactRows: String.raw`.ticket-row { gap:5px; min-height:50px; padding:5px 8px 6px; border-bottom:1px solid color-mix(in srgb, var(--app-text) 5%, transparent); }
 .ticket-row.is-unsynced { background:color-mix(in srgb, var(--app-link) 7%, transparent); }
 .ticket-row.is-unsynced:hover { background:color-mix(in srgb, var(--app-link) 12%, var(--app-surface-hover)); }
 .ticket-row.selected, .ticket-row.is-unsynced.selected { background:var(--app-selected); color:var(--app-selected-fg); }
@@ -109,29 +104,25 @@ export const ticketListStyles = {
   background-color: color-mix(in srgb, var(--vscode-gitDecoration-modifiedResourceForeground, var(--app-warning)) 12%, var(--vscode-list-hoverBackground, var(--app-surface-hover)));
 }
 .ticket-row.selected, .ticket-row.is-unsynced.selected {
-  background-color: color-mix(in oklab, var(--vscode-list-inactiveSelectionBackground, var(--app-surface-hover)) 86%, var(--app-focus));
-  color: var(--vscode-foreground, var(--app-text));
+  --selected-fg: var(--vscode-list-activeSelectionForeground, var(--vscode-foreground, #ffffff));
+  background-color: color-mix(in srgb, var(--vscode-list-activeSelectionBackground, #04395e) 72%, var(--vscode-sideBar-background, var(--app-bg)));
+  color: var(--selected-fg);
 }
 body:focus-within .ticket-row.selected, body:focus-within .ticket-row.is-unsynced.selected {
-  background-color: color-mix(in oklab, var(--vscode-list-activeSelectionBackground, var(--app-surface-hover)) 78%, var(--app-focus));
-  color: var(--vscode-list-activeSelectionForeground, var(--app-selected-fg));
+  --selected-fg: var(--vscode-list-activeSelectionForeground, #ffffff);
+  background-color: var(--vscode-list-activeSelectionBackground, #04395e);
+  color: var(--selected-fg);
 }
-.ticket-row.selected::before { content: none; }
-
-.ticket-tracker-bar {
-  position: absolute;
-  left: 0;
-  top: 4px;
-  bottom: 4px;
-  width: 3px;
-  border-radius: 0 1px 1px 0;
-  background-color: var(--vscode-textLink-foreground, var(--vscode-charts-blue, var(--app-accent)));
-  pointer-events: none;
+body.vscode-light .ticket-row.selected, body.vscode-light .ticket-row.is-unsynced.selected {
+  --selected-fg: var(--vscode-editor-foreground, var(--vscode-foreground, #1f1f1f));
+  background-color: color-mix(in srgb, var(--vscode-list-activeSelectionBackground, #0060c0) 18%, var(--vscode-sideBar-background, var(--app-bg)));
+  color: var(--selected-fg);
 }
-.ticket-row.tracker-bug .ticket-tracker-bar { background-color: var(--vscode-editorError-foreground, var(--app-danger)); }
-.ticket-row.tracker-feature .ticket-tracker-bar { background-color: var(--vscode-gitDecoration-addedResourceForeground, var(--app-success)); }
-.ticket-row.tracker-task .ticket-tracker-bar,
-.ticket-row.tracker-neutral .ticket-tracker-bar { background-color: var(--vscode-textLink-foreground, var(--vscode-charts-blue, var(--app-accent))); }
+body.vscode-light:focus-within .ticket-row.selected, body.vscode-light:focus-within .ticket-row.is-unsynced.selected {
+  --selected-fg: var(--vscode-editor-foreground, var(--vscode-foreground, #1f1f1f));
+  background-color: color-mix(in srgb, var(--vscode-list-activeSelectionBackground, #0060c0) 28%, var(--vscode-sideBar-background, var(--app-bg)));
+  color: var(--selected-fg);
+}
 
 .ticket-indent-guide {
   position: absolute;
@@ -184,6 +175,7 @@ body:focus-within .ticket-row.selected, body:focus-within .ticket-row.is-unsynce
   color: inherit;
   flex: 0 0 auto;
 }
+.ticket-row.selected .ticket-row-main .ticket-id { opacity: 0.85; }
 .priority-indicator {
   font-size: 11px;
   font-weight: 700;
@@ -192,6 +184,7 @@ body:focus-within .ticket-row.selected, body:focus-within .ticket-row.is-unsynce
 }
 .priority-indicator.priority-urgent { color: var(--vscode-editorError-foreground, var(--app-danger)); }
 .priority-indicator.priority-high { color: var(--vscode-editorWarning-foreground, var(--app-warning)); }
+.ticket-row.selected .priority-indicator { color: var(--selected-fg, inherit); }
 .ticket-row-main .ticket-subject {
   display: block;
   min-width: 0;
@@ -247,9 +240,9 @@ body:focus-within .ticket-row.selected, body:focus-within .ticket-row.is-unsynce
   border-color: color-mix(in srgb, var(--vscode-gitDecoration-addedResourceForeground, var(--app-success)) 45%, transparent);
   color: var(--vscode-gitDecoration-addedResourceForeground, var(--app-success));
 }
-body:focus-within .ticket-row.selected .status-pill {
-  border-color: color-mix(in srgb, var(--vscode-list-activeSelectionForeground, var(--app-selected-fg)) 55%, transparent);
-  color: var(--vscode-list-activeSelectionForeground, var(--app-selected-fg));
+.ticket-row.selected .status-pill {
+  border-color: color-mix(in srgb, var(--selected-fg, currentColor) 55%, transparent);
+  color: var(--selected-fg, inherit);
 }
 
 .unsynced-inline-badge {
@@ -260,6 +253,9 @@ body:focus-within .ticket-row.selected .status-pill {
   font-weight: 500;
   color: var(--vscode-gitDecoration-modifiedResourceForeground, var(--app-warning));
   white-space: nowrap;
+}
+.ticket-row.selected .unsynced-inline-badge {
+  color: var(--selected-fg, inherit);
 }
 .unsynced-dot {
   display: inline-block;
@@ -276,8 +272,8 @@ body:focus-within .ticket-row.selected .status-pill {
   color: var(--vscode-descriptionForeground, var(--app-text-secondary));
 }
 .ticket-meta-item .action-icon { width: 11px; height: 11px; flex-basis: 11px; }
-body:focus-within .ticket-row.selected .ticket-meta-item:not(.is-overdue) {
-  color: color-mix(in srgb, var(--vscode-list-activeSelectionForeground, var(--app-selected-fg)) 80%, transparent);
+.ticket-row.selected .ticket-meta-item:not(.is-overdue) {
+  color: color-mix(in srgb, var(--selected-fg, currentColor) 85%, transparent);
 }
 .ticket-meta-due.is-overdue {
   color: var(--vscode-editorError-foreground, var(--app-danger));
@@ -341,14 +337,14 @@ body:focus-within .ticket-row.selected .ticket-meta-item:not(.is-overdue) {
 .empty-clear-link:hover { text-decoration: underline; }
 
 `,
-  draftRows: String.raw`.ticket-row.is-draft {
-  border-left-color: var(--app-modified);
-}
-
-.ticket-id.ticket-id-new {
+  draftRows: String.raw`.ticket-id.ticket-id-new {
   color: var(--app-modified);
   font-weight: 700;
   letter-spacing: 0.02em;
+}
+.ticket-row.selected .ticket-id.ticket-id-new {
+  color: inherit;
+  opacity: 1;
 }
 
 `,

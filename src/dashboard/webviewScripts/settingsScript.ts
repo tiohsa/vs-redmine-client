@@ -90,7 +90,7 @@ function renderSettingsBase(){
 }
 
 function resetViewState(){
-  ticketLayoutMode='auto'; detailFocus=false; compactMode=false; quickFilters.clear(); quickFilters.add('open');
+  ticketLayoutMode='auto'; detailFocus=false; compactMode=false; detailHeightPercent=48; quickFilters.clear(); quickFilters.add('open');
   expandedTicketIds.clear(); collapsedTicketIds.clear(); expandedComments.clear();
   activeTicketActionMenuId=null; activeTicketActionAnchorTop=null; searchQuery=''; closeProjectPicker(false);
   if(searchTimer){ window.clearTimeout(searchTimer); searchTimer=null; }
@@ -98,9 +98,10 @@ function resetViewState(){
   document.querySelectorAll('.settings-category').forEach(function(category){ category.open=category.dataset.category === 'tickets'; });
   const nextState=Object.assign({},vscode.getState() || {},{ticketLayoutMode:ticketLayoutMode,detailFocus:detailFocus,compactMode:compactMode,quickFilters:['open']});
   delete nextState.detailTab;
+  delete nextState.detailHeightPercent;
   vscode.setState(nextState);
   submitSearch();
-  render(); applyTicketLayoutMode(); if(typeof applyCompactMode === 'function') applyCompactMode(); showToast('success',STRINGS.viewStateReset);
+  render(); applyTicketLayoutMode(); if(typeof applyCompactMode === 'function') applyCompactMode(); if(typeof syncDetailPanelHeight === 'function') syncDetailPanelHeight(); showToast('success',STRINGS.viewStateReset);
 }
 
 function renderSettings(){

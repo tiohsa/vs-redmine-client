@@ -2,14 +2,12 @@ export const ticketDetailScript = String.raw`// ── Ticket detail / composer 
 function renderTicketDetailPanel(ticket){
   if(renderedDetailTicketId !== ticket.id){ renderedDetailTicketId=ticket.id; }
   const card=document.getElementById('ticket-detail-card');
-  const trackerCls=trackerAccentClass(ticket.trackerName);
-  card.className='ticket-work-panel ticket-detail-card '+trackerCls;
+  card.className='ticket-work-panel ticket-detail-card';
   card.removeAttribute('aria-busy');
   const commentCount=state.comments.ticketId === ticket.id ? state.comments.items.length : 0;
   card.innerHTML=
     '<div class="detail-header-fixed">'
       +'<div class="detail-head-row1">'
-        +'<span class="detail-tracker-bar" aria-hidden="true"'+(ticket.trackerName?' title="'+esc(STRINGS.sortTracker+': '+ticket.trackerName)+'"':'')+'></span>'
         +'<span class="ticket-id">#'+ticket.id+'</span>'
         +'<span class="comments-header-label">'+actionIcon('comment')+'<span>'+esc(STRINGS.tabComments)+'</span><span id="detail-comment-count" class="tab-badge">'+commentCount+'</span></span>'
       +'</div>'

@@ -22,6 +22,7 @@ function applyTicketLayoutMode(){
   layout.classList.toggle('layout-detail-focus',detailFocus);
   document.getElementById('detail-focus-toggle').checked=detailFocus;
   ticketLayoutSelect.value=ticketLayoutMode;
+  if(typeof syncDetailPanelHeight === 'function') syncDetailPanelHeight();
   updateCommentExpandButtons();
 }
 ticketLayoutSelect.addEventListener('change',function(){

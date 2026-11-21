@@ -3,9 +3,19 @@ export const accessibilityStyles = {
 body.vscode-high-contrast .ticket-row.is-unsynced.selected,
 body.vscode-high-contrast-light .ticket-row.selected,
 body.vscode-high-contrast-light .ticket-row.is-unsynced.selected,
+body.vscode-high-contrast #detail-comments .comment-card.selected,
+body.vscode-high-contrast #detail-comments .comment-card.is-editable.selected:hover,
+body.vscode-high-contrast #detail-comments .comment-card.is-editable.selected:focus-visible,
+body.vscode-high-contrast .comment-timeline .comment-card.selected,
 body.vscode-high-contrast .comment-card.selected,
+body.vscode-high-contrast-light #detail-comments .comment-card.selected,
+body.vscode-high-contrast-light #detail-comments .comment-card.is-editable.selected:hover,
+body.vscode-high-contrast-light #detail-comments .comment-card.is-editable.selected:focus-visible,
+body.vscode-high-contrast-light .comment-timeline .comment-card.selected,
 body.vscode-high-contrast-light .comment-card.selected {
+  --selected-fg: var(--vscode-list-inactiveSelectionForeground, var(--vscode-foreground, var(--app-text)));
   background-color: var(--vscode-list-inactiveSelectionBackground, var(--app-selected));
+  color: var(--selected-fg);
   outline: 1px solid var(--vscode-contrastBorder, var(--app-focus));
   outline-offset: -1px;
 }
@@ -13,9 +23,19 @@ body.vscode-high-contrast:focus-within .ticket-row.selected,
 body.vscode-high-contrast:focus-within .ticket-row.is-unsynced.selected,
 body.vscode-high-contrast-light:focus-within .ticket-row.selected,
 body.vscode-high-contrast-light:focus-within .ticket-row.is-unsynced.selected,
+body.vscode-high-contrast:focus-within #detail-comments .comment-card.selected,
+body.vscode-high-contrast:focus-within #detail-comments .comment-card.is-editable.selected:hover,
+body.vscode-high-contrast:focus-within #detail-comments .comment-card.is-editable.selected:focus-visible,
+body.vscode-high-contrast:focus-within .comment-timeline .comment-card.selected,
 body.vscode-high-contrast:focus-within .comment-card.selected,
+body.vscode-high-contrast-light:focus-within #detail-comments .comment-card.selected,
+body.vscode-high-contrast-light:focus-within #detail-comments .comment-card.is-editable.selected:hover,
+body.vscode-high-contrast-light:focus-within #detail-comments .comment-card.is-editable.selected:focus-visible,
+body.vscode-high-contrast-light:focus-within .comment-timeline .comment-card.selected,
 body.vscode-high-contrast-light:focus-within .comment-card.selected {
+  --selected-fg: var(--vscode-list-activeSelectionForeground, var(--vscode-foreground, var(--app-text)));
   background-color: var(--vscode-list-activeSelectionBackground, var(--app-selected));
+  color: var(--selected-fg);
 }
 
 `,

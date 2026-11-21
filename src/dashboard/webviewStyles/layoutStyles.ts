@@ -42,6 +42,44 @@ button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-
 .tickets-master, .tickets-detail { display: flex; min-width: 0; min-height: 0; flex-direction: column; }
 .tickets-master { container-type: inline-size; flex: 1 1 42%; margin: 12px 0 12px 12px; overflow: hidden; border: 1px solid var(--app-border-strong); border-radius: var(--app-radius-card); background: var(--app-surface-raised); }
 .tickets-detail { container-type: inline-size; flex: 1 1 58%; margin: 12px 12px 12px 10px; overflow-y: auto; border-radius: var(--app-radius-card); }
+.detail-resize-handle {
+  position: relative;
+  display: none;
+  flex: 0 0 6px;
+  height: 6px;
+  align-items: center;
+  justify-content: center;
+  cursor: ns-resize;
+  touch-action: pan-x;
+  user-select: none;
+  background: var(--vscode-sideBar-background, var(--app-bg));
+  z-index: 2;
+}
+.detail-resize-handle::before {
+  content: "";
+  width: 100%;
+  height: 1px;
+  background: var(--vscode-sideBar-border, var(--app-border-subtle));
+  transition: background-color 120ms ease, height 120ms ease;
+}
+.detail-resize-handle:hover::before,
+.detail-resize-handle.is-dragging::before {
+  height: 3px;
+  background: var(--vscode-sash-hoverBorder, var(--app-focus));
+}
+.detail-resize-handle:focus-visible {
+  outline: 2px solid var(--vscode-focusBorder, var(--app-focus));
+  outline-offset: -2px;
+}
+.detail-resize-handle:focus-visible::before {
+  height: 2px;
+  background: var(--vscode-sash-hoverBorder, var(--app-focus));
+}
+body.is-resizing-detail,
+body.is-resizing-detail * {
+  cursor: ns-resize !important;
+  user-select: none !important;
+}
 
 `,
   responsive: String.raw`/* Narrow Sidebar / responsive checkpoints */
@@ -180,9 +218,10 @@ body.vscode-high-contrast .tab.active { border-bottom-width: 3px; }
   .header-actions { width:auto; margin-left:auto; }
   .header-actions .btn { flex:0 0 auto; }
   .tickets-layout:not(.layout-split):not(.layout-single) { flex-direction:column; overflow:hidden; }
-  .tickets-layout:not(.layout-split):not(.layout-single) .tickets-master { flex:1 1 52%; min-height:100px; max-height:none; margin:0; }
+  .tickets-layout:not(.layout-split):not(.layout-single) .tickets-master { flex:1 1 52%; min-height:min(100px, 40%); max-height:none; margin:0; }
   .tickets-layout:not(.layout-split):not(.layout-single):has(.ticket-detail-card:not(.hidden)) .tickets-master { flex:1 1 52%; max-height:none; }
-  .tickets-layout:not(.layout-split):not(.layout-single) .tickets-detail { flex:0 0 48%; height:48%; min-height:0; margin:0; overflow:hidden; display:flex; flex-direction:column; border-top:0; }
+  .tickets-layout:not(.layout-split):not(.layout-single):not(.layout-detail-focus):has(.ticket-detail-card:not(.hidden)) .detail-resize-handle { display:flex; }
+  .tickets-layout:not(.layout-split):not(.layout-single) .tickets-detail { flex:0 0 var(--detail-panel-height, 48%); height:var(--detail-panel-height, 48%); min-height:0; margin:0; overflow:hidden; display:flex; flex-direction:column; border-top:0; }
   .tickets-layout:not(.layout-split):not(.layout-single) .tickets-detail:has(.ticket-detail-card.hidden) { display:none; }
   .comments-header { flex-direction:row; }
   .comment-actions { grid-column:auto; grid-row:auto; }
@@ -257,6 +296,30 @@ body.vscode-high-contrast .tab.active { border-bottom-width: 3px; }
 .tickets-master {
   background-color: var(--vscode-sideBar-background, var(--app-bg));
   border-right-color: var(--vscode-sideBar-border, var(--app-border-subtle));
+}
+body.vscode-high-contrast .detail-resize-handle::before,
+body.vscode-high-contrast-light .detail-resize-handle::before {
+  background: var(--vscode-contrastBorder, var(--app-border));
+}
+body.vscode-high-contrast .detail-resize-handle:hover::before,
+body.vscode-high-contrast .detail-resize-handle.is-dragging::before,
+body.vscode-high-contrast-light .detail-resize-handle:hover::before,
+body.vscode-high-contrast-light .detail-resize-handle.is-dragging::before {
+  background: var(--vscode-focusBorder, var(--app-focus));
+}
+@media (forced-colors: active) {
+  .detail-resize-handle::before {
+    background: CanvasText;
+  }
+  .detail-resize-handle:hover::before,
+  .detail-resize-handle.is-dragging::before,
+  .detail-resize-handle:focus-visible::before {
+    background: Highlight;
+  }
+  .detail-resize-handle:focus-visible {
+    outline: 2px solid Highlight;
+    outline-offset: -2px;
+  }
 }
 `,
 };

@@ -83,14 +83,6 @@ document.addEventListener('scroll',function(event){
   const trigger=document.querySelector('[aria-controls="'+activeTicketActionMenuId+'"]');
   if(!trigger || trigger.getBoundingClientRect().top !== activeTicketActionAnchorTop) closeTicketActionMenus();
 },true);
-function trackerAccentClass(name){
-  const n = String(name || '').trim().toLowerCase();
-  if(!n) return 'tracker-neutral';
-  if(n.includes('bug') || n.includes('defect') || n.includes('バグ') || n.includes('不具合') || n.includes('障害')) return 'tracker-bug';
-  if(n.includes('feature') || n.includes('enhancement') || n.includes('機能') || n.includes('改善')) return 'tracker-feature';
-  if(n.includes('task') || n.includes('todo') || n.includes('chore') || n.includes('タスク') || n.includes('作業')) return 'tracker-task';
-  return 'tracker-neutral';
-}
 function statusPillClass(name){
   const n = String(name || '').trim().toLowerCase();
   if(n === 'new' || n === '新規') return 'status-new';
@@ -115,8 +107,6 @@ function formatShortDueDate(dateStr){
 }
 function renderDraftRow(draft){
   const selected = draft.queueId === selectedDraftId;
-  const trackerCls = trackerAccentClass(draft.trackerName);
-  const trackerBar = '<span class="ticket-tracker-bar" aria-hidden="true"'+(draft.trackerName ? ' title="'+esc(STRINGS.sortTracker+': '+draft.trackerName)+'"' : '')+'></span>';
   const status = state.settings.showStatus !== false && draft.statusName ? '<span class="ticket-attribute status-pill '+statusPillClass(draft.statusName)+'">'+esc(draft.statusName)+'</span>' : '';
   const syncStateText = draft.syncState && draft.syncState !== 'Draft' ? syncLabel(draft.syncState) : STRINGS.unsyncedShort;
   const unsyncedInline = '<span class="unsynced-inline-badge" title="'+esc(syncLabel(draft.syncState || 'Draft'))+'"><span class="unsynced-dot" aria-hidden="true"></span>'+esc(syncStateText)+'</span>';
@@ -127,7 +117,7 @@ function renderDraftRow(draft){
   const hoverActions='<div class="ticket-hover-actions">'
     +'<button class="ticket-action-btn ticket-hover-action-btn" type="button" data-draft-action="sync" data-draft-queue-id="'+esc(draft.queueId)+'" data-draft-uri="'+esc(draft.documentUri)+'" title="'+esc(STRINGS.syncToRedmine)+'" aria-label="'+esc(STRINGS.syncToRedmine)+'">'+actionIcon('sync')+'</button>'
     +'</div>';
-  return '<div class="ticket-row '+trackerCls+' is-draft is-unsynced'+(selected ? ' selected' : '')+'" data-draft-queue-id="'+esc(draft.queueId)+'" data-draft-uri="'+esc(draft.documentUri)+'" role="listitem" aria-current="'+selected+'" tabindex="0" data-level="0">'+trackerBar+'<div class="ticket-row-content"><div class="ticket-row-main"><div class="ticket-row-title-group"><span class="ticket-id ticket-id-new">#NEW</span>'+priorityIndicator(draft.priorityName)+'<span class="ticket-subject" title="'+esc(draft.subject)+'">'+esc(draft.subject)+'</span></div></div><div class="ticket-row-meta"><div class="ticket-meta-left">'+status+unsyncedInline+'</div><div class="ticket-meta-right">'+assignee+dueDate+'</div></div></div>'+hoverActions+'</div>';
+  return '<div class="ticket-row is-draft is-unsynced'+(selected ? ' selected' : '')+'" data-draft-queue-id="'+esc(draft.queueId)+'" data-draft-uri="'+esc(draft.documentUri)+'" role="listitem" aria-current="'+selected+'" tabindex="0" data-level="0"><div class="ticket-row-content"><div class="ticket-row-main"><div class="ticket-row-title-group"><span class="ticket-id ticket-id-new">#NEW</span>'+priorityIndicator(draft.priorityName)+'<span class="ticket-subject" title="'+esc(draft.subject)+'">'+esc(draft.subject)+'</span></div></div><div class="ticket-row-meta"><div class="ticket-meta-left">'+status+unsyncedInline+'</div><div class="ticket-meta-right">'+assignee+dueDate+'</div></div></div>'+hoverActions+'</div>';
 }
 function renderTicketRow(ticket){
   const selected=selectedDraftId === null && ticket.id === state.selectedTicketId;
@@ -135,8 +125,6 @@ function renderTicketRow(ticket){
   const hasChildren=!searching && !!ticket.children?.length;
   const expanded=!!ticket.autoExpand || expandedTicketIds.has(ticket.id);
   const unsynced=!!ticket.syncState && ticket.syncState !== 'Synced';
-  const trackerCls=trackerAccentClass(ticket.trackerName);
-  const trackerBar='<span class="ticket-tracker-bar" aria-hidden="true"'+(ticket.trackerName ? ' title="'+esc(STRINGS.sortTracker+': '+ticket.trackerName)+'"' : '')+'></span>';
   const status=state.settings.showStatus !== false && ticket.statusName ? '<span class="ticket-attribute status-pill '+statusPillClass(ticket.statusName)+'">'+esc(ticket.statusName)+'</span>' : '';
   const unsyncedInline=unsynced && ticket.syncState !== 'Draft' ? '<span class="unsynced-inline-badge" title="'+esc(syncLabel(ticket.syncState))+'"><span class="unsynced-dot" aria-hidden="true"></span>'+esc(ticketSyncBadgeLabel(ticket.syncState))+'</span>' : '';
   const project=(!state.selectedProject || state.includeChildProjects) && ticket.projectName ? '<span class="ticket-attribute ticket-project">'+esc(ticket.projectName)+'</span>' : '';
@@ -153,7 +141,7 @@ function renderTicketRow(ticket){
     +'<button class="ticket-action-btn ticket-hover-action-btn" type="button" data-ticket-action="sync" data-ticket="'+ticket.id+'" title="'+esc(STRINGS.syncToRedmine)+'" aria-label="'+esc(STRINGS.syncToRedmine)+'">'+actionIcon('sync')+'</button>'
     +'<button class="ticket-action-btn ticket-hover-action-btn" type="button" data-ticket-action="browser" data-ticket="'+ticket.id+'" title="'+esc(STRINGS.openInBrowser)+'" aria-label="'+esc(STRINGS.openInBrowser)+'">'+actionIcon('browser')+'</button>'
     +'</div>';
-  return '<div class="ticket-row '+trackerCls+(unsynced ? ' is-unsynced' : '')+(level > 0 ? ' child-row' : '')+(selected ? ' selected' : '')+'" data-id="'+ticket.id+'" role="listitem" aria-current="'+selected+'" tabindex="0" data-level="'+level+'">'+trackerBar+guides+'<div class="ticket-row-content"><div class="ticket-row-main"><div class="ticket-row-title-group">'+expand+'<span class="ticket-id">#'+ticket.id+'</span>'+priorityIndicator(ticket.priorityName)+'<span class="ticket-subject" title="'+esc(ticket.subject)+'">'+esc(ticket.subject)+'</span></div></div><div class="ticket-row-meta"><div class="ticket-meta-left">'+status+unsyncedInline+project+'</div><div class="ticket-meta-right">'+assignee+dueDate+'</div></div></div>'+hoverActions+'</div>';
+  return '<div class="ticket-row'+(unsynced ? ' is-unsynced' : '')+(level > 0 ? ' child-row' : '')+(selected ? ' selected' : '')+'" data-id="'+ticket.id+'" role="listitem" aria-current="'+selected+'" tabindex="0" data-level="'+level+'">'+guides+'<div class="ticket-row-content"><div class="ticket-row-main"><div class="ticket-row-title-group">'+expand+'<span class="ticket-id">#'+ticket.id+'</span>'+priorityIndicator(ticket.priorityName)+'<span class="ticket-subject" title="'+esc(ticket.subject)+'">'+esc(ticket.subject)+'</span></div></div><div class="ticket-row-meta"><div class="ticket-meta-left">'+status+unsyncedInline+project+'</div><div class="ticket-meta-right">'+assignee+dueDate+'</div></div></div>'+hoverActions+'</div>';
 }
 function isTicketActionTarget(target){ return isElement(target) && !!target.closest('.ticket-action-btn,.ticket-action-menu,.expand-btn'); }
 let renderedTicketMarkup = null;

@@ -114,10 +114,6 @@ body.vscode-high-contrast-light .ticket-detail-card {
   overflow-y: auto;
   padding: 10px 12px;
 }
-.ticket-detail-card.tracker-bug { --tracker-color: var(--app-tracker-bug); }
-.ticket-detail-card.tracker-feature { --tracker-color: var(--app-tracker-feature); }
-.ticket-detail-card.tracker-task { --tracker-color: var(--app-tracker-task); }
-.ticket-detail-card.tracker-neutral { --tracker-color: var(--app-tracker-neutral); }
 
 .detail-header-fixed {
   flex: 0 0 auto;
@@ -136,13 +132,6 @@ body.vscode-high-contrast-light .ticket-detail-card {
   gap: 6px;
   min-width: 0;
   flex: 1 1 auto;
-}
-.detail-tracker-bar {
-  flex: 0 0 3px;
-  width: 3px;
-  height: 16px;
-  border-radius: 2px;
-  background: var(--tracker-color, var(--app-tracker-neutral));
 }
 .detail-head-row1 .ticket-id {
   flex: 0 0 auto;

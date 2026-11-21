@@ -141,25 +141,49 @@ export const commentStyles = {
   background: var(--app-surface-hover);
 }
 #detail-comments .comment-card.selected,
+#detail-comments .comment-card.is-editable.selected:hover,
+#detail-comments .comment-card.is-editable.selected:focus-visible,
 .comment-timeline .comment-card.selected,
 .comment-card.selected {
-  background-color: color-mix(in oklab, var(--vscode-list-inactiveSelectionBackground, var(--app-surface-hover)) 86%, var(--app-focus));
-  color: var(--vscode-foreground, var(--app-text));
-  box-shadow: inset 3px 0 0 var(--vscode-focusBorder, var(--app-focus));
+  --selected-fg: var(--vscode-list-activeSelectionForeground, var(--vscode-foreground, #ffffff));
+  background-color: color-mix(in srgb, var(--vscode-list-activeSelectionBackground, #04395e) 72%, var(--vscode-sideBar-background, var(--app-bg)));
+  color: var(--selected-fg);
 }
 body:focus-within #detail-comments .comment-card.selected,
+body:focus-within #detail-comments .comment-card.is-editable.selected:hover,
+body:focus-within #detail-comments .comment-card.is-editable.selected:focus-visible,
 body:focus-within .comment-timeline .comment-card.selected,
 body:focus-within .comment-card.selected {
-  background-color: color-mix(in oklab, var(--vscode-list-activeSelectionBackground, var(--app-surface-hover)) 78%, var(--app-focus));
-  color: var(--vscode-list-activeSelectionForeground, var(--app-selected-fg));
+  --selected-fg: var(--vscode-list-activeSelectionForeground, #ffffff);
+  background-color: var(--vscode-list-activeSelectionBackground, #04395e);
+  color: var(--selected-fg);
 }
-body:focus-within .comment-card.selected .comment-author,
-body:focus-within .comment-card.selected .comment-body {
-  color: inherit;
+body.vscode-light #detail-comments .comment-card.selected,
+body.vscode-light #detail-comments .comment-card.is-editable.selected:hover,
+body.vscode-light #detail-comments .comment-card.is-editable.selected:focus-visible,
+body.vscode-light .comment-timeline .comment-card.selected,
+body.vscode-light .comment-card.selected {
+  --selected-fg: var(--vscode-editor-foreground, var(--vscode-foreground, #1f1f1f));
+  background-color: color-mix(in srgb, var(--vscode-list-activeSelectionBackground, #0060c0) 18%, var(--vscode-sideBar-background, var(--app-bg)));
+  color: var(--selected-fg);
 }
-body:focus-within .comment-card.selected .comment-date,
-body:focus-within .comment-card.selected .comment-id {
-  color: color-mix(in srgb, var(--vscode-list-activeSelectionForeground, var(--app-selected-fg)) 80%, transparent);
+body.vscode-light:focus-within #detail-comments .comment-card.selected,
+body.vscode-light:focus-within #detail-comments .comment-card.is-editable.selected:hover,
+body.vscode-light:focus-within #detail-comments .comment-card.is-editable.selected:focus-visible,
+body.vscode-light:focus-within .comment-timeline .comment-card.selected,
+body.vscode-light:focus-within .comment-card.selected {
+  --selected-fg: var(--vscode-editor-foreground, var(--vscode-foreground, #1f1f1f));
+  background-color: color-mix(in srgb, var(--vscode-list-activeSelectionBackground, #0060c0) 28%, var(--vscode-sideBar-background, var(--app-bg)));
+  color: var(--selected-fg);
+}
+.comment-card.selected .comment-author,
+.comment-card.selected .comment-body,
+.comment-card.selected .unsynced-inline-badge {
+  color: var(--selected-fg, inherit);
+}
+.comment-card.selected .comment-date,
+.comment-card.selected .comment-id {
+  color: color-mix(in srgb, var(--selected-fg, currentColor) 85%, transparent);
 }
 .comment-header {
   display: flex;

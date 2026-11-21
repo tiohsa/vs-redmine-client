@@ -443,17 +443,19 @@ suite("Dashboard maintenance", () => {
       ticketLayoutMode: "split",
       detailFocus: true,
       detailTab: "comments",
+      detailHeightPercent: 65,
       quickFilters: ["mine", "open"],
       retainedExtensionState: "keep",
     };
     let renderCount = 0;
+    let syncDetailPanelHeightCount = 0;
     let toastMessage = "";
     const searchInput = { value: "filtered" };
     const projectSearchInput = { value: "nagoya", setAttribute: () => undefined, removeAttribute: () => undefined };
     const projectPickerPopup = { hidden: false };
     const filterDialog = { classList: { add: () => undefined } };
     const snapshot = runInNewContext(`${source}\nresetViewState(); JSON.stringify({
-      ticketLayoutMode, detailFocus, quickFilters: Array.from(quickFilters),
+      ticketLayoutMode, detailFocus, detailHeightPercent, quickFilters: Array.from(quickFilters),
       expanded: Array.from(expandedTicketIds), collapsed: Array.from(collapsedTicketIds),
       expandedComments: Array.from(expandedComments), ticketDetailExpanded, metadataExpanded,
       searchQuery, searchValue: searchInput.value, searchTimer,
@@ -463,6 +465,7 @@ suite("Dashboard maintenance", () => {
     });`, {
       ticketLayoutMode: "split",
       detailFocus: true,
+      detailHeightPercent: 65,
       quickFilters: new Set(["mine", "open"]),
       expandedTicketIds: new Set([410]),
       collapsedTicketIds: new Set([411]),
@@ -497,12 +500,14 @@ suite("Dashboard maintenance", () => {
       req: () => undefined,
       render: () => { renderCount++; },
       applyTicketLayoutMode: () => undefined,
+      syncDetailPanelHeight: () => { syncDetailPanelHeightCount++; },
       showToast: (_level: string, message: string) => { toastMessage = message; },
     }) as string;
 
     assert.deepStrictEqual(JSON.parse(snapshot), {
       ticketLayoutMode: "auto",
       detailFocus: false,
+      detailHeightPercent: 48,
       quickFilters: ["open"],
       expanded: [],
       collapsed: [],
@@ -527,6 +532,7 @@ suite("Dashboard maintenance", () => {
       retainedExtensionState: "keep",
     });
     assert.strictEqual(renderCount, 1);
+    assert.strictEqual(syncDetailPanelHeightCount, 1);
     assert.strictEqual(toastMessage, "view state reset");
   });
 

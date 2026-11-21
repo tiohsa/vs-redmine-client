@@ -26,8 +26,14 @@ suite("Dashboard の表示と操作", () => {
     assert.ok(html.includes('id="open-settings-json-btn"'));
   });
 
-  test("VS Code ネイティブサイドバーデザイン用 CSS を持つ", () => {
-    assert.ok(dashboardStyles.includes(".ticket-tracker-bar"));
+  test("VS Code ネイティブサイドバーデザイン用 CSS を持ち、トラッカー縦バーとコメント左バーを持たない", () => {
+    assert.ok(!dashboardStyles.includes(".ticket-tracker-bar"));
+    assert.ok(!dashboardStyles.includes(".detail-tracker-bar"));
+    assert.ok(!dashboardStyles.includes("border-left: 3px solid var(--tracker-color"));
+    assert.ok(!dashboardStyles.includes("inset 3px 0 0"));
+    assert.ok(!dashboardStyles.includes(".ticket-row.selected::before"));
+    assert.ok(!dashboardWebviewScript.includes("ticket-tracker-bar"));
+    assert.ok(!dashboardWebviewScript.includes("detail-tracker-bar"));
     assert.ok(dashboardStyles.includes(".priority-indicator.priority-urgent"));
     assert.ok(dashboardStyles.includes(".priority-indicator.priority-high"));
     assert.ok(dashboardStyles.includes(".status-pill.status-new"));
@@ -46,25 +52,76 @@ suite("Dashboard の表示と操作", () => {
     assert.ok(dashboardStyles.includes("@keyframes dashboard-spin"));
   });
 
-  test("選択行ハイライトが VS Code 選択色とフォーカス色の混色・High Contrast・Forced Colors を備える", () => {
+  test("選択行・選択コメントのソフトブルーハイライトと High Contrast・Forced Colors を備える", () => {
+    assert.ok(!dashboardStyles.includes("color-mix(in oklab,"));
     assert.ok(
       dashboardStyles.includes(
-        "color-mix(in oklab, var(--vscode-list-inactiveSelectionBackground, var(--app-surface-hover)) 86%, var(--app-focus))",
+        "background-color: color-mix(in srgb, var(--vscode-list-activeSelectionBackground, #04395e) 72%, var(--vscode-sideBar-background, var(--app-bg)));",
       ),
     );
     assert.ok(
       dashboardStyles.includes(
-        "color-mix(in oklab, var(--vscode-list-activeSelectionBackground, var(--app-surface-hover)) 78%, var(--app-focus))",
+        "body:focus-within .ticket-row.selected, body:focus-within .ticket-row.is-unsynced.selected",
       ),
     );
+    assert.ok(
+      dashboardStyles.includes(
+        "background-color: var(--vscode-list-activeSelectionBackground, #04395e);",
+      ),
+    );
+    assert.ok(
+      dashboardStyles.includes(
+        "body.vscode-light .ticket-row.selected, body.vscode-light .ticket-row.is-unsynced.selected",
+      ),
+    );
+    assert.ok(
+      dashboardStyles.includes(
+        "background-color: color-mix(in srgb, var(--vscode-list-activeSelectionBackground, #0060c0) 18%, var(--vscode-sideBar-background, var(--app-bg)));",
+      ),
+    );
+    assert.ok(
+      dashboardStyles.includes(
+        "body.vscode-light:focus-within .ticket-row.selected, body.vscode-light:focus-within .ticket-row.is-unsynced.selected",
+      ),
+    );
+    assert.ok(
+      dashboardStyles.includes(
+        "background-color: color-mix(in srgb, var(--vscode-list-activeSelectionBackground, #0060c0) 28%, var(--vscode-sideBar-background, var(--app-bg)));",
+      ),
+    );
+    assert.ok(dashboardStyles.includes("#detail-comments .comment-card.selected,"));
+    assert.ok(dashboardStyles.includes("#detail-comments .comment-card.is-editable.selected:hover,"));
+    assert.ok(dashboardStyles.includes("body:focus-within #detail-comments .comment-card.selected,"));
+    assert.ok(dashboardStyles.includes("body.vscode-light #detail-comments .comment-card.selected,"));
+    assert.ok(dashboardStyles.includes("body.vscode-light:focus-within #detail-comments .comment-card.selected,"));
     assert.ok(dashboardStyles.includes("body.vscode-high-contrast .ticket-row.selected"));
     assert.ok(dashboardStyles.includes("body.vscode-high-contrast:focus-within .ticket-row.selected"));
     assert.ok(dashboardStyles.includes("body.vscode-high-contrast-light .ticket-row.selected"));
+    assert.ok(dashboardStyles.includes("body.vscode-high-contrast #detail-comments .comment-card.selected"));
+    assert.ok(dashboardStyles.includes("body.vscode-high-contrast:focus-within #detail-comments .comment-card.selected"));
+    assert.ok(dashboardStyles.includes("body.vscode-high-contrast-light #detail-comments .comment-card.selected"));
+    assert.ok(dashboardStyles.includes("body.vscode-high-contrast-light:focus-within #detail-comments .comment-card.selected"));
     const forcedColorsStart = dashboardStyles.indexOf("@media (forced-colors: active)");
     assert.ok(forcedColorsStart >= 0);
     const forcedColorsCss = dashboardStyles.slice(forcedColorsStart);
     assert.ok(forcedColorsCss.includes(".ticket-row.selected"));
+    assert.ok(forcedColorsCss.includes(".comment-card.selected"));
     assert.ok(forcedColorsCss.includes("Highlight"));
+  });
+
+  test("コメントパネル縦リサイズ用ハンドル・スタイル・状態管理を備える", () => {
+    const html = buildDashboardHtml("nonce", buildDashboardStrings());
+    assert.ok(html.includes('id="detail-resize-handle"'));
+    assert.ok(html.includes('role="separator"'));
+    assert.ok(html.includes('aria-orientation="horizontal"'));
+    assert.ok(html.includes('aria-controls="ticket-detail-card"'));
+    assert.ok(html.includes('tabindex="0"'));
+    assert.ok(dashboardStyles.includes(".detail-resize-handle"));
+    assert.ok(dashboardStyles.includes("--detail-panel-height"));
+    assert.ok(dashboardStyles.includes("body.is-resizing-detail"));
+    assert.ok(dashboardWebviewScript.includes("detailHeightPercent"));
+    assert.ok(dashboardWebviewScript.includes("is-resizing-detail"));
+    assert.ok(dashboardWebviewScript.includes("--detail-panel-height"));
   });
 
   test("詳細コメント一覧が余白なし・全幅・上下境界線リスト用 CSS を持つ", () => {
