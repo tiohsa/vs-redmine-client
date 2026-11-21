@@ -4,6 +4,8 @@
 
 新規機能の配置と公開 API は [AGENTS.md](../AGENTS.md) の Feature Verification に従います。[参照機能](../src/layers/extension-host/features/reference-example/index.ts) と [アーキテクチャー設定](../architecture.config.json) で実際に適用される境界を確認できます。
 
+[コマンド登録の入口](../src/app/commandRegistry.ts) は、既存の登録順で機能別の登録処理を呼び出します。利用できるコマンド ID は [マニフェスト](../package.json) と [機能マップ](../verification/feature-map.json) を参照してください。
+
 | 確認対象 | コマンド |
 | --- | --- |
 | TypeScript の型 | `pnpm exec tsc --noEmit` |

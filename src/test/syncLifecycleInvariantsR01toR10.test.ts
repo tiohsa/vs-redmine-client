@@ -566,7 +566,7 @@ suite("R01 〜 R10: Invariant & Lifecycle Recovery Tests", () => {
 
   // R10: Ownership static check (INV-12)
   test("R10: Production code (src/ excluding src/test/) に legacy direct lifecycle mutation が存在しないこと (INV-12)", () => {
-    const srcDir = path.resolve(__dirname, "../..");
+    const root = path.resolve(__dirname, "../..");
     const forbiddenPatterns = [
       "transitionOfflineNewTicketLifecycleAsync",
       "transitionOfflineTicketUpdateLifecycleAsync",
@@ -582,13 +582,15 @@ suite("R01 〜 R10: Invariant & Lifecycle Recovery Tests", () => {
             violations.push(...checkDir(fullPath));
           }
         } else if (entry.isFile() && (entry.name.endsWith(".ts") || entry.name.endsWith(".js"))) {
-          // offlineSyncStore.ts defines the functions, so exclude its own declaration
-          if (entry.name === "offlineSyncStore.ts") {
-            continue;
-          }
           const content = fs.readFileSync(fullPath, "utf8");
+          const relativePath = path.relative(root, fullPath).split(path.sep).join("/");
+          const productionReferences = relativePath === "src/views/offlineSyncLifecycle.ts"
+            ? content.replace(/^export const transitionOffline(?:NewTicket|TicketUpdate)LifecycleAsync = async \(/gm, "")
+            : relativePath === "src/views/offlineSyncStore.ts"
+              ? content.replace(/^export \{[^{}]*\} from "\.\/offlineSyncLifecycle";$/m, "")
+              : content;
           for (const pattern of forbiddenPatterns) {
-            if (content.includes(pattern)) {
+            if (productionReferences.includes(pattern)) {
               violations.push(`${fullPath} contains legacy lifecycle call: ${pattern}`);
             }
           }
@@ -597,7 +599,7 @@ suite("R01 〜 R10: Invariant & Lifecycle Recovery Tests", () => {
       return violations;
     };
 
-    const violations = checkDir(srcDir);
+    const violations = checkDir(root);
     assert.deepStrictEqual(violations, [], `Forbidden legacy lifecycle calls found: ${violations.join(", ")}`);
   });
 });

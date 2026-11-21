@@ -3,9 +3,9 @@ import { runInNewContext } from "vm";
 import { DashboardController } from "../dashboard/DashboardController";
 import { DashboardStateStore } from "../dashboard/DashboardStateStore";
 import { dashboardWebviewScript } from "../dashboard/dashboardWebviewScript";
-import type { DashboardMetadataOption, DashboardStatusMetadata } from "../dashboard/dashboardProtocol";
+import type { DashboardMetadataOption, DashboardProjectNode, DashboardStatusMetadata } from "../dashboard/dashboardProtocol";
 import type { DashboardTicketNode } from "../dashboard/dashboardProtocol";
-import type { Project, Ticket } from "../redmine/types";
+import type { Ticket } from "../redmine/types";
 import type { DurableSyncEffect } from "../app/syncEffects";
 import { getCurrentConnectionScope } from "../config/connectionScope";
 import { clearTicketSummaries, getTicketSummary, rememberTicketSummary } from "../views/ticketSummaryStore";
@@ -194,18 +194,6 @@ const makeController = (
   _maintenanceTestHooks: { confirmDashboardCacheReset: async () => confirm },
 });
 
-interface ControllerInternals {
-  projectService: { invalidate: () => void };
-  ticketService: { invalidate: () => void };
-  commentService: { invalidate: () => void };
-  metadataService: { invalidate: () => void };
-  loadProjects: (throwOnError?: boolean) => Promise<void>;
-  loadMetadataOptions: (throwOnError?: boolean) => Promise<void>;
-  loadTickets: (throwOnError?: boolean) => Promise<void>;
-  pushTickets: () => void;
-  refreshUnsynced: () => void;
-}
-
 const installReloadStubs = (
   controller: DashboardController,
   store: DashboardStateStore,
@@ -213,17 +201,16 @@ const installReloadStubs = (
   failure?: Error,
   onTicketLoad?: () => void,
 ): { invalidations: string[] } => {
-  const internal = controller as unknown as ControllerInternals;
   const invalidations: string[] = [];
-  internal.projectService.invalidate = () => invalidations.push("projects");
-  internal.ticketService.invalidate = () => invalidations.push("tickets");
-  internal.commentService.invalidate = () => invalidations.push("comments");
-  internal.metadataService.invalidate = () => invalidations.push("metadata");
-  internal.loadProjects = async () => {
+  controller["projectService"].invalidate = () => invalidations.push("projects");
+  controller["ticketService"].invalidate = () => invalidations.push("tickets");
+  controller["commentService"].invalidate = () => invalidations.push("comments");
+  controller["metadataService"].invalidate = () => invalidations.push("metadata");
+  controller["projectService"].loadProjects = async () => {
     events.push("projects");
     store.update({ projects: [{ id: 1, name: "Fresh", identifier: "fresh", level: 0 }] });
   };
-  internal.loadMetadataOptions = async () => {
+  controller["dataService"].loadMetadataOptions = async () => {
     events.push("metadata-options");
     const option: DashboardMetadataOption = { id: 1, name: "Fresh option" };
     const status: DashboardStatusMetadata = { ...option, isClosed: false };
@@ -235,7 +222,7 @@ const installReloadStubs = (
       throw failure;
     }
   };
-  internal.loadTickets = async () => {
+  controller["ticketService"].loadTickets = async () => {
     events.push("tickets");
     if (failure && failure.message !== "Metadata unavailable") {
       throw failure;
@@ -247,11 +234,11 @@ const installReloadStubs = (
       loadedTicketCount: 0,
     });
   };
-  internal.pushTickets = () => {
+  controller["pushTickets"] = () => {
     events.push("filter-metadata-rebuilt");
     store.update({ ticketFilterOptions: { assignees: [], statuses: store.getState().metadataOptions.statuses } });
   };
-  internal.refreshUnsynced = () => events.push("unsynced-refreshed");
+  controller["refreshUnsynced"] = () => events.push("unsynced-refreshed");
   return { invalidations };
 };
 
@@ -325,7 +312,7 @@ suite("Dashboard maintenance", () => {
       projectId: 1,
       updatedAt: "2026-09-22T00:00:00Z",
     };
-    const previousProject: Project = { id: 1, name: "Previously loaded project", identifier: "previous" };
+    const previousProject: DashboardProjectNode = { id: 1, name: "Previously loaded project", identifier: "previous", level: 0 };
     const previousTicketNode: DashboardTicketNode = {
       id: ticketId,
       subject: previousTicket.subject,
@@ -333,14 +320,14 @@ suite("Dashboard maintenance", () => {
       children: [],
       level: 0,
     };
-    const internals = controller as unknown as { tickets: Ticket[]; projects: Project[]; totalCount: number };
-    internals.tickets = [previousTicket];
-    internals.projects = [previousProject];
-    internals.totalCount = 1;
+    const cache = controller["cache"];
+    cache.tickets = [previousTicket];
+    cache.projects = [previousProject];
+    cache.totalCount = 1;
     store.update({
       settings: { ...store.getState().settings, baseUrl: "https://redmine.example/", apiKeyStatus: "set" },
       selectedProject: { id: 1, name: previousProject.name },
-      projects: [{ ...previousProject, level: 0 }],
+      projects: [previousProject],
       tickets: [previousTicketNode],
       totalTicketCount: 1,
       loadedTicketCount: 1,
@@ -351,6 +338,13 @@ suite("Dashboard maintenance", () => {
     const beforePresentation = structuredClone(store.getState());
     const beforeSettings = structuredClone(store.getState().settings);
     installReloadStubs(controller, store, events, new Error("Redmine is offline"));
+    const reloadProjects = controller["projectService"].loadProjects;
+    controller["projectService"].loadProjects = async () => {
+      await reloadProjects();
+      cache.projects = store.getState().projects;
+      cache.tickets = [];
+      cache.totalCount = 0;
+    };
 
     await controller.handle({ type: "dashboard.resetCache", requestId: "reset-cache-failure" });
 
@@ -363,9 +357,9 @@ suite("Dashboard maintenance", () => {
     assert.strictEqual(store.getState().loadedTicketCount, beforePresentation.loadedTicketCount);
     assert.strictEqual(store.getState().selectedTicketId, beforePresentation.selectedTicketId);
     assert.deepStrictEqual(store.getState().selectedTicket, beforePresentation.selectedTicket);
-    assert.deepStrictEqual(internals.tickets, [previousTicket]);
-    assert.deepStrictEqual(internals.projects, [previousProject]);
-    assert.strictEqual(internals.totalCount, 1);
+    assert.deepStrictEqual(cache.tickets, [previousTicket]);
+    assert.deepStrictEqual(cache.projects, [previousProject]);
+    assert.strictEqual(cache.totalCount, 1);
     assert.ok(events.some((event) => event.includes("Redmine is offline")));
     assert.strictEqual(events.some((event) => event.startsWith("success:")), false);
     controller.dispose();

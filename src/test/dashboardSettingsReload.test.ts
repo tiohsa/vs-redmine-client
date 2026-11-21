@@ -12,13 +12,12 @@ suite("Dashboard settings reload", () => {
       notifyToast: () => undefined,
       onTicketsRefreshed: () => undefined,
     });
-    const target = controller as unknown as {
-      settingsCtrl: { updateGeneral(patch: unknown): Promise<void> };
-      loadTickets(): Promise<void>;
-    };
+    let updateCount = 0;
     let reloadCount = 0;
-    target.settingsCtrl = { updateGeneral: async () => undefined };
-    target.loadTickets = async () => {
+    controller["settingsCtrl"].updateGeneral = async () => {
+      updateCount++;
+    };
+    controller["ticketService"].loadTickets = async () => {
       reloadCount++;
     };
 
@@ -28,6 +27,7 @@ suite("Dashboard settings reload", () => {
       patch: { ticketListLimit: 100 },
     });
 
+    assert.strictEqual(updateCount, 1);
     assert.strictEqual(reloadCount, 0);
     controller.dispose();
   });

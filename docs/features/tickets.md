@@ -11,4 +11,6 @@
 
 Dashboard の設定または対応するコマンドから、件名・説明・トラッカー・優先度・ステータス・期日の既定値を指定・リセットできます。既定値は対応する編集操作の初期入力に使います。候補と入力の検証はプロジェクトのメタデータに従います。
 
-実装は [作成フォーム](../../src/dashboard/services/DashboardComposerService.ts)、[Markdown からの作成](../../src/views/markdownTicketCreateService.ts)、[プレビューと編集](../../src/views/ticketPreview.ts)、[エディタ既定値](../../src/views/ticketEditorDefaultsStore.ts) を参照してください。検証は [機能マップ](../../verification/feature-map.json) の `ticket-editing` と `editor-defaults` を参照してください。
+実装は [作成フォーム](../../src/dashboard/services/DashboardComposerService.ts)、[Dashboard から開く下書き](../../src/dashboard/services/DashboardDraftService.ts)、[Markdown からの作成](../../src/views/markdownTicketCreateService.ts)、[プレビューと編集](../../src/views/ticketPreview.ts)、[エディタ既定値](../../src/views/ticketEditorDefaultsStore.ts) を参照してください。検証は [機能マップ](../../verification/feature-map.json) の `ticket-editing` と `editor-defaults` を参照してください。
+
+同期時の書き込み・読み戻し・ローカル確定は、[作成ハンドラー](../../src/app/ticketSync/ticketCreateHandler.ts) と [更新ハンドラー](../../src/app/ticketSync/ticketUpdateHandler.ts) が扱います。

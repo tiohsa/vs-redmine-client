@@ -2,9 +2,6 @@ import * as assert from "assert";
 import { DashboardController } from "../dashboard/DashboardController";
 import { DashboardStateStore } from "../dashboard/DashboardStateStore";
 
-const invokeLoadMetadataOptions = (controller: DashboardController): Promise<void> =>
-  (controller as unknown as { loadMetadataOptions(): Promise<void> }).loadMetadataOptions();
-
 const createController = (
   store: DashboardStateStore,
   getCurrentUserId: () => Promise<number>,
@@ -33,7 +30,7 @@ suite("Dashboard quick-filter metadata", () => {
     const store = new DashboardStateStore();
     const controller = createController(store, () => currentUserId);
     try {
-      const load = invokeLoadMetadataOptions(controller);
+      const load = controller["dataService"].loadMetadataOptions();
       assert.deepStrictEqual(store.getState().quickFilterCapabilities, { mine: "loading", open: "loading" });
       await load;
 
@@ -57,7 +54,7 @@ suite("Dashboard quick-filter metadata", () => {
     const store = new DashboardStateStore();
     const controller = createController(store, async () => { throw new Error("user lookup failed"); });
     try {
-      await invokeLoadMetadataOptions(controller);
+      await controller["dataService"].loadMetadataOptions();
       await new Promise((resolve) => setTimeout(resolve, 0));
 
       assert.deepStrictEqual(store.getState().metadataOptions.statuses, [
@@ -88,7 +85,7 @@ suite("Dashboard quick-filter metadata", () => {
       },
     });
     try {
-      await invokeLoadMetadataOptions(controller);
+      await controller["dataService"].loadMetadataOptions();
       await new Promise((resolve) => setTimeout(resolve, 0));
       assert.deepStrictEqual(store.getState().quickFilterCapabilities, { mine: "available", open: "unavailable" });
     } finally {

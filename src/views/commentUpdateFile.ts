@@ -99,6 +99,16 @@ export interface ParsedCommentUpdateFile {
   body: string;
 }
 
+export const hasInvalidCommentUpdateMetadata = (
+  parsed: ParsedCommentUpdateFile | undefined,
+  content: string,
+  documentPath: string,
+  expected: { issueId: number; journalId?: number },
+): boolean => parsed === undefined
+  ? isCommentUpdateDocument(content, documentPath)
+  : parsed.fields.issueId !== expected.issueId ||
+    (expected.journalId !== undefined && parsed.fields.journalId !== expected.journalId);
+
 export type CommentDocumentFinalizeResult =
   | "applied"
   | "stale_source"

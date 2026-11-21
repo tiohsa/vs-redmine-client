@@ -5,7 +5,7 @@ import { validateDashboardMessage } from "../dashboard/dashboardMessageValidatio
 import { dashboardStyles } from "../dashboard/dashboardStyles";
 import { dashboardWebviewScript } from "../dashboard/dashboardWebviewScript";
 
-suite("Dashboard UI 再構築 (redmine_client.md / redmine_client_ui.html)", () => {
+suite("Dashboard の表示と操作", () => {
   test("settings.openJson メッセージを検証する", () => {
     const valid = validateDashboardMessage({ type: "settings.openJson", requestId: "req-1" });
     assert.strictEqual(valid.ok, true);

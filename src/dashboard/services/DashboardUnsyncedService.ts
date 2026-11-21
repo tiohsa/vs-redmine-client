@@ -1,70 +1,25 @@
-import type { DashboardServiceContext } from "./DashboardServiceContext";
 import * as vscode from "vscode";
-import { runOfflineSync } from "../../commands/offlineSync";
-import type { OfflineSyncRunResult } from "../../commands/offlineSync";
-import { syncUnsyncedFile } from "../../commands/syncUnsyncedFile";
-import type { SyncUnsyncedFileResult } from "../../commands/syncUnsyncedFile";
-import {
-  getOfflineSyncQueue,
-  prepareOfflineDiscard,
-  commitOfflineDiscardAsync,
-  prepareOfflineAbandon,
-  commitOfflineAbandonAsync,
-  prepareOfflineForgetAbandoned,
-  commitOfflineForgetAbandonedAsync,
-  prepareOfflineForgetAllAbandoned,
-  commitOfflineForgetAllAbandonedAsync,
-  isAbandoned,
-  beginFreshTicketEdit,
-} from "../../views/offlineSyncStore";
-import { updateDraftAfterSave } from "../../views/ticketDraftStore";
-import { showTicketPreview } from "../../views/ticketPreview";
-import type { OfflineTicketConflictExpectation } from "../../views/offlineSyncStore";
-import { buildUnsyncedDashboardItems } from "../viewModels/unsyncedDashboardViewModel";
-import type { DashboardUnsyncedKey } from "../dashboardProtocol";
-import type { UnsyncedFileSyncKey } from "../../app/unsyncedTypes";
-import {
-  getConnectionScopeForEditor,
-  getTicketEditors,
-} from "../../views/ticketEditorRegistry";
-import { handleConflict, handleCommentConflict } from "../../views/conflictResolver";
-import { getConflictContext, getConflictContextExpectation } from "../../views/conflictDiffProvider";
-import type { TicketSaveResult } from "../../views/ticketSaveTypes";
-import type { CommentSaveResult } from "../../views/commentSaveTypes";
 import type { SyncStatus } from "../../app/syncController";
+import type { SyncEngine } from "../../app/syncEngine";
+import type { UnsyncedFileSyncKey } from "../../app/unsyncedTypes";
+import { runOfflineSync } from "../../commands/offlineSync";
+import { syncUnsyncedFile, type SyncUnsyncedFileResult } from "../../commands/syncUnsyncedFile";
 import { getCurrentConnectionScope } from "../../config/connectionScope";
-import { createSyncEngine, type SyncEngine } from "../../app/syncEngine";
-import { getIssueDetail } from "../../redmine/issues";
-import { runWithConnectionScope } from "../../redmine/client";
-import { parseQueuedTicketIntent } from "../../views/ticketSync/ticketChangeDetector";
-import { metadataFromTicket } from "../../views/ticketSync/ticketRemoteContent";
-import { getAttemptGeneration } from "../../app/syncEffects";
-import { registerConflictContext } from "../../views/conflictDiffProvider";
-import type { OfflineTicketUpdate } from "../../views/offlineSyncStore";
-
-const conflictExpectationFor = (operation: OfflineTicketUpdate): OfflineTicketConflictExpectation => ({
-  operationId: operation.operationId,
-  revision: operation.revision,
-  intentRevision: operation.intentRevision,
-  attemptGeneration: getAttemptGeneration(operation),
-  connectionScope: operation.connectionScope,
-  content: operation.content,
-});
-
-const matchesConflictExpectation = (
-  operation: OfflineTicketUpdate | undefined,
-  expected: OfflineTicketConflictExpectation,
-): boolean => !!operation &&
-  operation.operationId === expected.operationId &&
-  operation.revision === expected.revision &&
-  (expected.intentRevision === undefined ||
-    (operation.intentRevision ?? operation.revision) === expected.intentRevision) &&
-  (expected.attemptGeneration === undefined ||
-    getAttemptGeneration(operation) === expected.attemptGeneration) &&
-  (expected.connectionScope === undefined || operation.connectionScope === expected.connectionScope) &&
-  operation.content === expected.content;
+import type { getIssueDetail } from "../../redmine/issues";
+import { getOfflineSyncQueue, isAbandoned } from "../../views/offlineSyncStore";
+import { getTicketEditors } from "../../views/ticketEditorRegistry";
+import type { DashboardUnsyncedKey } from "../dashboardProtocol";
+import { buildUnsyncedDashboardItems } from "../viewModels/unsyncedDashboardViewModel";
+import type { DashboardServiceContext } from "./DashboardServiceContext";
+import { DashboardSyncConflictService } from "./DashboardSyncConflictService";
+import { DashboardSyncNotifications } from "./DashboardSyncNotifications";
+import { DashboardUnsyncedQueueActions } from "./DashboardUnsyncedQueueActions";
 
 export class DashboardUnsyncedService {
+  private readonly conflicts: DashboardSyncConflictService;
+  private readonly notifications: DashboardSyncNotifications;
+  private readonly queueActions: DashboardUnsyncedQueueActions;
+
   constructor(private readonly deps: {
     context: DashboardServiceContext;
     refreshTicketPresentation: () => void;
@@ -72,7 +27,11 @@ export class DashboardUnsyncedService {
     openTicketEditor?: (ticketId: number) => Promise<void>;
     getIssueDetail?: typeof getIssueDetail;
     syncEngine?: SyncEngine;
-  }) {}
+  }) {
+    this.conflicts = new DashboardSyncConflictService(deps);
+    this.notifications = new DashboardSyncNotifications(deps.context);
+    this.queueActions = new DashboardUnsyncedQueueActions(deps, () => this.refreshUnsynced());
+  }
 
   refreshUnsynced(): void {
     const items = buildUnsyncedDashboardItems();
@@ -83,158 +42,24 @@ export class DashboardUnsyncedService {
     });
   }
 
-  async handleStartNewTicketEdit(requestId: string, ticketId: number): Promise<void> {
-    const scope = getCurrentConnectionScope();
-    const queue = getOfflineSyncQueue(scope);
-    if (queue.tickets.has(ticketId) || !(queue.abandonedTickets ?? []).some((item) => item.ticketId === ticketId)) {
-      this.deps.context.notifyError(requestId, vscode.l10n.t("The abandoned item changed. Refresh and try again."));
-      return;
-    }
-    this.deps.context.notifyOperationStarted(requestId, vscode.l10n.t("Loading the latest ticket…"));
-    try {
-      const detail = await runWithConnectionScope(scope, () => (this.deps.getIssueDetail ?? getIssueDetail)(ticketId));
-      if (scope !== getCurrentConnectionScope()) {
-        this.deps.context.notifyError(requestId, vscode.l10n.t("The connection changed. Try again."));
-        return;
-      }
-      const current = getOfflineSyncQueue(scope);
-      if (current.tickets.has(ticketId) || !(current.abandonedTickets ?? []).some((item) => item.ticketId === ticketId)) {
-        this.deps.context.notifyError(requestId, vscode.l10n.t("The abandoned item changed. Refresh and try again."));
-        return;
-      }
-      const ticket = detail.ticket;
-      const editor = await showTicketPreview(ticket, { kind: "extra", freshStart: true });
-      if (scope !== getCurrentConnectionScope()) {
-        this.deps.context.notifyError(requestId, vscode.l10n.t("The connection changed. Try again."));
-        return;
-      }
-      if (getOfflineSyncQueue(scope).tickets.has(ticketId)) {
-        this.deps.context.notifyError(requestId, vscode.l10n.t("The abandoned item changed. Refresh and try again."));
-        return;
-      }
-      const authorization = await beginFreshTicketEdit(ticketId, editor.document.uri.toString(), scope);
-      if (!authorization) {
-        this.deps.context.notifyError(requestId, vscode.l10n.t("The abandoned item changed. Refresh and try again."));
-        return;
-      }
-      updateDraftAfterSave(ticketId, ticket.subject, ticket.description ?? "",
-        metadataFromTicket(ticket), ticket.updatedAt, scope);
-      this.deps.refreshTicketPresentation();
-      this.deps.context.notifySuccess(requestId, vscode.l10n.t("Latest ticket loaded. Start a new edit in the opened editor."));
-    } catch (error) {
-      this.deps.context.notifyError(requestId, error instanceof Error ? error.message : vscode.l10n.t("Could not load the ticket."));
-    }
+  handleStartNewTicketEdit(requestId: string, ticketId: number): Promise<void> {
+    return this.queueActions.handleStartNewTicketEdit(requestId, ticketId);
   }
 
-  async handleAbandonOne(requestId: string, key: DashboardUnsyncedKey): Promise<void> {
-    const scope = getCurrentConnectionScope();
-    const plan = prepareOfflineAbandon(key, scope);
-    if (!plan.expectation || isAbandoned(plan.expectation)) {
-      this.deps.context.notifyError(requestId, vscode.l10n.t("The unsynced item changed. Refresh and try again."));
-      return;
-    }
-    const target = buildUnsyncedDashboardItems().find((item) =>
-      JSON.stringify(item.key) === JSON.stringify(key));
-    const label = target?.label ?? vscode.l10n.t("Unsynced item");
-    const laterChanges = plan.expectation.nextIntent !== undefined
-      ? vscode.l10n.t("Later edits will also remain in the retained record and will not be synced automatically.")
-      : vscode.l10n.t("There are no later queued edits.");
-    const confirm = vscode.l10n.t("Abandon sync and exclude");
-    const selected = await vscode.window.showWarningMessage(
-      vscode.l10n.t("Abandon sync for this item?"),
-      {
-        modal: true,
-        detail: `${vscode.l10n.t("Connection: {0}", scope)}\n${vscode.l10n.t("Target: {0}", label)}\n${laterChanges}\n\n${vscode.l10n.t("This item will be removed from the unsynced list and future sync runs. Changes already applied to Redmine will not be undone. An unknown remote outcome will remain unknown. The local Markdown file and processing record will be retained.")}`,
-      },
-      confirm,
-    );
-    if (selected !== confirm) {
-      this.deps.context.notifySuccess(requestId, vscode.l10n.t("Operation cancelled. Saved changes were retained."), "info");
-      return;
-    }
-    const result = await commitOfflineAbandonAsync(plan);
-    this.refreshUnsynced();
-    this.deps.refreshTicketPresentation();
-    if (result === "abandoned") {
-      this.deps.context.notifySuccess(requestId, vscode.l10n.t("Sync abandoned. The processing record was retained."));
-    } else {
-      this.deps.context.notifyError(requestId, result === "busy"
-        ? vscode.l10n.t("This item is being synced. Wait for the current operation to finish and try again.")
-        : result === "persistence_failed"
-          ? vscode.l10n.t("Could not save the abandoned state. The item remains available for sync.")
-          : vscode.l10n.t("The unsynced item changed. Refresh and try again."));
-    }
+  handleAbandonOne(requestId: string, key: DashboardUnsyncedKey): Promise<void> {
+    return this.queueActions.handleAbandonOne(requestId, key);
   }
 
-  async handleForgetAbandoned(requestId: string, key: DashboardUnsyncedKey): Promise<void> {
-    const scope = getCurrentConnectionScope();
-    const plan = prepareOfflineForgetAbandoned(key, scope);
-    if (!plan.expectation || !isAbandoned(plan.expectation)) {
-      this.refreshUnsynced();
-      this.deps.context.notifyError(requestId, vscode.l10n.t("The abandoned item changed. Refresh and try again."));
-      return;
-    }
-    const label = buildUnsyncedDashboardItems(true).find((item) =>
-      JSON.stringify(item.key) === JSON.stringify(key))?.label ?? vscode.l10n.t("Unsynced item");
-    const removeLabel = vscode.l10n.t("Delete retained record");
-    const selected = await vscode.window.showWarningMessage(
-      vscode.l10n.t("Delete this abandoned sync record permanently?"),
-      {
-        modal: true,
-        detail: `${vscode.l10n.t("Connection: {0}", scope)}\n${vscode.l10n.t("Target: {0}", label)}\n${vscode.l10n.t("The local processing record will be deleted. The local Markdown file and any changes already applied to Redmine will remain.")}`,
-      },
-      removeLabel,
-    );
-    if (selected !== removeLabel) {
-      this.deps.context.notifySuccess(requestId, vscode.l10n.t("Operation cancelled. Saved changes were retained."), "info");
-      return;
-    }
-    const result = await commitOfflineForgetAbandonedAsync(plan);
-    this.refreshUnsynced();
-    this.deps.refreshTicketPresentation();
-    if (result === "removed") {
-      this.deps.context.notifySuccess(requestId, vscode.l10n.t("Abandoned sync record deleted."));
-    } else {
-      this.deps.context.notifyError(requestId, result === "busy"
-        ? vscode.l10n.t("This item is being synced. Wait for the current operation to finish and try again.")
-        : vscode.l10n.t("The abandoned item changed. Refresh and try again."));
-    }
+  handleForgetAbandoned(requestId: string, key: DashboardUnsyncedKey): Promise<void> {
+    return this.queueActions.handleForgetAbandoned(requestId, key);
   }
 
-  async handleForgetAllAbandoned(requestId: string): Promise<void> {
-    const scope = getCurrentConnectionScope();
-    const plan = prepareOfflineForgetAllAbandoned(scope);
-    if (!plan.items.length) {
-      this.refreshUnsynced();
-      this.deps.context.notifySuccess(requestId, vscode.l10n.t("No abandoned sync records to delete."), "info");
-      return;
-    }
-    const removeLabel = vscode.l10n.t("Delete all abandoned records");
-    const selected = await vscode.window.showWarningMessage(
-      vscode.l10n.t("Permanently delete {0} abandoned sync records?", plan.items.length),
-      { modal: true, detail: `${vscode.l10n.t("Connection: {0}", scope)}\n${vscode.l10n.t("The local processing record will be deleted. The local Markdown file and any changes already applied to Redmine will remain.")}` },
-      removeLabel,
-    );
-    if (selected !== removeLabel) {
-      this.deps.context.notifySuccess(requestId, vscode.l10n.t("Operation cancelled. Saved changes were retained."), "info");
-      return;
-    }
-    if (getCurrentConnectionScope() !== scope) {
-      this.deps.context.notifyError(requestId, vscode.l10n.t("The connection changed. Try again."));
-      return;
-    }
-    const result = await commitOfflineForgetAllAbandonedAsync(plan);
-    this.refreshUnsynced();
-    this.deps.refreshTicketPresentation();
-    if (result === "removed") {
-      this.deps.context.notifySuccess(requestId, vscode.l10n.t("Deleted {0} abandoned sync records.", plan.items.length));
-    } else {
-      this.deps.context.notifyError(requestId, result === "busy"
-        ? vscode.l10n.t("This item is being synced. Wait for the current operation to finish and try again.")
-        : result === "persistence_failed"
-          ? vscode.l10n.t("Could not delete the records. All records were retained.")
-          : vscode.l10n.t("The abandoned records changed. Nothing was deleted. Refresh and try again."));
-    }
+  handleForgetAllAbandoned(requestId: string): Promise<void> {
+    return this.queueActions.handleForgetAllAbandoned(requestId);
+  }
+
+  handleDiscardOne(requestId: string, key: DashboardUnsyncedKey): Promise<void> {
+    return this.queueActions.handleDiscardOne(requestId, key);
   }
 
   async handleSyncOne(requestId: string, key: DashboardUnsyncedKey): Promise<void> {
@@ -245,14 +70,14 @@ export class DashboardUnsyncedService {
     this.deps.context.notifyOperationStarted(requestId, vscode.l10n.t("Syncing…"));
     const result = await this.syncOne(key);
     if (result?.status === "conflict") {
-      const status = await this.resolveConflictInEditor(key, result);
+      const status = await this.conflicts.resolveConflictInEditor(key, result);
       if (status) {
         await this.refreshAfterConflict(key, status);
-        this.notifySyncStatusResult(requestId, status);
+        this.notifications.notifySyncStatusResult(requestId, status);
         return;
       }
     }
-    this.notifySyncOneResult(requestId, result);
+    this.notifications.notifySyncOneResult(requestId, result);
   }
 
   async handleSyncSelectedTicket(requestId: string, ticketId: number): Promise<void> {
@@ -270,7 +95,7 @@ export class DashboardUnsyncedService {
         "redmine-client.syncOpenEditor",
         { uri: openTicketRecord.uri },
       );
-      this.notifySyncStatusResult(requestId, status);
+      this.notifications.notifySyncStatusResult(requestId, status);
       return;
     }
 
@@ -280,7 +105,7 @@ export class DashboardUnsyncedService {
     for (const key of keys) {
       const result = await this.syncOne(key);
       if (result?.status === "conflict") {
-        const status = await this.resolveConflictInEditor(key, result);
+        const status = await this.conflicts.resolveConflictInEditor(key, result);
         if (status === "uploaded") {
           await this.refreshAfterConflict(key, status);
           results.push({ status: "success", kind: key.kind, id: key.kind === "ticket" ? key.ticketId : undefined });
@@ -300,210 +125,21 @@ export class DashboardUnsyncedService {
       }
       results.push(result);
       if (result?.status === "cancelled" || result?.status === "commit_unknown" || result?.status === "recovery_pending") {
-        this.notifySyncOneResult(requestId, result);
+        this.notifications.notifySyncOneResult(requestId, result);
         return;
       }
     }
 
-    const failures = results.filter(
-      (result) => !result || result.status === "failed" || result.status === "conflict",
-    );
-    if (failures.length > 0) {
-      this.deps.context.notifyError(
-        requestId,
-        vscode.l10n.t("Partial sync failure. Succeeded: {0} / Failed: {1}.", results.length - failures.length, failures.length),
-      );
-      return;
-    }
-
-    const synced = results.filter((result) => result?.status === "success").length;
-    const queued = results.filter((result) => result?.status === "queued" ||
-      ((result?.status === "success" || result?.status === "no_change") && result.hasRemainingChanges)).length;
-    if (synced === 0) {
-      this.deps.context.notifySuccess(
-        requestId,
-        merged > 0
-          ? vscode.l10n.t("Merge result is ready. Review and save to sync.")
-          : queued > 0
-          ? vscode.l10n.t("Recovery completed. The item is queued for synchronization.")
-          : vscode.l10n.t("No changes."),
-      );
-      return;
-    }
-    this.deps.context.onTicketsRefreshed();
-    this.deps.context.notifySuccess(
-      requestId,
-      queued > 0
-        ? vscode.l10n.t("Sync completed. Synced: {0}; recovery queued: {1}.", synced, queued)
-        : vscode.l10n.t("Sync completed. Synced: {0}.", synced),
-    );
+    this.notifications.notifySelectedTicketResult(requestId, results, merged);
   }
 
   async handleReviewConflict(requestId: string, ticketId: number): Promise<void> {
-    this.deps.context.notifyOperationStarted(requestId, vscode.l10n.t("Reviewing conflict…"));
-    const operationScope = getCurrentConnectionScope();
-    let conflictContext = getConflictContext(ticketId, operationScope);
-    if (
-      (conflictContext && conflictContext.ticketId !== ticketId) ||
-      (conflictContext?.connectionScope !== undefined && conflictContext.connectionScope !== operationScope)
-    ) {
-      this.deps.context.notifyError(
-        requestId,
-        vscode.l10n.t("Conflict context is no longer available. Refresh before saving."),
-      );
-      return;
-    }
-
-    let expectedOperation = getConflictContextExpectation(ticketId, operationScope);
-    let queued = getOfflineSyncQueue(operationScope).tickets.get(ticketId);
-    if (!expectedOperation && queued) {
-      expectedOperation = conflictExpectationFor(queued);
-    }
-    if (expectedOperation && !matchesConflictExpectation(queued, expectedOperation)) {
-      this.deps.context.notifyError(
-        requestId,
-        vscode.l10n.t("Remote changes detected. Refresh before saving."),
-      );
-      return;
-    }
-
-    if (!conflictContext) {
-      if (
-        !queued ||
-        !queued.operationId ||
-        typeof queued.revision !== "number" ||
-        !Number.isSafeInteger(queued.revision) ||
-        queued.revision <= 0
-      ) {
-        this.deps.context.notifyError(
-          requestId,
-          vscode.l10n.t("Persisted conflict data is unavailable. Refresh before saving."),
-        );
-        return;
-      }
-      const local = parseQueuedTicketIntent(queued);
-      if (!local) {
-        this.deps.context.notifyError(
-          requestId,
-          vscode.l10n.t("Persisted conflict data is invalid. Refresh before saving."),
-        );
-        return;
-      }
-
-      const capturedOperation = conflictExpectationFor(queued);
-      try {
-        const detail = await runWithConnectionScope(
-          operationScope,
-          () => (this.deps.getIssueDetail ?? getIssueDetail)(ticketId),
-        );
-        if (getCurrentConnectionScope() !== operationScope || detail.ticket.id !== ticketId) {
-          throw new Error(vscode.l10n.t("The Redmine connection changed while refreshing the conflict."));
-        }
-        const current = getOfflineSyncQueue(operationScope).tickets.get(ticketId);
-        if (!current || !matchesConflictExpectation(current, capturedOperation)) {
-          this.deps.context.notifyError(
-            requestId,
-            vscode.l10n.t("Remote changes detected. Refresh before saving."),
-          );
-          return;
-        }
-        if (!detail.ticket.updatedAt) {
-          throw new Error(vscode.l10n.t("Redmine did not return the ticket update time."));
-        }
-        conflictContext = {
-          connectionScope: operationScope,
-          ticketId,
-          baseSubject: current.baseSubject,
-          baseDescription: current.baseDescription,
-          localSubject: local.subject || current.baseSubject,
-          localDescription: local.description,
-          remoteSubject: detail.ticket.subject,
-          remoteDescription: detail.ticket.description ?? "",
-          remoteMetadata: metadataFromTicket(detail.ticket),
-          remoteUpdatedAt: detail.ticket.updatedAt,
-        };
-        expectedOperation = capturedOperation;
-        registerConflictContext(conflictContext, expectedOperation);
-      } catch (error) {
-        this.deps.context.notifyError(
-          requestId,
-          vscode.l10n.t(
-            "Conflict review could not be refreshed from Redmine: {0}",
-            error instanceof Error ? error.message : String(error),
-          ),
-        );
-        return;
-      }
-    }
-
-    const key: DashboardUnsyncedKey = { kind: "ticket", ticketId };
-    const result: Extract<SyncUnsyncedFileResult, { status: "conflict" }> = {
-      status: "conflict",
-      kind: "ticket",
-      id: ticketId,
-      conflictContext,
-    };
-    const status = await this.resolveConflictInEditor(key, result, expectedOperation);
+    const status = await this.conflicts.reviewTicket(requestId, ticketId);
     if (!status) {
-      this.deps.context.notifyError(
-        requestId,
-        vscode.l10n.t("Conflicts with remote changes detected. Open the file to review."),
-      );
       return;
     }
-    await this.refreshAfterConflict(key, status);
-    this.notifySyncStatusResult(requestId, status);
-  }
-
-  async handleDiscardOne(requestId: string, key: DashboardUnsyncedKey): Promise<void> {
-    const operationScope = getCurrentConnectionScope();
-    if (key.kind === "newTicket" && !key.queueId && !key.documentUri) {
-      this.deps.context.notifyError(requestId, vscode.l10n.t("Cannot identify the target new ticket draft."));
-      return;
-    }
-    const plan = prepareOfflineDiscard(key, operationScope);
-    if (plan.mode !== "none") {
-      const discardLaterChanges = plan.mode === "nextIntent";
-      const discardLabel = discardLaterChanges
-        ? vscode.l10n.t("Discard later changes")
-        : vscode.l10n.t("Discard");
-      const confirmed = await vscode.window.showWarningMessage(
-        discardLaterChanges
-          ? vscode.l10n.t("This will discard only the later local changes. The remote sync checkpoint will remain for review.")
-          : vscode.l10n.t("This will discard the unsynced local changes. The ticket on the Redmine server will not be deleted."),
-        { modal: true },
-        discardLabel,
-      );
-      if (confirmed !== discardLabel) {
-        this.deps.context.notifySuccess(requestId, vscode.l10n.t("Operation cancelled. Saved changes were retained."), "info");
-        return;
-      }
-    }
-
-    const result = await commitOfflineDiscardAsync(plan);
-
-    switch (result) {
-      case "recovery_required":
-        this.deps.context.notifyError(
-          requestId,
-          vscode.l10n.t("This item has a remote sync checkpoint and must be resumed before it can be discarded."),
-        );
-        return;
-      case "stale":
-      case "not_found":
-        this.refreshUnsynced();
-        this.deps.refreshTicketPresentation();
-        this.deps.context.notifyError(requestId, vscode.l10n.t("The unsynced item changed. Refresh and try again."));
-        return;
-      case "discarded":
-      case "discarded_next":
-        this.refreshUnsynced();
-        this.deps.refreshTicketPresentation();
-        this.deps.context.notifySuccess(requestId, result === "discarded_next"
-          ? vscode.l10n.t("Later local changes discarded. The remote sync checkpoint was preserved.")
-          : vscode.l10n.t("Unsynced local changes discarded."));
-        return;
-    }
+    await this.refreshAfterConflict({ kind: "ticket", ticketId }, status);
+    this.notifications.notifySyncStatusResult(requestId, status);
   }
 
   async handleSyncAll(requestId: string): Promise<void> {
@@ -515,29 +151,7 @@ export class DashboardUnsyncedService {
     this.deps.context.onTicketsRefreshed();
     this.refreshUnsynced();
     this.deps.refreshTicketPresentation();
-    this.notifySyncAllResult(requestId, result);
-  }
-
-  private notifySyncStatusResult(requestId: string, status: SyncStatus | undefined): void {
-    switch (status) {
-      case "uploaded":
-        this.deps.context.onTicketsRefreshed();
-        this.deps.context.notifySuccess(requestId, vscode.l10n.t("Sync completed."));
-        break;
-      case "merged":
-        this.deps.context.notifySuccess(requestId, vscode.l10n.t("Merge result is ready. Review and save to sync."));
-        break;
-      case "noChange":
-        this.deps.context.notifySuccess(requestId, vscode.l10n.t("No changes."));
-        break;
-      case "conflict":
-        this.deps.context.notifyError(requestId, vscode.l10n.t("Conflicts with remote changes detected. Open the file to review."));
-        break;
-      case "failed":
-      default:
-        this.deps.context.notifyError(requestId, vscode.l10n.t("Sync failed. Check the VS Code notifications."));
-        break;
-    }
+    this.notifications.notifySyncAllResult(requestId, result);
   }
 
   private buildSelectedTicketSyncKeys(ticketId: number): DashboardUnsyncedKey[] {
@@ -559,78 +173,6 @@ export class DashboardUnsyncedService {
       });
     }
     return keys;
-  }
-
-  private notifySyncOneResult(requestId: string, result: SyncUnsyncedFileResult | undefined): void {
-    if (!result) {
-      this.deps.context.notifyError(requestId, vscode.l10n.t("Sync failed. Check the VS Code notifications."));
-      return;
-    }
-    switch (result.status) {
-      case "success":
-        this.deps.context.onTicketsRefreshed();
-        this.deps.context.notifySuccess(requestId, result.hasRemainingChanges
-          ? vscode.l10n.t("This sync completed. Later local changes are still waiting to sync.")
-          : vscode.l10n.t("Sync completed."), result.hasRemainingChanges ? "info" : "success");
-        break;
-      case "no_change":
-        this.deps.context.notifySuccess(requestId, result.hasRemainingChanges
-          ? vscode.l10n.t("This sync completed. Later local changes are still waiting to sync.")
-          : vscode.l10n.t("No changes."), "info");
-        break;
-      case "queued":
-        this.deps.context.notifySuccess(requestId, vscode.l10n.t("Recovery completed. The item is queued for synchronization."));
-        break;
-      case "conflict":
-        this.deps.context.notifyError(requestId, vscode.l10n.t("Conflicts with remote changes detected. Open the file to review."));
-        break;
-      case "cancelled":
-        this.deps.context.notifySuccess(requestId, vscode.l10n.t("Recovery cancelled. The saved synchronization state was retained."), "info");
-        break;
-      case "commit_unknown":
-      case "recovery_pending":
-        this.deps.context.notifySuccess(requestId, result.message, "warning");
-        break;
-      case "failed":
-        this.deps.context.notifyError(requestId, result.message ?? vscode.l10n.t("Sync failed. Check the VS Code notifications."));
-        break;
-    }
-  }
-
-  private notifySyncAllResult(requestId: string, result: OfflineSyncRunResult): void {
-    const diagnostics = result.newTicketDiagnostics?.join(" ");
-    const suffix = diagnostics ? ` ${diagnostics}` : "";
-    switch (result.status) {
-      case "nothing_to_sync":
-        this.deps.context.notifySuccess(requestId, vscode.l10n.t("Nothing to sync."));
-        break;
-      case "success":
-        this.deps.context.notifySuccess(requestId, result.remainingChanges
-          ? vscode.l10n.t("Sync completed. Synced: {0}; local changes remaining: {1}.", result.synced, result.remainingChanges)
-          : vscode.l10n.t("All items synced. Synced: {0}.", result.synced), result.remainingChanges ? "info" : "success");
-        break;
-      case "recovery_pending":
-        this.deps.context.notifySuccess(requestId, vscode.l10n.t("Sync paused for recovery. Synced: {0}; incomplete: {1}. Review the unsynced items.", result.synced, result.failed) + suffix, "warning");
-        break;
-      case "partial_failure":
-        this.deps.context.notifyError(
-          requestId,
-          vscode.l10n.t("Partial sync failure. Succeeded: {0} / Failed: {1} / Conflicts: {2}.", result.synced, result.failed, result.conflicts) + suffix,
-        );
-        break;
-      case "cancelled":
-        this.deps.context.notifySuccess(
-          requestId,
-          vscode.l10n.t("Sync cancelled. Succeeded: {0} / Incomplete: {1}.", result.synced, result.failed) + suffix,
-          "info",
-        );
-        break;
-      case "failed":
-        this.deps.context.notifyError(requestId, diagnostics
-          ? vscode.l10n.t("Sync failed: {0}", diagnostics)
-          : vscode.l10n.t("Sync failed. Check the VS Code notifications."));
-        break;
-    }
   }
 
   private async syncOne(key: DashboardUnsyncedKey): Promise<SyncUnsyncedFileResult | undefined> {
@@ -670,94 +212,6 @@ export class DashboardUnsyncedService {
     return result;
   }
 
-  private async resolveConflictInEditor(
-    key: DashboardUnsyncedKey,
-    result: Extract<SyncUnsyncedFileResult, { status: "conflict" }>,
-    expectedOperation?: OfflineTicketConflictExpectation,
-  ): Promise<SyncStatus | undefined> {
-    if ((key.kind !== "ticket" && key.kind !== "comment") || key.ticketId === undefined) {
-      return undefined;
-    }
-    const commentContext = result.kind === "comment" ? result.commentConflictContext : undefined;
-    if (key.kind === "comment" && (
-      (key.commentId === undefined && key.documentUri === undefined) ||
-      !commentContext || commentContext.ticketId !== key.ticketId ||
-      (key.commentId !== undefined && commentContext.commentId !== key.commentId) ||
-      (commentContext.connectionScope !== undefined &&
-        commentContext.connectionScope !== getCurrentConnectionScope())
-    )) {
-      return undefined;
-    }
-    if (key.kind === "ticket" && result.kind === "ticket" && (
-      !result.conflictContext ||
-      result.conflictContext.ticketId !== key.ticketId ||
-      (result.conflictContext.connectionScope !== undefined &&
-        result.conflictContext.connectionScope !== getCurrentConnectionScope())
-    )) {
-      return undefined;
-    }
-    const operationScope = getCurrentConnectionScope();
-    const findEditor = () => getTicketEditors(key.ticketId, operationScope)
-      .filter((record) => key.kind === "ticket"
-        ? record.contentType === "ticket"
-        : (record.contentType === "comment" || record.contentType === "commentDraft") &&
-          (key.commentId === undefined || record.commentId === key.commentId) &&
-          record.commentId === commentContext?.commentId &&
-          (key.documentUri === undefined || record.uri === key.documentUri))
-      .sort((a, b) => b.lastActiveAt - a.lastActiveAt)[0];
-    let editor = findEditor();
-    if (!editor && key.kind === "ticket") {
-      await this.deps.openTicketEditor?.(key.ticketId);
-      editor = findEditor();
-    }
-    if (!editor) {
-      return undefined;
-    }
-    const document = await vscode.workspace.openTextDocument(vscode.Uri.parse(editor.uri));
-    const textEditor = vscode.window.visibleTextEditors.find(
-      (candidate) => candidate.document === document,
-    ) ?? await vscode.window.showTextDocument(document, { preview: false });
-    const editorScope = getConnectionScopeForEditor(textEditor);
-    if (editorScope !== undefined && editorScope !== operationScope) {
-      return undefined;
-    }
-    const resolverScope = editorScope ?? operationScope;
-    const syncEngine = this.deps.syncEngine ?? createSyncEngine();
-
-    if (key.kind === "ticket" && result.kind === "ticket" && result.conflictContext) {
-      const resolved = await handleConflict(
-        {
-          status: "conflict",
-          message: vscode.l10n.t("Remote changes detected. Review diff before syncing."),
-          conflictContext: result.conflictContext,
-        } satisfies TicketSaveResult,
-        textEditor,
-        undefined,
-        resolverScope,
-        syncEngine,
-        expectedOperation,
-      );
-      return toSyncStatus(resolved.status);
-    }
-
-    if (key.kind === "comment" && result.kind === "comment" && result.commentConflictContext) {
-      const resolved = await handleCommentConflict(
-        {
-          status: "conflict",
-          message: vscode.l10n.t("Comment was updated in Redmine. Review diff before syncing."),
-          commentId: result.commentConflictContext.commentId,
-          conflictContext: result.commentConflictContext,
-        } satisfies CommentSaveResult,
-        textEditor,
-        resolverScope,
-        syncEngine,
-      );
-      return toSyncStatus(resolved.status);
-    }
-
-    return undefined;
-  }
-
   private async refreshAfterConflict(key: DashboardUnsyncedKey, status: SyncStatus): Promise<void> {
     if (status === "uploaded" || status === "noChange" || status === "merged") {
       this.refreshUnsynced();
@@ -782,19 +236,3 @@ export class DashboardUnsyncedService {
     await this.deps.loadComments(key.ticketId);
   }
 }
-
-const toSyncStatus = (status: TicketSaveResult["status"] | CommentSaveResult["status"]): SyncStatus => {
-  switch (status) {
-    case "created":
-    case "success":
-      return "uploaded";
-    case "merged":
-      return "merged";
-    case "no_change":
-      return "noChange";
-    case "conflict":
-      return "conflict";
-    default:
-      return "failed";
-  }
-};

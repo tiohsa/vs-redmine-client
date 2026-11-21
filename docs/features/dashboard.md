@@ -13,6 +13,7 @@ Activity Bar の Webview に Tickets、Unsynced、Settings があります。Tic
 - ビュータイトルの `+` アクション（`redmine-client.createTicketFromDashboard`）は選択中プロジェクトを引き継いで新規チケットの即時ドラフトを開き、同期完了まで一覧先頭に `#NEW` 行（`#tickets-badge` 対象）として表示します。Markdown 編集中の変更（既存チケット・新規下書き、`done_ratio` 進捗率を含む）も `300ms` デバウンス後に一覧・未同期件数・詳細ドロワーへ即時反映します。
 - 詳細ドロワーはサイドバー下半分（リスト `52%` / 詳細 `48%`）に展開し、レイヤー感のある背景（`--vscode-editorWidget-background`・上端境界線・上向きシャドウ）を持ちます。2段構成の固定コンパクトヘッダー（1段目: トラッカー色バー・`#id`・1行省略件名・閉じるボタン、2段目: プロジェクト名・未同期インジケータ・`同期` と `ブラウザで開く` の 2 アクション）の直下にコメントセクションヘッダー（左側: コメントアイコン・見出し・件数バッジ `#detail-comment-count`、右側: プライマリボタン `#add-comment-btn`「コメント追加」と再読み込みボタン `#reload-comments-btn`）を配置し、チケット選択と同時に `#comments-list` へコメント履歴を表示します。各コメント行をクリックして編集用 Markdown を開けます。
 - 設定タブから `settings.json` を直接開けます。
+- チケット行と詳細ドロワーの同期バッジは、編集中の変更を `Editing`、保存済みキューの待機を `Waiting to sync` と表示します。結果不明や復旧待ちなどは該当する同期状態を表示します。
 
 ## 並び替えと設定
 
@@ -21,5 +22,10 @@ Activity Bar の Webview に Tickets、Unsynced、Settings があります。Tic
 - 並び替えは取得済みの絞り込み結果に適用します。通常一覧では同じ階層の兄弟同士を並べ、親子関係を維持します。検索では直接一致の優先を維持します。項目や方向の変更による Redmine への追加リクエストはありません。
 - Webview からの入力は [プロトコル](../../src/dashboard/dashboardProtocol.ts) と [検証](../../src/dashboard/dashboardMessageValidation.ts) を通してから処理します。許可外の並び替え項目や方向を持つ `settings.update` は設定を変更しません。
 - **Reset Dashboard Cache** は Redmine から再構築可能なデータとメタデータを取り直します。下書き・同期状態・認証情報・設定は保持します。**Reset View State** はレイアウトとクイックフィルターを初期化し、永続のチケット一覧設定を保持します。
+- 接続先を変更した場合は切り替え前の取得結果を破棄します。キャッシュ再取得と属性候補の読み込みは [Dashboard のデータ取得](../../src/dashboard/services/DashboardDataService.ts) が扱います。検証は [再取得中の接続切り替え](../../src/test/dashboardCacheInterruption.test.ts) を参照してください。
 
 実装は [プロジェクトの取得と選択](../../src/dashboard/services/DashboardProjectService.ts)、[チケット取得と検索](../../src/dashboard/services/DashboardTicketService.ts)、[一覧の表示ルール](../../src/views/projectListSettings.ts)、[一覧設定ストア](../../src/views/ticketListSettingsStore.ts) を参照してください。検証は [機能マップ](../../verification/feature-map.json) の `ticket-browsing` と [メンテナンステスト](../../src/test/dashboardMaintenance.test.ts) を参照してください。
+
+[Webview スクリプト](../../src/dashboard/dashboardWebviewScript.ts) と [スタイル](../../src/dashboard/dashboardStyles.ts) は、画面別・共通処理の断片を決められた順序で連結します。再描画後のフォーカス、キーボード操作、テーマと表示幅ごとの挙動は [Dashboard UI 検証](../../scripts/check-dashboard-ui.cjs) で確認できます。
+
+Unsynced の [同期操作](../../src/dashboard/services/DashboardUnsyncedService.ts) は [競合の仲介](../../src/dashboard/services/DashboardSyncConflictService.ts)、[結果通知](../../src/dashboard/services/DashboardSyncNotifications.ts)、[破棄・中止などのキュー操作](../../src/dashboard/services/DashboardUnsyncedQueueActions.ts) に処理を渡します。

@@ -12,6 +12,8 @@
 - トランザクション候補と公開 snapshot は、ネストした Effect や `RequestSnapshot` の変更が保存前の状態に波及しないよう分離します。通常の操作更新は `mutateOfflineSyncQueueAsync()` を経由します。
 - 旧キュー、操作形式、世代情報を読み込む移行経路を維持します。以後の遷移では古い `revision` や `attemptGeneration` のコールバック、再試行、完了処理を永続化前に拒否します。
 
+保存形式と旧データの変換は [キューの形式変換](../../src/views/offlineSyncQueueCodec.ts)、キューの読み込み・更新・移行の直列化は [ストレージ](../../src/views/offlineSyncQueueStorage.ts) が扱います。[状態遷移](../../src/views/offlineSyncLifecycle.ts) はスコープ、操作、バージョン、実行段階を更新時に照合します。
+
 ## リモート書き込みと完了
 
 1. 操作の入力と書き込みに必要な [添付の識別情報](attachments.md) を確定します。
@@ -21,6 +23,14 @@
 
 Effect の進行は単調かつ冪等にします。補償として定義した遷移でのみ `planned` への巻き戻しを扱います。書き込みの受理後からローカル確定までの間も、同期トレイまたは Unsynced に復旧対象を表示します。
 
+[Primary 遷移](../../src/app/ticketSync/syncPrimaryRemoteTransition.ts) は操作と Effect の遷移候補を同時に計算し、同期リポジトリは双方を一度の更新で保存します。[世代照合](../../src/app/ticketSync/syncAttemptGenerationRepository.ts) は試行中のリポジトリ呼び出しに開始時の世代を渡します。[Effect の状態遷移](../../src/app/syncEffects/effectTransition.ts) と [試行終了の判定](../../src/app/syncEffects/attemptClosure.ts) は、保存やリモート操作を行わずに遷移結果を決めます。
+
 実装は [保存キュー](../../src/app/saveSyncQueue.ts)、[同期エンジン](../../src/app/syncEngine.ts)、[コーディネーター](../../src/app/ticketSync/syncCoordinator.ts)、[同期リポジトリ](../../src/app/ticketSync/syncRepository.ts)、[永続ストア](../../src/views/offlineSyncStore.ts) を参照してください。検証は [ストアのトランザクション](../../src/test/offlineSyncStoreTransactions.test.ts)、[世代](../../src/test/syncAttemptGenerationM01toM10.test.ts)、[ローカル確定の復旧](../../src/test/syncLocalFinalizationRecovery.test.ts) を参照してください。
 
-新規チケットの同期では、本文の `mode` が省略されていても、ステータスが空の場合は一覧を取得せず `status_id` を省略します。指定時は一覧から ID を解決し、取得に失敗した場合は作成しません。VS Code コマンドと Dashboard の一括同期では、一覧取得または作成の HTTP エラーについて操作名とステータスを結果通知に表示します。作成結果が不明な HTTP エラーは復旧待ちとして扱います。許可された明示的再試行では凍結済みリクエストを使用し、ステータス一覧を再取得しません。
+## 新規チケットの作成と通知
+
+新規チケットのステータス指定が空の場合は、ステータス一覧を取得せず `status_id` を省略します。YAML フロントマターの `mode` が省略されていても同じです。指定時は一覧から ID を解決し、取得に失敗した場合は作成しません。許可された明示的再試行で凍結済みリクエストを送るときは、ステータス一覧を再取得しません。
+
+一括同期で一覧取得または作成が HTTP エラーになった場合は、操作名と HTTP ステータスを結果通知に表示します。ほかの項目が成功した場合も失敗した項目の診断を表示します。Dashboard から実行した場合は Dashboard の結果通知に集約します。認証情報、リクエスト本文、応答本文は診断に含めません。作成 POST の HTTP 503 は `commit_unknown` として保存し、復旧待ちを表示します。
+
+検証は [作成時の HTTP 診断](../../src/test/ticketSyncService.test.ts) と [Dashboard の同期結果と再同期](../../src/test/dashboardSyncFeedback.test.ts) を参照してください。
