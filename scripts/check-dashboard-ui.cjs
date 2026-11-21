@@ -1076,6 +1076,13 @@ async function main() {
     await evaluate(`document.body.className=${JSON.stringify(theme)};document.getElementById('tab-tickets').click()`);
     await push();
     if (theme === 'vscode-dark') assert.equal(await evaluate('getComputedStyle(document.body).backgroundColor'), 'rgb(37, 37, 38)');
+    if (theme === 'vscode-light' || theme === 'vscode-dark') {
+      assert.notEqual(
+        await evaluate(`getComputedStyle(document.getElementById('ticket-detail-card')).backgroundColor`),
+        await evaluate(`getComputedStyle(document.getElementById('ticket-scroll')).backgroundColor`),
+        `detail background differs from list: ${theme} ${width}`,
+      );
+    }
     assert.equal(await evaluate(`document.querySelectorAll('.ticket-row .due-overdue').length`), 0);
     assert.equal(await evaluate(`document.querySelector('.tickets-master').scrollWidth <= document.querySelector('.tickets-master').clientWidth`), true);
     assert.equal(await evaluate(`document.getElementById('ticket-scroll').scrollWidth <= document.getElementById('ticket-scroll').clientWidth`), true, `list overflow: ${theme} ${width}`);

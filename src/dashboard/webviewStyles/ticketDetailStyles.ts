@@ -101,10 +101,14 @@ export const ticketDetailStyles = {
   overflow: hidden;
   padding: 0;
   border: 0;
-  border-top: 1px solid var(--vscode-panel-border, var(--app-border-strong));
+  border-top: 1px solid var(--app-border);
   border-radius: 0;
-  background: var(--vscode-editorWidget-background, var(--app-surface-raised));
+  background: color-mix(in srgb, var(--vscode-sideBar-background, var(--app-bg)) 92%, var(--app-text));
   box-shadow: 0 -4px 12px rgba(0, 0, 0, 0.18);
+}
+body.vscode-high-contrast .ticket-detail-card,
+body.vscode-high-contrast-light .ticket-detail-card {
+  background: var(--vscode-editorWidget-background, var(--vscode-sideBar-background, var(--app-bg)));
 }
 .ticket-detail-card:has(.composer-grid) {
   overflow-y: auto;

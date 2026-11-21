@@ -116,6 +116,10 @@ export const commentStyles = {
   background: var(--app-surface);
   overflow: hidden;
 }
+#detail-comments .comment-card,
+.comment-timeline .comment-card {
+  background: transparent;
+}
 .comment-card.is-editable {
   cursor: pointer;
 }
