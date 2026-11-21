@@ -37,6 +37,8 @@ export const registerViews = (
     updateTicketSubject: (ticketId, subject) =>
       dashboardProvider.updateTicketSubject(ticketId, subject),
     setSelectedProjectId: (projectId) => dashboardProvider.selectProject(projectId),
+    revealCreatedTickets: (ticketIds, connectionScope) =>
+      dashboardProvider.revealCreatedTickets(ticketIds, connectionScope),
   };
   const commentsPresentation: CommentPresentationPort = {
     refresh: () => {

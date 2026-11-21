@@ -75,5 +75,44 @@ suite("createTicketFromEditor durable sync boundary guard (RT-03)", () => {
       assert.strictEqual(receivedUploads?.[0]?.token, "tok-12345");
     });
   });
+
+  test("作成完了時のみ onTicketCreated(ticketId, scope) を呼び出し、エラーでも作成失敗にしない", async () => {
+    await runWithConnectionScope(scope, async () => {
+      const uri = vscode.Uri.parse("file:///tmp/create-callback.md");
+      const editor = createMutableEditorStub(uri, "Body");
+      const createdCalls: Array<{ ticketId: number; scope: string }> = [];
+
+      await createTicketFromEditor({
+        getActiveEditor: () => editor,
+        getDefaultProjectId: () => "50",
+        promptSubject: async () => "Created Subject",
+        promptAttachments: async () => [],
+        createTicketSyncService: () => ({
+          syncEditor: async () => ({ kind: "completed", ticketId: 888 }),
+        }),
+        onTicketCreated: async (ticketId, connectionScope) => {
+          createdCalls.push({ ticketId, scope: connectionScope });
+          throw new Error("UI refresh failed");
+        },
+      });
+
+      assert.deepStrictEqual(createdCalls, [{ ticketId: 888, scope }]);
+
+      let failedCallbackCalled = false;
+      await createTicketFromEditor({
+        getActiveEditor: () => editor,
+        getDefaultProjectId: () => "50",
+        promptSubject: async () => "Failed Subject",
+        promptAttachments: async () => [],
+        createTicketSyncService: () => ({
+          syncEditor: async () => ({ kind: "failed_before_commit", error: new Error("denied") }),
+        }),
+        onTicketCreated: () => {
+          failedCallbackCalled = true;
+        },
+      });
+      assert.strictEqual(failedCallbackCalled, false);
+    });
+  });
 });
 

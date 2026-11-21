@@ -64,10 +64,13 @@ export const createSyncController = (deps: SyncControllerDeps): SyncController =
       const wasNewTicketDraft = getTicketIdForEditor(editor) === NEW_TICKET_DRAFT_ID;
       const oldUri = editor.document.uri;
       const operationScope = getConnectionScopeForEditor(editor) ?? getCurrentConnectionScope();
+      let createdTicketId: number | undefined;
       const syncResult = await syncEditorToRedmine(editor, {
         trigger: "explicit",
         onSubjectUpdated: updateTicketListSubject,
-        onTicketCreated: () => ticketsPresentation.refresh(),
+        onTicketCreated: (ticketId) => {
+          createdTicketId = ticketId;
+        },
         onCommentsRefresh: (ticketId) => commentsPresentation.refreshForTicket(ticketId),
         syncEngine: deps.syncEngine,
       });
@@ -87,7 +90,7 @@ export const createSyncController = (deps: SyncControllerDeps): SyncController =
         }
         notifications.notifyTicketSaveResult(result);
         if (result.status === "created") {
-          const createdId = getTicketIdForEditor(editor);
+          const createdId = createdTicketId ?? getTicketIdForEditor(editor);
           if (wasNewTicketDraft && createdId && createdId > 0) {
             await renameSyncedNewTicketFileIfEligible({
               oldUri,
@@ -97,7 +100,11 @@ export const createSyncController = (deps: SyncControllerDeps): SyncController =
             });
           }
           refreshTicketEditorContexts(vscode.window.activeTextEditor);
-          ticketsPresentation.refresh();
+          if (createdId && createdId > 0 && ticketsPresentation.revealCreatedTickets) {
+            await ticketsPresentation.revealCreatedTickets([createdId], operationScope).catch(() => undefined);
+          } else {
+            ticketsPresentation.refresh();
+          }
         } else {
           ticketsPresentation.notifyChange();
         }

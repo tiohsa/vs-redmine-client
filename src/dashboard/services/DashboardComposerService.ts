@@ -8,8 +8,11 @@ import type { TicketSaveResult } from "../../views/ticketSaveTypes";
 import { syncEditorToRedmine } from "../../commands/syncToRedmine";
 import {
   getConnectionScopeForEditor,
+  getProjectIdForEditor,
   getTicketIdForEditor,
 } from "../../views/ticketEditorRegistry";
+import { renameSyncedNewTicketFileIfEligible } from "../../views/ticketSync/ticketEditorRewrite";
+import { refreshTicketEditorContexts } from "../../app/editorEventController";
 import { type DashboardWorkPanel, type NewTicketComposerValues } from "../dashboardProtocol";
 import type { Ticket } from "../../redmine/types";
 import {
@@ -29,6 +32,7 @@ export class DashboardComposerService {
     refreshUnsynced: () => void;
     loadTickets: () => Promise<void>;
     selectTicket: (ticketId: number) => Promise<void>;
+    revealCreatedTickets?: (ticketIds: readonly number[], options?: { connectionScope?: string }) => Promise<void>;
     getProjectTrackers?: typeof getProjectTrackers;
     listProjectMembers?: typeof listProjectMembers;
     syncEngine?: Pick<SyncEngine, "syncOne"> & Partial<Pick<SyncEngine, "syncTicketEditor">>;
@@ -184,9 +188,13 @@ export class DashboardComposerService {
         const doc = await vscode.workspace.openTextDocument(uri);
         return vscode.window.showTextDocument(doc, { preview: false });
       });
+    let syncedCreatedId: number | undefined;
     const syncFn = hooks?.syncFn ?? (async (editor: vscode.TextEditor) => {
       const synced = await syncEditorToRedmine(editor, {
         trigger: "explicit",
+        onTicketCreated: (ticketId) => {
+          syncedCreatedId = ticketId;
+        },
         syncEngine: this.deps.syncEngine,
       });
       return synced?.kind === "ticket"
@@ -201,7 +209,8 @@ export class DashboardComposerService {
       openEditorFn,
       fileExistsFn: hooks?.fileExistsFn,
     });
-    const resolvedUri = editor.document.uri.toString();
+    const oldUri = editor.document.uri;
+    const resolvedUri = oldUri.toString();
     if (resolvedUri !== draftUri) {
       this.updateWorkPanelComposer({ draftUri: resolvedUri });
     }
@@ -215,7 +224,16 @@ export class DashboardComposerService {
     const result = await syncFn(editor);
 
     if (result.status === "created") {
-      const createdId = getTicketIdFn(editor);
+      const createdId = getTicketIdFn(editor) ?? syncedCreatedId;
+      if (!hooks?.syncFn && createdId !== undefined && createdId > 0) {
+        await renameSyncedNewTicketFileIfEligible({
+          oldUri,
+          ticketId: createdId,
+          projectId: getProjectIdForEditor(editor) ?? workPanel.projectId,
+          connectionScope: operationScope,
+        });
+        refreshTicketEditorContexts(vscode.window.activeTextEditor);
+      }
       this.deps.refreshUnsynced();
       if (operationScope !== getCurrentConnectionScope()) {
         this.deps.context.notifyError(requestId, CONNECTION_SCOPE_MISMATCH_MESSAGE);
@@ -225,19 +243,30 @@ export class DashboardComposerService {
         await hooks.afterCreatedFn(createdId ?? 0);
         this.deps.context.onTicketsRefreshed();
         this.deps.context.notifySuccess(requestId, vscode.l10n.t("Ticket created."));
+      } else if (createdId !== undefined && createdId > 0) {
+        if (this.deps.revealCreatedTickets) {
+          try {
+            await this.deps.revealCreatedTickets([createdId], { connectionScope: operationScope });
+          } catch {
+            this.deps.context.onTicketsRefreshed();
+          }
+        } else {
+          await this.deps.loadTickets();
+          await this.deps.selectTicket(createdId);
+        }
+        if (this.deps.context.store.getState().workPanel?.mode !== "detail") {
+          this.deps.context.store.update({ workPanel: undefined });
+        }
+        this.deps.context.notifySuccess(requestId, vscode.l10n.t("Ticket created."));
       } else {
         await this.deps.loadTickets();
-        this.deps.context.onTicketsRefreshed();
-        if (createdId !== undefined && createdId > 0) {
-          this.deps.context.store.update({ workPanel: { mode: "detail", ticketId: createdId } });
-          await this.deps.selectTicket(createdId);
-          this.deps.context.notifySuccess(requestId, vscode.l10n.t("Ticket created."));
-        } else {
-          this.deps.context.notifySuccess(
-            requestId,
-            vscode.l10n.t("Ticket created. However, the new ticket ID could not be determined. Refresh the list to check."),
-          );
+        if (this.deps.context.store.getState().workPanel?.mode !== "detail") {
+          this.deps.context.store.update({ workPanel: undefined });
         }
+        this.deps.context.notifySuccess(
+          requestId,
+          vscode.l10n.t("Ticket created. However, the new ticket ID could not be determined. Refresh the list to check."),
+        );
       }
       return;
     }

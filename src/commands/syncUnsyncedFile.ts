@@ -46,7 +46,7 @@ export type SyncUnsyncedFileResult =
 
 type SyncUnsyncedFileOptions = {
   suppressResultNotifications?: boolean;
-  onTicketCreated?: () => void;
+  onTicketCreated?: (ticketId?: number) => void;
   onSubjectUpdated?: (ticketId: number, subject: string) => void;
   createTicketSyncService?: typeof createTicketSyncService;
   createSyncEngine?: typeof createSyncEngine;
@@ -249,7 +249,7 @@ const syncUnsyncedFileAtScope = async (
         });
         refreshTicketEditorContexts();
       }
-      options.onTicketCreated?.();
+      options.onTicketCreated?.(outcome.ticketId);
       showInfoResult(hasRemainingChanges()
         ? vscode.l10n.t("This sync completed. Later local changes are still waiting to sync.")
         : vscode.l10n.t("New ticket created."));

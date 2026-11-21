@@ -23,12 +23,19 @@ export const registerSyncCommands = (
 
   context.subscriptions.push(
     vscode.commands.registerCommand("redmine-client.runOfflineSync", async () => {
-      await runOfflineSync(deps.syncEngine
+      const result = await runOfflineSync(deps.syncEngine
         ? { createSyncEngine: () => deps.syncEngine! }
         : undefined);
-      ticketsPresentation.refresh();
-      commentsPresentation.refresh();
       unsyncedPresentation.refresh();
+      if (
+        result.createdTicketIds &&
+        result.createdTicketIds.length > 0 &&
+        ticketsPresentation.revealCreatedTickets
+      ) {
+        await ticketsPresentation.revealCreatedTickets(result.createdTicketIds).catch(() => undefined);
+      } else {
+        ticketsPresentation.refresh();
+      }
     }),
     vscode.commands.registerCommand("redmine-client.syncUnsyncedFile", async (item: unknown) => {
       const withKey = item as { syncKey?: unknown } | undefined;
@@ -36,14 +43,28 @@ export const registerSyncCommands = (
         vscode.window.showErrorMessage(vscode.l10n.t("Select sync target from the Dashboard unsynced list."));
         return;
       }
+      let ticketCreated = false;
+      let createdTicketId: number | undefined;
       await syncUnsyncedFile(
         { syncKey: withKey.syncKey },
         {
-          onTicketCreated: () => ticketsPresentation.refresh(),
+          onTicketCreated: (ticketId) => {
+            ticketCreated = true;
+            createdTicketId = ticketId;
+          },
           createSyncEngine: deps.syncEngine ? () => deps.syncEngine! : undefined,
         },
       );
       unsyncedPresentation.refresh();
+      if (
+        createdTicketId !== undefined &&
+        createdTicketId > 0 &&
+        ticketsPresentation.revealCreatedTickets
+      ) {
+        await ticketsPresentation.revealCreatedTickets([createdTicketId]).catch(() => undefined);
+      } else if (ticketCreated) {
+        ticketsPresentation.refresh();
+      }
     }),
   );
 

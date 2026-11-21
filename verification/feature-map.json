@@ -57,6 +57,7 @@
         "src/test/dashboardTicketSearch.test.ts",
         "src/test/ticketListSettingsStore.test.ts",
         "src/test/dashboardValidationExtended.test.ts",
+        "src/test/createdTicketListSelection.test.ts",
         "scripts/check-dashboard-ui.cjs",
         "src/test/live/dashboardWorkflow.test.ts"
       ]
@@ -89,6 +90,7 @@
         "src/test/createTicketFromMarkdownHeader.test.ts",
         "src/test/markdownTicketCreateService.test.ts",
         "src/test/draftPersistenceScope.test.ts",
+        "src/test/createdTicketListSelection.test.ts",
         "src/test/live/dashboardWorkflow.test.ts",
         "src/test/live/editorWorkflowSync.test.ts"
       ]
@@ -150,7 +152,8 @@
         "src/test/saveSyncExecutorAutoMode.test.ts",
         "src/test/ticketSyncService.test.ts",
         "src/test/syncLifecycleBoundary.test.ts",
-        "src/test/syncLifecycleOwnership.test.ts"
+        "src/test/syncLifecycleOwnership.test.ts",
+        "src/test/createdTicketListSelection.test.ts"
       ]
     },
     {

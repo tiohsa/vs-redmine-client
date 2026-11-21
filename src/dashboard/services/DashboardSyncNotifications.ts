@@ -30,14 +30,20 @@ export class DashboardSyncNotifications {
     }
   }
 
-  notifySyncOneResult(requestId: string, result: SyncUnsyncedFileResult | undefined): void {
+  notifySyncOneResult(
+    requestId: string,
+    result: SyncUnsyncedFileResult | undefined,
+    options?: { skipRefresh?: boolean },
+  ): void {
     if (!result) {
       this.context.notifyError(requestId, vscode.l10n.t("Sync failed. Check the VS Code notifications."));
       return;
     }
     switch (result.status) {
       case "success":
-        this.context.onTicketsRefreshed();
+        if (!options?.skipRefresh) {
+          this.context.onTicketsRefreshed();
+        }
         this.context.notifySuccess(requestId, result.hasRemainingChanges
           ? vscode.l10n.t("This sync completed. Later local changes are still waiting to sync.")
           : vscode.l10n.t("Sync completed."), result.hasRemainingChanges ? "info" : "success");

@@ -186,18 +186,25 @@ export const performSyncOnSave = async (
       }
       try {
         const outcome = await deps.syncEngine.syncOne(key, { connectionScope: operationScope });
+        const createdTicketId =
+          key.kind === "newTicket" &&
+          outcome.kind === "completed" &&
+          "ticketId" in outcome &&
+          typeof outcome.ticketId === "number" &&
+          outcome.ticketId > 0
+            ? outcome.ticketId
+            : undefined;
         if (key.kind === "newTicket" && outcome.kind === "completed") {
-          if (key.documentUri && "ticketId" in outcome && outcome.ticketId) {
+          if (key.documentUri && createdTicketId !== undefined) {
             const oldUri = vscode.Uri.parse(key.documentUri);
             await renameSyncedNewTicketFileIfEligible({
               oldUri,
-              ticketId: outcome.ticketId,
+              ticketId: createdTicketId,
               projectId: getProjectIdForUri(oldUri),
               connectionScope: operationScope,
             });
             refreshTicketEditorContexts(vscode.window.activeTextEditor);
           }
-          ticketsPresentation.refresh();
         }
         const conflictHandled = await resolveAutoConflict(key, outcome);
         if (!conflictHandled) {
@@ -225,6 +232,16 @@ export const performSyncOnSave = async (
             commentId: key.kind === "comment" ? key.commentId : undefined,
             isAuto: true,
           });
+        }
+        if (key.kind === "newTicket" && outcome.kind === "completed") {
+          try {
+            if (createdTicketId !== undefined && ticketsPresentation.revealCreatedTickets) {
+              await ticketsPresentation.revealCreatedTickets([createdTicketId], operationScope);
+            } else {
+              ticketsPresentation.refresh();
+            }
+          } catch {
+          }
         }
       } catch (error) {
         if (key.kind === "ticket") {

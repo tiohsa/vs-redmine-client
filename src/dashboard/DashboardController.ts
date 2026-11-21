@@ -168,6 +168,7 @@ export class DashboardController {
       refreshTicketPresentation: () => this.refreshTicketPresentation(),
       loadComments: (ticketId) => this.commentService.loadComments(ticketId),
       openTicketEditor: (ticketId) => this.ticketService.openEditor(ticketId),
+      revealCreatedTickets: (ticketIds) => this.revealCreatedTickets(ticketIds),
       syncEngine: opts.syncEngine,
     });
     this.metadataService = new DashboardMetadataService({
@@ -185,6 +186,7 @@ export class DashboardController {
       refreshUnsynced: () => this.refreshUnsynced(),
       loadTickets: () => this.ticketService.loadTickets(),
       selectTicket: (ticketId) => this.selectTicket(ticketId),
+      revealCreatedTickets: (ticketIds, options) => this.revealCreatedTickets(ticketIds, options),
       syncEngine: opts.syncEngine,
     });
     this.dataService = new DashboardDataService({
@@ -236,6 +238,44 @@ export class DashboardController {
 
   refreshTickets(): void {
     void this.ticketService.loadTickets();
+  }
+
+  async revealCreatedTickets(
+    ticketIds: readonly number[],
+    options?: { connectionScope?: string },
+  ): Promise<void> {
+    const initialScope = options?.connectionScope ?? getCurrentConnectionScope();
+    if (options?.connectionScope !== undefined && options.connectionScope !== getCurrentConnectionScope()) {
+      return;
+    }
+    const normalizedIds = Array.from(
+      new Set(ticketIds.filter((id) => Number.isInteger(id) && id > 0)),
+    );
+    const targetId = normalizedIds.at(-1);
+    if (this.cache.projects.length === 0) {
+      await this.projectService.loadProjects();
+    }
+    if (initialScope !== getCurrentConnectionScope()) {
+      return;
+    }
+    if (!this.dataService.hasMetadataOptions) {
+      await Promise.all([
+        this.dataService.loadMetadataOptions(),
+        this.ticketService.loadTickets(false, { ensureTicketIds: normalizedIds }),
+      ]);
+    } else {
+      await this.ticketService.loadTickets(false, { ensureTicketIds: normalizedIds });
+    }
+    if (initialScope !== getCurrentConnectionScope()) {
+      return;
+    }
+    if (targetId === undefined) {
+      return;
+    }
+    const state = this.opts.store.getState();
+    if (collectTicketNodeIds(state.tickets).has(targetId)) {
+      await this.selectTicket(targetId);
+    }
   }
 
   refreshCommentsForTicket(ticketId: number): void {

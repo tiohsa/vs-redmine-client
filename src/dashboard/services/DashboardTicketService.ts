@@ -94,9 +94,15 @@ export class DashboardTicketService {
     await this.searchTickets(rawQuery, { kind: "all" });
   }
 
-  async loadTickets(throwOnError = false): Promise<void> {
+  async loadTickets(
+    throwOnError = false,
+    options?: { ensureTicketIds?: readonly number[] },
+  ): Promise<void> {
     const generation = ++this.ticketLoadGeneration;
     this.projectIssueOffset = undefined;
+    const normalizedEnsureIds = Array.from(
+      new Set((options?.ensureTicketIds ?? []).filter((id) => Number.isInteger(id) && id > 0)),
+    );
     const { store } = this.deps.context;
     const project = this.deps.getResolvedProject();
     const includeChildProjects = getIncludeChildProjects();
@@ -117,10 +123,41 @@ export class DashboardTicketService {
         const result = await this.listIssues({ projectId: project.id, includeChildProjects, limit: getTicketListLimit(), offset: 0 });
         if (generation !== this.ticketLoadGeneration) { return; }
         this.projectIssueOffset = result.offset + result.tickets.length;
-        const loaded = mergeTicketsById([], result.tickets);
+        let loaded = mergeTicketsById([], result.tickets);
+        const missingIds = normalizedEnsureIds.filter((id) => !loaded.some((ticket) => ticket.id === id));
+        if (missingIds.length > 0) {
+          try {
+            const ensured = await this.listIssues({
+              projectId: project.id,
+              includeChildProjects,
+              limit: missingIds.length,
+              offset: 0,
+              issueIds: missingIds,
+            });
+            if (generation !== this.ticketLoadGeneration) { return; }
+            loaded = mergeTicketsById(loaded, ensured.tickets);
+          } catch {
+          }
+        }
         this.cachedProjectTickets = { projectId: project.id, includeChildProjects, tickets: loaded };
         this.deps.setTickets(loaded);
         this.deps.setTotalCount(result.totalCount);
+      } else if (normalizedEnsureIds.length > 0) {
+        let ensuredTickets: Ticket[] = [];
+        try {
+          const ensured = await this.listIssues({
+            includeChildProjects: true,
+            limit: normalizedEnsureIds.length,
+            offset: 0,
+            issueIds: normalizedEnsureIds,
+          });
+          if (generation !== this.ticketLoadGeneration) { return; }
+          ensuredTickets = mergeTicketsById([], ensured.tickets);
+        } catch {
+        }
+        this.cachedProjectTickets = undefined;
+        this.deps.setTickets(ensuredTickets);
+        this.deps.setTotalCount(ensuredTickets.length);
       } else {
         this.cachedProjectTickets = undefined;
         this.deps.setTickets([]);
@@ -383,7 +420,8 @@ export class DashboardTicketService {
     if (this.search) {
       return [this.search.subject, this.search.description].some(page => page.total !== undefined && page.offset < page.total);
     }
-    return (this.projectIssueOffset ?? this.deps.getTickets().length) < this.deps.getTotalCount();
+    return (this.projectIssueOffset ?? this.deps.getTickets().length) < this.deps.getTotalCount() &&
+      this.deps.getTickets().length < this.deps.getTotalCount();
   }
 
   private get listIssues(): typeof fetchIssues {

@@ -25,6 +25,7 @@ export class DashboardUnsyncedService {
     refreshTicketPresentation: () => void;
     loadComments: (ticketId: number) => Promise<void>;
     openTicketEditor?: (ticketId: number) => Promise<void>;
+    revealCreatedTickets?: (ticketIds: readonly number[]) => Promise<void>;
     getIssueDetail?: typeof getIssueDetail;
     syncEngine?: SyncEngine;
   }) {
@@ -77,7 +78,13 @@ export class DashboardUnsyncedService {
         return;
       }
     }
-    this.notifications.notifySyncOneResult(requestId, result);
+    const createdTicketRevealed =
+      result?.kind === "newTicket" &&
+      result.status === "success" &&
+      typeof result.id === "number" &&
+      result.id > 0 &&
+      Boolean(this.deps.revealCreatedTickets);
+    this.notifications.notifySyncOneResult(requestId, result, { skipRefresh: createdTicketRevealed });
   }
 
   async handleSyncSelectedTicket(requestId: string, ticketId: number): Promise<void> {
@@ -148,9 +155,18 @@ export class DashboardUnsyncedService {
       suppressResultNotifications: true,
       ...(this.deps.syncEngine ? { createSyncEngine: () => this.deps.syncEngine! } : {}),
     });
-    this.deps.context.onTicketsRefreshed();
     this.refreshUnsynced();
-    this.deps.refreshTicketPresentation();
+    const createdTicketIds = result.createdTicketIds;
+    if (createdTicketIds && createdTicketIds.length > 0 && this.deps.revealCreatedTickets) {
+      try {
+        await this.deps.revealCreatedTickets(createdTicketIds);
+      } catch {
+        this.deps.refreshTicketPresentation();
+      }
+    } else {
+      this.deps.context.onTicketsRefreshed();
+      this.deps.refreshTicketPresentation();
+    }
     this.notifications.notifySyncAllResult(requestId, result);
   }
 
@@ -196,18 +212,32 @@ export class DashboardUnsyncedService {
       return undefined;
     }
 
+    let createdTicketId: number | undefined;
     const result = await syncUnsyncedFile(
       { syncKey },
       {
         suppressResultNotifications: true,
-        onTicketCreated: () => this.deps.context.onTicketsRefreshed(),
+        onTicketCreated: (ticketId) => {
+          createdTicketId = ticketId;
+        },
         createSyncEngine: this.deps.syncEngine
           ? () => this.deps.syncEngine!
           : undefined,
       },
     );
     this.refreshUnsynced();
-    this.deps.refreshTicketPresentation();
+    const resolvedCreatedId =
+      createdTicketId ??
+      (result?.kind === "newTicket" && result.status === "success" ? result.id : undefined);
+    if (resolvedCreatedId !== undefined && resolvedCreatedId > 0 && this.deps.revealCreatedTickets) {
+      try {
+        await this.deps.revealCreatedTickets([resolvedCreatedId]);
+      } catch {
+        this.deps.refreshTicketPresentation();
+      }
+    } else {
+      this.deps.refreshTicketPresentation();
+    }
     await this.refreshSyncedComments(key, result);
     return result;
   }

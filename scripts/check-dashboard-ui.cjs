@@ -1521,6 +1521,61 @@ async function main() {
   assert.equal(await evaluate(`document.querySelector('[data-expand="200"]').getAttribute('aria-expanded')`), 'true');
   assert.equal(await evaluate(`document.querySelector('.ticket-row[data-id="201"]').classList.contains('selected')`), true);
 
+  state.draftTickets = [{
+    queueId: 'draft-created',
+    documentUri: 'file:///tmp/redmine-client-new-ticket-draft-created.md',
+    subject: '新規登録確認',
+    projectId: 1,
+    statusName: 'Open',
+    syncState: 'Draft',
+  }];
+  state.selectedTicketId = undefined;
+  state.selectedTicket = undefined;
+  await push();
+  await evaluate(`document.querySelector('.ticket-row.is-draft[data-draft-queue-id="draft-created"]').click()`);
+  assert.equal(await evaluate(`document.querySelector('.ticket-row.is-draft[data-draft-queue-id="draft-created"]').classList.contains('selected')`), true);
+
+  state.draftTickets = [];
+  state.tickets = [...state.tickets, {
+    id: 205,
+    subject: '新規登録確認',
+    level: 0,
+    statusId: 1,
+    statusName: 'Open',
+    syncState: 'Synced',
+    children: [],
+  }];
+  state.loadedTicketCount = 3;
+  state.totalTicketCount = 3;
+  state.selectedTicketId = 205;
+  state.selectedTicket = { id: 205, subject: '新規登録確認', syncState: 'Synced' };
+  await push();
+  assert.equal(await evaluate(`document.querySelectorAll('.ticket-row.is-draft').length`), 0);
+  assert.equal(await evaluate(`document.querySelector('.ticket-row[data-id="205"]').classList.contains('selected')`), true);
+  assert.equal(await evaluate(`document.querySelector('.ticket-row[data-id="205"]').getAttribute('aria-current')`), 'true');
+
+  await evaluate(`document.getElementById('tab-unsynced').click()`);
+  assert.equal(await evaluate(`document.getElementById('panel-tickets').hidden`), true);
+  state.tickets = [...state.tickets, {
+    id: 206,
+    subject: '別タブ作成確認',
+    level: 0,
+    statusId: 1,
+    statusName: 'Open',
+    syncState: 'Synced',
+    children: [],
+  }];
+  state.loadedTicketCount = 4;
+  state.totalTicketCount = 4;
+  state.selectedTicketId = 206;
+  state.selectedTicket = { id: 206, subject: '別タブ作成確認', syncState: 'Synced' };
+  await push();
+  await evaluate(`(()=>{window.__scrollCalls=0;const row=document.querySelector('.ticket-row[data-id="206"]');const orig=row.scrollIntoView;row.scrollIntoView=function(...args){window.__scrollCalls++;return orig.apply(this,args);};document.getElementById('tab-tickets').click();})()`);
+  assert.equal(await evaluate(`window.__scrollCalls`), 1);
+  assert.equal(await evaluate(`document.querySelector('.ticket-row[data-id="206"]').classList.contains('selected')`), true);
+  await evaluate(`document.getElementById('tab-unsynced').click();document.getElementById('tab-tickets').click()`);
+  assert.equal(await evaluate(`window.__scrollCalls`), 1);
+
   await evaluate(`window.messages.length=0;document.getElementById('tab-settings').click();document.getElementById('settings-tickets').open=true;document.getElementById('set-follow-active-editor').click()`);
   assert.deepEqual(await evaluate(`window.messages.find(m=>m.type==='settings.updateGeneral'&&m.patch&&'followActiveEditor' in m.patch)?.patch`), { followActiveEditor: true });
   await evaluate(`window.messages.length=0;document.getElementById('open-settings-json-btn').click()`);

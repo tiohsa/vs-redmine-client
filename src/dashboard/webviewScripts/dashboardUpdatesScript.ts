@@ -23,7 +23,7 @@ window.addEventListener('message',function(event){ const message=event.data || {
     const projectChanged=previous?.selectedProject?.id !== message.state.selectedProject?.id;
     if(projectChanged){ expandedTicketIds.clear(); collapsedTicketIds.clear(); }
     const connectionChanged=previous?.settings?.baseUrl !== message.state.settings?.baseUrl;
-    if(connectionChanged){ closeProjectPicker(false); activeRefreshRequests.clear(); updateRefreshButtonState(); if(searchTimer){ window.clearTimeout(searchTimer); searchTimer=null; } searchComposing=false; searchQuery=message.state.ticketSearch?.query || ''; searchInput.value=searchQuery; updateSearchClearButton(); }
+    if(connectionChanged){ closeProjectPicker(false); activeRefreshRequests.clear(); updateRefreshButtonState(); if(searchTimer){ window.clearTimeout(searchTimer); searchTimer=null; } searchComposing=false; searchQuery=message.state.ticketSearch?.query || ''; searchInput.value=searchQuery; updateSearchClearButton(); pendingScrollSelectedTicketId = null; }
     const ticketChanged=previous?.selectedTicketId !== message.state.selectedTicketId;
     if(connectionChanged || !message.state.draftTickets?.some(function(draft){ return draft.queueId === selectedDraftId; }) || (ticketChanged && message.state.selectedTicketId !== undefined)) selectedDraftId = null;
     const previousComposer=previous?.workPanel;
@@ -36,8 +36,15 @@ window.addEventListener('message',function(event){ const message=event.data || {
     if(ticketChanged && state.selectedTicketId !== undefined) expandAncestorsOfTicket(state.tickets, state.selectedTicketId, []);
     render();
     if(ticketChanged && state.selectedTicketId !== undefined){
-      const selectedRow=document.querySelector('#ticket-list .ticket-row[data-id="'+CSS.escape(String(state.selectedTicketId))+'"]');
-      if(selectedRow && typeof selectedRow.scrollIntoView === 'function') selectedRow.scrollIntoView({ block: 'nearest' });
+      if(document.getElementById('panel-tickets')?.hidden){
+        pendingScrollSelectedTicketId = state.selectedTicketId;
+      } else {
+        pendingScrollSelectedTicketId = null;
+        const selectedRow=document.querySelector('#ticket-list .ticket-row[data-id="'+CSS.escape(String(state.selectedTicketId))+'"]');
+        if(selectedRow && typeof selectedRow.scrollIntoView === 'function') selectedRow.scrollIntoView({ block: 'nearest' });
+      }
+    } else if(state.selectedTicketId === undefined){
+      pendingScrollSelectedTicketId = null;
     }
     if(panel && panel.mode !== 'detail' && !panel.loading && (openingComposer || previousComposer?.loading)) document.getElementById('work-tracker')?.focus();
     if(previousComposer?.mode === 'newTicket' && (!panel || panel.mode === 'detail')) document.getElementById('project-select-trigger')?.focus();

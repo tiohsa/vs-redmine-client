@@ -3,6 +3,7 @@ export interface TicketPresentationPort {
   notifyChange(): void;
   updateTicketSubject(ticketId: number, subject: string): void;
   setSelectedProjectId(projectId: number): Promise<void>;
+  revealCreatedTickets?(ticketIds: readonly number[], connectionScope?: string): Promise<void>;
 }
 
 export interface CommentPresentationPort {

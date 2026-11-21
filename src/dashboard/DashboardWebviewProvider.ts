@@ -109,6 +109,10 @@ export class DashboardWebviewProvider
     this.controller.refreshTickets();
   }
 
+  revealCreatedTickets(ticketIds: readonly number[], connectionScope?: string): Promise<void> {
+    return this.controller.revealCreatedTickets(ticketIds, { connectionScope });
+  }
+
   toggleCompactMode(): void {
     this.send({ type: "view.toggleCompactMode" });
   }

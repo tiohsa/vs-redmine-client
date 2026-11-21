@@ -19,9 +19,16 @@ import { registerStubMessage } from "./registerCommandStub";
 
 export const registerTicketEditorCommands = (
   context: vscode.ExtensionContext,
-  { commentsPresentation, dashboardProvider }: Pick<CommandDeps, "commentsPresentation" | "dashboardProvider">,
+  { commentsPresentation, dashboardProvider, ticketsPresentation }: Pick<CommandDeps, "commentsPresentation" | "dashboardProvider" | "ticketsPresentation">,
 ): void => {
   const getState = () => dashboardProvider.getStateSnapshot();
+  const notifyTicketCreated = async (ticketId: number, connectionScope: string): Promise<void> => {
+    if (ticketsPresentation.revealCreatedTickets) {
+      await ticketsPresentation.revealCreatedTickets([ticketId], connectionScope);
+    } else {
+      ticketsPresentation.refresh();
+    }
+  };
 
   context.subscriptions.push(
     registerStubMessage(
@@ -61,10 +68,10 @@ export const registerTicketEditorCommands = (
       "Dashboard のフィルタ設定を使用してください。",
     ),
     vscode.commands.registerCommand("redmine-client.createTicket", async () => {
-      await createTicketFromEditor();
+      await createTicketFromEditor({ onTicketCreated: notifyTicketCreated });
     }),
     vscode.commands.registerCommand(CREATE_TICKET_FROM_MARKDOWN_HEADER_COMMAND, async () => {
-      await createTicketFromMarkdownHeader();
+      await createTicketFromMarkdownHeader({ onTicketCreated: notifyTicketCreated });
     }),
     vscode.commands.registerCommand(INSERT_REDMINE_TICKET_FRONTMATTER_COMMAND, async () => {
       await insertRedmineTicketFrontmatter();

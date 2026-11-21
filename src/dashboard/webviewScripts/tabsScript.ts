@@ -13,6 +13,11 @@ function activateTab(name){
     panel.classList.toggle('active', active);
     panel.hidden = !active;
   });
+  if(name === 'tickets' && pendingScrollSelectedTicketId !== null && pendingScrollSelectedTicketId === state?.selectedTicketId){
+    const selectedRow=document.querySelector('#ticket-list .ticket-row[data-id="'+CSS.escape(String(pendingScrollSelectedTicketId))+'"]');
+    if(selectedRow && typeof selectedRow.scrollIntoView === 'function') selectedRow.scrollIntoView({ block: 'nearest' });
+    pendingScrollSelectedTicketId = null;
+  }
 }
 tabs.forEach(function(tab){ tab.addEventListener('click', function(){ activateTab(tab.dataset.tab); }); });
 document.getElementById('tabs').addEventListener('keydown', function(event){

@@ -160,4 +160,26 @@ suite("createTicketFromMarkdownHeader command", () => {
     assert.strictEqual(error, "Open a Markdown file before creating a Redmine ticket.");
     assert.strictEqual(previewCalls, 0);
   });
+
+  test("作成完了時のみ onTicketCreated(ticketId, scope) を呼び、未完了や失敗では呼ばない", async () => {
+    const createdCalls: Array<{ ticketId: number; scope: string }> = [];
+    await createTicketFromMarkdownHeader(buildDeps({
+      syncTicket: async () => ({ kind: "completed", ticketId: 654 }),
+      onTicketCreated: (ticketId, scope) => {
+        createdCalls.push({ ticketId, scope });
+      },
+    }));
+    assert.deepStrictEqual(createdCalls, [{ ticketId: 654, scope: getCurrentConnectionScope() }]);
+
+    let skippedCalls = 0;
+    await createTicketFromMarkdownHeader(buildDeps({
+      syncTicket: async () => ({ kind: "remote_committed", ticketId: 655, pending: "local_finalize" }),
+      onTicketCreated: () => { skippedCalls++; },
+    }));
+    await createTicketFromMarkdownHeader(buildDeps({
+      syncTicket: async () => ({ kind: "failed_before_commit", error: new Error("ng") }),
+      onTicketCreated: () => { skippedCalls++; },
+    }));
+    assert.strictEqual(skippedCalls, 0);
+  });
 });

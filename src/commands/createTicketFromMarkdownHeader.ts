@@ -27,6 +27,7 @@ type CreateTicketFromMarkdownHeaderDeps = {
     baseDir?: string;
     connectionScope: string;
   }) => Promise<TicketSyncOutcome>;
+  onTicketCreated?: (ticketId: number, connectionScope: string) => void | Promise<void>;
 };
 
 const confirmCreation = async (preview: MarkdownTicketCreatePreview): Promise<boolean> => {
@@ -85,15 +86,16 @@ const localizeCreationError = (message: string): string => {
 };
 
 export const createTicketFromMarkdownHeader = async (
-  deps: CreateTicketFromMarkdownHeaderDeps = defaultDeps,
+  deps: Partial<CreateTicketFromMarkdownHeaderDeps> = {},
 ): Promise<void> => {
-  const editor = deps.getActiveEditor();
+  const resolvedDeps: CreateTicketFromMarkdownHeaderDeps = { ...defaultDeps, ...deps };
+  const editor = resolvedDeps.getActiveEditor();
   if (!editor) {
-    deps.showError(vscode.l10n.t("No active editor found."));
+    resolvedDeps.showError(vscode.l10n.t("No active editor found."));
     return;
   }
   if (!isMarkdownEditor(editor)) {
-    deps.showError(vscode.l10n.t("Open a Markdown file before creating a Redmine ticket."));
+    resolvedDeps.showError(vscode.l10n.t("Open a Markdown file before creating a Redmine ticket."));
     return;
   }
 
@@ -101,9 +103,9 @@ export const createTicketFromMarkdownHeader = async (
   const operationScope = getCurrentConnectionScope();
   let preview: MarkdownTicketCreatePreview;
   try {
-    preview = deps.previewCreation(content);
+    preview = resolvedDeps.previewCreation(content);
   } catch (error) {
-    deps.showError(
+    resolvedDeps.showError(
       error instanceof Error
         ? localizeCreationError(error.message)
         : vscode.l10n.t("Invalid metadata."),
@@ -111,34 +113,40 @@ export const createTicketFromMarkdownHeader = async (
     return;
   }
 
-  if (!await deps.confirmCreation(preview)) {
+  if (!await resolvedDeps.confirmCreation(preview)) {
     return;
   }
 
   let outcome: TicketSyncOutcome;
   try {
-    outcome = await deps.syncTicket({
+    outcome = await resolvedDeps.syncTicket({
       editor,
       content,
       projectId: preview.projectId,
-      baseDir: deps.resolveBaseDir(editor),
+      baseDir: resolvedDeps.resolveBaseDir(editor),
       connectionScope: operationScope,
     });
   } catch (error) {
-    deps.showError(error instanceof Error
+    resolvedDeps.showError(error instanceof Error
       ? error.message
       : vscode.l10n.t("An unexpected error occurred."));
     return;
   }
   if (outcome.kind === "completed") {
-    deps.showSuccess(vscode.l10n.t("Redmine ticket created (#{0}).", outcome.ticketId));
+    if (outcome.ticketId > 0 && resolvedDeps.onTicketCreated) {
+      try {
+        await resolvedDeps.onTicketCreated(outcome.ticketId, operationScope);
+      } catch {
+      }
+    }
+    resolvedDeps.showSuccess(vscode.l10n.t("Redmine ticket created (#{0}).", outcome.ticketId));
   } else if (outcome.kind === "remote_committed") {
-    deps.showWarning(outcome.message ?? createFailureWarning(outcome.ticketId));
+    resolvedDeps.showWarning(outcome.message ?? createFailureWarning(outcome.ticketId));
   } else if (outcome.kind === "commit_unknown") {
-    deps.showWarning(outcome.message);
+    resolvedDeps.showWarning(outcome.message);
   } else if (outcome.kind === "failed_before_commit") {
-    deps.showError(localizeCreationError(outcome.error.message));
+    resolvedDeps.showError(localizeCreationError(outcome.error.message));
   } else {
-    deps.showError(vscode.l10n.t("Ticket creation did not complete."));
+    resolvedDeps.showError(vscode.l10n.t("Ticket creation did not complete."));
   }
 };

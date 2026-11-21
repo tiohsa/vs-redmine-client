@@ -26,6 +26,7 @@ let composerDraftValues = null;
 let renderedSettingsBaseUrl = null;
 let settingsRenderGeneration = 0;
 let selectedDraftId = null;
+let pendingScrollSelectedTicketId = null;
 const ticketSyncRequests = new Map();
 const expandedTicketIds = new Set();
 const collapsedTicketIds = new Set();
