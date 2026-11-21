@@ -28,7 +28,7 @@ export const settingsStyles = {
 .settings-reset-btn { width: 100%; margin-top: 14px; }
 #quick-filter-row { display: grid; grid-template-columns: minmax(0, 1fr); gap: 6px; align-items: center; margin-top: 6px; }
 .quick-filter-label { color: var(--app-text-readable-muted); font-size: var(--app-font-label); font-weight: 600; white-space: nowrap; }
-.quick-filter-select { min-height: 60px; min-width: 0; padding: 3px 6px; border: 1px solid var(--vscode-dropdown-border, var(--app-border)); border-radius: var(--app-radius-sm); background: var(--vscode-dropdown-background, var(--app-surface)); color: var(--vscode-dropdown-foreground, var(--app-text)); font-size: var(--app-font-caption); }
+.quick-filter-select { min-height: 60px; min-width: 0; padding: 3px 6px; border: 1px solid var(--vscode-dropdown-border, var(--app-border)); border-radius: 2px; background: var(--vscode-dropdown-background, var(--app-surface)); color: var(--vscode-dropdown-foreground, var(--app-text)); font-size: var(--app-font-caption); }
 .quick-filter-select:focus { outline: 2px solid var(--app-focus); outline-offset: 1px; }
 .quick-filter-select:disabled { opacity: .65; }
 .quick-filter-check { display: flex; min-width: 0; align-items: center; gap: 4px; color: var(--app-text-readable-muted); font-size: var(--app-font-label); white-space: nowrap; }

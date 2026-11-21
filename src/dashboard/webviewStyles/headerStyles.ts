@@ -16,16 +16,16 @@ export const headerStyles = {
 .project-select-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .project-select-chevron { flex: 0 0 auto; color: var(--app-text-secondary); }
 .project-picker-popup[hidden] { display: none !important; }
-.project-picker-popup { position: fixed; z-index: 80; display: flex; flex-direction: column; gap: 6px; min-width: 0; padding: 8px; overflow: hidden; border: 1px solid var(--app-border-strong); border-radius: var(--app-radius-md); background: var(--app-surface); color: var(--app-text); box-shadow: var(--app-shadow); }
+.project-picker-popup { position: fixed; z-index: 80; display: flex; flex-direction: column; gap: 6px; min-width: 0; padding: 8px; overflow: hidden; border: 1px solid var(--app-border-strong); border-radius: 2px; background: var(--app-surface); color: var(--app-text); box-shadow: var(--app-shadow); }
 .project-picker-popup h2 { margin: 0; }
-.project-search-control { display: flex; flex: 0 0 auto; min-width: 0; height: 30px; border: 1px solid var(--vscode-dropdown-border, var(--app-border)); border-radius: var(--app-radius-md); background: var(--vscode-dropdown-background, var(--app-surface)); }
+.project-search-control { display: flex; flex: 0 0 auto; min-width: 0; height: 26px; border: 1px solid var(--vscode-dropdown-border, var(--app-border)); border-radius: 2px; background: var(--vscode-dropdown-background, var(--app-surface)); }
 .project-search-input { min-width: 0; width: 100%; padding: 0 8px; border: 0; outline: 0; background: transparent; color: var(--vscode-dropdown-foreground, var(--app-text)); font: inherit; }
-.project-search-input:focus-visible { outline: 2px solid var(--app-focus); outline-offset: -2px; border-radius: var(--app-radius-md); }
-.project-search-clear { flex: 0 0 28px; border: 0; background: transparent; color: var(--app-text-secondary); cursor: pointer; font: inherit; font-size: 18px; }
+.project-search-input:focus-visible { outline: 2px solid var(--app-focus); outline-offset: -2px; border-radius: 2px; }
+.project-search-clear { flex: 0 0 26px; border: 0; background: transparent; color: var(--app-text-secondary); cursor: pointer; font: inherit; font-size: 18px; }
 .project-search-clear[hidden], .project-search-empty[hidden] { display: none; }
 .project-search-empty { margin: 0; color: var(--app-text-secondary); font-size: var(--app-font-caption); }
 .project-listbox { min-height: 0; overflow-y: auto; overscroll-behavior: contain; }
-.project-option { display: flex; align-items: center; justify-content: space-between; gap: 10px; min-height: 32px; padding: 4px 8px; border-radius: var(--app-radius-sm); cursor: pointer; }
+.project-option { display: flex; align-items: center; justify-content: space-between; gap: 10px; min-height: 32px; padding: 4px 8px; border-radius: 2px; cursor: pointer; }
 .project-option:hover, .project-option-active { background: var(--app-surface-hover); }
 .project-option[aria-selected="true"] .project-option-name { font-weight: 600; }
 .project-option-copy { display: flex; min-width: 0; flex-direction: column; }

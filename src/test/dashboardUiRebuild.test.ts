@@ -155,6 +155,18 @@ suite("Dashboard の表示と操作", () => {
     assert.match(drawerAndTimelineCss, /\.comment-hover-action-btn\s*\{[^}]*border-radius:\s*2px;/);
   });
 
+  test("ダッシュボードのボタン・フィルタ・レイアウト選択パネルの角丸とボタンサイズが統一されている", () => {
+    assert.match(dashboardStyles, /\.btn\s*\{[^}]*min-height:\s*26px;[^}]*border-radius:\s*2px;/);
+    assert.match(dashboardStyles, /\.layout-mode-select\s*\{[^}]*height:\s*26px;[^}]*border-radius:\s*2px;/);
+    assert.match(dashboardStyles, /\.layout-popover\s*\{[^}]*border-radius:\s*2px;/);
+    assert.match(dashboardStyles, /\.filter-dialog-card\s*\{[^}]*border-radius:\s*2px;/);
+    assert.match(dashboardStyles, /#filter-dialog-close\s*\{[^}]*width:\s*26px;[^}]*height:\s*26px;[^}]*border-radius:\s*2px;/);
+    assert.match(dashboardStyles, /#filter-dialog-fields input,#filter-dialog-fields select\s*\{[^}]*border-radius:\s*2px;/);
+    assert.match(dashboardStyles, /\.search-clear-btn\s*\{[^}]*border-radius:\s*2px;/);
+    assert.match(dashboardStyles, /\.project-picker-popup\s*\{[^}]*border-radius:\s*2px;/);
+    assert.match(dashboardStyles, /\.project-search-control\s*\{[^}]*height:\s*26px;[^}]*border-radius:\s*2px;/);
+  });
+
   test("コメント追加ボタンは＋アイコンのみで、コメント一覧のホバー編集アイコンを持たない", () => {
     assert.ok(
       dashboardWebviewScript.includes(
