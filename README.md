@@ -58,7 +58,7 @@ The Tickets tab shows the ticket list for the selected project.
 
 **Work Panel** shows ticket metadata (ID, subject, project, tracker, status, priority, dates, parent) and provides **Overview / Comments** tabs, inline metadata editing, and ticket actions. Comments open in the VS Code Markdown editor for editing.
 
-Quick filters (My Issues, Open, Overdue, Unsynced) filter tickets already loaded into the Dashboard. The displayed count distinguishes shown, loaded, and total tickets. **Filters…** edits persistent ticket filters. The sync attention tray at the bottom links to the existing Unsynced and conflict flows.
+Quick filters in **Tickets** (My Issues, Open, Overdue, High Priority, and Editing) filter loaded tickets and new drafts. The counts distinguish shown, loaded, and total tickets. Use **Filters…** to edit persistent ticket filters. The **Unsynced** tab shows all unsynced changes and provides actions to sync them or resolve conflicts.
 
 ### Dashboard Maintenance
 

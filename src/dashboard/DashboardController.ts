@@ -24,31 +24,14 @@ import type {
   DashboardDraftTicketNode,
   DashboardProjectNode,
   DashboardRequest,
-  DashboardTicketNode,
 } from "./dashboardProtocol";
 import type { TicketSaveResult } from "../views/ticketSaveTypes";
 import type { DashboardServiceContext } from "./services/DashboardServiceContext";
 import type { SyncEngine } from "../app/syncEngine";
 import { getCurrentConnectionScope } from "../config/connectionScope";
-import { getTicketListFollowActiveEditor } from "../config/settings";
 import { DashboardDataService, type DashboardDataCache, type DashboardMetadataTestHooks } from "./services/DashboardDataService";
 import { DashboardDraftService } from "./services/DashboardDraftService";
-
-const collectTicketNodeIds = (nodes: DashboardTicketNode[]): Set<number> => {
-  const ids = new Set<number>();
-  const stack = [...nodes];
-  while (stack.length > 0) {
-    const node = stack.pop();
-    if (!node) {
-      continue;
-    }
-    ids.add(node.id);
-    if (node.children.length > 0) {
-      stack.push(...node.children);
-    }
-  }
-  return ids;
-};
+import { collectTicketNodeIds, DashboardSelectionService } from "./services/DashboardSelectionService";
 
 const isKnownUnsyncedDocumentUri = (documentUri: string): boolean => {
   const queue = getOfflineSyncQueue(getCurrentConnectionScope());
@@ -98,6 +81,7 @@ export class DashboardController {
   private readonly disposables: vscode.Disposable[] = [];
   private readonly dataService: DashboardDataService;
   private readonly draftService: DashboardDraftService;
+  private readonly selectionService: DashboardSelectionService;
 
   constructor(private readonly opts: DashboardControllerOptions) {
     this.settingsCtrl = new SettingsController(opts.store);
@@ -219,6 +203,15 @@ export class DashboardController {
       },
       syncDraft: (requestId, key) => this.unsyncedService.handleSyncOne(requestId, key),
     });
+    this.selectionService = new DashboardSelectionService({
+      store: opts.store,
+      cache: this.cache,
+      dataService: this.dataService,
+      projectService: this.projectService,
+      ticketService: this.ticketService,
+      commentService: this.commentService,
+      metadataService: this.metadataService,
+    });
     this.disposables.push(
       { dispose: onOfflineSyncQueueChanged(() => this.refreshUnsynced()) },
       { dispose: onTicketDraftSaved((event) => this.handleTicketDraftSaved(event)) },
@@ -250,78 +243,12 @@ export class DashboardController {
     void this.ticketService.loadTickets();
   }
 
-  private async ensureTicketsLoadedForReveal(
-    ticketIds: readonly number[],
-    initialScope: string,
-  ): Promise<boolean> {
-    if (this.cache.projects.length === 0) {
-      await this.projectService.loadProjects();
-    }
-    if (initialScope !== getCurrentConnectionScope()) {
-      return false;
-    }
-    if (!this.dataService.hasMetadataOptions) {
-      await Promise.all([
-        this.dataService.loadMetadataOptions(),
-        this.ticketService.loadTickets(false, { ensureTicketIds: ticketIds }),
-      ]);
-    } else {
-      await this.ticketService.loadTickets(false, { ensureTicketIds: ticketIds });
-    }
-    return initialScope === getCurrentConnectionScope();
+  revealCreatedTickets(ticketIds: readonly number[], options?: { connectionScope?: string }): Promise<void> {
+    return this.selectionService.revealCreatedTickets(ticketIds, options);
   }
 
-  async revealCreatedTickets(
-    ticketIds: readonly number[],
-    options?: { connectionScope?: string },
-  ): Promise<void> {
-    const initialScope = options?.connectionScope ?? getCurrentConnectionScope();
-    if (options?.connectionScope !== undefined && options.connectionScope !== getCurrentConnectionScope()) {
-      return;
-    }
-    const normalizedIds = Array.from(
-      new Set(ticketIds.filter((id) => Number.isInteger(id) && id > 0)),
-    );
-    const targetId = normalizedIds.at(-1);
-    if (!(await this.ensureTicketsLoadedForReveal(normalizedIds, initialScope))) {
-      return;
-    }
-    if (targetId === undefined) {
-      return;
-    }
-    const state = this.opts.store.getState();
-    if (collectTicketNodeIds(state.tickets).has(targetId)) {
-      await this.selectTicket(targetId);
-    }
-  }
-
-  async revealCreatedComment(
-    ticketId: number,
-    commentId: number,
-    options?: { connectionScope?: string },
-  ): Promise<void> {
-    const initialScope = options?.connectionScope ?? getCurrentConnectionScope();
-    if (options?.connectionScope !== undefined && options.connectionScope !== getCurrentConnectionScope()) {
-      return;
-    }
-    if (!Number.isInteger(ticketId) || ticketId <= 0 || !Number.isInteger(commentId) || commentId <= 0) {
-      return;
-    }
-    let state = this.opts.store.getState();
-    if (!collectTicketNodeIds(state.tickets).has(ticketId)) {
-      if (!(await this.ensureTicketsLoadedForReveal([ticketId], initialScope))) {
-        return;
-      }
-      state = this.opts.store.getState();
-      if (!collectTicketNodeIds(state.tickets).has(ticketId)) {
-        return;
-      }
-    }
-    if (state.selectedTicketId !== ticketId) {
-      await this.selectTicket(ticketId, false, { commentId });
-      return;
-    }
-    await this.commentService.loadComments(ticketId, false, { commentId });
+  revealCreatedComment(ticketId: number, commentId: number, options?: { connectionScope?: string }): Promise<void> {
+    return this.selectionService.revealCreatedComment(ticketId, commentId, options);
   }
 
   refreshCommentsForTicket(ticketId: number): void {
@@ -547,21 +474,12 @@ export class DashboardController {
 
   // ── Private ────────────────────────────────────────────────────────────
 
-  private async selectTicket(
+  private selectTicket(
     ticketId: number,
     throwOnLoadError = false,
     commentSelection?: { commentId?: number; documentUri?: string },
   ): Promise<void> {
-    await this.ticketService.selectTicket(ticketId, throwOnLoadError, commentSelection);
-    const ticket = this.cache.tickets.find((t) => t.id === ticketId);
-    if (ticket?.projectId) {
-      const editOptions = this.metadataService.loadEditOptions(ticketId, ticket.projectId, throwOnLoadError);
-      if (throwOnLoadError) {
-        await editOptions;
-      } else {
-        void editOptions;
-      }
-    }
+    return this.selectionService.selectTicket(ticketId, throwOnLoadError, commentSelection);
   }
 
   private buildCurrentDraftTickets(
@@ -583,63 +501,15 @@ export class DashboardController {
     await this.draftService.createQuickNewTicketDraft("command-create-ticket");
   }
 
-  public async selectTicketForEditor(
-    ticketId: number,
-    editorConnectionScope?: string,
-  ): Promise<void> {
-    if (!getTicketListFollowActiveEditor()) {
-      return;
-    }
-    if (!Number.isInteger(ticketId) || ticketId <= 0) {
-      return;
-    }
-    if (
-      editorConnectionScope !== undefined &&
-      editorConnectionScope !== getCurrentConnectionScope()
-    ) {
-      return;
-    }
-    const state = this.opts.store.getState();
-    if (state.selectedTicketId === ticketId) {
-      return;
-    }
-    if (!collectTicketNodeIds(state.tickets).has(ticketId)) {
-      return;
-    }
-    await this.selectTicket(ticketId);
+  public selectTicketForEditor(ticketId: number, editorConnectionScope?: string): Promise<void> {
+    return this.selectionService.selectTicketForEditor(ticketId, editorConnectionScope);
   }
 
-  public async selectCommentForEditor(
+  public selectCommentForEditor(
     target: { ticketId: number; commentId?: number; documentUri?: string },
     editorConnectionScope?: string,
   ): Promise<void> {
-    if (!getTicketListFollowActiveEditor()) {
-      return;
-    }
-    if (!Number.isInteger(target.ticketId) || target.ticketId <= 0) {
-      return;
-    }
-    if (
-      editorConnectionScope !== undefined &&
-      editorConnectionScope !== getCurrentConnectionScope()
-    ) {
-      return;
-    }
-    const state = this.opts.store.getState();
-    if (!collectTicketNodeIds(state.tickets).has(target.ticketId)) {
-      return;
-    }
-    if (state.selectedTicketId !== target.ticketId) {
-      await this.selectTicket(target.ticketId, false, {
-        commentId: target.commentId,
-        documentUri: target.documentUri,
-      });
-      return;
-    }
-    this.commentService.selectComment(target.ticketId, {
-      commentId: target.commentId,
-      documentUri: target.documentUri,
-    });
+    return this.selectionService.selectCommentForEditor(target, editorConnectionScope);
   }
 
   private cancelDetail(): void {

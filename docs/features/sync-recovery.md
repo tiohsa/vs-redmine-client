@@ -25,8 +25,10 @@
 - 中止記録の恒久削除は専用の操作で行い、確認後に対象を再照合します。Dashboard では 1 件または全件の中止記録を削除できます。一括削除は全対象を照合してから同じトランザクションで保存します。
 - 現在の操作または明示的な編集許可がある間は現在の状態を表示します。中止記録だけが残るときは、旧下書きの失敗や競合より `Abandoned` を優先します。
 
-実装は [復旧ポリシー](../../src/app/syncEffects/recoveryPolicy.ts)、[同期コーディネーター](../../src/app/ticketSync/syncCoordinator.ts)、[競合解決](../../src/views/conflictResolver.ts)、[破棄・中止と記録の削除](../../src/views/offlineSyncDiscard.ts) を参照してください。検証は [Dashboard の復旧ポリシー](../../src/test/dashboardRecoveryPolicy.test.ts)、[競合解決時の照合](../../src/test/syncConflictResolutionCas.test.ts)、[確定時の世代照合](../../src/test/syncAttemptClosurePersistenceFence.test.ts)、[同期トレイ](../../src/test/dashboardSyncTray.test.ts)、[中止記録の一括削除](../../src/test/forgetAllAbandoned.test.ts) を参照してください。
+実装は [復旧ポリシー](../../src/app/syncEffects/recoveryPolicy.ts)、[同期コーディネーター](../../src/app/ticketSync/syncCoordinator.ts)、[競合解決](../../src/views/conflictResolver.ts)、[破棄・中止と記録の削除](../../src/views/offlineSyncDiscard.ts) を参照してください。検証は [Dashboard の復旧ポリシー](../../src/test/dashboardRecoveryPolicy.test.ts)、[競合解決時の照合](../../src/test/syncConflictResolutionCas.test.ts)、[確定時の世代照合](../../src/test/syncAttemptClosurePersistenceFence.test.ts)、[Unsynced の表示と同期状態](../../src/test/dashboardSyncTray.test.ts)、[中止記録の一括削除](../../src/test/forgetAllAbandoned.test.ts) を参照してください。
 
 復旧の実行は [結果不明の照合と再試行](../../src/app/ticketSync/syncCommitUnknownRecovery.ts)、[ローカル確定](../../src/app/ticketSync/syncLocalFinalizeRecovery.ts)、[個別の Effect](../../src/app/ticketSync/syncEffectRecovery.ts) が扱います。
 
 [未同期項目の同期入口](../../src/commands/syncUnsyncedFile.ts) は選択した接続先のスコープで操作し、[Primary の復旧](../../src/commands/unsyncedPrimaryRecovery.ts)、[Secondary Effect の復旧](../../src/commands/unsyncedSecondaryRecovery.ts)、[ローカル確定の確認](../../src/commands/unsyncedLocalFinalize.ts) に処理を渡します。
+
+同期ハンドラーは [チケット作成の Effect 復旧](../../src/app/ticketSync/ticketCreateEffectRecovery.ts) と [チケット更新の Effect 復旧](../../src/app/ticketSync/ticketUpdateEffectRecovery.ts) に操作別の処理を委ねます。確定可能になった操作は、通常の同期と同じ読み戻しとローカル確定の入口を通ります。[ローカル確定の復旧テスト](../../src/test/syncLocalFinalizationRecovery.test.ts) で再取得や文書を書き戻せなかった場合にキューを保持することを確認します。

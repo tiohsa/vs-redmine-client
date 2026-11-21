@@ -306,6 +306,53 @@ suite("新規チケット作成後の一覧反映と自動選択", () => {
     }
   });
 
+  test("DashboardController.revealCreatedTickets: 一覧取得中の接続切り替え後は同じIDを選択しない", async () => {
+    const config = vscode.workspace.getConfiguration("redmine-client");
+    const previousBaseUrl = config.inspect<unknown>("baseUrl")?.globalValue;
+    const store = new DashboardStateStore();
+    const controller = new DashboardController({
+      store,
+      notifyOperationStarted: () => undefined,
+      notifySuccess: () => undefined,
+      notifyError: () => undefined,
+      notifyToast: () => undefined,
+      onTicketsRefreshed: () => undefined,
+    });
+    let releaseLoad: () => void = () => undefined;
+    let markLoadStarted: () => void = () => undefined;
+    const loadStarted = new Promise<void>((resolve) => { markLoadStarted = resolve; });
+    const loadReleased = new Promise<void>((resolve) => { releaseLoad = resolve; });
+    let selectCalls = 0;
+    controller["cache"].projects = [{ id: 1, name: "Project", identifier: "p1", level: 0 }];
+    controller["dataService"].loadMetadataOptions = async () => undefined;
+    controller["ticketService"].loadTickets = async () => {
+      markLoadStarted();
+      await loadReleased;
+    };
+    controller["ticketService"].selectTicket = async () => { selectCalls++; };
+
+    try {
+      await config.update("baseUrl", "https://old-redmine.example.com", vscode.ConfigurationTarget.Global);
+      const oldScope = getCurrentConnectionScope();
+      const reveal = controller.revealCreatedTickets([120], { connectionScope: oldScope });
+      await loadStarted;
+      await config.update("baseUrl", "https://new-redmine.example.com", vscode.ConfigurationTarget.Global);
+      store.update({
+        tickets: [{ id: 120, subject: "New connection ticket", syncState: "Synced", children: [], level: 0 }],
+        selectedTicketId: 42,
+      });
+      releaseLoad();
+      await reveal;
+
+      assert.strictEqual(selectCalls, 0);
+      assert.strictEqual(store.getState().selectedTicketId, 42);
+    } finally {
+      releaseLoad();
+      controller.dispose();
+      await config.update("baseUrl", previousBaseUrl, vscode.ConfigurationTarget.Global);
+    }
+  });
+
   test("DashboardUnsyncedService: 単件/一括の新規作成同期は revealCreatedTickets を呼び onTicketsRefreshed を二重発火しない", async () => {
     const store = new DashboardStateStore();
     const notices: string[] = [];
