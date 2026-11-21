@@ -27,14 +27,12 @@ function updateRefreshButtonState(){
 }
 function updateSyncButtonStates(){
   const busy = activeSyncRequests.size > 0;
-  document.querySelectorAll('[data-sync-key],[data-discard-key],[data-sync-comment-key],[data-abandon-key],[data-forget-key],#forget-all-abandoned-btn,[data-start-ticket],[data-ticket-action="sync"],[data-draft-action="sync"]').forEach(function(button){ button.disabled = busy; });
-  const detailSync = document.getElementById('detail-sync-btn');
   const selectedSyncing = state?.selectedTicket?.syncState === 'Syncing' || Array.from(ticketSyncRequests.values()).includes(state?.selectedTicket?.id);
-  if(detailSync){
-    detailSync.disabled = busy || selectedSyncing;
-    detailSync.setAttribute('aria-busy',String(selectedSyncing));
-    detailSync.querySelector('span').textContent = selectedSyncing ? STRINGS.syncSyncing : STRINGS.syncToRedmine;
-  }
+  document.querySelectorAll('[data-sync-key],[data-discard-key],[data-sync-comment-key],[data-abandon-key],[data-forget-key],#forget-all-abandoned-btn,[data-start-ticket],[data-ticket-action="sync"],[data-draft-action="sync"]').forEach(function(button){
+    const ticketId = Number(button.dataset.ticket);
+    const isSelectedSyncing = Number.isInteger(ticketId) && ticketId > 0 && ticketId === state?.selectedTicket?.id && selectedSyncing;
+    button.disabled = busy || isSelectedSyncing;
+  });
   const detailState=document.getElementById('detail-sync-state');
   if(detailState && state?.selectedTicket){
     const value=selectedSyncing ? 'Syncing' : state.selectedTicket.syncState;

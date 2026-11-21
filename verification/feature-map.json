@@ -78,8 +78,9 @@
       ],
       "selectors": [
         "#ticket-detail-card",
-        "#detail-sync-btn",
-        "#detail-browser-btn",
+        ".ticket-hover-actions",
+        "[data-ticket-action=\"sync\"]",
+        "[data-ticket-action=\"browser\"]",
         "#detail-cancel-btn"
       ],
       "invariants": [

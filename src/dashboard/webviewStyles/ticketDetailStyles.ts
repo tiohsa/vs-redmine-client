@@ -121,7 +121,12 @@ body.vscode-high-contrast-light .ticket-detail-card {
 
 .detail-header-fixed {
   flex: 0 0 auto;
-  padding: 8px 10px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 6px 10px;
   border-bottom: 1px solid var(--vscode-panel-border, var(--app-border-subtle));
   background: transparent;
 }
@@ -130,6 +135,7 @@ body.vscode-high-contrast-light .ticket-detail-card {
   align-items: center;
   gap: 6px;
   min-width: 0;
+  flex: 1 1 auto;
 }
 .detail-tracker-bar {
   flex: 0 0 3px;
@@ -144,18 +150,7 @@ body.vscode-high-contrast-light .ticket-detail-card {
   font-size: var(--app-font-label);
   color: var(--app-text-secondary);
 }
-.detail-subject {
-  flex: 1 1 auto;
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  font-size: 13px;
-  font-weight: 700;
-  color: var(--app-text);
-}
-#detail-cancel-btn,
-#detail-browser-btn {
+#detail-cancel-btn {
   flex: 0 0 auto;
   min-width: 24px;
   min-height: 24px;
@@ -164,49 +159,14 @@ body.vscode-high-contrast-light .ticket-detail-card {
   padding: 0;
   border-radius: 2px;
 }
-.detail-head-row2 {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-  margin-top: 4px;
-  min-width: 0;
-}
-.detail-head-meta {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  min-width: 0;
-  flex: 1 1 auto;
-}
-.detail-project-name {
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  font-size: var(--app-font-caption);
-  color: var(--app-text-readable-muted);
-}
-.detail-head-meta .detail-sync-state {
+.detail-header-fixed .detail-sync-state {
   flex: 0 0 auto;
   margin: 0;
   font-size: var(--app-font-label);
   font-weight: 600;
 }
-.detail-head-meta .detail-sync-state.hidden {
+.detail-header-fixed .detail-sync-state.hidden {
   display: none;
-}
-.detail-head-actions {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-  flex: 0 0 auto;
-}
-#detail-sync-btn {
-  min-height: 24px;
-  padding: 2px 8px;
-  border-radius: 2px;
-  font-size: var(--app-font-label);
 }
 `,
 };

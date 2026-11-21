@@ -18,9 +18,8 @@ body.vscode-high-contrast-light:focus-within .ticket-row.is-unsynced.selected {
   focusAndForcedColors: String.raw`/* Focus & High Contrast / Forced Colors */
 .comment-card.is-editable:focus-visible,
 .comment-edit-icon:focus-visible,
+.ticket-hover-action-btn:focus-visible,
 #detail-cancel-btn:focus-visible,
-#detail-sync-btn:focus-visible,
-#detail-browser-btn:focus-visible,
 #add-comment-btn:focus-visible,
 #reload-comments-btn:focus-visible,
 .expand-btn:focus-visible,

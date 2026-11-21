@@ -124,7 +124,10 @@ function renderDraftRow(draft){
   const dueDiff = draft.dueDate ? daysUntilDateOnly(draft.dueDate, new Date()) : undefined;
   const isOverdue = dueDiff !== undefined && dueDiff < 0;
   const dueDate = draft.dueDate ? '<span class="ticket-meta-item ticket-meta-due'+(isOverdue ? ' is-overdue' : '')+'" title="'+esc(STRINGS.dueDateLabel+': '+draft.dueDate)+'">'+actionIcon('calendar')+'<span>'+esc(formatShortDueDate(draft.dueDate))+'</span></span>' : '';
-  return '<div class="ticket-row '+trackerCls+' is-draft is-unsynced'+(selected ? ' selected' : '')+'" data-draft-queue-id="'+esc(draft.queueId)+'" data-draft-uri="'+esc(draft.documentUri)+'" role="listitem" aria-current="'+selected+'" tabindex="0" data-level="0">'+trackerBar+'<div class="ticket-row-content"><div class="ticket-row-main"><div class="ticket-row-title-group"><span class="ticket-id ticket-id-new">#NEW</span>'+priorityIndicator(draft.priorityName)+'<span class="ticket-subject" title="'+esc(draft.subject)+'">'+esc(draft.subject)+'</span></div></div><div class="ticket-row-meta"><div class="ticket-meta-left">'+status+unsyncedInline+'</div><div class="ticket-meta-right">'+assignee+dueDate+'</div></div></div></div>';
+  const hoverActions='<div class="ticket-hover-actions">'
+    +'<button class="ticket-action-btn ticket-hover-action-btn" type="button" data-draft-action="sync" data-draft-queue-id="'+esc(draft.queueId)+'" data-draft-uri="'+esc(draft.documentUri)+'" title="'+esc(STRINGS.syncToRedmine)+'" aria-label="'+esc(STRINGS.syncToRedmine)+'">'+actionIcon('sync')+'</button>'
+    +'</div>';
+  return '<div class="ticket-row '+trackerCls+' is-draft is-unsynced'+(selected ? ' selected' : '')+'" data-draft-queue-id="'+esc(draft.queueId)+'" data-draft-uri="'+esc(draft.documentUri)+'" role="listitem" aria-current="'+selected+'" tabindex="0" data-level="0">'+trackerBar+'<div class="ticket-row-content"><div class="ticket-row-main"><div class="ticket-row-title-group"><span class="ticket-id ticket-id-new">#NEW</span>'+priorityIndicator(draft.priorityName)+'<span class="ticket-subject" title="'+esc(draft.subject)+'">'+esc(draft.subject)+'</span></div></div><div class="ticket-row-meta"><div class="ticket-meta-left">'+status+unsyncedInline+'</div><div class="ticket-meta-right">'+assignee+dueDate+'</div></div></div>'+hoverActions+'</div>';
 }
 function renderTicketRow(ticket){
   const selected=selectedDraftId === null && ticket.id === state.selectedTicketId;
@@ -146,7 +149,11 @@ function renderTicketRow(ticket){
   let guides='';
   for(let i=0;i<level;i++) guides+='<span class="ticket-indent-guide" aria-hidden="true"></span>';
   if(level > 0) guides+='<span class="ticket-indent-branch" aria-hidden="true"></span>';
-  return '<div class="ticket-row '+trackerCls+(unsynced ? ' is-unsynced' : '')+(level > 0 ? ' child-row' : '')+(selected ? ' selected' : '')+'" data-id="'+ticket.id+'" role="listitem" aria-current="'+selected+'" tabindex="0" data-level="'+level+'">'+trackerBar+guides+'<div class="ticket-row-content"><div class="ticket-row-main"><div class="ticket-row-title-group">'+expand+'<span class="ticket-id">#'+ticket.id+'</span>'+priorityIndicator(ticket.priorityName)+'<span class="ticket-subject" title="'+esc(ticket.subject)+'">'+esc(ticket.subject)+'</span></div></div><div class="ticket-row-meta"><div class="ticket-meta-left">'+status+unsyncedInline+project+'</div><div class="ticket-meta-right">'+assignee+dueDate+'</div></div></div></div>';
+  const hoverActions='<div class="ticket-hover-actions">'
+    +'<button class="ticket-action-btn ticket-hover-action-btn" type="button" data-ticket-action="sync" data-ticket="'+ticket.id+'" title="'+esc(STRINGS.syncToRedmine)+'" aria-label="'+esc(STRINGS.syncToRedmine)+'">'+actionIcon('sync')+'</button>'
+    +'<button class="ticket-action-btn ticket-hover-action-btn" type="button" data-ticket-action="browser" data-ticket="'+ticket.id+'" title="'+esc(STRINGS.openInBrowser)+'" aria-label="'+esc(STRINGS.openInBrowser)+'">'+actionIcon('browser')+'</button>'
+    +'</div>';
+  return '<div class="ticket-row '+trackerCls+(unsynced ? ' is-unsynced' : '')+(level > 0 ? ' child-row' : '')+(selected ? ' selected' : '')+'" data-id="'+ticket.id+'" role="listitem" aria-current="'+selected+'" tabindex="0" data-level="'+level+'">'+trackerBar+guides+'<div class="ticket-row-content"><div class="ticket-row-main"><div class="ticket-row-title-group">'+expand+'<span class="ticket-id">#'+ticket.id+'</span>'+priorityIndicator(ticket.priorityName)+'<span class="ticket-subject" title="'+esc(ticket.subject)+'">'+esc(ticket.subject)+'</span></div></div><div class="ticket-row-meta"><div class="ticket-meta-left">'+status+unsyncedInline+project+'</div><div class="ticket-meta-right">'+assignee+dueDate+'</div></div></div>'+hoverActions+'</div>';
 }
 function isTicketActionTarget(target){ return isElement(target) && !!target.closest('.ticket-action-btn,.ticket-action-menu,.expand-btn'); }
 let renderedTicketMarkup = null;

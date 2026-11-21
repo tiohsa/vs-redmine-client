@@ -287,6 +287,48 @@ body:focus-within .ticket-row.selected .ticket-meta-item:not(.is-overdue) {
 #ticket-list.is-compact .ticket-row { min-height: 30px; padding-top: 5px; padding-bottom: 5px; }
 #ticket-list.is-compact .ticket-row-meta { display: none; }
 
+.ticket-hover-actions {
+  display: none;
+  position: absolute;
+  top: 4px;
+  right: 6px;
+  z-index: 2;
+  align-items: center;
+  gap: 2px;
+  padding: 2px;
+  border: 1px solid var(--vscode-widget-border, var(--app-border-subtle));
+  border-radius: 3px;
+  background-color: var(--vscode-editorWidget-background, var(--app-surface-raised));
+  box-shadow: var(--app-shadow);
+}
+.ticket-row:hover .ticket-hover-actions,
+.ticket-row:focus-within .ticket-hover-actions {
+  display: inline-flex;
+}
+#ticket-list.is-compact .ticket-hover-actions {
+  top: 50%;
+  transform: translateY(-50%);
+}
+.ticket-hover-action-btn {
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border: 0;
+  border-radius: 2px;
+  background: transparent;
+  color: var(--vscode-foreground, var(--app-text));
+  opacity: 0.9;
+}
+.ticket-hover-action-btn:hover {
+  opacity: 1;
+  background-color: var(--vscode-toolbar-hoverBackground, var(--app-surface-hover));
+  color: var(--vscode-foreground, var(--app-text));
+}
+.ticket-hover-action-btn:disabled {
+  opacity: 0.45;
+  cursor: progress;
+}
+
 .empty-clear-link {
   margin-top: 6px;
   padding: 2px 6px;

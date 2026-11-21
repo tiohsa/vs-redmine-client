@@ -33,7 +33,11 @@ suite("Dashboard の表示と操作", () => {
     assert.ok(dashboardStyles.includes(".status-pill.status-new"));
     assert.ok(dashboardStyles.includes(".status-pill.status-in-progress"));
     assert.ok(dashboardStyles.includes(".status-pill.status-resolved"));
-    assert.ok(!dashboardStyles.includes(".ticket-hover-actions"));
+    assert.ok(dashboardStyles.includes(".ticket-hover-actions"));
+    assert.ok(dashboardStyles.includes(".ticket-row:hover .ticket-hover-actions"));
+    assert.ok(dashboardStyles.includes(".ticket-row:focus-within .ticket-hover-actions"));
+    assert.ok(!dashboardStyles.includes(".ticket-row.selected .ticket-hover-actions"));
+    assert.ok(dashboardStyles.includes("position: absolute;"));
     assert.ok(!dashboardStyles.includes(".ticket-progress"));
     assert.ok(dashboardStyles.includes("#ticket-list.is-compact"));
     assert.ok(dashboardStyles.includes(".ticket-indent-branch"));
@@ -88,8 +92,7 @@ suite("Dashboard の表示と操作", () => {
     const drawerStart = dashboardStyles.indexOf("/* Comments-only Detail Drawer");
     assert.ok(drawerStart >= 0);
     const drawerAndTimelineCss = dashboardStyles.slice(drawerStart);
-    assert.match(drawerAndTimelineCss, /#detail-cancel-btn,\s*#detail-browser-btn\s*\{[^}]*border-radius:\s*2px;/);
-    assert.match(drawerAndTimelineCss, /#detail-sync-btn\s*\{[^}]*border-radius:\s*2px;/);
+    assert.match(drawerAndTimelineCss, /#detail-cancel-btn\s*\{[^}]*border-radius:\s*2px;/);
     assert.match(drawerAndTimelineCss, /#add-comment-btn\s*\{[^}]*border-radius:\s*2px;/);
     assert.match(drawerAndTimelineCss, /#reload-comments-btn\s*\{[^}]*border-radius:\s*2px;/);
     assert.match(drawerAndTimelineCss, /\.comment-sync-btn\s*\{[^}]*border-radius:\s*2px;/);
@@ -110,6 +113,13 @@ suite("Dashboard の表示と操作", () => {
     assert.ok(dashboardWebviewScript.includes("req('settings.openJson')"));
     assert.ok(dashboardWebviewScript.includes("ticket.openDraft"));
     assert.ok(dashboardWebviewScript.includes("ticket.syncDraft"));
+    assert.ok(dashboardWebviewScript.includes("data-ticket-action=\"sync\""));
+    assert.ok(dashboardWebviewScript.includes("data-ticket-action=\"browser\""));
+    assert.ok(dashboardWebviewScript.includes("data-draft-action=\"sync\""));
+    assert.ok(!dashboardWebviewScript.includes("detail-sync-btn"));
+    assert.ok(!dashboardWebviewScript.includes("detail-browser-btn"));
+    assert.ok(!dashboardWebviewScript.includes("detail-subject"));
+    assert.ok(!dashboardWebviewScript.includes("detail-project-name"));
     assert.ok(dashboardWebviewScript.includes("#NEW"));
     assert.ok(!dashboardWebviewScript.includes("ticket-progress"));
   });

@@ -850,10 +850,13 @@ async function main() {
     const appearances = await evaluate(`(${JSON.stringify(selectors)}).map(selector=>{const button=document.querySelector(selector);return {label:button.textContent.trim(),icon:button.querySelector('svg').outerHTML};})`);
     appearances.slice(1).forEach(actual => assert.deepEqual(actual, appearances[0]));
   }
-  assert.equal(await evaluate(`document.querySelector('#detail-browser-btn') !== null`), true);
+  assert.equal(await evaluate(`document.querySelector('#detail-sync-btn')`), null);
+  assert.equal(await evaluate(`document.querySelector('#detail-browser-btn')`), null);
+  assert.equal(await evaluate(`document.querySelector('.ticket-row[data-id="10"] [data-ticket-action="sync"]') !== null`), true);
+  assert.equal(await evaluate(`document.querySelector('.ticket-row[data-id="10"] [data-ticket-action="browser"]') !== null`), true);
   assert.equal(await evaluate(`document.querySelector('#add-comment-btn') !== null`), true);
-  await assertSameAction(['#detail-sync-btn', '[data-sync-key]', '[data-sync-comment-key]']);
-  assert.equal(await evaluate(`document.querySelector('#sync-all-btn svg').outerHTML`), await evaluate(`document.querySelector('#detail-sync-btn svg').outerHTML`));
+  await assertSameAction(['[data-sync-key]', '[data-sync-comment-key]']);
+  assert.equal(await evaluate(`document.querySelector('#sync-all-btn svg').outerHTML`), await evaluate(`document.querySelector('.ticket-row[data-id="10"] [data-ticket-action="sync"] svg').outerHTML`));
   state.comments.items = [];
   state.unsynced = { totalCount: 0, items: [] };
   await push();
@@ -928,7 +931,7 @@ async function main() {
   state.editOptions = { ticketId: 10, projectId: 1, loading: false, statusFallback: false, trackers: [{ id: 1, name: 'Bug' }, { id: 2, name: 'Task' }], priorities: [{ id: 1, name: 'Normal' }, { id: 2, name: 'High' }], statuses: [{ id: 1, name: 'Open' }, { id: 2, name: 'Closed' }], assignees: [{ id: 1, name: 'Taro' }] };
   await push();
   assert.equal(await evaluate(`document.querySelectorAll('#ticket-detail-card .detail-tabs, #detail-tab-overview, #detail-tab-comments, .detail-metadata-grid, .detail-description, .detail-description-warning').length`), 0);
-  assert.equal(await evaluate(`document.querySelector('#ticket-detail-card .detail-head-row1') !== null && document.querySelector('#ticket-detail-card .detail-head-row2') !== null`), true);
+  assert.equal(await evaluate(`document.querySelector('#ticket-detail-card .detail-header-fixed') !== null && document.querySelectorAll('#ticket-detail-card .detail-subject, #ticket-detail-card .detail-project-name, #ticket-detail-card .detail-head-row2').length === 0`), true);
   assert.equal(await evaluate(`document.getElementById('detail-comments').hidden`), false);
   assert.equal(await evaluate(`document.getElementById('detail-comment-count').textContent`), '0');
   state.tickets[0].syncState = 'Conflict';
@@ -976,8 +979,8 @@ async function main() {
   assert.ok(commentLayout.longScrollTop > 0);
   assert.equal(commentLayout.shortOverflowY, 'auto');
   assert.equal(commentLayout.shortScrollable, false);
-  for (const [id, type] of [['add-comment-btn', 'comment.add'], ['reload-comments-btn', 'comment.reload'], ['detail-browser-btn', 'ticket.openBrowser']]) {
-    await evaluate(`document.getElementById('${id}').click()`);
+  for (const [selector, type] of [['#add-comment-btn', 'comment.add'], ['#reload-comments-btn', 'comment.reload'], ['.ticket-row[data-id="10"] [data-ticket-action="browser"]', 'ticket.openBrowser']]) {
+    await evaluate(`document.querySelector(${JSON.stringify(selector)}).click()`);
     assert.deepEqual(await evaluate(`({type:window.messages.at(-1).type,ticketId:window.messages.at(-1).ticketId})`), { type, ticketId: 10 });
   }
   state.comments.items = [];
@@ -992,37 +995,38 @@ async function main() {
   assert.equal(await evaluate(`window.messages.at(-1).type`), 'ticket.cancelDetail');
 
   // 同期は送信直後から無効化し、state 更新・started・成功・失敗でも二重送信しない。
+  const rowSyncSelector = '.ticket-row[data-id="10"] [data-ticket-action="sync"]';
   const beforeSync = await evaluate('window.messages.length');
-  await evaluate(`document.getElementById('detail-sync-btn').click();document.getElementById('detail-sync-btn').click()`);
+  await evaluate(`document.querySelector(${JSON.stringify(rowSyncSelector)}).click();document.querySelector(${JSON.stringify(rowSyncSelector)}).click()`);
   assert.equal(await evaluate('window.messages.length'), beforeSync + 1);
   const syncRequest = await evaluate('window.messages.at(-1)');
   assert.equal(syncRequest.type, 'ticket.syncSelected');
   assert.equal(syncRequest.ticketId, 10);
-  assert.equal(await evaluate(`document.getElementById('detail-sync-btn').textContent`), strings.syncSyncing);
+  assert.equal(await evaluate(`document.querySelector(${JSON.stringify(rowSyncSelector)}).disabled`), true);
   await push();
-  assert.equal(await evaluate(`document.getElementById('detail-sync-btn').disabled`), true);
+  assert.equal(await evaluate(`document.querySelector(${JSON.stringify(rowSyncSelector)}).disabled`), true);
   await evaluate(`window.dispatchEvent(new MessageEvent('message',{data:{type:'operation.started',requestId:'${syncRequest.requestId}',label:'同期中…'}}))`);
   assert.equal(await evaluate(`document.getElementById('detail-sync-state').textContent`), strings.syncSyncing);
   state.selectedTicket.syncState = 'Synced';
   await push();
   await evaluate(`window.dispatchEvent(new MessageEvent('message',{data:{type:'operation.success',requestId:'${syncRequest.requestId}',message:'同期が完了しました'}}))`);
-  assert.equal(await evaluate(`document.getElementById('detail-sync-btn').disabled`), false);
+  assert.equal(await evaluate(`document.querySelector(${JSON.stringify(rowSyncSelector)}).disabled`), false);
   assert.equal(await evaluate(`document.querySelector('.toast-success:last-child').textContent`), '同期が完了しました');
-  await evaluate(`document.getElementById('detail-sync-btn').click()`);
+  await evaluate(`document.querySelector(${JSON.stringify(rowSyncSelector)}).click()`);
   const failedSync = await evaluate('window.messages.at(-1).requestId');
   state.selectedTicket.syncState = 'Failed';
   await push();
   await evaluate(`window.dispatchEvent(new MessageEvent('message',{data:{type:'operation.error',requestId:'${failedSync}',message:'同期に失敗しました'}}))`);
-  assert.equal(await evaluate(`document.getElementById('detail-sync-btn').disabled`), false);
+  assert.equal(await evaluate(`document.querySelector(${JSON.stringify(rowSyncSelector)}).disabled`), false);
   assert.equal(await evaluate(`document.querySelector('.toast-error:last-child').textContent`), '同期に失敗しました');
   // キャッシュ再取得の中断通知も started を終了し、同期操作を再び使えるようにする。
   await evaluate(`window.dispatchEvent(new MessageEvent('message',{data:{type:'operation.started',requestId:'interrupted-cache-reset',label:'キャッシュ再取得中'}}))`);
-  assert.equal(await evaluate(`document.getElementById('detail-sync-btn').disabled`), true);
+  assert.equal(await evaluate(`document.querySelector(${JSON.stringify(rowSyncSelector)}).disabled`), true);
   await push();
   await evaluate(`window.dispatchEvent(new MessageEvent('message',{data:{type:'operation.success',requestId:'interrupted-cache-reset',message:'表示が変更されたため再取得を中断しました',level:'info'}}))`);
-  assert.equal(await evaluate(`document.getElementById('detail-sync-btn').disabled`), false);
+  assert.equal(await evaluate(`document.querySelector(${JSON.stringify(rowSyncSelector)}).disabled`), false);
   const messagesAfterReset = await evaluate('window.messages.length');
-  await evaluate(`document.getElementById('detail-sync-btn').click()`);
+  await evaluate(`document.querySelector(${JSON.stringify(rowSyncSelector)}).click()`);
   assert.equal(await evaluate('window.messages.length'), messagesAfterReset + 1);
   assert.equal(await evaluate('window.messages.at(-1).type'), 'ticket.syncSelected');
   await evaluate(`window.dispatchEvent(new MessageEvent('message',{data:{type:'operation.success',requestId:window.messages.at(-1).requestId,message:'完了'}}))`);
@@ -1033,7 +1037,7 @@ async function main() {
     }
     await push();
     assert.equal(await evaluate(`document.getElementById('detail-sync-state').textContent`), label);
-    assert.equal(await evaluate(`document.getElementById('detail-sync-btn').disabled`), syncState === 'Syncing');
+    assert.equal(await evaluate(`document.querySelector(${JSON.stringify(rowSyncSelector)}).disabled`), syncState === 'Syncing');
     if (syncState === 'Dirty' || syncState === 'Queued') {
       assert.equal(await evaluate(`document.querySelector('.ticket-row[data-id="${state.tickets[0].id}"] .unsynced-inline-badge')?.textContent`), label);
     } else if (syncState === 'Synced') {
@@ -1061,7 +1065,7 @@ async function main() {
     await evaluate(`document.body.className=${JSON.stringify(theme)}`);
     await push();
     assert.equal(await evaluate(`document.getElementById('ticket-detail-card').scrollWidth <= document.getElementById('ticket-detail-card').clientWidth`), true, `detail overflow: ${theme} ${width}`);
-    assert.equal(await evaluate(`(()=>{const card=document.getElementById('ticket-detail-card').getBoundingClientRect();return [...document.querySelectorAll('.detail-head-actions button, #detail-cancel-btn, #add-comment-btn, #reload-comments-btn')].filter(el=>el.getClientRects().length>0).every(el=>{const r=el.getBoundingClientRect();return r.left>=card.left && r.right<=card.right;});})()`), true, `control overflow: ${theme} ${width}`);
+    assert.equal(await evaluate(`(()=>{const card=document.getElementById('ticket-detail-card').getBoundingClientRect();return [...document.querySelectorAll('#detail-cancel-btn, #add-comment-btn, #reload-comments-btn')].filter(el=>el.getClientRects().length>0).every(el=>{const r=el.getBoundingClientRect();return r.left>=card.left && r.right<=card.right;});})()`), true, `control overflow: ${theme} ${width}`);
     await evaluate(`document.querySelector('.ticket-row[data-id="10"]').focus()`);
     assert.notEqual(await evaluate(`getComputedStyle(document.querySelector('.ticket-row[data-id="10"]')).outlineStyle`), 'none');
     assert.notEqual(await evaluate(`getComputedStyle(document.querySelector('.ticket-row[data-id="10"]'),'::before').backgroundColor`), 'rgba(0, 0, 0, 0)');
@@ -1347,7 +1351,13 @@ async function main() {
     assert.equal(await evaluate(`document.getElementById('ticket-scroll').scrollWidth <= document.getElementById('ticket-scroll').clientWidth`), true, `list overflow: ${theme} ${width}`);
     assert.equal(await evaluate(`getComputedStyle(document.querySelector('.tickets-master')).borderRightWidth`), '1px');
     assert.equal(await evaluate(`document.querySelector('.ticket-subject').getBoundingClientRect().width >= 40`), true, `subject clipped: ${theme} ${width}`);
-    assert.equal(await evaluate(`document.querySelectorAll('.detail-head-actions svg[aria-hidden="true"]').length === 2`), true);
+    assert.equal(await evaluate(`document.querySelectorAll('.ticket-row.selected .ticket-hover-actions svg[aria-hidden="true"]').length === 2`), true);
+    assert.equal(await evaluate(`getComputedStyle(document.querySelector('.ticket-row:not(.selected) .ticket-hover-actions')).display`), 'none');
+    assert.equal(await evaluate(`getComputedStyle(document.querySelector('.ticket-row.selected .ticket-hover-actions')).display`), 'none');
+    await evaluate(`document.querySelector('.ticket-row.selected').focus()`);
+    assert.equal(await evaluate(`getComputedStyle(document.querySelector('.ticket-row.selected .ticket-hover-actions')).display`), 'flex');
+    await evaluate(`document.querySelector('.ticket-row.selected').blur()`);
+    assert.equal(await evaluate(`getComputedStyle(document.querySelector('.ticket-row.selected .ticket-hover-actions')).display`), 'none');
     if (width < 700) assert.equal(await evaluate(`document.querySelector('.tickets-master').getBoundingClientRect().height <= innerHeight * .55 + 1`), true);
     await evaluate(`document.getElementById('ticket-scroll').scrollTop=0; document.querySelector('.tickets-layout').scrollTop=0`);
     await evaluate('new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)))');
@@ -1448,7 +1458,8 @@ async function main() {
   assert.equal(await evaluate(`document.getElementById('tickets-badge').textContent`), '6');
   assert.equal(await evaluate(`document.querySelector('.ticket-row').classList.contains('is-draft')`), true);
   assert.equal(await evaluate(`document.querySelector('.ticket-row.is-draft .ticket-id-new').textContent`), '#NEW');
-  assert.equal(await evaluate(`document.querySelectorAll('.ticket-row.is-draft .ticket-hover-actions').length`), 0);
+  assert.equal(await evaluate(`document.querySelectorAll('.ticket-row.is-draft .ticket-hover-actions').length`), 1);
+  assert.equal(await evaluate(`document.querySelectorAll('.ticket-row.is-draft [data-draft-action="sync"]').length`), 1);
   assert.equal(await evaluate(`document.querySelectorAll('.ticket-row.is-draft [data-ticket-action="browser"]').length`), 0);
   await evaluate(`window.messages.length=0;document.querySelector('.ticket-row.is-draft').click()`);
   assert.deepEqual(await evaluate(`(({type,queueId})=>({type,queueId}))(window.messages.at(-1))`), { type: 'ticket.openDraft', queueId: 'draft-q1' });

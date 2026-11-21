@@ -11,34 +11,20 @@ function renderTicketDetailPanel(ticket){
       +'<div class="detail-head-row1">'
         +'<span class="detail-tracker-bar" aria-hidden="true"'+(ticket.trackerName?' title="'+esc(STRINGS.sortTracker+': '+ticket.trackerName)+'"':'')+'></span>'
         +'<span class="ticket-id">#'+ticket.id+'</span>'
-        +'<span class="detail-subject" title="'+esc(ticket.subject)+'">'+esc(ticket.subject)+'</span>'
-        +'<button class="btn btn-secondary detail-toggle" id="detail-cancel-btn" type="button" title="'+esc(STRINGS.dismissDetail)+'" aria-label="'+esc(STRINGS.dismissDetail)+'">'+actionIcon('cancel')+'</button>'
+        +'<span class="comments-header-label">'+actionIcon('comment')+'<span>'+esc(STRINGS.tabComments)+'</span><span id="detail-comment-count" class="tab-badge">'+commentCount+'</span></span>'
+        +'<span class="sr-only">'+esc(STRINGS.editingState)+'</span>'
+        +'<span id="detail-sync-state" role="status" aria-live="polite"></span>'
       +'</div>'
-      +'<div class="detail-head-row2">'
-        +'<div class="detail-head-meta">'
-          +'<span class="detail-project-name" title="'+esc(ticket.projectName || STRINGS.projectNone)+'">'+esc(ticket.projectName || STRINGS.projectNone)+'</span>'
-          +'<span class="sr-only">'+esc(STRINGS.editingState)+'</span>'
-          +'<span id="detail-sync-state" role="status" aria-live="polite"></span>'
-        +'</div>'
-        +'<div class="detail-head-actions">'
-          +'<button class="btn btn-secondary detail-sync-button" id="detail-sync-btn" type="button" title="'+esc(STRINGS.syncTicketTooltip)+'">'+actionIcon('sync')+'<span>'+esc(STRINGS.syncToRedmine)+'</span></button>'
-          +'<button class="btn btn-secondary detail-icon-button" id="detail-browser-btn" type="button" title="'+esc(STRINGS.openInBrowser)+'" aria-label="'+esc(STRINGS.openInBrowser)+'">'+actionIcon('browser')+'</button>'
-        +'</div>'
-      +'</div>'
-    +'</div>'
-    +'<div class="comments-header">'
-      +'<span class="comments-header-label">'+actionIcon('comment')+'<span>'+esc(STRINGS.tabComments)+'</span><span id="detail-comment-count" class="tab-badge">'+commentCount+'</span></span>'
       +'<div class="comments-header-actions">'
         +'<button class="btn btn-primary" id="add-comment-btn" type="button">'+actionIcon('child')+'<span>'+esc(STRINGS.addCommentAction)+'</span></button>'
         +'<button class="btn btn-secondary detail-icon-button" id="reload-comments-btn" type="button" title="'+esc(STRINGS.reloadComments)+'" aria-label="'+esc(STRINGS.reloadComments)+'">'+actionIcon('refresh')+'</button>'
+        +'<button class="btn btn-secondary detail-toggle" id="detail-cancel-btn" type="button" title="'+esc(STRINGS.dismissDetail)+'" aria-label="'+esc(STRINGS.dismissDetail)+'">'+actionIcon('cancel')+'</button>'
       +'</div>'
     +'</div>'
     +'<div id="detail-comments" class="detail-comments-panel">'
       +'<div id="comments-list"></div>'
     +'</div>';
   card.querySelector('#detail-cancel-btn').addEventListener('click',function(){ req('ticket.cancelDetail'); });
-  card.querySelector('#detail-sync-btn').addEventListener('click',function(){ req('ticket.syncSelected',{ticketId:ticket.id}); });
-  card.querySelector('#detail-browser-btn').addEventListener('click',function(){ req('ticket.openBrowser',{ticketId:ticket.id}); });
   card.querySelector('#add-comment-btn').addEventListener('click',function(){ req('comment.add',{ticketId:ticket.id}); });
   card.querySelector('#reload-comments-btn').addEventListener('click',function(){ req('comment.reload',{ticketId:ticket.id}); });
   updateSyncButtonStates();
