@@ -160,7 +160,7 @@ export interface ParsedCommentCreateFile {
 }
 
 export const buildCommentCreateFileContent = (issueId: number): string =>
-  `---\nmode: comment-create\nissue_id: ${issueId}\n---\n\n# ${vscode.l10n.t("Comment on ticket #{0}", issueId)}\n\n`;
+  `---\nmode: comment-create\nissue_id: ${issueId}\n---\n\n`;
 
 export const parseCommentCreateFile = (
   content: string,
@@ -196,7 +196,11 @@ export const parseCommentCreateFile = (
   while (idx < rest.length && rest[idx].trim() === "") {
     idx += 1;
   }
-  if (idx < rest.length && /^#(?:\s|$)/.test(rest[idx])) {
+  const legacyHeadings = new Set([
+    `# Comment on ticket #${issueId}`,
+    `# ${vscode.l10n.t("Comment on ticket #{0}", issueId)}`,
+  ]);
+  if (idx < rest.length && legacyHeadings.has(rest[idx])) {
     idx += 1;
     if (idx < rest.length && rest[idx] === "") {
       idx += 1;

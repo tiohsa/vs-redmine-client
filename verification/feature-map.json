@@ -114,12 +114,15 @@
       ],
       "invariants": [
         "選択チケットのコメントを表示する。",
-        "編集権限のないコメントの更新を拒否する。"
+        "編集権限のないコメントの更新を拒否する。",
+        "新規コメントは空の本文欄で開き、本文先頭に入力した Markdown 見出しを同期する。"
       ],
       "checks": [
         "src/test/commentListMapping.test.ts",
         "src/test/commentPermissions.test.ts",
+        "src/test/commentCreateTemplate.test.ts",
         "src/test/commentSaveSync.test.ts",
+        "src/test/stabilizeDashboard013SaveSerialization.test.ts",
         "src/test/live/isolationSync.test.ts",
         "src/test/live/dashboardWorkflow.test.ts"
       ]
