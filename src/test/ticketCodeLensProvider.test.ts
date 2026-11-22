@@ -143,7 +143,7 @@ suite("TicketCodeLensProvider", () => {
 
     const originalShowQuickPick = vscode.window.showQuickPick;
     const originalShowInputBox = vscode.window.showInputBox;
-    const originalActiveTextEditor = vscode.window.activeTextEditor;
+    const originalActiveTextEditor = Object.getOwnPropertyDescriptor(vscode.window, "activeTextEditor");
 
     try {
       const windowObj = vscode.window as unknown as {
@@ -204,13 +204,10 @@ suite("TicketCodeLensProvider", () => {
     } finally {
       (vscode.window as { showQuickPick: typeof vscode.window.showQuickPick }).showQuickPick = originalShowQuickPick;
       (vscode.window as { showInputBox: typeof vscode.window.showInputBox }).showInputBox = originalShowInputBox;
-      if (originalActiveTextEditor !== undefined) {
-        Object.defineProperty(vscode.window, "activeTextEditor", {
-          configurable: true,
-          get: () => originalActiveTextEditor,
-        });
+      if (originalActiveTextEditor) {
+        Object.defineProperty(vscode.window, "activeTextEditor", originalActiveTextEditor);
       } else {
-        delete (vscode.window as unknown as Record<string, unknown>).activeTextEditor;
+        Reflect.deleteProperty(vscode.window, "activeTextEditor");
       }
     }
   });

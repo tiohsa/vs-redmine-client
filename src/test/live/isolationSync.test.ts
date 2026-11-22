@@ -24,15 +24,21 @@ liveTest("LIVE-I01", "別の論理接続先へAPI keyを継承しない", async 
 
 liveTest("LIVE-I02", "不正なAPI keyに対する実HTTP 401では書き込みを開始しない", async (live) => {
   const key = await live.queueNewTicket({ subject: "LIVE-I02 invalid key" });
-  const savedKey = process.env.REDMINE_API_KEY;
-  assert.ok(savedKey);
-  await setApiKeyForScope(live.scope, "invalid-live-test-api-key");
+  const proxy = await createFaultProxy(resolveLiveUpstream());
+  const engine = live.engine();
   try {
-    const outcome = await live.engine().syncOne(key, live.context);
+    const operation = engine.getRepository().getOperation(key, live.scope);
+    assert.ok(operation);
+    await engine.getRepository().saveOperation({ ...operation, connectionScope: proxy.origin }, proxy.origin);
+    await setApiKeyForScope(proxy.origin, "invalid-live-test-api-key");
+    const outcome = await engine.syncOne(key, { connectionScope: proxy.origin });
     assert.notStrictEqual(outcome.kind, "completed");
-    assert.ok(live.proxy.hits().some((hit) => hit.status === 401));
-    assert.strictEqual(live.proxy.hits().filter((hit) => hit.forwarded && hit.method === "POST" && hit.path === "/issues.json").length, 0);
-  } finally { await setApiKeyForScope(live.scope, savedKey); }
+    assert.ok(proxy.hits().some((hit) => hit.status === 401));
+    assert.strictEqual(proxy.hits().filter((hit) => hit.forwarded && hit.method === "POST" && hit.path === "/issues.json").length, 0);
+  } finally {
+    try { await engine.getRepository().deleteOperation(key, proxy.origin); }
+    finally { await clearApiKeyForScope(proxy.origin); await proxy.close(); }
+  }
 });
 
 liveTest("LIVE-I03", "別接続先の同じticket IDのキューとOperationを分離する", async (live) => {

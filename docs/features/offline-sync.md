@@ -6,6 +6,8 @@
 
 保存時は文書の種類に応じて変更を分類し、同じ文書の保存要求を直列化します。保存処理で得た入力と実行中の同期の所有関係を維持します。リモート書き込み中に次の編集を保存した場合は、現在実行中の入力を維持し、後続の編集を別の意図として保持します。
 
+保存の入口は [保存同期](../../src/app/saveSyncExecutor.ts) です。文書種別ごとのローカル処理は [チケット](../../src/app/saveSyncLocalTicket.ts) と [コメント](../../src/app/saveSyncLocalComment.ts)、自動同期と結果の処理は [自動同期](../../src/app/saveSyncAutoSync.ts) が扱います。[自動・手動モード](../../src/test/saveSyncExecutorAutoMode.test.ts) と [保存の直列化](../../src/test/stabilizeDashboard013SaveSerialization.test.ts) で検証します。
+
 [エディターイベント](../../src/app/editorEventController.ts) は、表示更新を [文書変更のスケジューラー](../../src/app/editorDocumentChangeScheduler.ts) に URI ごとに登録します。アクティブエディターの切り替え時は保留中の表示更新を実行し、文書を閉じたときは対象 URI の予約を取り消します。保存イベントは保存同期を起動します。URI ごとの隔離と予約の取り消しは [スケジューラーテスト](../../src/test/editorDocumentChangeScheduler.test.ts) で確認します。
 
 Dashboard の Unsynced には、現在の接続先に属する未保存の編集、ローカル下書き、同期キュー、同期中・復旧待ちの項目を表示します。同じ変更は1件にまとめ、キュー登録後に加わった未保存の編集は別に表示します。キュー登録前の変更は「開く」で元のエディターを開き、既存の編集・保存操作で処理します。元のエディターを開けない場合は理由を表示し、内容が残っていれば読み取り専用で開けます。ローカル下書きの説明と操作は、カードの幅に合わせて枠内で折り返します。「すべて同期」の対象は同期キューの項目です。

@@ -29,23 +29,12 @@ import type { TicketSaveResult } from "../views/ticketSaveTypes";
 import type { DashboardServiceContext } from "./services/DashboardServiceContext";
 import type { SyncEngine } from "../app/syncEngine";
 import { getCurrentConnectionScope } from "../config/connectionScope";
-import { runWithConnectionScope } from "../redmine/client";
-import { deleteIssue, getIssueDetail } from "../redmine/issues";
-import { updateComment } from "../redmine/comments";
-import { RedmineHttpError } from "../redmine/httpError";
-import {
-  assertCanDelete,
-  getTicketIdsWithPendingChanges,
-  runProtectedDelete,
-} from "./services/dashboardDeletionProtection";
-import { getPendingChangeReview } from "./services/dashboardPendingDeletionChanges";
-import { browserTargetForUri } from "../app/browserCommandTarget";
-import { scheduleTask } from "../packages/framework-core";
-import { onActiveSyncChanged } from "../app/ticketSync/syncDeletionGuard";
 import { DashboardDataService, type DashboardDataCache, type DashboardMetadataTestHooks } from "./services/DashboardDataService";
 import { DashboardDraftService } from "./services/DashboardDraftService";
 import { collectTicketNodeIds, DashboardSelectionService } from "./services/DashboardSelectionService";
-import { confirmPendingChangeReview, DashboardDeletionService } from "../layers/extension-host/features/delete-redmine-items";
+import type { DashboardDeletionService } from "../layers/extension-host/features/delete-redmine-items";
+import { createDashboardDeletionService } from "./services/createDashboardDeletionService";
+import { DashboardPendingChangesObserver } from "./services/DashboardPendingChangesObserver";
 
 const isKnownUnsyncedDocumentUri = (documentUri: string): boolean => {
   const queue = getOfflineSyncQueue(getCurrentConnectionScope());
@@ -229,65 +218,16 @@ export class DashboardController {
       commentService: this.commentService,
       metadataService: this.metadataService,
     });
-    this.deletionService = new DashboardDeletionService({
-      getIssueDetail,
-      deleteIssue,
-      clearJournalNotes: (journalId) => updateComment(journalId, ""),
-      getConnectionScope: getCurrentConnectionScope,
-      withConnectionScope: runWithConnectionScope,
-      getHttpStatusCode: (error) => error instanceof RedmineHttpError ? error.statusCode : undefined,
-      getConnectionGeneration: () => getCurrentConnectionScope() === this.boundConnectionScope
-        ? opts.store.getState().connectionGeneration
-        : -1,
-      assertCanDelete,
-      runProtectedDelete,
-      getPendingTicketIds: getTicketIdsWithPendingChanges,
-      getPendingChangeReview,
-      reviewPendingChanges: confirmPendingChangeReview,
-      openUnsynced: (ids) => {
-        this.unsyncedService.revealPendingChanges(ids);
-        opts.revealUnsyncedView?.();
-      },
-      refreshTickets: async (ticketIds) => {
-        this.ticketService.removeDeletedTickets(ticketIds);
-        await this.ticketService.loadTickets();
-      },
-      refreshComments: async (ticketId, commentId) => {
-        this.commentService.removeDeletedComment(ticketId, commentId);
-        await this.commentService.loadComments(ticketId);
-      },
-      clearSelectedTicket: (ticketId) => {
-        if (opts.store.getState().selectedTicketId === ticketId) { this.cancelDetail(); }
-      },
-      clearSelectedComment: (ticketId, commentId) => {
-        const state = opts.store.getState();
-        if (state.selectedTicketId === ticketId && state.comments.selectedCommentId === commentId) {
-          this.commentService.selectComment(ticketId, {});
-        }
-      },
-      notifyError: opts.notifyError,
-      notifySuccess: opts.notifySuccess,
+    this.deletionService = createDashboardDeletionService({
+      ...opts,
+      getBoundConnectionScope: () => this.boundConnectionScope,
+      ticketService: this.ticketService,
+      commentService: this.commentService,
+      unsyncedService: this.unsyncedService,
+      cancelDetail: () => this.cancelDetail(),
     });
-    let cancelPendingRefresh: (() => void) | undefined;
-    const schedulePendingRefresh = (): void => {
-      cancelPendingRefresh?.();
-      cancelPendingRefresh = scheduleTask(() => {
-        cancelPendingRefresh = undefined;
-        this.unsyncedService.refreshUnsynced();
-      }, 100);
-    };
-    const refreshDocumentChanges = (document: vscode.TextDocument): void => {
-      const scope = getCurrentConnectionScope();
-      if (browserTargetForUri(document.uri, scope)?.connectionScope === scope) { schedulePendingRefresh(); }
-    };
     this.disposables.push(
-      { dispose: () => cancelPendingRefresh?.() },
-      vscode.workspace.onDidOpenTextDocument(refreshDocumentChanges),
-      vscode.workspace.onDidChangeTextDocument(event => refreshDocumentChanges(event.document)),
-      vscode.workspace.onDidSaveTextDocument(refreshDocumentChanges),
-      vscode.workspace.onDidCloseTextDocument(refreshDocumentChanges),
-      vscode.window.onDidChangeActiveTextEditor(() => schedulePendingRefresh()),
-      onActiveSyncChanged((scope) => { if (scope === getCurrentConnectionScope()) { schedulePendingRefresh(); } }),
+      new DashboardPendingChangesObserver(() => this.unsyncedService.refreshUnsynced()),
       { dispose: onOfflineSyncQueueChanged(() => this.refreshUnsynced()) },
       { dispose: onTicketDraftSaved((event) => this.handleTicketDraftSaved(event)) },
     );

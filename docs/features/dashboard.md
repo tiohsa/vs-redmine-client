@@ -35,3 +35,7 @@ Activity Bar の Webview に Tickets、Unsynced、Settings があります。Tic
 [Webview スクリプト](../../src/dashboard/dashboardWebviewScript.ts) と [スタイル](../../src/dashboard/dashboardStyles.ts) は、画面別・共通処理の断片を決められた順序で連結します。再描画後のフォーカス、キーボード操作、テーマと表示幅ごとの挙動は [Dashboard UI 検証](../../scripts/check-dashboard-ui.cjs) で確認できます。
 
 Unsynced の [同期操作](../../src/dashboard/services/DashboardUnsyncedService.ts) は [競合の仲介](../../src/dashboard/services/DashboardSyncConflictService.ts)、[結果通知](../../src/dashboard/services/DashboardSyncNotifications.ts)、[破棄・中止などのキュー操作](../../src/dashboard/services/DashboardUnsyncedQueueActions.ts) に処理を渡します。
+
+削除後の表示更新は [Dashboard の削除サービス組み立て](../../src/dashboard/services/createDashboardDeletionService.ts)、保留変更のイベント購読と更新予約は [保留変更の監視](../../src/dashboard/services/DashboardPendingChangesObserver.ts) が扱います。設定と同期キーの詳細検証は [設定パッチ](../../src/dashboard/dashboardSettingsValidation.ts) と [同期キー](../../src/dashboard/dashboardUnsyncedKeyValidation.ts) に分かれます。削除の統合検証は [Dashboard 削除テスト](../../src/test/dashboardDeletionIntegration.test.ts) と [実 Redmine の Dashboard 検証](../../src/test/live/dashboardWorkflow.test.ts) の `LIVE-B07`・`LIVE-B08` を参照してください。
+
+案内のみを表示していた `redmine-client.addComment`、`loadMoreTickets`、`toggleRelevantTickets`、各 `configureTicket*Filter`、`configureTicketSort`、`configureTicketDueDateDisplay`、`resetTicketListSettings` は登録せず、互換 ID も設けません。これらに対応する操作は Dashboard から行います。コメント追加の `redmine-client.addCommentFromComments` と `redmine-client.openProjectInBrowser` は利用できます。

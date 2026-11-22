@@ -1,19 +1,9 @@
 import * as vscode from "vscode";
+import { getRelevantPendingTicketIds, hasRelevantPendingTicketChanges, resolveTicketDeletionTarget, sameTicketIds, sortedUniqueTicketIds } from "./deletionAssessment";
+import { writeAndVerifyDeletion } from "./deletionVerification";
+import type { DeleteProtectionInput, DeleteTarget, DeletionIssueDetail, ProtectedDelete, UnverifiedDescendant } from "./deletionTypes";
 
-interface DeletionIssueDetail {
-  ticket: { id: number; subject: string; parentId?: number };
-  comments: Array<{ id: number; ticketId: number; body: string }>;
-  childIssueIds?: number[];
-}
-
-interface DeleteProtectionInput {
-  connectionScope: string;
-  ticketIds: readonly number[];
-  commentIds?: readonly number[];
-  possibleTicketIds?: readonly number[];
-}
-
-type ProtectedDelete = <T>(input: DeleteProtectionInput, operation: () => Promise<T>) => Promise<T>;
+export type { DeleteProtectionInput, DeletionIssueDetail } from "./deletionTypes";
 
 export interface DeleteTicketRequest {
   requestId: string;
@@ -67,21 +57,12 @@ export interface DashboardDeletionServiceDependencies {
   notifySuccess: (requestId: string, message: string) => void;
 }
 
-interface UnverifiedDescendant {
-  ticketId: number;
-  unreadableTicketId: number;
-}
-
-type DeleteTarget =
-  | { kind: "ticket"; ticketId: number; subject: string; ticketIds: number[]; pendingSnapshot?: number[]; unverified: UnverifiedDescendant[] }
-  | { kind: "comment"; ticketId: number; commentId: number; body: string };
-
 export class DashboardDeletionService {
   private readonly inFlight = new Set<string>();
   constructor(private readonly deps: DashboardDeletionServiceDependencies) {}
 
   async deleteTicket(request: DeleteTicketRequest): Promise<void> {
-    await this.perform(request, (scope) => this.resolveTicket(scope, request.ticketId));
+    await this.perform(request, (scope) => resolveTicketDeletionTarget(this.deps, scope, request.ticketId));
   }
 
   async deleteComment(request: DeleteCommentRequest): Promise<void> {
@@ -109,7 +90,7 @@ export class DashboardDeletionService {
       this.assertCurrent(request, scope);
       const target = await resolve(scope);
       this.assertCurrent(request, scope);
-      const pendingReview = target.kind === "ticket" && this.hasPendingReview(target, scope)
+      const pendingReview = target.kind === "ticket" && hasRelevantPendingTicketChanges(this.deps, target, scope)
         ? await this.reviewPending(target, request, scope)
         : undefined;
       if (pendingReview === undefined) {
@@ -124,7 +105,7 @@ export class DashboardDeletionService {
       this.assertCurrent(request, scope);
       if (verified.kind === "ticket") {
         if (target.kind !== "ticket" || target.subject !== verified.subject ||
-            !this.sameUnverified(target.unverified, verified.unverified) || !this.sameIds(target.ticketIds, verified.ticketIds) ||
+            !this.sameUnverified(target.unverified, verified.unverified) || !sameTicketIds(target.ticketIds, verified.ticketIds) ||
             !this.sameOptionalIds(target.pendingSnapshot, verified.pendingSnapshot)) {
           throw new Error(vscode.l10n.t("Pending changes changed while verifying this ticket. Try again."));
         }
@@ -132,7 +113,7 @@ export class DashboardDeletionService {
           this.assertPendingSnapshotCurrent(scope, verified.pendingSnapshot);
         }
         if (pendingReview !== undefined) {
-          const reviewIds = this.relevantPendingIds(verified, scope);
+          const reviewIds = getRelevantPendingTicketIds(this.deps, verified, scope);
           const currentItems = this.getReviewItems(scope, request, reviewIds);
           this.assertReviewSnapshotCurrent(pendingReview.items, currentItems);
         }
@@ -141,7 +122,7 @@ export class DashboardDeletionService {
       this.deps.assertCanDelete(this.protectionInput(scope, verified));
       await this.deps.runProtectedDelete(this.protectionInput(scope, verified), async () => {
         this.assertCurrent(request, scope);
-        await this.writeAndVerify(scope, verified);
+        await writeAndVerifyDeletion(this.deps, scope, verified);
       });
 
       if (!this.isCurrent(request, scope)) { return; }
@@ -172,7 +153,7 @@ export class DashboardDeletionService {
     request: DeleteTicketRequest,
     scope: string,
   ): Promise<{ approved: boolean; items: readonly PendingChangeReviewItem[] }> {
-    const pendingIds = this.relevantPendingIds(target, scope);
+    const pendingIds = getRelevantPendingTicketIds(this.deps, target, scope);
     const items = this.getReviewItems(scope, request, pendingIds);
     const itemTicketIds = new Set(items.flatMap((item) => item.ticketIds));
     const missingCandidates = pendingIds.filter((ticketId) => !itemTicketIds.has(ticketId));
@@ -191,7 +172,7 @@ export class DashboardDeletionService {
       title: vscode.l10n.t("Review pending changes before deleting ticket #{0}: {1}", target.ticketId, target.subject),
       detail,
       items: items.map(item => {
-        const references = this.sortedUnique(target.unverified.filter(gap => item.ticketIds.includes(gap.ticketId))
+        const references = sortedUniqueTicketIds(target.unverified.filter(gap => item.ticketIds.includes(gap.ticketId))
           .map(gap => gap.unreadableTicketId));
         const detail = [item.detail];
         if (references.length > 0) {
@@ -215,19 +196,6 @@ export class DashboardDeletionService {
     return { approved, items };
   }
 
-  private hasPendingReview(target: Extract<DeleteTarget, { kind: "ticket" }>, scope: string): boolean {
-    return this.relevantPendingIds(target, scope).length > 0;
-  }
-
-  private relevantPendingIds(target: Extract<DeleteTarget, { kind: "ticket" }>, scope: string): number[] {
-    const pending = target.pendingSnapshot ?? this.sortedUnique(this.deps.getPendingTicketIds(scope));
-    const relevant = new Set(target.unverified.map((candidate) => candidate.ticketId));
-    for (const ticketId of pending) {
-      if (target.ticketIds.includes(ticketId)) { relevant.add(ticketId); }
-    }
-    return this.sortedUnique([...relevant]);
-  }
-
   private getReviewItems(
     scope: string,
     request: DeleteTicketRequest,
@@ -244,7 +212,7 @@ export class DashboardDeletionService {
       ids.add(item.id);
     }
     this.assertCurrent(request, scope);
-    return items.map((item) => ({ ...item, ticketIds: this.sortedUnique(item.ticketIds) }));
+    return items.map((item) => ({ ...item, ticketIds: sortedUniqueTicketIds(item.ticketIds) }));
   }
 
   private scopeBoundReviewItem(
@@ -269,7 +237,7 @@ export class DashboardDeletionService {
     if (approved.length !== current.length || approved.some((item, index) => {
       const next = current[index];
       return item.id !== next.id || item.label !== next.label || item.detail !== next.detail ||
-        item.version !== next.version || item.inProgress !== next.inProgress || Boolean(item.open) !== Boolean(next.open) || !this.sameIds(item.ticketIds, next.ticketIds);
+        item.version !== next.version || item.inProgress !== next.inProgress || Boolean(item.open) !== Boolean(next.open) || !sameTicketIds(item.ticketIds, next.ticketIds);
     })) {
       throw new Error(vscode.l10n.t("Pending changes changed while verifying this ticket. Try again."));
     }
@@ -280,114 +248,9 @@ export class DashboardDeletionService {
       item.ticketId === right[index].ticketId && item.unreadableTicketId === right[index].unreadableTicketId);
   }
 
-  private async resolveTicket(scope: string, ticketId: number): Promise<DeleteTarget> {
-    const detail = await this.deps.withConnectionScope(scope, () => this.deps.getIssueDetail(ticketId, true));
-    if (detail.ticket.id !== ticketId) { throw new Error(vscode.l10n.t("The ticket could not be verified.")); }
-    const ticketIds = this.sortedUnique([ticketId, ...(detail.childIssueIds ?? [])]);
-    if (ticketIds.length !== (detail.childIssueIds?.length ?? 0) + 1 ||
-        ticketIds.some((id) => !Number.isSafeInteger(id) || id <= 0)) {
-      throw new Error(vscode.l10n.t("Redmine returned an invalid ticket hierarchy."));
-    }
-    const target = { kind: "ticket" as const, ticketId, subject: detail.ticket.subject, ticketIds, unverified: [] };
-    if (detail.childIssueIds === undefined) { return target; }
-    return { ...target, ...await this.resolvePendingDescendants(scope, ticketIds) };
-  }
-
-  private async writeAndVerify(scope: string, target: DeleteTarget): Promise<void> {
-    try {
-      await this.deps.withConnectionScope(scope, () => target.kind === "ticket"
-        ? this.deps.deleteIssue(target.ticketId)
-        : this.deps.clearJournalNotes(target.commentId));
-    } catch (error) {
-      const status = this.deps.getHttpStatusCode(error);
-      if (status !== undefined && status >= 400 && status < 500 && status !== 408) { throw error; }
-    }
-
-    const verified = target.kind === "ticket"
-      ? await this.ticketIsMissing(scope, target.ticketId)
-      : await this.commentIsEmpty(scope, target.ticketId, target.commentId);
-    if (!verified) {
-      throw new Error(vscode.l10n.t("The deletion result could not be confirmed. Review the item in Redmine before trying again."));
-    }
-  }
-
-  private async resolvePendingDescendants(
-    scope: string,
-    visibleTicketIds: number[],
-  ): Promise<{ ticketIds: number[]; pendingSnapshot: number[]; unverified: UnverifiedDescendant[] }> {
-    const pendingSnapshot = this.sortedUnique(this.deps.getPendingTicketIds(scope));
-    const deletedTree = new Set(visibleTicketIds);
-    const pendingDescendants = new Set<number>();
-    const unverified: UnverifiedDescendant[] = [];
-    for (const candidateId of pendingSnapshot) {
-      if (deletedTree.has(candidateId)) { continue; }
-      const visited = new Set<number>();
-      let currentId = candidateId;
-      while (true) {
-        if (visited.has(currentId)) {
-          throw new Error(vscode.l10n.t("Redmine returned an invalid ticket hierarchy."));
-        }
-        visited.add(currentId);
-        let detail: DeletionIssueDetail;
-        try {
-          detail = await this.deps.withConnectionScope(scope, () => this.deps.getIssueDetail(currentId, false));
-        } catch (error) {
-          const status = this.deps.getHttpStatusCode(error);
-          if (status === 403 || status === 404) {
-            unverified.push({ ticketId: candidateId, unreadableTicketId: currentId });
-            break;
-          }
-          throw new Error(vscode.l10n.t("Unable to read ticket #{0} while checking whether pending changes on ticket #{1} would be affected by deletion.", currentId, candidateId));
-        }
-        if (detail.ticket.id !== currentId) {
-          throw new Error(vscode.l10n.t("Unable to read ticket #{0} while checking whether pending changes on ticket #{1} would be affected by deletion.", currentId, candidateId));
-        }
-        const parentId = detail.ticket.parentId;
-        if (parentId === undefined) { break; }
-        if (!Number.isSafeInteger(parentId) || parentId <= 0) {
-          throw new Error(vscode.l10n.t("Redmine returned an invalid ticket hierarchy."));
-        }
-        if (deletedTree.has(parentId)) {
-          pendingDescendants.add(candidateId);
-          break;
-        }
-        currentId = parentId;
-      }
-    }
-    const currentSnapshot = this.sortedUnique(this.deps.getPendingTicketIds(scope));
-    if (!this.sameIds(pendingSnapshot, currentSnapshot)) {
-      throw new Error(vscode.l10n.t("Pending changes changed while verifying this ticket. Try again."));
-    }
-    return {
-      ticketIds: this.sortedUnique([...visibleTicketIds, ...pendingDescendants]),
-      pendingSnapshot,
-      unverified,
-    };
-  }
-
   private assertPendingSnapshotCurrent(scope: string, pendingSnapshot: number[]): void {
-    if (!this.sameIds(pendingSnapshot, this.sortedUnique(this.deps.getPendingTicketIds(scope)))) {
+    if (!sameTicketIds(pendingSnapshot, sortedUniqueTicketIds(this.deps.getPendingTicketIds(scope)))) {
       throw new Error(vscode.l10n.t("Pending changes changed while verifying this ticket. Try again."));
-    }
-  }
-
-  private async ticketIsMissing(scope: string, ticketId: number): Promise<boolean> {
-    try {
-      await this.deps.withConnectionScope(scope, () => this.deps.getIssueDetail(ticketId));
-      return false;
-    } catch (error) {
-      if (this.deps.getHttpStatusCode(error) === 404) { return true; }
-      return false;
-    }
-  }
-
-  private async commentIsEmpty(scope: string, ticketId: number, commentId: number): Promise<boolean> {
-    try {
-      const detail = await this.deps.withConnectionScope(scope, () => this.deps.getIssueDetail(ticketId));
-      return detail.ticket.id === ticketId &&
-        !detail.comments.some((item) => item.id === commentId && item.body.trim().length > 0);
-    } catch {
-      return false;
     }
   }
 
@@ -421,17 +284,9 @@ export class DashboardDeletionService {
       : { connectionScope: scope, ticketIds: [target.ticketId], commentIds: [target.commentId] };
   }
 
-  private sortedUnique(ids: readonly number[]): number[] {
-    return Array.from(new Set(ids)).sort((left, right) => left - right);
-  }
-
-  private sameIds(left: readonly number[], right: readonly number[]): boolean {
-    return left.length === right.length && left.every((id, index) => id === right[index]);
-  }
-
   private sameOptionalIds(left: readonly number[] | undefined, right: readonly number[] | undefined): boolean {
     if (left === undefined || right === undefined) { return left === right; }
-    return this.sameIds(left, right);
+    return sameTicketIds(left, right);
   }
 
   private errorMessage(error: unknown): string {

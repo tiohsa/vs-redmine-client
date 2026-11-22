@@ -4,8 +4,8 @@ import * as path from "path";
 import * as vscode from "vscode";
 import { getOfflineSyncQueue, addOfflineTicketUpdateAsync } from "../../views/offlineSyncStore";
 import { buildTicketEditorContent } from "../../views/ticketEditorContent";
-import { initializeTicketDraft } from "../../views/ticketDraftStore";
-import { registerTicketEditor } from "../../views/ticketEditorRegistry";
+import { clearTicketDraft, initializeTicketDraft } from "../../views/ticketDraftStore";
+import { registerTicketEditor, removeTicketEditorByDocument } from "../../views/ticketEditorRegistry";
 import { metadataFromTicket } from "../../views/ticketSync/ticketRemoteContent";
 import { liveTest } from "./liveFixture";
 import { chooseConfirmation, openLiveDashboard } from "./dashboardHarness";
@@ -125,19 +125,26 @@ liveTest("LIVE-U07", "競合の確認を画面から開いてキャンセルし�
   const content = buildTicketEditorContent({ subject: detail.ticket.subject, description: "Local", metadata });
   const document = await vscode.workspace.openTextDocument({ content, language: "markdown" });
   const editor = await vscode.window.showTextDocument(document, { preview: false });
-  registerTicketEditor(id, editor, "primary", "ticket", live.projectId, live.scope);
-  initializeTicketDraft(id, detail.ticket.subject, "Base", metadata, detail.ticket.updatedAt, live.scope);
-  await live.queueTicket(id, { description: "Local", content: document.getText(), documentUri: document.uri.toString(), lastKnownRemoteUpdatedAt: "2000-01-01T00:00:00Z" });
-  await live.request({ method: "PUT", path: `/issues/${id}.json`, body: { issue: { description: "Remote" } } });
-  const ui = await openLiveDashboard(live);
-  const cancel = chooseConfirmation();
   try {
-    await ui.click("[data-sync-key]");
-    assert.ok(getOfflineSyncQueue(live.scope).tickets.has(id));
-    assert.strictEqual(document.getText(), content);
-    assert.strictEqual((await live.readIssue(id)).ticket.description, "Remote");
-    assert.strictEqual(live.proxy.hits().filter((hit) => hit.method === "PUT").length, 0);
-  } finally { cancel.dispose(); ui.dispose(); }
+    registerTicketEditor(id, editor, "primary", "ticket", live.projectId, live.scope);
+    initializeTicketDraft(id, detail.ticket.subject, "Base", metadata, detail.ticket.updatedAt, live.scope);
+    await live.queueTicket(id, { description: "Local", content: document.getText(), documentUri: document.uri.toString(), lastKnownRemoteUpdatedAt: "2000-01-01T00:00:00Z" });
+    await live.request({ method: "PUT", path: `/issues/${id}.json`, body: { issue: { description: "Remote" } } });
+    const ui = await openLiveDashboard(live);
+    const cancel = chooseConfirmation();
+    try {
+      await ui.click("[data-sync-key]");
+      assert.ok(getOfflineSyncQueue(live.scope).tickets.has(id));
+      assert.strictEqual(document.getText(), content);
+      assert.strictEqual((await live.readIssue(id)).ticket.description, "Remote");
+      assert.strictEqual(live.proxy.hits().filter((hit) => hit.method === "PUT").length, 0);
+    } finally { cancel.dispose(); ui.dispose(); }
+  } finally {
+    removeTicketEditorByDocument(document);
+    clearTicketDraft(id, live.scope);
+    await vscode.window.showTextDocument(document, { preview: false });
+    await vscode.commands.executeCommand("workbench.action.revertAndCloseActiveEditor");
+  }
 });
 
 liveTest("LIVE-U08", "全件同期ボタンから新規・更新・コメントを送信する", async (live) => {

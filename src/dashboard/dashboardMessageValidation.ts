@@ -1,6 +1,9 @@
-import type { DashboardRequest, DashboardUnsyncedKey } from "./dashboardProtocol";
+import type { DashboardRequest } from "./dashboardProtocol";
 import { EDITOR_DEFAULT_FIELDS } from "../config/settings";
-import { normalizeBaseUrl } from "../redmine/client";
+import { isBoolean, isNonEmptyString, isNumber, isObject, isPositiveInt, isString } from "./dashboardValidationPrimitives";
+import { validateConnectionPatch, validateEditorPatch, validateGeneralPatch, validateSettingsPatch } from "./dashboardSettingsValidation";
+import { validateDashboardUnsyncedKey } from "./dashboardUnsyncedKeyValidation";
+export { validateDashboardUnsyncedKey } from "./dashboardUnsyncedKeyValidation";
 import {
   normalizeEditorDefaultValue,
   validateEditorDefaultValue,
@@ -10,24 +13,9 @@ type ValidationResult =
   | { ok: true; request: DashboardRequest }
   | { ok: false; reason: string };
 
-const isString = (v: unknown): v is string => typeof v === "string";
-const isNonEmptyString = (v: unknown): v is string => isString(v) && v.trim().length > 0;
-const isNumber = (v: unknown): v is number => typeof v === "number" && Number.isFinite(v);
-const isPositiveInt = (v: unknown): v is number => isNumber(v) && Number.isSafeInteger(v) && (v as number) > 0;
 const isNonNegativeInt = (v: unknown): v is number => isNumber(v) && Number.isSafeInteger(v) && (v as number) >= 0;
-const isBoolean = (v: unknown): v is boolean => typeof v === "boolean";
-const isObject = (v: unknown): v is Record<string, unknown> =>
-  v !== null && typeof v === "object" && !Array.isArray(v);
 const isStringArray = (v: unknown): v is string[] =>
   Array.isArray(v) && v.every((item) => typeof item === "string");
-const isPositiveIntArray = (v: unknown): v is number[] =>
-  Array.isArray(v) && v.every((item) => isPositiveInt(item));
-
-const UNSYNCED_KINDS = new Set(["ticket", "newTicket", "comment"]);
-const OFFLINE_SYNC_MODES = new Set(["auto", "manual"]);
-const SORT_DIRECTIONS = new Set(["asc", "desc"]);
-const SORT_FIELDS = new Set(["priority", "status", "tracker", "assignee", "dueDate", "startDate"]);
-const SYNC_FILTERS = new Set(["all", "dirty", "editing", "unsynced"]);
 const METADATA_PATCH_FIELDS = new Set(["tracker", "priority", "status", "due_date", "start_date", "assignee"]);
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 
@@ -38,106 +26,6 @@ const hasValidDateField = (
   if (!(field in value)) { return true; }
   const date = value[field];
   return isString(date) && (date.length === 0 || DATE_RE.test(date));
-};
-
-export const validateDashboardUnsyncedKey = (v: unknown): v is DashboardUnsyncedKey => {
-  if (!isObject(v)) { return false; }
-  const kind = v["kind"];
-  if (!isString(kind) || !UNSYNCED_KINDS.has(kind)) { return false; }
-  if (kind === "ticket") {
-    if (!isPositiveInt(v["ticketId"])) { return false; }
-    if ("operationId" in v && !isNonEmptyString(v["operationId"])) { return false; }
-    if ("abandonedAt" in v && (!isNumber(v["abandonedAt"]) || v["abandonedAt"] < 0)) { return false; }
-  }
-  if (kind === "newTicket") {
-    if ("queueId" in v && !isNonEmptyString(v["queueId"])) { return false; }
-    if ("documentUri" in v && !isNonEmptyString(v["documentUri"])) { return false; }
-    if (!isNonEmptyString(v["queueId"]) && !isNonEmptyString(v["documentUri"])) { return false; }
-  }
-  if (kind === "comment") {
-    if (!isPositiveInt(v["ticketId"])) { return false; }
-    if ("commentId" in v && !isPositiveInt(v["commentId"])) { return false; }
-    if ("documentUri" in v && !isNonEmptyString(v["documentUri"])) { return false; }
-    if ("operationId" in v && !isNonEmptyString(v["operationId"])) { return false; }
-    if (!("commentId" in v) && !("documentUri" in v) && !("operationId" in v)) { return false; }
-  }
-  return true;
-};
-
-const validateSettingsPatch = (v: unknown): boolean => {
-  if (!isObject(v)) { return false; }
-  if ("filters" in v) {
-    const f = v["filters"];
-    if (!isObject(f)) { return false; }
-    if ("subjectQuery" in f && !isString(f["subjectQuery"])) { return false; }
-    if ("priorityIds" in f && !isPositiveIntArray(f["priorityIds"])) { return false; }
-    if ("statusIds" in f && !isPositiveIntArray(f["statusIds"])) { return false; }
-    if ("trackerIds" in f && !isPositiveIntArray(f["trackerIds"])) { return false; }
-    if ("assigneeIds" in f && !isPositiveIntArray(f["assigneeIds"])) { return false; }
-    if ("includeUnassigned" in f && !isBoolean(f["includeUnassigned"])) { return false; }
-    if ("syncFilter" in f && !SYNC_FILTERS.has(f["syncFilter"] as string)) { return false; }
-  }
-  if ("sort" in v) {
-    const s = v["sort"];
-    if (!isObject(s)) { return false; }
-    if ("direction" in s && !SORT_DIRECTIONS.has(s["direction"] as string)) { return false; }
-    if ("field" in s && s["field"] !== undefined && !SORT_FIELDS.has(s["field"] as string)) { return false; }
-  }
-  if ("dueDate" in v) {
-    const d = v["dueDate"];
-    if (!isObject(d)) { return false; }
-    for (const key of ["showWithin7Days", "showWithin3Days", "showWithin1Day", "showOverdue"]) {
-      if (key in d && !isBoolean(d[key])) { return false; }
-    }
-  }
-  return true;
-};
-
-const validateGeneralPatch = (v: unknown): boolean => {
-  if (!isObject(v)) { return false; }
-  if ("offlineSyncMode" in v && !OFFLINE_SYNC_MODES.has(v["offlineSyncMode"] as string)) { return false; }
-  if ("includeChildProjects" in v && !isBoolean(v["includeChildProjects"])) { return false; }
-  if ("showStatus" in v && !isBoolean(v["showStatus"])) { return false; }
-  if ("showDueDate" in v && !isBoolean(v["showDueDate"])) { return false; }
-  if ("showTracker" in v && !isBoolean(v["showTracker"])) { return false; }
-  if ("showPriority" in v && !isBoolean(v["showPriority"])) { return false; }
-  if ("showAssignee" in v && !isBoolean(v["showAssignee"])) { return false; }
-  if ("followActiveEditor" in v && !isBoolean(v["followActiveEditor"])) { return false; }
-  if ("ticketListLimit" in v) {
-    const limit = v["ticketListLimit"];
-    if (!isNumber(limit) || !Number.isInteger(limit) || (limit as number) < 1 || (limit as number) > 500) {
-      return false;
-    }
-  }
-  return true;
-};
-
-const isValidBaseUrl = (value: unknown): value is string => {
-  if (!isString(value)) { return false; }
-  const trimmed = value.trim();
-  if (!trimmed) { return true; }
-  try {
-    normalizeBaseUrl(trimmed);
-    return true;
-  } catch {
-    return false;
-  }
-};
-
-const validateConnectionPatch = (v: unknown): boolean => {
-  if (!isObject(v)) { return false; }
-  if ("baseUrl" in v && !isValidBaseUrl(v["baseUrl"])) { return false; }
-  if ("defaultProjectId" in v && !isString(v["defaultProjectId"])) { return false; }
-  if ("requestTimeoutMs" in v && (!isNumber(v["requestTimeoutMs"]) || (v["requestTimeoutMs"] as number) <= 0)) {
-    return false;
-  }
-  if ("ignoreSSLErrors" in v && !isBoolean(v["ignoreSSLErrors"])) { return false; }
-  return true;
-};
-
-const validateEditorPatch = (v: unknown): boolean => {
-  if (!isObject(v)) { return false; }
-  return !("editorStorageDirectory" in v) || isString(v["editorStorageDirectory"]);
 };
 
 const validateMetadataPatch = (v: unknown): boolean => {

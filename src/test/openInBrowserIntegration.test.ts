@@ -20,12 +20,12 @@ const openFixture = (scope: string, filename: string): Thenable<vscode.TextDocum
 
 const withoutActiveEditor = async (operation: () => Promise<void>): Promise<void> => {
   const descriptor = Object.getOwnPropertyDescriptor(vscode.window, "activeTextEditor");
-  assert.ok(descriptor);
   try {
     Object.defineProperty(vscode.window, "activeTextEditor", { configurable: true, get: () => undefined });
     await operation();
   } finally {
-    Object.defineProperty(vscode.window, "activeTextEditor", descriptor);
+    if (descriptor) { Object.defineProperty(vscode.window, "activeTextEditor", descriptor); }
+    else { Reflect.deleteProperty(vscode.window, "activeTextEditor"); }
   }
 };
 

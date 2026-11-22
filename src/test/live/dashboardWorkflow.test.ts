@@ -8,6 +8,7 @@ import { parseTicketEditorContent } from "../../views/ticketEditorContent";
 import { createFaultProxy } from "./faultProxy";
 import { resolveLiveUpstream } from "./liveFixture";
 import { requestJson } from "../../redmine/client";
+import { extractHttpStatusCode } from "../../redmine/httpError";
 import { setApiKeyForScope } from "../../config/apiKeyStore";
 import { getStoredTicketListSettings, setStoredTicketListSettings } from "../../views/ticketListSettingsStore";
 import { syncEditorToRedmine } from "../../commands/syncToRedmine";
@@ -327,4 +328,106 @@ liveTest("LIVE-B06", "Dashboard新規下書きと設定を保ったままキャ�
     setTicketEditorDefaults(defaults);
     setStoredTicketListSettings(previousListSettings);
   }
+});
+
+liveTest("LIVE-B07", "Dashboardからコメント本文だけを削除しフィールド履歴を残す", async (live) => {
+  const issueId = await live.createIssue({ subject: "LIVE-B07 journal delete" });
+  const parentNotes = "LIVE-B07 parent note";
+  const targetNotes = "LIVE-B07 target note";
+  const otherNotes = "LIVE-B07 other note";
+  await live.request({ method: "PUT", path: `/issues/${issueId}.json`, body: { issue: { notes: parentNotes } } });
+  await live.request({ method: "PUT", path: `/issues/${issueId}.json`, body: {
+    issue: { subject: "LIVE-B07 changed subject", notes: targetNotes },
+  } });
+  await live.request({ method: "PUT", path: `/issues/${issueId}.json`, body: { issue: { notes: otherNotes } } });
+  type RawJournal = { id: number; notes: string; details: Array<{ property?: string; name?: string; new_value?: string }> };
+  const readRaw = () => live.request<{ issue: { journals: RawJournal[] } }>({
+    method: "GET", path: `/issues/${issueId}.json`, query: { include: "journals" },
+  });
+  const initial = (await readRaw()).issue.journals;
+  const parent = initial.find((journal) => journal.notes === parentNotes);
+  const target = initial.find((journal) => journal.notes === targetNotes);
+  const other = initial.find((journal) => journal.notes === otherNotes);
+  assert.ok(parent && target && other, "作成した3件のjournalがraw GETに存在する");
+  assert.ok(target.details.some((detail) => detail.property === "attr" && detail.name === "subject" &&
+    detail.new_value === "LIVE-B07 changed subject"), "対象journalにsubject変更履歴がある");
+
+  const confirm = chooseConfirmation(vscode.l10n.t("Delete"));
+  try {
+    await withDashboard(live, async (dashboard) => {
+      await waitForRows(dashboard, [issueId]);
+      await dashboard.dom(`.ticket-row[data-id="${issueId}"]`);
+      await dashboard.waitFor(() => dashboard.store.getState().selectedTicketId === issueId &&
+        dashboard.store.getState().comments.items.length === 3, "ticket and three comments selected");
+      await dashboard.dom(`.comment-card[data-comment-id="${target.id}"]`);
+      await dashboard.waitFor(() => dashboard.store.getState().comments.selectedCommentId === target.id, "target comment selected");
+      const before = live.proxy.hits().length;
+      const { result } = await dashboard.click(`[data-comment-action="delete"][data-ticket="${issueId}"][data-comment-id="${target.id}"]`);
+      assert.strictEqual(result.type, "operation.success", JSON.stringify(result));
+      await dashboard.waitFor(() => dashboard.store.getState().comments.items.length === 2 &&
+        dashboard.store.getState().comments.selectedCommentId === undefined, "comment removed from dashboard");
+      assert.strictEqual((await dashboard.read(`.comment-card[data-comment-id="${parent.id}"]`)).length, 1);
+      assert.strictEqual((await dashboard.read(`.comment-card[data-comment-id="${other.id}"]`)).length, 1);
+      assert.strictEqual((await dashboard.read(`.comment-card[data-comment-id="${target.id}"]`)).length, 0);
+      assert.ok((await dashboard.read(`.comment-card[data-comment-id="${parent.id}"] .comment-body`)).includes(parentNotes));
+      assert.ok((await dashboard.read(`.comment-card[data-comment-id="${other.id}"] .comment-body`)).includes(otherNotes));
+      assert.strictEqual((await dashboard.read("#detail-comment-count"))[0], "2");
+      assert.strictEqual(dashboard.store.getState().selectedTicketId, issueId, "parent ticket remains selected");
+
+      const traces = live.proxy.hits().slice(before);
+      const writes = traces.filter((hit) => hit.method === "PUT" && hit.path === `/journals/${target.id}.json`);
+      assert.strictEqual(writes.length, 1, "対象journalへのPUTは1回");
+      const writeIndex = traces.indexOf(writes[0]);
+      const laterIssueGets = traces.slice(writeIndex + 1).filter((hit) => hit.method === "GET" && hit.path === `/issues/${issueId}.json`);
+      assert.ok(laterIssueGets.length >= 2, "書込照合とコメント画面更新で後続issue GETが2回記録される");
+    });
+  } finally {
+    confirm.dispose();
+  }
+  const after = (await readRaw()).issue.journals;
+  const cleared = after.find((journal) => journal.id === target.id);
+  assert.ok(cleared, "対象journal自体は保持される");
+  assert.strictEqual(cleared.notes.trim(), "", "raw GETで対象本文だけが空になっている");
+  assert.ok(cleared.details.some((detail) => detail.property === "attr" && detail.name === "subject" &&
+    detail.new_value === "LIVE-B07 changed subject"), "対象journalのsubject変更履歴は保持される");
+  assert.strictEqual(after.find((journal) => journal.id === parent.id)?.notes, parentNotes);
+  assert.strictEqual(after.find((journal) => journal.id === other.id)?.notes, otherNotes);
+});
+
+liveTest("LIVE-B08", "Dashboardからチケットを削除し実APIと一覧を照合する", async (live) => {
+  const deletedId = await live.createIssue({ subject: "LIVE-B08 delete target" });
+  const survivorId = await live.createIssue({ subject: "LIVE-B08 survivor" });
+  const confirm = chooseConfirmation(vscode.l10n.t("Delete"));
+  try {
+    await withDashboard(live, async (dashboard) => {
+      await waitForRows(dashboard, [deletedId, survivorId]);
+      await dashboard.dom(`.ticket-row[data-id="${deletedId}"]`);
+      await dashboard.waitFor(() => dashboard.store.getState().selectedTicketId === deletedId, "delete target selected");
+      const beforeCount = dashboard.store.getState().totalTicketCount;
+      const before = live.proxy.hits().length;
+      const { result } = await dashboard.click(`.ticket-row[data-id="${deletedId}"] [data-ticket-action="delete"]`);
+      assert.strictEqual(result.type, "operation.success", JSON.stringify(result));
+      await waitForRows(dashboard, [survivorId], [deletedId]);
+      await dashboard.waitFor(() => dashboard.store.getState().selectedTicketId === undefined &&
+        dashboard.store.getState().totalTicketCount === beforeCount - 1, "deleted ticket removed and selection cleared");
+      assert.strictEqual((await dashboard.read(".ticket-row[data-id]")).includes(String(deletedId)), false);
+      assert.strictEqual((await dashboard.read(".ticket-row[data-id]")).includes(String(survivorId)), true);
+      assert.strictEqual((await dashboard.read("#ticket-detail-card:not(.hidden)")).length, 0, "詳細パネルが閉じる");
+
+      const traces = live.proxy.hits().slice(before);
+      const deletes = traces.filter((hit) => hit.method === "DELETE" && hit.path === `/issues/${deletedId}.json`);
+      assert.strictEqual(deletes.length, 1, "対象チケットへのDELETEは1回");
+      const deleteIndex = traces.indexOf(deletes[0]);
+      const readbacks = traces.slice(deleteIndex + 1).filter((hit) => hit.method === "GET" &&
+        hit.path === `/issues/${deletedId}.json` && hit.status === 404);
+      assert.ok(readbacks.length >= 1, "DELETE後のissue GETで404を読み戻す");
+      assert.ok(traces.some((hit) => hit.method === "GET" && hit.path === "/issues.json"), "一覧を再取得する");
+    });
+  } finally {
+    confirm.dispose();
+  }
+  await assert.rejects(live.request<{ issue: unknown }>({ method: "GET", path: `/issues/${deletedId}.json` }),
+    (error: unknown) => extractHttpStatusCode(error) === 404);
+  const survivor = await live.request<{ issue: { id: number } }>({ method: "GET", path: `/issues/${survivorId}.json` });
+  assert.strictEqual(survivor.issue.id, survivorId, "別チケットは残る");
 });

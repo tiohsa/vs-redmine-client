@@ -1,20 +1,7 @@
-import * as path from "path";
 import * as vscode from "vscode";
 import type { IssueUploadInput } from "../../redmine/issues";
 import { createSyncOperationRepository, type SyncOperationRepository } from "./syncRepository";
-import {
-  getCommentIdForDocument,
-  getConnectionScopeForDocument,
-  getEditorContentTypeForDocument,
-  getTicketIdForDocument,
-} from "../../views/ticketEditorRegistry";
 import { normalizeCommentBody } from "../../views/commentSaveSync";
-import {
-  isCommentUpdateDocument,
-  isCommentUpdateFilename,
-  updateCommentUpdateFileAfterSync,
-} from "../../views/commentUpdateFile";
-import { updateCommentEdit } from "../../views/commentEditStore";
 import { isMissingPathReason, resolveFallbackImagePath, resolveLocalPath } from "../../utils/markdownImageUpload";
 import { containsConflictMarkers } from "../../utils/threeWayMerge";
 import { computeNotesHash } from "../../utils/notesHash";
@@ -43,7 +30,8 @@ import { defaultCommentDeps } from "./commentHandlerDependencies";
 import { resolveIntentBaseDir } from "./resolveIntentBaseDir";
 import { resolvePersistedMarkdownImagePath, resolveMarkdownImageFilenames, findMarkdownImageEffect, getCommittedMarkdownImageUpload, prepareMarkdownImageUpload } from "./markdownImageEffects";
 import { persistUploadSnapshot } from "./uploadSnapshotLease";
-import { resolveCommentUploadEffect } from "./commentUploadEffectRecovery";
+import { resolveCommentUpdateEffect } from "./commentUpdateEffectRecovery";
+import { finalizeCommentUpdateLocal } from "./commentUpdateLocalFinalization";
 
 export class CommentUpdateHandler implements OperationHandler<CommentUpdateIntent, PreparedCommentData> {
   public async prepare(
@@ -641,44 +629,7 @@ export class CommentUpdateHandler implements OperationHandler<CommentUpdateInten
     context: OperationHandlerContext,
     deps?: OperationHandlerDeps,
   ): Promise<{ ok: true } | { ok: false; message: string; pending: "local_finalize" }> {
-    const documentUri = operation.documentUri ?? operation.intent?.documentUri;
-    const body = operation.intent?.body ?? "";
-    const commentId = operation.commentId ?? operation.intent?.commentId;
-    const remoteComment = commentId === undefined
-      ? undefined
-      : reconciled?.comments?.find((comment: { id?: number }) => comment.id === commentId);
-    const remoteBody = typeof remoteComment?.body === "string" ? remoteComment.body : body;
-    const remoteUpdatedAt = typeof remoteComment?.updatedAt === "string"
-      ? remoteComment.updatedAt
-      : operation.remoteUpdatedAt;
-
-    const openDocument = documentUri === undefined
-      ? undefined
-      : vscode.workspace.textDocuments.find((document) => document.uri.toString() === documentUri);
-    const isRegisteredPlainComment = openDocument !== undefined &&
-      getEditorContentTypeForDocument(openDocument) === "comment" &&
-      getTicketIdForDocument(openDocument) === (operation.ticketId ?? operation.intent?.ticketId) &&
-      getCommentIdForDocument(openDocument) === commentId &&
-      getConnectionScopeForDocument(openDocument) === context.connectionScope &&
-      !isCommentUpdateDocument(openDocument.getText(), openDocument.uri.path);
-    const requiresCommentUpdateFileFinalize = !isRegisteredPlainComment &&
-      (operation.intent?.sourceNotesHash !== undefined ||
-        (documentUri !== undefined && isCommentUpdateFilename(path.basename(vscode.Uri.parse(documentUri).path))));
-    if (documentUri && requiresCommentUpdateFileFinalize) {
-      const res = await updateCommentUpdateFileAfterSync({
-        documentUri,
-        syncedBody: remoteBody,
-        expectedBody: operation.intent?.body ?? "",
-        remoteUpdatedAt,
-        canonical: reconciled,
-      });
-      if (res !== "applied") {
-        return { ok: false, message: `Local finalization pending: ${res}`, pending: "local_finalize" };
-      }
-    } else if (commentId !== undefined) {
-      updateCommentEdit(commentId, remoteBody, remoteUpdatedAt, context.connectionScope);
-    }
-    return { ok: true };
+    return finalizeCommentUpdateLocal(operation, reconciled, context);
   }
 
   public async resolveEffect(input: {
@@ -689,114 +640,6 @@ export class CommentUpdateHandler implements OperationHandler<CommentUpdateInten
     deps: OperationHandlerDeps & { repository: SyncOperationRepository };
     resolution: EffectResolution;
   }): Promise<SyncOutcome> {
-    const { key, effectId, operation, context, deps, resolution } = input;
-    const repo = deps.repository;
-    const revision = operation.intentRevision ?? operation.revision ?? 1;
-    const scope = context.connectionScope;
-    const effect = getEffectsForRevision(operation, revision).find((e) => e.effectId === effectId);
-    if (!effect) {
-      return { kind: "failed_before_commit", error: new Error(`Effect not found: ${effectId}`) };
-    }
-
-    const commentDeps = { ...defaultCommentDeps, ...deps.comment };
-    if (effect.kind === "attachment_link") {
-      const snapshot = effect.requestSnapshot?.kind === "attachment_link"
-        ? effect.requestSnapshot as AttachmentLinkRequestSnapshot
-        : undefined;
-      if (!snapshot) {
-        return { kind: "failed_before_commit", error: new Error(`Attachment link effect ${effectId} has no request snapshot`) };
-      }
-
-      if (resolution.kind === "assume_committed") {
-        const assumed = await repo.transitionEffect(
-          key,
-          effectId,
-          { kind: "assume_committed" },
-          scope,
-          { operationRevision: revision, sourceState: "commit_unknown" },
-        );
-        if (!assumed) {
-          return { kind: "failed_before_commit", error: new Error(`Failed to assume committed for effect ${effectId}`) };
-        }
-        return {
-          kind: "remote_committed",
-          ticketId: operation.ticketId ?? 0,
-          commentId: operation.commentId,
-          pending: "remote_reconcile",
-          message: `Attachment link effect ${effectId} assumed committed`,
-        };
-      }
-
-      if (resolution.kind === "retry_effect") {
-        if (effect.state === "failed" && effect.failure?.disposition === "non_retriable") {
-          return { kind: "failed_before_commit", error: new Error("Cannot retry non-retriable failure") };
-        }
-        const started = await repo.transitionEffect(
-          key,
-          effectId,
-          { kind: "start_explicit_retry", requestSnapshot: snapshot },
-          scope,
-          { operationRevision: revision, sourceState: effect.state },
-        );
-        if (!started) {
-          return { kind: "failed_before_commit", error: new Error(`Failed to start retry for effect ${effectId}`) };
-        }
-        try {
-          await commentDeps.updateIssue(snapshot.request);
-        } catch (error) {
-          const commitUnknown = isRemoteCommitUnknownError(error);
-          const disposition = classifyFailureDisposition(error);
-          await repo.transitionEffect(
-            key,
-            effectId,
-            commitUnknown
-              ? { kind: "mark_commit_unknown" }
-              : { kind: "mark_failed", detail: (error as Error).message, disposition },
-            scope,
-            { operationRevision: revision, sourceState: "started" },
-          );
-          return commitUnknown
-            ? { kind: "commit_unknown", operationId: operation.operationId, message: (error as Error).message }
-            : { kind: "failed_before_commit", error: error as Error };
-        }
-        let committed: UnifiedSyncOperation | undefined;
-        try {
-          committed = await repo.transitionEffect(
-            key,
-            effectId,
-            { kind: "commit", target: effect.target, requestSnapshot: snapshot },
-            scope,
-            { operationRevision: revision, sourceState: "started" },
-          );
-        } catch {
-          committed = undefined;
-        }
-        if (!committed) {
-          try {
-            await repo.transitionEffect(
-              key,
-              effectId,
-              { kind: "mark_commit_unknown" },
-              scope,
-              { operationRevision: revision, sourceState: "started" },
-            );
-          } catch {
-            // Keep the started state when the unknown checkpoint itself cannot be persisted.
-          }
-          return { kind: "commit_unknown", operationId: operation.operationId, message: `Attachment link checkpoint failed for ${effectId}` };
-        }
-        return {
-          kind: "remote_committed",
-          ticketId: operation.ticketId ?? 0,
-          commentId: operation.commentId,
-          pending: "remote_reconcile",
-          message: `Attachment link effect ${effectId} retried successfully`,
-        };
-      }
-    }
-
-    return resolveCommentUploadEffect({
-      ...input, effect, revision, commentDeps,
-    });
+    return resolveCommentUpdateEffect(input);
   }
 }

@@ -1,8 +1,7 @@
 import * as vscode from "vscode";
 import type { IssueUploadInput } from "../../redmine/issues";
 import { createSyncOperationRepository, type SyncOperationRepository } from "./syncRepository";
-import { finalizeNewCommentDraftDocument, reconcileCommentCommitUnknown } from "../../views/commentSaveSync";
-import { finalizeNewCommentDraftFileAfterSync } from "../../views/commentUpdateFile";
+import { reconcileCommentCommitUnknown } from "../../views/commentSaveSync";
 import { isMissingPathReason, resolveFallbackImagePath, resolveLocalPath } from "../../utils/markdownImageUpload";
 import { validateComment } from "../../utils/commentValidation";
 import { containsConflictMarkers } from "../../utils/threeWayMerge";
@@ -29,8 +28,9 @@ import type { PreparedCommentData } from "./commentHandlerTypes";
 import { resolveIntentBaseDir } from "./resolveIntentBaseDir";
 import { resolvePersistedMarkdownImagePath, resolveMarkdownImageFilenames, findMarkdownImageEffect, getCommittedMarkdownImageUpload, prepareMarkdownImageUpload } from "./markdownImageEffects";
 import { persistUploadSnapshot } from "./uploadSnapshotLease";
-import { resolveCommentUploadEffect } from "./commentUploadEffectRecovery";
 import { defaultCommentDeps } from "./commentHandlerDependencies";
+import { finalizeCommentCreateLocal } from "./commentCreateLocalFinalization";
+import { resolveCommentCreateEffect } from "./commentCreateEffectRecovery";
 
 export class CommentCreateHandler implements OperationHandler<CommentCreateIntent, PreparedCommentData> {
   public async prepare(
@@ -469,48 +469,7 @@ export class CommentCreateHandler implements OperationHandler<CommentCreateInten
     context: OperationHandlerContext,
     deps?: OperationHandlerDeps,
   ): Promise<{ ok: true } | { ok: false; message: string; pending: "local_finalize" }> {
-    const ticketId = operation.ticketId ?? operation.intent?.ticketId;
-    if (!ticketId) {
-      return { ok: false, message: "Missing ticketId", pending: "local_finalize" };
-    }
-
-    const documentUri = operation.documentUri ?? operation.intent?.documentUri;
-    const commentId = operation.createdRemoteId ?? reconciled?.remoteId;
-    const primary = getPrimaryEffectForRevision(operation);
-    const snapshot = primary?.requestSnapshot;
-    const syncedBody = snapshot?.kind === "comment_create"
-      ? snapshot.request.notes
-      : primary?.target.submittedBody ?? operation.intent?.body ?? "";
-
-    if (documentUri && commentId) {
-      const uri = vscode.Uri.parse(documentUri);
-      const doc = vscode.workspace.textDocuments.find((d) => d.uri.toString() === uri.toString());
-      if (doc) {
-        finalizeNewCommentDraftDocument({
-          document: doc,
-          ticketId,
-          commentId,
-          projectId: operation.projectId ?? reconciled?.projectId ?? 0,
-          operationScope: context.connectionScope,
-          body: syncedBody,
-        });
-      }
-      if (operation.intent?.finalizeDraft) {
-        const res = await finalizeNewCommentDraftFileAfterSync({
-          documentUri,
-          ticketId,
-          commentId,
-          projectId: operation.projectId ?? reconciled?.projectId,
-          expectedDocumentBody: operation.intent?.body ?? "",
-          syncedBody,
-        });
-        if (res !== "applied") {
-          return { ok: false, message: `Local finalization pending: ${res}`, pending: "local_finalize" };
-        }
-      }
-    }
-
-    return { ok: true };
+    return finalizeCommentCreateLocal(operation, reconciled, context, deps);
   }
 
   public async resolveEffect(input: {
@@ -521,17 +480,6 @@ export class CommentCreateHandler implements OperationHandler<CommentCreateInten
     deps: OperationHandlerDeps & { repository: SyncOperationRepository };
     resolution: EffectResolution;
   }): Promise<SyncOutcome> {
-    const { effectId, operation, deps } = input;
-    const revision = operation.intentRevision ?? operation.revision ?? 1;
-    const effect = getEffectsForRevision(operation, revision).find((e) => e.effectId === effectId);
-    if (!effect) {
-      return { kind: "failed_before_commit", error: new Error(`Effect not found: ${effectId}`) };
-    }
-
-    const commentDeps = { ...defaultCommentDeps, ...deps.comment };
-
-    return resolveCommentUploadEffect({
-      ...input, effect, revision, commentDeps,
-    });
+    return resolveCommentCreateEffect(input);
   }
 }
