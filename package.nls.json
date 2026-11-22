@@ -35,7 +35,6 @@
   "command.openTicketInBrowser.title": "Redmine: Open Ticket in Browser",
   "command.openCommentInBrowser.title": "Redmine: Open Comment in Browser",
   "command.editComment.title": "Redmine: Edit Comment",
-  "command.addComment.title": "Redmine: Add Comment",
   "command.addCommentFromComments.title": "Redmine: Add Comment",
   "command.runOfflineSync.title": "Redmine: Run Offline Sync",
   "command.syncUnsyncedFile.title": "Redmine: Sync This File",

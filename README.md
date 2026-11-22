@@ -174,7 +174,7 @@ After Redmine accepts a ticket, child-ticket, or comment mutation, the item rema
 
 | Command | Description |
 |---------|-------------|
-| `Redmine: Add Comment` | Add a new comment to the selected ticket |
+| `Redmine: Add Comment` (`redmine-client.addCommentFromComments`) | Add a new comment to the selected ticket |
 | `Redmine: Edit Comment` | Open the selected comment in an editor |
 | `Redmine: Reload Comment` | Reload the active comment editor from Redmine |
 

@@ -111,7 +111,6 @@
       "entryPoints": [
         "redmine-clientActivityDashboard",
         "redmine-client.refreshComments",
-        "redmine-client.addComment",
         "redmine-client.addCommentFromComments",
         "redmine-client.editComment",
         "redmine-client.openInBrowser"
@@ -391,12 +390,6 @@
     {
       "id": "redmine-client.editComment",
       "label": "%command.editComment.title%",
-      "navigation": "Command Palette",
-      "shortcuts": []
-    },
-    {
-      "id": "redmine-client.addComment",
-      "label": "%command.addComment.title%",
       "navigation": "Command Palette",
       "shortcuts": []
     },

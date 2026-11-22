@@ -16,7 +16,6 @@ import { getTicketIdForEditor, isTicketEditor, NEW_TICKET_DRAFT_ID } from "../vi
 import { showTicketPreview } from "../views/ticketPreview";
 import type { CommandDeps } from "./commandRegistry";
 import { requireSelectedTicket } from "./dashboardCommandSelection";
-import { registerStubMessage } from "./registerCommandStub";
 
 export const registerTicketEditorCommands = (
   context: vscode.ExtensionContext,
@@ -73,10 +72,6 @@ export const registerTicketEditorCommands = (
         ticketsPresentation.notifyChange();
       }
     }),
-    registerStubMessage(
-      "redmine-client.toggleRelevantTickets",
-      "Dashboard のフィルタ設定を使用してください。",
-    ),
     vscode.commands.registerCommand("redmine-client.createTicket", async () => {
       await createTicketFromEditor({ onTicketCreated: notifyTicketCreated });
     }),

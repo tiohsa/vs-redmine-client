@@ -4,7 +4,6 @@ import { editComment } from "../commands/editComment";
 import { reloadCommentFromEditor } from "../commands/reloadComment";
 import type { CommandDeps } from "./commandRegistry";
 import { pickDashboardComment } from "./dashboardCommandSelection";
-import { registerStubMessage } from "./registerCommandStub";
 
 export const registerCommentCommands = (
   context: vscode.ExtensionContext,
@@ -24,10 +23,6 @@ export const registerCommentCommands = (
       }
       await editComment(comment);
     }),
-    registerStubMessage(
-      "redmine-client.addComment",
-      "Dashboard からチケットを選択してコメントを追加してください。",
-    ),
     vscode.commands.registerCommand("redmine-client.addCommentFromComments", async () => {
       const ticketId = getState().selectedTicketId;
       await addCommentFromList(ticketId);

@@ -1,13 +1,5 @@
 export const TICKET_SETTINGS_COMMANDS = {
-  titleFilter: "redmine-client.configureTicketTitleFilter",
-  priorityFilter: "redmine-client.configureTicketPriorityFilter",
-  statusFilter: "redmine-client.configureTicketStatusFilter",
-  trackerFilter: "redmine-client.configureTicketTrackerFilter",
-  assigneeFilter: "redmine-client.configureTicketAssigneeFilter",
-  sort: "redmine-client.configureTicketSort",
-  dueDate: "redmine-client.configureTicketDueDateDisplay",
   offlineSyncMode: "redmine-client.configureOfflineSyncMode",
-  reset: "redmine-client.resetTicketListSettings",
 } as const;
 
 export const EDITOR_DEFAULT_COMMANDS = {

@@ -190,10 +190,6 @@
         "title": "%command.editComment.title%"
       },
       {
-        "command": "redmine-client.addComment",
-        "title": "%command.addComment.title%"
-      },
-      {
         "command": "redmine-client.addCommentFromComments",
         "title": "%command.addCommentFromComments.title%",
         "icon": "$(add)"

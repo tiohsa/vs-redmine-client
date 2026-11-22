@@ -174,7 +174,7 @@ Redmine が作成・更新を受理した後も、remote read-back とローカ�
 
 | コマンド | 説明 |
 |---------|------|
-| `Redmine: コメントを追加` | 選択中チケットに新規コメントを追加 |
+| `Redmine: コメントを追加`（`redmine-client.addCommentFromComments`） | 選択中チケットに新規コメントを追加 |
 | `Redmine: コメントを編集` | 選択中のコメントをエディタで開く |
 | `Redmine: コメントをリロード` | アクティブなコメントエディタを Redmine から再読み込み |
 

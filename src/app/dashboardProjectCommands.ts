@@ -1,6 +1,5 @@
 import * as vscode from "vscode";
 import type { CommandDeps } from "./commandRegistry";
-import { registerStubMessage } from "./registerCommandStub";
 
 export const registerListRefreshCommands = (
   context: vscode.ExtensionContext,
@@ -15,10 +14,6 @@ export const registerListRefreshCommands = (
     ),
     vscode.commands.registerCommand("redmine-client.refreshComments", () =>
       commentsPresentation.refresh(),
-    ),
-    registerStubMessage(
-      "redmine-client.loadMoreTickets",
-      vscode.l10n.t("Use the 'Load more' button in the Dashboard."),
     ),
   );
 };

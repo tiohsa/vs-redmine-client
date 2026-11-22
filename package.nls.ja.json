@@ -35,7 +35,6 @@
   "command.openTicketInBrowser.title": "Redmine: チケットをブラウザで開く",
   "command.openCommentInBrowser.title": "Redmine: コメントをブラウザで開く",
   "command.editComment.title": "Redmine: コメントを編集",
-  "command.addComment.title": "Redmine: コメントを追加",
   "command.addCommentFromComments.title": "Redmine: コメントを追加",
   "command.runOfflineSync.title": "Redmine: オフライン同期を実行",
   "command.syncUnsyncedFile.title": "Redmine: このファイルを同期",

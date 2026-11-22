@@ -4,8 +4,9 @@ import * as path from "path";
 
 type PackageJson = Record<string, unknown>;
 
-export const loadNls = (): Record<string, string> => {
-  const nlsPath = path.resolve(__dirname, "../../../package.nls.json");
+export const loadNls = (locale?: "ja"): Record<string, string> => {
+  const filename = locale ? `package.nls.${locale}.json` : "package.nls.json";
+  const nlsPath = path.resolve(__dirname, "../../../", filename);
   const raw = fs.readFileSync(nlsPath, "utf8");
   return JSON.parse(raw) as Record<string, string>;
 };
