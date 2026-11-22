@@ -28,13 +28,13 @@ function updateRefreshButtonState(){
 function updateSyncButtonStates(){
   const busy = activeSyncRequests.size > 0;
   const selectedSyncing = state?.selectedTicket?.syncState === 'Syncing' || Array.from(ticketSyncRequests.values()).includes(state?.selectedTicket?.id);
-  document.querySelectorAll('[data-sync-key],[data-discard-key],[data-comment-action="sync"],[data-abandon-key],[data-forget-key],#forget-all-abandoned-btn,[data-start-ticket],[data-ticket-action="sync"],[data-draft-action="sync"]').forEach(function(button){
+  document.querySelectorAll('[data-sync-key],[data-discard-key],[data-discard-pending-id],[data-comment-action="sync"],[data-abandon-key],[data-forget-key],#forget-all-abandoned-btn,[data-start-ticket],[data-ticket-action="sync"],[data-draft-action="sync"]').forEach(function(button){
     const ticketId = Number(button.dataset.ticket);
     const isSelectedSyncing = Number.isInteger(ticketId) && ticketId > 0 && ticketId === state?.selectedTicket?.id && selectedSyncing;
-    button.disabled = busy || isSelectedSyncing;
+    button.disabled = busy || isSelectedSyncing || !!button.closest('[data-sync-in-progress="true"]');
   });
   const syncAll = document.getElementById('sync-all-btn');
-  if(syncAll){ syncAll.disabled = busy; syncAll.setAttribute('aria-busy', String(busy)); }
+  if(syncAll){ const syncing = busy || !!state?.unsynced.items.some(item=>item.inProgress); syncAll.disabled = syncing; syncAll.setAttribute('aria-busy', String(syncing)); }
 }
 function startOperation(requestId, label){
   if(activeRefreshRequests.has(requestId)){ updateRefreshButtonState(); return; }

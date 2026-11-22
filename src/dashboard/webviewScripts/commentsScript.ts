@@ -28,7 +28,10 @@ function renderComments(){
     const browserBtn=cm.id !== undefined
       ? '<button class="comment-action-btn comment-hover-action-btn" type="button" data-comment-action="browser" data-ticket="'+ticketId+'" data-comment-id="'+cm.id+'"'+(cm.noteIndex !== undefined ? ' data-note-index="'+cm.noteIndex+'"' : '')+' title="'+esc(STRINGS.openInBrowser)+'" aria-label="'+esc(STRINGS.openInBrowser)+'">'+actionIcon('browser')+'</button>'
       : '';
-    const hoverActions=(syncBtn || browserBtn) ? '<div class="comment-hover-actions">'+syncBtn+browserBtn+'</div>' : '';
+    const deleteBtn=cm.id !== undefined
+      ? '<button class="comment-action-btn comment-hover-action-btn" type="button" data-comment-action="delete" data-ticket="'+ticketId+'" data-comment-id="'+cm.id+'" data-connection-generation="'+state.connectionGeneration+'" title="'+esc(STRINGS.deleteAction)+'" aria-label="'+esc(STRINGS.deleteAction)+'">'+actionIcon('delete')+'</button>'
+      : '';
+    const hoverActions=(syncBtn || browserBtn || deleteBtn) ? '<div class="comment-hover-actions">'+syncBtn+browserBtn+deleteBtn+'</div>' : '';
     const journalId=cm.id?'<span class="comment-id">#'+cm.id+'</span>':'';
     const date=cm.updatedAt?'<time class="comment-date" title="'+esc(cm.updatedAt)+'">'+esc(cm.updatedAt.substring(0,16).replace('T',' '))+'</time>':'';
     const cardIdentityAttrs=(cm.id !== undefined ? ' data-comment-id="'+cm.id+'"' : (cm.syncKey?.documentUri ? ' data-comment-uri="'+esc(cm.syncKey.documentUri)+'"' : ''));
@@ -58,6 +61,8 @@ function renderComments(){
         if(btn.dataset.commentId) payload.commentId=Number(btn.dataset.commentId);
         else if(btn.dataset.commentUri) payload.documentUri=btn.dataset.commentUri;
         req('comment.syncSelected',payload);
+      } else if(action === 'delete'){
+        req('deleteComment',{ticketId:targetTicketId,commentId:Number(btn.dataset.commentId),connectionGeneration:Number(btn.dataset.connectionGeneration)});
       } else if(action === 'browser'){
         const payload={ticketId:targetTicketId,commentId:Number(btn.dataset.commentId)};
         if(btn.dataset.noteIndex) payload.noteIndex=Number(btn.dataset.noteIndex);

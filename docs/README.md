@@ -6,8 +6,8 @@
 | --- | --- |
 | 接続設定と認証 | [接続先と API キー](features/connection.md) |
 | Dashboard | [プロジェクト選択・一覧・検索・表示設定](features/dashboard.md) |
-| チケット | [作成・Markdown 編集・エディタ既定値](features/tickets.md) |
-| コメント | [閲覧・追加・編集](features/comments.md) |
+| チケット | [作成・Markdown 編集・削除・エディタ既定値](features/tickets.md) |
+| コメント | [閲覧・追加・編集・削除](features/comments.md) |
 | 画像と添付 | [Markdown 変換・アップロード・永続スプール](features/attachments.md) |
 | 保存と同期 | [未同期キュー・同期ライフサイクル](features/offline-sync.md) |
 | 障害復旧 | [競合・結果不明・破棄と中止](features/sync-recovery.md) |

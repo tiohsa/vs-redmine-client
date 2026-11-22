@@ -1254,6 +1254,75 @@ async function main() {
   await push();
   assert.equal(await evaluate(`document.activeElement.id`), 'unsynced-list', 'empty queue keeps focus even before result feedback arrives');
   await evaluate(`document.getElementById('tab-tickets').click()`);
+  const pendingId = 'a'.repeat(64);
+  const pendingFocus = 'b'.repeat(64);
+  state.unsynced = { totalCount: 2, items: [], reveal: { sequence: 1, focusIds: [pendingFocus] }, localChanges: [
+    { id: pendingId, focusIds: [pendingFocus], label: '未保存の編集', detail: '新規下書き · 親 #89', open: 'editor' },
+    { id: 'c'.repeat(64), focusIds: ['d'.repeat(64)], label: 'コメント下書き', detail: '#10', reason: '変更内容を確認できません。' },
+  ] };
+  await push();
+  assert.equal(await evaluate(`document.getElementById('tab-unsynced').getAttribute('aria-selected')`), 'true');
+  assert.equal(await evaluate(`document.activeElement.dataset.pendingFocus`), pendingFocus);
+  assert.equal(await evaluate(`document.getElementById('unsynced-badge').textContent`), '2');
+  assert.equal(await evaluate(`document.getElementById('sync-all-btn').classList.contains('hidden')`), true);
+  assert.equal(await evaluate(`document.querySelectorAll('#unsynced-list [data-sync-key], #unsynced-list [data-discard-key]').length`), 0);
+  assert.match(await evaluate(`document.getElementById('unsynced-list').textContent`), /親 #89.*変更内容を確認できません/);
+  await evaluate(`document.activeElement.querySelector('button').focus();window.messages.length=0`);
+  await key('Enter');
+  assert.deepEqual(await evaluate(`(({type,itemId})=>({type,itemId}))(window.messages.at(-1))`), { type: 'unsynced.openPendingChange', itemId: pendingId });
+  const previewId = 'e'.repeat(64);
+  const previewReason = '元のエディターを開けません。読み取り専用で下書きの内容を確認できます。';
+  state.unsynced = { totalCount: 4, items: [], localChanges: [
+    { id: previewId, focusIds: ['1'.repeat(64)], label: 'チケットの下書き', detail: '#10', reason: previewReason, open: 'preview', canDiscard: true },
+    { id: '2'.repeat(64), focusIds: ['3'.repeat(64)], label: '編集中', detail: '#11', open: 'editor', canDiscard: true },
+    { id: '4'.repeat(64), focusIds: ['5'.repeat(64)], label: '保護済み', detail: '#12', open: 'preview', canDiscard: false },
+    { id: '6'.repeat(64), focusIds: ['7'.repeat(64)], label: '確認不可', detail: '#13', canDiscard: true },
+  ] };
+  await push();
+  for (const width of [440, 280, 768]) {
+    await call('Emulation.setDeviceMetricsOverride', { width, height: 800, deviceScaleFactor: 1, mobile: false });
+    await settleViewport();
+    const draftCardFits = await evaluate(`(() => {
+      const card = document.querySelector('[data-discard-pending-id]').closest('.unsynced-card');
+      const message = [...card.querySelectorAll('.unsynced-detail')].find(detail => detail.textContent === ${JSON.stringify(previewReason)});
+      const box = card.getBoundingClientRect();
+      if (!message) return false;
+      const range = document.createRange();
+      range.selectNodeContents(message);
+      const items = [...range.getClientRects(), ...[...card.querySelectorAll('button')].map(button => button.getBoundingClientRect())];
+      return items.every(item => item.left >= box.left && item.right <= box.right && item.top >= box.top && item.bottom <= box.bottom);
+    })()`);
+    assert.equal(draftCardFits, true, `draft card message and buttons stay within the card at ${width}px`);
+  }
+  await call('Emulation.setDeviceMetricsOverride', { width: queueViewport.width, height: queueViewport.height, deviceScaleFactor: 1, mobile: false });
+  await settleViewport();
+  assert.equal(await evaluate(`document.querySelectorAll('[data-discard-pending-id]').length`), 1);
+  assert.equal(await evaluate(`document.querySelector('[data-discard-pending-id]').textContent.trim()`), strings.discardPendingDraft);
+  await evaluate(`window.messages.length=0;document.querySelector('[data-discard-pending-id]').focus()`);
+  await key('Enter');
+  const pendingDiscard = await evaluate(`window.messages.at(-1)`);
+  assert.deepEqual(Object.keys(pendingDiscard).sort(), ['itemId', 'requestId', 'type']);
+  assert.equal(pendingDiscard.type, 'unsynced.discardPendingChange');
+  assert.equal(pendingDiscard.itemId, previewId);
+  assert.match(pendingDiscard.requestId, /^req-/);
+  assert.equal(await evaluate(`document.querySelector('[data-discard-pending-id]').disabled`), true);
+  state.unsynced.localChanges.shift(); state.unsynced.totalCount--;
+  await push();
+  assert.equal(await evaluate(`document.activeElement.dataset.pendingFocus`), '3'.repeat(64), 'removed draft moves focus to the next card');
+  const discardMessage = `チケット #10 の下書きを破棄しました。 https://redmine.example.test/${'ticketdraft'.repeat(12)}`;
+  await call('Emulation.setDeviceMetricsOverride', { width: 280, height: 800, deviceScaleFactor: 1, mobile: false });
+  await settleViewport();
+  await evaluate(`window.dispatchEvent(new MessageEvent('message',{data:{type:'operation.success',requestId:${JSON.stringify(pendingDiscard.requestId)},message:${JSON.stringify(discardMessage)}}}))`);
+  assert.equal(await evaluate(`document.getElementById('unsynced-feedback').textContent`), discardMessage);
+  assert.equal(await evaluate(`(() => { const message = document.getElementById('unsynced-feedback'); const bounds = message.getBoundingClientRect(); return message.scrollWidth <= message.clientWidth && bounds.left >= 0 && bounds.right <= innerWidth; })()`), true, 'draft discard feedback wraps within its box');
+  await evaluate(`document.getElementById('toast-area').replaceChildren();window.dispatchEvent(new MessageEvent('message',{data:{type:'toast',level:'error',message:${JSON.stringify(discardMessage)}}}))`);
+  assert.equal(await evaluate(`(() => { const message = document.querySelector('#toast-area .toast'); const bounds = message.getBoundingClientRect(); return message.scrollWidth <= message.clientWidth && bounds.left >= 0 && bounds.right <= innerWidth; })()`), true, 'draft discard toast wraps within the sidebar');
+  await evaluate(`document.getElementById('toast-area').replaceChildren()`);
+  await call('Emulation.setDeviceMetricsOverride', { width: queueViewport.width, height: queueViewport.height, deviceScaleFactor: 1, mobile: false });
+  await settleViewport();
+  state.unsynced = { totalCount: 0, items: [] };
+  await push();
+  await evaluate(`document.getElementById('tab-tickets').click()`);
   assert.equal(await evaluate(`document.querySelectorAll('#search-clear-btn').length`), 1);
   assert.equal(await evaluate(`getComputedStyle(document.querySelector('.ticket-row[data-id="10"]')).paddingLeft`), '12px');
   assert.equal(await evaluate(`getComputedStyle(document.querySelector('.ticket-row[data-id="11"]')).paddingLeft`), '26px');
@@ -1283,7 +1352,7 @@ async function main() {
 
   // 一覧・詳細・コメント・未同期の同じ操作はラベルと SVG が一致する。
   state.comments.ticketId = 10;
-  state.comments.items = [{ id: 20, authorName: 'Taro', body: 'Comment', editableByCurrentUser: true, syncKey: { kind: 'comment', ticketId: 10, commentId: 20 } }];
+  state.comments.items = [{ id: 20, noteIndex: 3, authorName: 'Taro', body: 'Comment', editableByCurrentUser: true, syncKey: { kind: 'comment', ticketId: 10, commentId: 20 } }];
   state.unsynced = { totalCount: 1, items: [{ key: { kind: 'ticket', ticketId: 10 }, label: 'Ticket', documentUri: 'file:///tmp/ticket.md', lifecycle: 'queued' }] };
   await push();
   async function assertSameAction(selectors) {
@@ -1300,6 +1369,24 @@ async function main() {
   assert.equal(await evaluate(`document.querySelector('#sync-all-btn svg').outerHTML`), await evaluate(`document.querySelector('.ticket-row[data-id="10"] [data-ticket-action="sync"] svg').outerHTML`));
   assert.equal(await evaluate(`document.querySelector('.comment-card[data-comment-id="20"] [data-comment-action="sync"] svg').outerHTML`), await evaluate(`document.querySelector('.ticket-row[data-id="10"] [data-ticket-action="sync"] svg').outerHTML`));
   assert.equal(await evaluate(`document.querySelector('.comment-card[data-comment-id="20"] [data-comment-action="browser"] svg').outerHTML`), await evaluate(`document.querySelector('.ticket-row[data-id="10"] [data-ticket-action="browser"] svg').outerHTML`));
+  // 削除操作は選択中の行ではなく、操作した行の永続 ID と描画時の接続世代を送る。
+  state.connectionGeneration = 9;
+  state.comments.items.push({ authorName: 'Local draft', body: 'Draft', isLocalUnsynced: true, syncKey: { kind: 'comment', ticketId: 10, documentUri: 'file:///draft.md' } });
+  await push();
+  assert.equal(await evaluate(`document.querySelectorAll('.comment-card:not([data-comment-id]) [data-comment-action="delete"]').length`), 0);
+  assert.equal(await evaluate(`getComputedStyle(document.querySelector('.ticket-row[data-id="11"] .ticket-hover-actions')).display`), 'none');
+  await evaluate(`document.querySelector('.ticket-row[data-id="11"]').focus();window.messages.length=0`);
+  assert.equal(await evaluate(`getComputedStyle(document.querySelector('.ticket-row[data-id="11"] .ticket-hover-actions')).display`), 'flex');
+  await evaluate(`document.querySelector('.ticket-row[data-id="11"] [data-ticket-action="delete"]').focus()`);
+  await key('Enter');
+  assert.deepEqual(await evaluate(`(({type,ticketId,connectionGeneration})=>({type,ticketId,connectionGeneration}))(window.messages.at(-1))`), { type: 'deleteTicket', ticketId: 11, connectionGeneration: 9 });
+  await evaluate(`window.messages.length=0`);
+  const commentPoint = await evaluate(`(()=>{const r=document.querySelector('.comment-card[data-comment-id="20"]').getBoundingClientRect();return {x:r.right-20,y:r.top+10}})()`);
+  await call('Input.dispatchMouseEvent', { type: 'mouseMoved', ...commentPoint });
+  const deletePoint = await evaluate(`(()=>{const r=document.querySelector('.comment-card[data-comment-id="20"] [data-comment-action="delete"]').getBoundingClientRect();return {x:r.x+r.width/2,y:r.y+r.height/2}})()`);
+  await call('Input.dispatchMouseEvent', { type: 'mousePressed', ...deletePoint, button: 'left', buttons: 1, clickCount: 1 });
+  await call('Input.dispatchMouseEvent', { type: 'mouseReleased', ...deletePoint, button: 'left', buttons: 0, clickCount: 1 });
+  assert.deepEqual(await evaluate(`(({type,ticketId,commentId,connectionGeneration})=>({type,ticketId,commentId,connectionGeneration}))(window.messages.at(-1))`), { type: 'deleteComment', ticketId: 10, commentId: 20, connectionGeneration: 9 });
   state.comments.items = [];
   state.unsynced = { totalCount: 0, items: [] };
   await push();
@@ -1867,7 +1954,7 @@ async function main() {
     assert.equal(await evaluate(`document.getElementById('ticket-scroll').scrollWidth <= document.getElementById('ticket-scroll').clientWidth`), true, `list overflow: ${theme} ${width}`);
     assert.equal(await evaluate(`getComputedStyle(document.querySelector('.tickets-master')).borderRightWidth`), '1px');
     assert.equal(await evaluate(`document.querySelector('.ticket-subject').getBoundingClientRect().width >= 40`), true, `subject clipped: ${theme} ${width}`);
-    assert.equal(await evaluate(`document.querySelectorAll('.ticket-row.selected .ticket-hover-actions svg[aria-hidden="true"]').length === 2`), true);
+    assert.equal(await evaluate(`document.querySelectorAll('.ticket-row.selected .ticket-hover-actions svg[aria-hidden="true"]').length === 3`), true);
     assert.equal(await evaluate(`getComputedStyle(document.querySelector('.ticket-row:not(.selected) .ticket-hover-actions')).display`), 'none');
     assert.equal(await evaluate(`getComputedStyle(document.querySelector('.ticket-row.selected .ticket-hover-actions')).display`), 'none');
     await evaluate(`document.querySelector('.ticket-row.selected').focus()`);
@@ -1977,6 +2064,7 @@ async function main() {
   assert.equal(await evaluate(`document.querySelectorAll('.ticket-row.is-draft .ticket-hover-actions').length`), 1);
   assert.equal(await evaluate(`document.querySelectorAll('.ticket-row.is-draft [data-draft-action="sync"]').length`), 1);
   assert.equal(await evaluate(`document.querySelectorAll('.ticket-row.is-draft [data-ticket-action="browser"]').length`), 0);
+  assert.equal(await evaluate(`document.querySelectorAll('.ticket-row.is-draft [data-ticket-action="delete"]').length`), 0);
   await evaluate(`window.messages.length=0;document.querySelector('.ticket-row.is-draft').click()`);
   assert.deepEqual(await evaluate(`(({type,queueId})=>({type,queueId}))(window.messages.at(-1))`), { type: 'ticket.openDraft', queueId: 'draft-q1' });
   state.draftTickets = [];

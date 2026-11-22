@@ -51,7 +51,7 @@ function req(type, extra){
     send(Object.assign({type:type,requestId:requestId}, extra || {}));
     return requestId;
   }
-  const queueAction = ['unsynced.syncOne','unsynced.syncAll','unsynced.discardOne','unsynced.abandonOne','unsynced.forgetAbandoned','unsynced.forgetAllAbandoned','unsynced.startNewTicketEdit'].includes(type);
+  const queueAction = ['unsynced.syncOne','unsynced.syncAll','unsynced.discardOne','unsynced.discardPendingChange','unsynced.abandonOne','unsynced.forgetAbandoned','unsynced.forgetAllAbandoned','unsynced.startNewTicketEdit'].includes(type);
   const ticketAction = type === 'ticket.syncSelected' || type === 'ticket.reviewConflict';
   const draftSyncAction = type === 'ticket.syncDraft';
   const commentSyncAction = type === 'comment.syncSelected';
@@ -74,7 +74,7 @@ function captureFocus(root){
   if(!element || !root.contains(element)) return null;
   const card=element.closest('#unsynced-list .unsynced-card');
   if(card){
-    return {queueKey:card.dataset.queueKey,queueIndex:Array.from(card.parentNode.querySelectorAll('.unsynced-card')).indexOf(card),action:element.dataset.unsyncedAction,moreOpen:!!card.querySelector('.unsynced-more[open]')};
+    return {queueKey:card.dataset.queueKey,pendingFocus:card.dataset.pendingFocus,queueIndex:Array.from(card.parentNode.querySelectorAll('.unsynced-card')).indexOf(card),action:element.dataset.unsyncedAction,moreOpen:!!card.querySelector('.unsynced-more[open]')};
   }
   let selector=element.id ? '#'+CSS.escape(element.id) : null;
   if(!selector){
@@ -92,10 +92,10 @@ function captureFocus(root){
 }
 function restoreFocus(focus){
   if(!focus) return;
-  if(focus.queueKey){
+  if(focus.queueIndex !== undefined){
     if(document.getElementById('panel-unsynced').hidden) return;
     const cards=Array.from(document.querySelectorAll('#unsynced-list .unsynced-card'));
-    const same=cards.find(function(card){ return card.dataset.queueKey === focus.queueKey; });
+    const same=cards.find(function(card){ return focus.queueKey ? card.dataset.queueKey === focus.queueKey : card.dataset.pendingFocus === focus.pendingFocus; });
     const card=same || cards[Math.min(focus.queueIndex,cards.length-1)];
     if(!card){ const feedback=document.getElementById('unsynced-feedback'); (feedback.classList.contains('hidden') ? document.getElementById('unsynced-list') : feedback).focus({preventScroll:true}); return; }
     if(same && focus.moreOpen) card.querySelector('.unsynced-more').open=true;

@@ -58,6 +58,8 @@ The Tickets tab shows the ticket list for the selected project.
 
 **Work Panel** shows ticket metadata (ID, subject, project, tracker, status, priority, dates, parent) and provides **Overview / Comments** tabs, inline metadata editing, and ticket actions. Comments open in the VS Code Markdown editor for editing.
 
+Hover over a ticket or comment already saved in Redmine, or focus its row with the keyboard, to reveal **Delete**. Review the target in the confirmation dialog, then choose **Delete**. Resolve any unsynced changes to the target before deleting it.
+
 Quick filters in **Tickets** (My Issues, Open, Overdue, High Priority, and Editing) filter loaded tickets and new drafts. The counts distinguish shown, loaded, and total tickets. Use **Filters…** to edit persistent ticket filters. The **Unsynced** tab shows all unsynced changes and provides actions to sync them or resolve conflicts.
 
 ### Dashboard Maintenance
@@ -80,6 +82,7 @@ Supported actions per item:
 | Open file | Open the local Markdown draft |
 | Sync one | Upload this item to Redmine |
 | Discard | Remove from the unsynced queue |
+| Discard draft | Confirm and discard a read-only local draft |
 
 A **Sync all** button uploads all queued items at once.
 

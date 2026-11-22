@@ -7,7 +7,7 @@ export const unsyncedStyles = {
 .unsynced-summary { display: flex; flex-wrap: wrap; gap: 6px; }
 .summary-badge { display: inline-flex; align-items: center; gap: 5px; padding: 4px 8px; border: 1px solid var(--app-border-subtle); border-radius: var(--app-radius-pill); background: var(--app-surface-raised); color: var(--app-text-secondary); font-size: var(--app-font-label); font-weight: 600; }
 .summary-badge strong { color: var(--app-text); font-variant-numeric: tabular-nums; }
-.operation-feedback { padding: 8px 10px; border: 1px solid var(--app-border); border-radius: 2px; background: var(--app-surface-raised); color: var(--app-text); font-size: var(--app-font-caption); }
+.operation-feedback { padding: 8px 10px; border: 1px solid var(--app-border); border-radius: 2px; background: var(--app-surface-raised); color: var(--app-text); font-size: var(--app-font-caption); overflow-wrap: anywhere; }
 .operation-feedback.success { border-color: var(--app-success); }
 .operation-feedback.warning { border-color: var(--app-warning); }
 .operation-feedback.error { border-color: var(--app-danger); color: var(--app-danger); }
@@ -20,6 +20,10 @@ export const unsyncedStyles = {
 .unsynced-state { display: flex; flex-wrap: wrap; gap: 4px; }
 .unsynced-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 5px; }
 .unsynced-actions .btn { min-height: 26px; padding-inline: 9px; }
+.unsynced-card.unsynced-card-local { grid-template-columns: minmax(0, 1fr); }
+.unsynced-card-local .unsynced-label { overflow: visible; white-space: normal; overflow-wrap: anywhere; }
+.unsynced-card-local .unsynced-actions { display: flex; grid-column: 1; justify-content: flex-start; }
+.unsynced-card-local .unsynced-actions .btn { flex: 0 1 auto; min-inline-size: 0; overflow-wrap: anywhere; }
 .unsynced-more { position: relative; align-self: center; }
 .unsynced-more summary { list-style: none; }
 .unsynced-more summary::-webkit-details-marker { display: none; }

@@ -75,6 +75,11 @@ export const getTicketDraft = (
   scope = activeScope,
 ): TicketDraftState | undefined => getCache(scope).get(ticketId);
 
+export const getPendingTicketDraftIds = (scope: string): number[] =>
+  Array.from(getCache(scope).values())
+    .filter(draft => draft.status !== "clean" && draft.status !== "Synced")
+    .map(draft => draft.ticketId);
+
 export interface NewTicketInitialValues {
   subject?: string;
   description?: string;
@@ -246,7 +251,11 @@ export const setTicketDraftContent = (
   persist(ticketId, draft, scope);
 };
 
-export const clearTicketDraftContent = (ticketId: number, scope = activeScope): void => {
+export const clearTicketDraftContent = (
+  ticketId: number,
+  scope = activeScope,
+  status?: TicketDraftStatus,
+): void => {
   const draft = getCache(scope).get(ticketId);
   if (!draft) {
     return;
@@ -255,6 +264,7 @@ export const clearTicketDraftContent = (ticketId: number, scope = activeScope): 
   draft.draftSubject = undefined;
   draft.draftDescription = undefined;
   draft.draftMetadata = undefined;
+  if (status !== undefined) { draft.status = status; }
   persist(ticketId, draft, scope);
 };
 

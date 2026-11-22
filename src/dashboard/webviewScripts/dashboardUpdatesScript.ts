@@ -70,6 +70,10 @@ window.addEventListener('message',function(event){ const message=event.data || {
     }
     if(panel && panel.mode !== 'detail' && !panel.loading && (openingComposer || previousComposer?.loading)) document.getElementById('work-tracker')?.focus();
     if(previousComposer?.mode === 'newTicket' && (!panel || panel.mode === 'detail')) document.getElementById('project-select-trigger')?.focus();
+    const reveal=state.unsynced.reveal;
+    if(reveal && (reveal.sequence !== previous?.unsynced.reveal?.sequence || state.connectionGeneration !== previous?.connectionGeneration)){
+      revealUnsyncedItems(reveal.focusIds);
+    }
   } else if(message.type === 'view.focusTicketSearch'){
     closeProjectPicker(false); closeLayoutPopover(); closeTicketActionMenus();
     if(!filterDialog.classList.contains('hidden')) closeFilterDialog();

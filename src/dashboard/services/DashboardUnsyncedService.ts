@@ -14,6 +14,9 @@ import type { DashboardServiceContext } from "./DashboardServiceContext";
 import { DashboardSyncConflictService } from "./DashboardSyncConflictService";
 import { DashboardSyncNotifications } from "./DashboardSyncNotifications";
 import { DashboardUnsyncedQueueActions } from "./DashboardUnsyncedQueueActions";
+import { openSnapshot } from "./dashboardPendingDeletionChanges";
+import { buildUnsyncedPendingChanges, pendingChangeFocusId } from "./dashboardUnsyncedPendingChanges";
+import { discardReadOnlyDraft } from "./dashboardReadOnlyDraftDiscard";
 
 export class DashboardUnsyncedService {
   private readonly conflicts: DashboardSyncConflictService;
@@ -40,12 +43,48 @@ export class DashboardUnsyncedService {
   }
 
   refreshUnsynced(): void {
-    const items = buildUnsyncedDashboardItems();
-    this.deps.context.store.updateNested("unsynced", {
-      totalCount: items.length,
+    const { store } = this.deps.context;
+    const { items, local } = this.collectPendingChanges();
+    store.updateNested("unsynced", {
+      totalCount: items.length + local.length,
       items,
+      localChanges: local.map(item => item.row),
       abandonedItems: buildUnsyncedDashboardItems(true),
     });
+  }
+
+  revealPendingChanges(ids: readonly string[]): void {
+    this.refreshUnsynced();
+    const { store } = this.deps.context;
+    const { connectionGeneration, unsynced } = store.getState();
+    const scope = getCurrentConnectionScope();
+    store.updateNested("unsynced", { reveal: {
+      sequence: (unsynced.reveal?.sequence ?? 0) + 1,
+      focusIds: ids.map(id => pendingChangeFocusId(scope, connectionGeneration, id)),
+    } });
+  }
+
+  async openPendingChange(itemId: string): Promise<void> {
+    const scope = getCurrentConnectionScope();
+    const row = this.collectPendingChanges().local.find(item => item.row.id === itemId);
+    if (!row || getCurrentConnectionScope() !== scope || !row.row.open) {
+      throw new Error(vscode.l10n.t("This pending change is no longer available. Refresh Unsynced and try again."));
+    }
+    if (row.editor) { await vscode.window.showTextDocument(row.editor); }
+    else { await openSnapshot(scope, row.change); }
+  }
+
+  discardPendingChange(itemId: string): Promise<"discarded" | "cancelled"> {
+    return discardReadOnlyDraft(itemId, () => ({
+      scope: getCurrentConnectionScope(),
+      generation: this.deps.context.store.getState().connectionGeneration,
+      local: this.collectPendingChanges().local,
+    }));
+  }
+
+  private collectPendingChanges(): ReturnType<typeof buildUnsyncedPendingChanges> {
+    return buildUnsyncedPendingChanges(getCurrentConnectionScope(),
+      this.deps.context.store.getState().connectionGeneration, buildUnsyncedDashboardItems());
   }
 
   handleStartNewTicketEdit(requestId: string, ticketId: number): Promise<void> {

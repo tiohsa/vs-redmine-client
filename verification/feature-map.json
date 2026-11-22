@@ -68,7 +68,7 @@
     },
     {
       "id": "ticket-editing",
-      "name": "チケット作成と Markdown 編集",
+      "name": "チケットの作成・Markdown 編集・削除",
       "entryPoints": [
         "redmine-clientActivityDashboard",
         "redmine-client.createTicket",
@@ -86,12 +86,15 @@
         ".ticket-hover-actions",
         "[data-ticket-action=\"sync\"]",
         "[data-ticket-action=\"browser\"]",
+        "[data-ticket-action=\"delete\"]",
         "#detail-cancel-btn"
       ],
       "invariants": [
         "作成時は Markdown の見出しとメタデータをチケットの入力に反映する。",
         "下書きは接続先ごとに分離する。",
-        "ブラウザで開くコマンドは明示された文書、アクティブな Redmine エディター、Dashboard の選択の順に対象を判定する。"
+        "ブラウザで開くコマンドは明示された文書、アクティブな Redmine エディター、Dashboard の選択の順に対象を判定する。",
+        "既存チケット行の削除は、その行を明示的に承認した後に現在の接続先で実行し、配下の未同期変更も保護する。",
+        "削除前に保留項目の内容を確認できる。項目を確認できない場合や対象・配下に未同期変更がある場合は削除を承認できない。"
       ],
       "checks": [
         "src/test/createTicketFromMarkdownHeader.test.ts",
@@ -101,13 +104,18 @@
         "src/test/markdownTicketCreateService.test.ts",
         "src/test/draftPersistenceScope.test.ts",
         "src/test/createdTicketListSelection.test.ts",
+        "src/test/dashboardMessageValidation.test.ts",
+        "src/test/dashboardDeletionIntegration.test.ts",
+        "src/test/dashboardDeletionProtection.test.ts",
+        "src/test/pendingChangeReviewPresenter.test.ts",
+        "scripts/check-dashboard-ui.cjs",
         "src/test/live/dashboardWorkflow.test.ts",
         "src/test/live/editorWorkflowSync.test.ts"
       ]
     },
     {
       "id": "comments",
-      "name": "コメントの閲覧・追加・編集",
+      "name": "コメントの閲覧・追加・編集・削除",
       "entryPoints": [
         "redmine-clientActivityDashboard",
         "redmine-client.refreshComments",
@@ -120,13 +128,15 @@
         "#detail-comment-count",
         "#add-comment-btn",
         "#reload-comments-btn",
-        "[data-comment-action=\"browser\"]"
+        "[data-comment-action=\"browser\"]",
+        "[data-comment-action=\"delete\"]"
       ],
       "invariants": [
         "選択チケットのコメントを表示する。",
         "編集権限のないコメントの更新を拒否する。",
         "既存コメントのブラウザ URL は Redmine の注記番号を使う。",
-        "新規コメントは空の本文欄で開き、本文先頭に入力した Markdown 見出しを同期する。"
+        "新規コメントは空の本文欄で開き、本文先頭に入力した Markdown 見出しを同期する。",
+        "リモートコメント行の削除は、親チケットと journal ID を照合し、承認後に本文だけを消去する。"
       ],
       "checks": [
         "src/test/commentListMapping.test.ts",
@@ -135,6 +145,10 @@
         "src/test/commentPermissions.test.ts",
         "src/test/commentCreateTemplate.test.ts",
         "src/test/commentSaveSync.test.ts",
+        "src/test/dashboardMessageValidation.test.ts",
+        "src/test/dashboardDeletionIntegration.test.ts",
+        "src/test/dashboardDeletionProtection.test.ts",
+        "scripts/check-dashboard-ui.cjs",
         "src/test/stabilizeDashboard013SaveSerialization.test.ts",
         "src/test/live/isolationSync.test.ts",
         "src/test/live/dashboardWorkflow.test.ts"
@@ -153,9 +167,13 @@
       "selectors": [
         "#tab-unsynced",
         "#unsynced-list",
+        "#unsynced-list [data-pending-id]",
+        "#unsynced-list [data-discard-pending-id]",
         "#sync-all-btn"
       ],
       "invariants": [
+        "キュー未登録の変更は元のエディターを開け、承認なしの書き込みは行わない。すべて同期はキュー項目だけを処理する。",
+        "読み取り専用の下書きの破棄は承認後に接続先と内容を照合し、同期キューや別の変更を保持する。",
         "リモート書き込み後に再取得・照合してからローカル状態を確定する。",
         "commit_unknown の操作は自動再試行しない。",
         "旧 revision または attemptGeneration の処理による保存を拒否する。",
@@ -164,6 +182,9 @@
       ],
       "checks": [
         "src/test/dashboardSyncTray.test.ts",
+        "src/test/dashboardReadOnlyDraftDiscard.test.ts",
+        "src/test/dashboardDeletionIntegration.test.ts",
+        "scripts/check-dashboard-ui.cjs",
         "src/test/dashboardSyncFeedback.test.ts",
         "src/test/saveSyncExecutorAutoMode.test.ts",
         "src/test/ticketSyncService.test.ts",

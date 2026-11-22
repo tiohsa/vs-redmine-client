@@ -9,7 +9,7 @@ import {
   getOperationRecoveryMode,
   isPrimaryEffectKind,
 } from "../syncEffects";
-import { beginActiveSync } from "../../views/offlineSyncStore";
+import { beginSyncUnlessDeleting, deletionInProgressError } from "./syncDeletionGuard";
 
 import type { SyncEffectRecoveryInput, SyncRecoveryDependencies } from "./syncRecoveryTypes";
 
@@ -114,7 +114,11 @@ export const resolveEffect = async (
     return recovery.inFlight.get(flightKey)!;
   }
 
-  const endActiveSync = beginActiveSync(scope, op.operationId);
+  const linkedTarget = input.resolution.kind === "link_remote_child" ? { ticketId: input.resolution.remoteId } : undefined;
+  const endActiveSync = beginSyncUnlessDeleting(scope, op, linkedTarget);
+  if (!endActiveSync) {
+    return { kind: "failed_before_commit", error: deletionInProgressError() };
+  }
   const flightPromise: Promise<SyncOutcome> = runWithConnectionScope(scope, async (): Promise<SyncOutcome> => {
     const handler = recovery.handlers[op.kind];
     const handlerCtx: OperationHandlerContext = { connectionScope: scope };

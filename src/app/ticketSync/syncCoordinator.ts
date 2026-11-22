@@ -32,7 +32,7 @@ import {
   RecoveryItem,
 } from "../syncEffects";
 import type { SyncContext } from "./ports";
-import { beginActiveSync } from "../../views/offlineSyncStore";
+import { beginSyncUnlessDeleting, deletionInProgressError } from "./syncDeletionGuard";
 
 import { resolveCommitUnknown } from "./syncCommitUnknownRecovery";
 import { resolveEffect } from "./syncEffectRecovery";
@@ -269,7 +269,10 @@ export class SyncCoordinator {
     }
 
     const runner = options.runInConnectionScope ?? runWithConnectionScope;
-    const endActiveSync = beginActiveSync(scope, operation.operationId);
+    const endActiveSync = beginSyncUnlessDeleting(scope, operation);
+    if (!endActiveSync) {
+      return { kind: "failed_before_commit", error: deletionInProgressError() };
+    }
     const flightPromise = runner(scope, async () => {
       try {
         return await this.executeSyncLifecycle(operation, context, options);

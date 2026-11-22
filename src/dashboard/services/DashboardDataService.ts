@@ -82,6 +82,7 @@ export class DashboardDataService {
     this.metadataOptionsLoaded = false;
     clearTicketSummaries();
     this.deps.context.store.update({
+      connectionGeneration: this.deps.context.store.getState().connectionGeneration + 1,
       projects: [],
       tickets: [],
       draftTickets: [],

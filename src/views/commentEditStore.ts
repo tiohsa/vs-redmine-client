@@ -32,6 +32,9 @@ export const getCommentEdit = (
   connectionScope = getCurrentConnectionScope(),
 ): CommentEditState | undefined => edits.get(editKey(connectionScope, commentId));
 
+export const getCommentEditDrafts = (connectionScope: string): CommentEditState[] =>
+  Array.from(edits.values()).filter(edit => edit.connectionScope === connectionScope && edit.draftBody !== undefined);
+
 export const initializeCommentEdit = (
   commentId: number,
   ticketId: number,
@@ -185,6 +188,17 @@ export const clearCommentEdit = (
     }
   }
   edits.delete(editKey(connectionScope, commentId));
+};
+
+export const discardCommentEditDraft = (
+  commentId: number,
+  connectionScope = getCurrentConnectionScope(),
+): void => {
+  const key = editKey(connectionScope, commentId);
+  const state = edits.get(key);
+  if (!state) { return; }
+  state.draftBody = undefined;
+  activeEditingComments.delete(editingKey(connectionScope, state.ticketId, commentId));
 };
 
 export const clearCommentEdits = (): void => {

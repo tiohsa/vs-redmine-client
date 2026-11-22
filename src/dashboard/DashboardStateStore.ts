@@ -3,6 +3,7 @@ import type { DashboardState } from "./dashboardProtocol";
 type StateListener = (state: DashboardState) => void;
 
 const DEFAULT_STATE: DashboardState = {
+  connectionGeneration: 0,
   quickFilterCapabilities: { mine: "loading", open: "loading" },
   includeChildProjects: false,
   projects: [],

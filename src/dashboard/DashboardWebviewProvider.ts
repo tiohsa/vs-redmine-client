@@ -48,6 +48,7 @@ export class DashboardWebviewProvider
       onTicketsRefreshed: () => {
         void this.controller.initialize();
       },
+      revealUnsyncedView: () => this.view?.show(false),
       syncEngine: deps.syncEngine,
     });
 

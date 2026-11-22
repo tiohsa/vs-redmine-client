@@ -2,6 +2,7 @@ import * as path from "path";
 import * as vscode from "vscode";
 import { setCommentDraft } from "../views/commentDraftStore";
 import { setCommentDraftBody } from "../views/commentEditStore";
+import { extractCommentBody } from "../views/commentUpdateFile";
 import {
   isNewTicketDraftFilename,
   parseDirectTicketFilename,
@@ -300,20 +301,14 @@ export const registerEditorEvents = (
           } catch {
             // Ignore parse errors when swapping focus.
           }
-        } else if (ticketId && contentType === "comment") {
-          const draft = previousActiveEditor.document.getText();
-          setCommentDraft(
-            ticketId,
-            draft,
-            getConnectionScopeForEditor(previousActiveEditor),
-          );
+        } else if (ticketId && contentType === "comment" && previousActiveEditor.document.isDirty) {
+          const draft = extractCommentBody(previousActiveEditor.document.getText());
+          const scope = getConnectionScopeForEditor(previousActiveEditor);
           const commentId = getCommentIdForEditor(previousActiveEditor);
           if (commentId) {
-            setCommentDraftBody(
-              commentId,
-              draft,
-              getConnectionScopeForEditor(previousActiveEditor),
-            );
+            setCommentDraftBody(commentId, draft, scope);
+          } else {
+            setCommentDraft(ticketId, draft, scope);
           }
         }
       }

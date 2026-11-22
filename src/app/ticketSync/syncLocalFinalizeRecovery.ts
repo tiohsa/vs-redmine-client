@@ -6,7 +6,7 @@ import {
 import { withAttemptGenerationFence } from "./syncRepository";
 import { SyncOutcome } from "./syncOperationTypes";
 import { getAttemptGeneration } from "../syncEffects";
-import { beginActiveSync } from "../../views/offlineSyncStore";
+import { beginSyncUnlessDeleting, deletionInProgressError } from "./syncDeletionGuard";
 
 import { getOutcomeTicketId } from "./syncOutcomeTicketId";
 import type { SyncRecoveryInput, SyncRecoveryDependencies } from "./syncRecoveryTypes";
@@ -69,7 +69,10 @@ export const resolveLocalFinalize = async (
     skipDocumentRewrite: true,
   };
 
-  const endActiveSync = beginActiveSync(scope, op.operationId);
+  const endActiveSync = beginSyncUnlessDeleting(scope, op);
+  if (!endActiveSync) {
+    return { kind: "failed_before_commit", error: deletionInProgressError() };
+  }
   const flightPromise = runWithConnectionScope(scope, async (): Promise<SyncOutcome> => {
     const freshOp = repository.getOperation(input.key, scope);
     if (

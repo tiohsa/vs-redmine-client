@@ -71,6 +71,18 @@ export class DashboardCommentService {
     });
   }
 
+  removeDeletedComment(ticketId: number, commentId: number): void {
+    const cached = this.cachedCommentsByTicket.get(ticketId);
+    if (cached) {
+      this.cachedCommentsByTicket.set(ticketId, cached.filter(comment => comment.id !== commentId));
+    }
+    const { store } = this.context;
+    const comments = store.getState().comments;
+    if (comments.ticketId === ticketId) {
+      store.updateNested("comments", { items: comments.items.filter(comment => comment.id !== commentId) });
+    }
+  }
+
   async loadComments(
     ticketId: number,
     throwOnError = false,

@@ -13,7 +13,8 @@ type ValidationResult =
 const isString = (v: unknown): v is string => typeof v === "string";
 const isNonEmptyString = (v: unknown): v is string => isString(v) && v.trim().length > 0;
 const isNumber = (v: unknown): v is number => typeof v === "number" && Number.isFinite(v);
-const isPositiveInt = (v: unknown): v is number => isNumber(v) && Number.isInteger(v) && (v as number) > 0;
+const isPositiveInt = (v: unknown): v is number => isNumber(v) && Number.isSafeInteger(v) && (v as number) > 0;
+const isNonNegativeInt = (v: unknown): v is number => isNumber(v) && Number.isSafeInteger(v) && (v as number) >= 0;
 const isBoolean = (v: unknown): v is boolean => typeof v === "boolean";
 const isObject = (v: unknown): v is Record<string, unknown> =>
   v !== null && typeof v === "object" && !Array.isArray(v);
@@ -229,6 +230,25 @@ export const validateDashboardMessage = (raw: unknown): ValidationResult => {
 
     case "tickets.loadMore":
       return { ok: true, request: { type, requestId } };
+
+    case "deleteTicket": {
+      const ticketId = raw["ticketId"];
+      const connectionGeneration = raw["connectionGeneration"];
+      if (!isPositiveInt(ticketId) || !isNonNegativeInt(connectionGeneration)) {
+        return { ok: false, reason: "deleteTicket: invalid ticketId or connectionGeneration" };
+      }
+      return { ok: true, request: { type, requestId, ticketId, connectionGeneration } };
+    }
+
+    case "deleteComment": {
+      const ticketId = raw["ticketId"];
+      const commentId = raw["commentId"];
+      const connectionGeneration = raw["connectionGeneration"];
+      if (!isPositiveInt(ticketId) || !isPositiveInt(commentId) || !isNonNegativeInt(connectionGeneration)) {
+        return { ok: false, reason: "deleteComment: invalid IDs or connectionGeneration" };
+      }
+      return { ok: true, request: { type, requestId, ticketId, commentId, connectionGeneration } };
+    }
 
     case "ticket.select": {
       const ticketId = raw["ticketId"];
@@ -476,6 +496,15 @@ export const validateDashboardMessage = (raw: unknown): ValidationResult => {
         return { ok: false, reason: "comment.reload: ticketId must be a positive integer" };
       }
       return { ok: true, request: { type, requestId, ticketId } };
+    }
+
+    case "unsynced.openPendingChange":
+    case "unsynced.discardPendingChange": {
+      const itemId = raw["itemId"];
+      if (typeof itemId !== "string" || !/^[a-f0-9]{64}$/.test(itemId)) {
+        return { ok: false, reason: `${type}: invalid itemId` };
+      }
+      return { ok: true, request: { type, requestId, itemId } };
     }
 
     case "unsynced.openLocalFile": {

@@ -91,6 +91,7 @@ export interface DashboardStrings {
   openInEditor: string;
   addCommentAction: string;
   openInBrowser: string;
+  deleteAction: string;
   createChildTicket: string;
   // Ticket list states
   noProjectSelected: string;
@@ -141,6 +142,7 @@ export interface DashboardStrings {
   unsyncedKindComment: string;
   unsyncedKindFile: string;
   discardAction: string;
+  discardPendingDraft: string;
   discardLaterChangesAction: string;
   discardTitle: string;
   discardLaterChangesTitle: string;
@@ -156,6 +158,8 @@ export interface DashboardStrings {
   syncAbandoned: string;
   syncAllBtn: string;
   unsyncedCountLabel: string;
+  localPendingChanges: string;
+  openPendingPreview: string;
   // Comments tab
   commentsForTicket: string;
   reloadComments: string;
@@ -328,6 +332,7 @@ export const buildDashboardStrings = (): DashboardStrings => ({
   openInEditor: vscode.l10n.t("Edit in VS Code"),
   addCommentAction: vscode.l10n.t("Add comment"),
   openInBrowser: vscode.l10n.t("Open in browser"),
+  deleteAction: vscode.l10n.t("Delete"),
   createChildTicket: vscode.l10n.t("Create child ticket"),
   // Ticket list states
   noProjectSelected: vscode.l10n.t("Enter a ticket number or text to search all projects."),
@@ -378,6 +383,7 @@ export const buildDashboardStrings = (): DashboardStrings => ({
   unsyncedKindComment: vscode.l10n.t("Comment"),
   unsyncedKindFile: vscode.l10n.t("File"),
   discardAction: vscode.l10n.t("Discard"),
+  discardPendingDraft: vscode.l10n.t("Discard draft"),
   discardLaterChangesAction: vscode.l10n.t("Discard later changes"),
   discardTitle: vscode.l10n.t("Discard unsynced local changes"),
   discardLaterChangesTitle: vscode.l10n.t("Discard later local changes and keep the recovery checkpoint"),
@@ -393,6 +399,8 @@ export const buildDashboardStrings = (): DashboardStrings => ({
   syncAbandoned: vscode.l10n.t("Sync abandoned"),
   syncAllBtn: vscode.l10n.t("Sync all"),
   unsyncedCountLabel: vscode.l10n.t("Unsynced changes: {0}"),
+  localPendingChanges: vscode.l10n.t("Local pending changes"),
+  openPendingPreview: vscode.l10n.t("Open read-only copy"),
   // Comments tab
   commentsForTicket: vscode.l10n.t("Comments for ticket"),
   reloadComments: vscode.l10n.t("Refresh"),

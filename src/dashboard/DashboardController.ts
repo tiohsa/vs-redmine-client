@@ -29,9 +29,23 @@ import type { TicketSaveResult } from "../views/ticketSaveTypes";
 import type { DashboardServiceContext } from "./services/DashboardServiceContext";
 import type { SyncEngine } from "../app/syncEngine";
 import { getCurrentConnectionScope } from "../config/connectionScope";
+import { runWithConnectionScope } from "../redmine/client";
+import { deleteIssue, getIssueDetail } from "../redmine/issues";
+import { updateComment } from "../redmine/comments";
+import { RedmineHttpError } from "../redmine/httpError";
+import {
+  assertCanDelete,
+  getTicketIdsWithPendingChanges,
+  runProtectedDelete,
+} from "./services/dashboardDeletionProtection";
+import { getPendingChangeReview } from "./services/dashboardPendingDeletionChanges";
+import { browserTargetForUri } from "../app/browserCommandTarget";
+import { scheduleTask } from "../packages/framework-core";
+import { onActiveSyncChanged } from "../app/ticketSync/syncDeletionGuard";
 import { DashboardDataService, type DashboardDataCache, type DashboardMetadataTestHooks } from "./services/DashboardDataService";
 import { DashboardDraftService } from "./services/DashboardDraftService";
 import { collectTicketNodeIds, DashboardSelectionService } from "./services/DashboardSelectionService";
+import { confirmPendingChangeReview, DashboardDeletionService } from "../layers/extension-host/features/delete-redmine-items";
 
 const isKnownUnsyncedDocumentUri = (documentUri: string): boolean => {
   const queue = getOfflineSyncQueue(getCurrentConnectionScope());
@@ -61,6 +75,7 @@ export interface DashboardControllerOptions {
   notifyError: (requestId: string, msg: string) => void;
   notifyToast: (level: "info" | "warning" | "error" | "success", msg: string) => void;
   onTicketsRefreshed: () => void;
+  revealUnsyncedView?: () => void;
   syncEngine?: SyncEngine;
   _composerSyncTestHooks?: ComposerSyncTestHooks;
   _metadataTestHooks?: DashboardMetadataTestHooks;
@@ -71,6 +86,7 @@ export interface DashboardControllerOptions {
 
 export class DashboardController {
   private readonly cache: DashboardDataCache = { tickets: [], projects: [], totalCount: 0 };
+  private boundConnectionScope = getCurrentConnectionScope();
   private readonly settingsCtrl: SettingsController;
   private readonly projectService: DashboardProjectService;
   private readonly ticketService: DashboardTicketService;
@@ -82,6 +98,7 @@ export class DashboardController {
   private readonly dataService: DashboardDataService;
   private readonly draftService: DashboardDraftService;
   private readonly selectionService: DashboardSelectionService;
+  private readonly deletionService: DashboardDeletionService;
 
   constructor(private readonly opts: DashboardControllerOptions) {
     this.settingsCtrl = new SettingsController(opts.store);
@@ -212,7 +229,65 @@ export class DashboardController {
       commentService: this.commentService,
       metadataService: this.metadataService,
     });
+    this.deletionService = new DashboardDeletionService({
+      getIssueDetail,
+      deleteIssue,
+      clearJournalNotes: (journalId) => updateComment(journalId, ""),
+      getConnectionScope: getCurrentConnectionScope,
+      withConnectionScope: runWithConnectionScope,
+      getHttpStatusCode: (error) => error instanceof RedmineHttpError ? error.statusCode : undefined,
+      getConnectionGeneration: () => getCurrentConnectionScope() === this.boundConnectionScope
+        ? opts.store.getState().connectionGeneration
+        : -1,
+      assertCanDelete,
+      runProtectedDelete,
+      getPendingTicketIds: getTicketIdsWithPendingChanges,
+      getPendingChangeReview,
+      reviewPendingChanges: confirmPendingChangeReview,
+      openUnsynced: (ids) => {
+        this.unsyncedService.revealPendingChanges(ids);
+        opts.revealUnsyncedView?.();
+      },
+      refreshTickets: async (ticketIds) => {
+        this.ticketService.removeDeletedTickets(ticketIds);
+        await this.ticketService.loadTickets();
+      },
+      refreshComments: async (ticketId, commentId) => {
+        this.commentService.removeDeletedComment(ticketId, commentId);
+        await this.commentService.loadComments(ticketId);
+      },
+      clearSelectedTicket: (ticketId) => {
+        if (opts.store.getState().selectedTicketId === ticketId) { this.cancelDetail(); }
+      },
+      clearSelectedComment: (ticketId, commentId) => {
+        const state = opts.store.getState();
+        if (state.selectedTicketId === ticketId && state.comments.selectedCommentId === commentId) {
+          this.commentService.selectComment(ticketId, {});
+        }
+      },
+      notifyError: opts.notifyError,
+      notifySuccess: opts.notifySuccess,
+    });
+    let cancelPendingRefresh: (() => void) | undefined;
+    const schedulePendingRefresh = (): void => {
+      cancelPendingRefresh?.();
+      cancelPendingRefresh = scheduleTask(() => {
+        cancelPendingRefresh = undefined;
+        this.unsyncedService.refreshUnsynced();
+      }, 100);
+    };
+    const refreshDocumentChanges = (document: vscode.TextDocument): void => {
+      const scope = getCurrentConnectionScope();
+      if (browserTargetForUri(document.uri, scope)?.connectionScope === scope) { schedulePendingRefresh(); }
+    };
     this.disposables.push(
+      { dispose: () => cancelPendingRefresh?.() },
+      vscode.workspace.onDidOpenTextDocument(refreshDocumentChanges),
+      vscode.workspace.onDidChangeTextDocument(event => refreshDocumentChanges(event.document)),
+      vscode.workspace.onDidSaveTextDocument(refreshDocumentChanges),
+      vscode.workspace.onDidCloseTextDocument(refreshDocumentChanges),
+      vscode.window.onDidChangeActiveTextEditor(() => schedulePendingRefresh()),
+      onActiveSyncChanged((scope) => { if (scope === getCurrentConnectionScope()) { schedulePendingRefresh(); } }),
       { dispose: onOfflineSyncQueueChanged(() => this.refreshUnsynced()) },
       { dispose: onTicketDraftSaved((event) => this.handleTicketDraftSaved(event)) },
     );
@@ -222,6 +297,7 @@ export class DashboardController {
 
   async initialize(): Promise<void> {
     this.settingsCtrl.pushSettings();
+    this.refreshUnsynced();
     await this.projectService.loadProjects();
     await Promise.all([this.dataService.loadMetadataOptions(), this.ticketService.loadTickets()]);
   }
@@ -289,6 +365,7 @@ export class DashboardController {
   }
 
   resetForConnectionChange(): Promise<void> {
+    this.boundConnectionScope = getCurrentConnectionScope();
     return this.dataService.resetForConnectionChange(() => this.initialize());
   }
 
@@ -340,6 +417,12 @@ export class DashboardController {
       case "ticket.openBrowser":
         void this.selectTicket(req.ticketId);
         await this.ticketService.openInBrowser(req.ticketId);
+        break;
+      case "deleteTicket":
+        await this.deletionService.deleteTicket(req);
+        break;
+      case "deleteComment":
+        await this.deletionService.deleteComment(req);
         break;
       case "ticket.create":
         await this.draftService.createQuickNewTicketDraft(req.requestId, req.projectId);
@@ -399,6 +482,27 @@ export class DashboardController {
       case "comment.reload":
         await this.commentService.loadComments(req.ticketId);
         break;
+      case "unsynced.openPendingChange": {
+        if (this.boundConnectionScope !== getCurrentConnectionScope()) {
+          throw new Error(vscode.l10n.t("This pending change is no longer available. Refresh Unsynced and try again."));
+        }
+        await this.unsyncedService.openPendingChange(req.itemId);
+        break;
+      }
+      case "unsynced.discardPendingChange": {
+        const scope = getCurrentConnectionScope();
+        if (this.boundConnectionScope !== scope) {
+          throw new Error(vscode.l10n.t("This pending change is no longer available. Refresh Unsynced and try again."));
+        }
+        const result = await this.unsyncedService.discardPendingChange(req.itemId);
+        if (result === "discarded") {
+          if (getCurrentConnectionScope() === scope) { this.notifyTicketChanged(); }
+          this.opts.notifySuccess(req.requestId, vscode.l10n.t("Draft discarded."));
+        } else {
+          this.opts.notifySuccess(req.requestId, vscode.l10n.t("Operation cancelled. Saved changes were retained."), "info");
+        }
+        break;
+      }
       case "unsynced.openLocalFile": {
         const uri = vscode.Uri.parse(req.documentUri);
         if (uri.scheme !== "file" && uri.scheme !== "vscode-userdata" && uri.scheme !== "untitled") {

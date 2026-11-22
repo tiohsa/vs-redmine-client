@@ -369,6 +369,20 @@ export class DashboardTicketService {
     await openIssueInBrowser({ ticketId });
   }
 
+  removeDeletedTickets(ticketIds: readonly number[]): void {
+    const deletedIds = new Set(ticketIds);
+    if (this.cachedProjectTickets) {
+      this.cachedProjectTickets.tickets = this.cachedProjectTickets.tickets.filter(ticket => !deletedIds.has(ticket.id));
+    }
+    const currentTickets = this.deps.getTickets();
+    const remaining = currentTickets.filter(ticket => !deletedIds.has(ticket.id));
+    const removed = currentTickets.length - remaining.length;
+    if (removed === 0) { return; }
+    this.deps.setTickets(remaining);
+    this.deps.setTotalCount(Math.max(remaining.length, this.deps.getTotalCount() - removed));
+    this.pushTickets();
+  }
+
   pushTickets(): void {
     const tickets = this.deps.getTickets();
     const state = this.deps.context.store.getState();

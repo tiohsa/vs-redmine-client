@@ -17,7 +17,7 @@ import {
   getPrimaryEffectForRevision,
   isPrimaryRecoveryRequired,
 } from "../syncEffects";
-import { beginActiveSync } from "../../views/offlineSyncStore";
+import { beginSyncUnlessDeleting, deletionInProgressError } from "./syncDeletionGuard";
 
 import { getOutcomeTicketId } from "./syncOutcomeTicketId";
 import type { CommitUnknownRecoveryInput, CommitUnknownRecoveryDependencies } from "./syncRecoveryTypes";
@@ -102,7 +102,16 @@ export const resolveCommitUnknown = async (
   }
 
   const runner = (input as any).runInConnectionScope ?? runWithConnectionScope;
-  const endActiveSync = beginActiveSync(scope, op.operationId);
+  const resolution = input.resolution;
+  const linkedTarget = resolution?.kind === "link_remote_ticket"
+    ? { ticketId: resolution.ticketId }
+    : resolution?.kind === "link_remote_comment" && op.ticketId !== undefined
+      ? { ticketId: op.ticketId, commentId: resolution.commentId }
+      : undefined;
+  const endActiveSync = beginSyncUnlessDeleting(scope, op, linkedTarget);
+  if (!endActiveSync) {
+    return { kind: "failed_before_commit", error: deletionInProgressError() };
+  }
   const flightPromise = runner(scope, async (): Promise<SyncOutcome> => {
     const freshOp = recovery.repository.getOperation(input.key, scope);
     const freshRevision = freshOp?.intentRevision ?? freshOp?.revision ?? 1;

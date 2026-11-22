@@ -97,6 +97,33 @@ suite("Dashboard メッセージバリデーション", () => {
     assert.strictEqual(r.ok, true);
   });
 
+  test("削除メッセージは描画時の接続世代と正の安全な整数 ID を要求する", () => {
+    const ticket = { type: "deleteTicket", requestId: "ticket", ticketId: 42, connectionGeneration: 0 };
+    const comment = { type: "deleteComment", requestId: "comment", ticketId: 42, commentId: 91, connectionGeneration: 5 };
+    assert.deepStrictEqual(validateDashboardMessage(ticket), { ok: true, request: ticket });
+    assert.deepStrictEqual(validateDashboardMessage(comment), { ok: true, request: comment });
+    for (const invalid of [0, -1, 1.5, "42", Number.MAX_SAFE_INTEGER + 1]) {
+      assert.strictEqual(validateDashboardMessage({ ...ticket, ticketId: invalid }).ok, false);
+      assert.strictEqual(validateDashboardMessage({ ...comment, commentId: invalid }).ok, false);
+    }
+    for (const connectionGeneration of [undefined, -1, 0.5, Number.MAX_SAFE_INTEGER + 1]) {
+      assert.strictEqual(validateDashboardMessage({ ...ticket, connectionGeneration }).ok, false);
+      assert.strictEqual(validateDashboardMessage({ ...comment, connectionGeneration }).ok, false);
+    }
+  });
+
+  test("保留項目を開く要求は項目 ID だけをホストへ渡す", () => {
+    const request = { type: "unsynced.openPendingChange", requestId: "pending", itemId: "a".repeat(64) };
+    assert.deepStrictEqual(validateDashboardMessage({ ...request, documentUri: "file:///untrusted.md" }), { ok: true, request });
+    assert.strictEqual(validateDashboardMessage({ ...request, itemId: "file:///untrusted.md" }).ok, false);
+  });
+
+  test("下書き破棄は項目 ID を要求し、エディターのパスや別の接続先を受け取らない", () => {
+    const request = { type: "unsynced.discardPendingChange", requestId: "pending", itemId: "b".repeat(64) };
+    assert.deepStrictEqual(validateDashboardMessage({ ...request, connectionScope: "https://another.invalid/", documentUri: "file:///other.md" }), { ok: true, request });
+    assert.strictEqual(validateDashboardMessage({ ...request, itemId: "file:///untrusted.md" }).ok, false);
+  });
+
   test("ticket.createChild: parentTicketId が数値でないと拒否される", () => {
     const r = validateDashboardMessage({ type: "ticket.createChild", requestId: "r", parentTicketId: "bad" });
     assert.strictEqual(r.ok, false);
