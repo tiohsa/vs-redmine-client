@@ -7,6 +7,7 @@ import { focusTicketEditor } from "../commands/focusTicketEditor";
 import { reloadTicketFromEditor } from "../commands/reloadTicket";
 import { showError, showSuccess } from "../utils/notifications";
 import { insertRedmineTicketFrontmatter } from "../commands/insertRedmineTicketFrontmatter";
+import { VIEW_ID_DASHBOARD } from "../dashboard/dashboardProtocol";
 import {
   CREATE_TICKET_FROM_MARKDOWN_HEADER_COMMAND,
   INSERT_REDMINE_TICKET_FRONTMATTER_COMMAND,
@@ -31,10 +32,17 @@ export const registerTicketEditorCommands = (
   };
 
   context.subscriptions.push(
-    registerStubMessage(
-      "redmine-client.searchTickets",
-      vscode.l10n.t("Search and select tickets from the Dashboard."),
-    ),
+    vscode.commands.registerCommand("redmine-client.searchTickets", async () => {
+      try {
+        await dashboardProvider.focusTicketSearch(() =>
+          vscode.commands.executeCommand(`${VIEW_ID_DASHBOARD}.focus`),
+        );
+      } catch (error) {
+        await vscode.window.showErrorMessage(
+          error instanceof Error ? error.message : vscode.l10n.t("Could not focus the Dashboard search."),
+        );
+      }
+    }),
     vscode.commands.registerCommand("redmine-client.focusTicketEditor", async (input: unknown) => {
       const payload = input as { ticketId?: number; uri?: string } | number | undefined;
       const ticketId = typeof payload === "number" ? payload : payload?.ticketId;

@@ -5,6 +5,7 @@ import { buildDashboardStrings } from "./dashboardI18n";
 import { DashboardController } from "./DashboardController";
 import { DashboardMessageRouter } from "./DashboardMessageRouter";
 import { DashboardStateStore } from "./DashboardStateStore";
+import { DashboardFocusCoordinator } from "./DashboardFocusCoordinator";
 import type { DashboardEvent, DashboardState } from "./dashboardProtocol";
 import { VIEW_ID_DASHBOARD } from "./dashboardProtocol";
 import type { SyncEngine } from "../app/syncEngine";
@@ -21,6 +22,7 @@ export class DashboardWebviewProvider
   private readonly store: DashboardStateStore;
   private readonly controller: DashboardController;
   private readonly router: DashboardMessageRouter;
+  private readonly focusCoordinator = new DashboardFocusCoordinator();
   private readonly disposables: vscode.Disposable[] = [];
 
   constructor(
@@ -67,6 +69,7 @@ export class DashboardWebviewProvider
     token: vscode.CancellationToken,
   ): void {
     this.view = webviewView;
+    this.focusCoordinator.setView(webviewView);
 
     webviewView.webview.options = {
       enableScripts: true,
@@ -74,21 +77,27 @@ export class DashboardWebviewProvider
     };
 
     const nonce = generateNonce();
-    webviewView.webview.html = buildDashboardHtml(nonce, buildDashboardStrings());
 
     this.disposables.push(
       webviewView.webview.onDidReceiveMessage(async (raw: unknown) => {
         if (token.isCancellationRequested) {
           return;
         }
-        await this.router.route(raw);
+        await this.router.route(raw, () => this.focusCoordinator.markReady(webviewView));
       }),
       webviewView.onDidChangeVisibility(() => {
+        this.focusCoordinator.visibilityChanged();
         if (webviewView.visible && this.latestState) {
           this.send({ type: "dashboard.state", state: this.latestState });
         }
       }),
+      webviewView.onDidDispose(() => {
+        if (this.view !== webviewView) { return; }
+        this.view = undefined;
+        this.focusCoordinator.setView(undefined);
+      }),
     );
+    webviewView.webview.html = buildDashboardHtml(nonce, buildDashboardStrings());
   }
 
   private send(event: DashboardEvent): void {
@@ -102,7 +111,12 @@ export class DashboardWebviewProvider
   }
 
   dispose(): void {
+    this.focusCoordinator.cancel(new Error(vscode.l10n.t("The Dashboard view was closed before it was ready.")));
     this.disposables.forEach((d) => d.dispose());
+  }
+
+  focusTicketSearch(reveal: () => Thenable<unknown>): Promise<void> {
+    return this.focusCoordinator.focus(reveal);
   }
 
   refreshTickets(): void {

@@ -70,6 +70,14 @@ window.addEventListener('message',function(event){ const message=event.data || {
     }
     if(panel && panel.mode !== 'detail' && !panel.loading && (openingComposer || previousComposer?.loading)) document.getElementById('work-tracker')?.focus();
     if(previousComposer?.mode === 'newTicket' && (!panel || panel.mode === 'detail')) document.getElementById('project-select-trigger')?.focus();
+  } else if(message.type === 'view.focusTicketSearch'){
+    closeProjectPicker(false); closeLayoutPopover(); closeTicketActionMenus();
+    if(!filterDialog.classList.contains('hidden')) closeFilterDialog();
+    activateTab('tickets');
+    if(detailFocus && !document.getElementById('ticket-detail-card').classList.contains('hidden')){
+      detailFocus=false; persistViewState(); applyTicketLayoutMode();
+    }
+    searchInput.focus();
   } else if(message.type === 'view.toggleCompactMode'){ compactMode = !compactMode; persistViewState(); applyCompactMode(); } else if(message.type === 'operation.started'){ startOperation(message.requestId,message.label); } else if(message.type === 'operation.success'){ endOperation(message.requestId); if(!finishOperation(message.level || 'success',message.requestId,message.message)) showToast(message.level || 'success',message.message); } else if(message.type === 'operation.error'){ endOperation(message.requestId); if(!finishOperation('error',message.requestId,message.message)) showToast('error',message.message); } else if(message.type === 'toast'){ showToast(message.level,message.message); } });
 document.addEventListener('keydown',function(event){
   if(event.defaultPrevented || event.key !== 'Escape') return;

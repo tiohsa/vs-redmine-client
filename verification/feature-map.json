@@ -40,6 +40,8 @@
         "#project-select-trigger",
         "#tab-tickets",
         "#search-input",
+        "#detail-focus-toggle",
+        "#advanced-filter-dialog",
         ".ticket-row[data-id]",
         "#tab-settings",
         "#set-sort-field",
@@ -47,6 +49,7 @@
       ],
       "invariants": [
         "プロジェクト選択と子プロジェクトの設定に従ってチケットを表示する。",
+        "検索コマンドは Dashboard の Tickets タブを開き、既存の検索条件を保持して検索欄にフォーカスする。詳細フォーカスで検索欄が隠れていれば設定を解除して保存する。",
         "Dashboard の操作メッセージは検証してから処理する。",
         "期日と開始日の並び替えは取得済みチケットに適用し、階層と検索の直接一致優先を維持する。"
       ],
@@ -55,6 +58,7 @@
         "src/test/dashboardMessageValidation.test.ts",
         "src/test/ticketsSettingsSorting.test.ts",
         "src/test/dashboardTicketSearch.test.ts",
+        "src/test/dashboardSearchFocus.test.ts",
         "src/test/ticketListSettingsStore.test.ts",
         "src/test/dashboardValidationExtended.test.ts",
         "src/test/createdTicketListSelection.test.ts",

@@ -386,6 +386,7 @@ export type DashboardEvent =
   | { type: "operation.success"; requestId: string; message: string; level?: "success" | "info" | "warning" }
   | { type: "operation.error"; requestId: string; message: string }
   | { type: "toast"; level: "info" | "warning" | "error" | "success"; message: string }
-  | { type: "view.toggleCompactMode" };
+  | { type: "view.toggleCompactMode" }
+  | { type: "view.focusTicketSearch" };
 
 export const VIEW_ID_DASHBOARD = "redmine-clientActivityDashboard";

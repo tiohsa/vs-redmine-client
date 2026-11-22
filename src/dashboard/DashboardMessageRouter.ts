@@ -6,7 +6,7 @@ import { logOperation } from "../utils/redmineLogger";
 export class DashboardMessageRouter {
   constructor(private readonly controller: DashboardController) {}
 
-  async route(raw: unknown): Promise<void> {
+  async route(raw: unknown, onDashboardReady?: () => void): Promise<void> {
     const result = validateDashboardMessage(raw);
     if (!result.ok) {
       logOperation({
@@ -15,6 +15,9 @@ export class DashboardMessageRouter {
         message: result.reason,
       });
       return;
+    }
+    if (result.request.type === "dashboard.ready") {
+      onDashboardReady?.();
     }
     await this.controller.handle(result.request);
   }

@@ -867,6 +867,15 @@ async function main() {
   await call('Page.navigate', { url: 'file://' + fixture });
   await evaluate(`new Promise(resolve=>{if(document.readyState==='complete')resolve();else window.addEventListener('load',resolve,{once:true})})`);
   assert.equal(await evaluate('document.documentElement.lang'), 'ja');
+  const focusTicketSearch = () => evaluate(`window.dispatchEvent(new MessageEvent('message', { data: { type: 'view.focusTicketSearch' } }))`);
+  await focusTicketSearch();
+  assert.equal(await evaluate(`document.activeElement.id`), 'search-input');
+  assert.deepEqual(await evaluate(`window.messages.map(message => message.type)`), ['dashboard.ready']);
+  state.loading.tickets = true;
+  await push();
+  assert.equal(await evaluate(`document.activeElement.id`), 'search-input');
+  await evaluate(`document.activeElement.blur()`);
+  state.loading.tickets = false;
   // 重複排除で表示件数が総件数未満でも、API取得完了なら追加ボタンを隠す。
   state.totalTicketCount = 3;
   state.hasMoreTickets = true;
@@ -1335,6 +1344,44 @@ async function main() {
   await push();
   assert.equal(await evaluate(`document.querySelectorAll('.ticket-row').length`), 1);
   assert.equal(await evaluate(`document.querySelector('.ticket-row').dataset.id`), '11');
+  // 外部コマンドは検索条件を維持して、モーダルと詳細集中表示から検索欄へ戻す。
+  state.selectedTicketId=11;
+  state.selectedTicket={...state.tickets[0],projectName:'検証プロジェクト'};
+  state.workPanel={mode:'detail',ticketId:11};
+  await push();
+  const focusSearchFilters = await evaluate(`window.acquireVsCodeApi().getState()?.quickFilters || []`);
+  await evaluate(`
+    const layoutControl = document.getElementById('ticket-layout-mode');
+    layoutControl.value = 'split';
+    layoutControl.dispatchEvent(new Event('change'));
+    document.getElementById('detail-focus-toggle').click();
+    document.getElementById('tab-settings').click();
+    document.getElementById('project-select-trigger').click();
+    window.messages.length = 0;
+  `);
+  await focusTicketSearch();
+  assert.equal(await evaluate(`document.activeElement.id`), 'search-input');
+  assert.equal(await evaluate(`document.getElementById('tab-tickets').getAttribute('aria-selected')`), 'true');
+  assert.equal(await evaluate(`document.getElementById('project-picker-popup').hidden`), true);
+  assert.equal(await evaluate(`document.getElementById('ticket-detail-card').classList.contains('hidden')`), false);
+  assert.deepEqual(await evaluate(`(({detailFocus,ticketLayoutMode,quickFilters})=>({detailFocus,ticketLayoutMode,quickFilters}))(window.acquireVsCodeApi().getState())`), {detailFocus:false,ticketLayoutMode:'split',quickFilters:focusSearchFilters});
+  assert.equal(await evaluate(`document.getElementById('search-input').value`), '本文だけ');
+  assert.equal(await evaluate(`window.messages.filter(m=>m.type==='tickets.search').length`), 0);
+  await evaluate(`
+    document.getElementById('advanced-filters-btn').click();
+    document.getElementById('advanced-unassigned').checked = false;
+    window.messages.length = 0;
+  `);
+  await focusTicketSearch();
+  assert.equal(await evaluate(`document.getElementById('advanced-filter-dialog').classList.contains('hidden')`), true);
+  assert.equal(await evaluate(`document.activeElement.id`), 'search-input');
+  assert.equal(await evaluate(`window.messages.length`), 0);
+  await typeText('x');
+  await new Promise(resolve => setTimeout(resolve,350));
+  assert.deepEqual(await evaluate(`(({query,scope})=>({query,scope}))(window.messages.at(-1))`), {query:'本文だけx',scope:{kind:'project',projectId:1}});
+  await evaluate(`document.getElementById('search-input').value='本文だけ';document.getElementById('ticket-layout-mode').value='auto';document.getElementById('ticket-layout-mode').dispatchEvent(new Event('change'))`);
+  state.selectedTicketId=undefined; state.selectedTicket=undefined; state.workPanel=undefined;
+  await push();
   await evaluate(`document.getElementById('project-select-trigger').click();document.getElementById('project-option-0').click()`);
   assert.deepEqual(await evaluate(`(({type,query})=>({type,query}))(window.messages.at(-1))`), {type:'project.selectAll',query:'本文だけ'});
   state.selectedProject=undefined;
