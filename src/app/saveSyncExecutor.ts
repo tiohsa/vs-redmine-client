@@ -21,6 +21,7 @@ import {
 } from "../views/ticketEditorRegistry";
 import { renameSyncedNewTicketFileIfEligible } from "../views/ticketSync/ticketEditorRewrite";
 import { refreshTicketEditorContexts } from "./editorEventController";
+import { updateTicketDraftStatusFromDocument } from "./editorDocumentPreview";
 import {
   addOfflineCommentUpdateAsync,
   getActiveScope,
@@ -63,6 +64,7 @@ export const performSyncOnSave = async (
   document: vscode.TextDocument,
   editor: vscode.TextEditor | undefined,
   deps: SaveSyncExecutorDeps,
+  savedContent = document.getText(),
 ): Promise<void> => {
   const currentScope = getActiveScope() || getCurrentConnectionScope();
   const operationScope = getConnectionScopeForDocument(document) ?? currentScope;
@@ -297,10 +299,29 @@ export const performSyncOnSave = async (
     else { unsyncedPresentation.refresh(); }
   };
 
+  const finishExistingTicketSave = async (
+    ticketId: number,
+    status: "queued" | "no_change",
+  ): Promise<void> => {
+    const refreshTicket = (): void => {
+      if (document.getText() !== savedContent) {
+        updateTicketDraftStatusFromDocument(document);
+      }
+      ticketsPresentation.notifyChange();
+    };
+    refreshTicket();
+
+    if (status === "queued" && syncMode === "auto" && deps.syncEngine) {
+      await syncIfAuto({ kind: "ticket", ticketId });
+      refreshTicket();
+    }
+  };
+
   if (editor) {
     let ticketResult = await handleTicketEditorSave(editor, {
       onSubjectUpdated: deps.updateTicketListSubject,
       operationScope,
+      savedContent,
     });
     if (ticketResult) {
       if (ticketResult.status === "conflict" && ticketResult.conflictContext) {
@@ -316,14 +337,16 @@ export const performSyncOnSave = async (
       if (ticketResult.status === "created") {
         ticketsPresentation.refresh();
         unsyncedPresentation.refresh();
-      } else if (ticketResult.status === "queued") {
+      } else if (ticketResult.status === "queued" || ticketResult.status === "no_change") {
         const ticketId = getTicketIdForDocument(editor.document) ?? getTicketIdForUri(editor.document.uri);
         if (ticketId && ticketId > 0) {
-          await syncIfAuto({ kind: "ticket", ticketId });
-        } else if (ticketId === NEW_TICKET_DRAFT_ID) {
-          await syncIfAuto(newTicketKey);
-        } else {
-          unsyncedPresentation.refresh();
+          await finishExistingTicketSave(ticketId, ticketResult.status);
+        } else if (ticketResult.status === "queued") {
+          if (ticketId === NEW_TICKET_DRAFT_ID) {
+            await syncIfAuto(newTicketKey);
+          } else {
+            unsyncedPresentation.refresh();
+          }
         }
       }
       return;
@@ -443,13 +466,13 @@ export const performSyncOnSave = async (
     case "parsedTicket": {
       const result = await queueTicketDraft({
         ticketId: classification.ticketId,
-        content: document.getText(),
+        content: savedContent,
         documentUri: document.uri,
         operationScope,
       });
       notifications.notifyTicketSaveResult(result);
-      if (result.status === "queued") {
-        await syncIfAuto({ kind: "ticket", ticketId: classification.ticketId });
+      if (result.status === "queued" || result.status === "no_change") {
+        await finishExistingTicketSave(classification.ticketId, result.status);
       } else {
         unsyncedPresentation.refresh();
       }

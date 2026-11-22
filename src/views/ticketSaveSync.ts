@@ -59,5 +59,6 @@ export const handleTicketEditorSave = async (
   options: {
     onSubjectUpdated?: (ticketId: number, subject: string) => void;
     operationScope?: string;
+    savedContent?: string;
   } = {},
 ): Promise<TicketSaveResult | undefined> => handleTicketEditorSaveInternal(editor, options);

@@ -7,9 +7,13 @@ import { TicketSyncService } from "../app/ticketSync";
 import { isSaveSyncSuppressed } from "../views/saveSyncSuppression";
 import { buildTicketEditorContent, parseTicketEditorContent } from "../views/ticketEditorContent";
 import { performSyncOnSave } from "../app/saveSyncExecutor";
-import { clearTicketDrafts, initializeTicketDraft } from "../views/ticketDraftStore";
+import { createSyncController } from "../app/syncController";
+import { registerEditorEvents } from "../app/editorEventController";
+import { updateTicketDraftStatusFromDocument } from "../app/editorDocumentPreview";
+import { resolveTicketSyncState } from "../dashboard/viewModels/ticketDashboardViewModel";
+import { clearTicketDrafts, getTicketDraftContent, initializeTicketDraft, updateDraftAfterSave } from "../views/ticketDraftStore";
 import { clearNewTicketDrafts } from "../views/newTicketDraftStore";
-import { clearOfflineSyncQueueAsync, getOfflineSyncQueue, initializeOfflineSyncStore } from "../views/offlineSyncStore";
+import { clearOfflineSyncQueueAsync, getOfflineSyncQueue, initializeOfflineSyncStore, onOfflineSyncQueueChanged } from "../views/offlineSyncStore";
 import {
   clearRegistry,
   registerNewCommentDraft,
@@ -115,6 +119,159 @@ suite("saveSyncExecutor auto/manual mode policy (RT-01, RT-02)", () => {
     assert.strictEqual(queue.tickets.get(101)?.subject, "Updated Subject");
   });
 
+  for (const visible of [true, false]) {
+    test(`保存結果を Dashboard に反映する（エディター表示中: ${visible}）`, async () => {
+      const ticketId = 103;
+      const metadata = buildIssueMetadataFixture();
+      const original = createTicketContentFixture("Original", "Body");
+      initializeTicketDraft(ticketId, "Original", "Body", metadata, undefined, scope);
+      const editor = createMutableEditorStub(vscode.Uri.file("/tmp/redmine-client-ticket-103.md"),
+        createTicketContentFixture("Original", "Earlier edit"));
+      registerTicketEditor(ticketId, editor, "primary", "ticket", 1, scope);
+      updateTicketDraftStatusFromDocument(editor.document);
+
+      const presented: ReturnType<typeof resolveTicketSyncState>[] = [];
+      const deps = {
+        ticketsPresentation: {
+          ...makeNoopProvider(),
+          notifyChange: () => { presented.push(resolveTicketSyncState(ticketId)); },
+        },
+        commentsPresentation: makeNoopProvider(),
+        unsyncedPresentation: makeNoopProvider(),
+        notifications: { notifyTicketSaveResult: () => undefined, notifyCommentSaveResult: () => undefined },
+        updateTicketListSubject: () => undefined,
+        offlineSyncMode: "manual" as const,
+      };
+
+      assert.strictEqual(resolveTicketSyncState(ticketId), "Dirty");
+      editor.document.setText(createTicketContentFixture("Original", "Saved edit", { children: ["Child"] }));
+      await performSyncOnSave(editor.document, visible ? editor : undefined, deps);
+      assert.strictEqual(presented.at(-1), "Queued");
+      assert.strictEqual(getTicketDraftContent(ticketId, scope)?.description, "Saved edit");
+      assert.deepStrictEqual(getOfflineSyncQueue(scope).tickets.get(ticketId)?.metadata.children, ["Child"]);
+
+      editor.document.setText(original);
+      await performSyncOnSave(editor.document, visible ? editor : undefined, deps);
+      assert.strictEqual(presented.at(-1), "Synced");
+      assert.strictEqual(getTicketDraftContent(ticketId, scope), undefined);
+      assert.strictEqual(getOfflineSyncQueue(scope).tickets.has(ticketId), false);
+    });
+  }
+
+  test("キューの永続化中に加えた編集は保存済みの入力と区別する", async () => {
+    const ticketId = 104;
+    initializeTicketDraft(ticketId, "Original", "Body", buildIssueMetadataFixture(), undefined, scope);
+    const editor = createMutableEditorStub(vscode.Uri.file("/tmp/redmine-client-ticket-104.md"),
+      `${createTicketContentFixture("Original", "Saved edit")}\n`);
+    registerTicketEditor(ticketId, editor, "primary", "ticket", 1, scope);
+    const newerEdit = createTicketContentFixture("Original", "Newer edit");
+    const unsubscribe = onOfflineSyncQueueChanged(() => {
+      if (getOfflineSyncQueue(scope).tickets.has(ticketId)) {
+        editor.document.setText(newerEdit);
+      }
+    });
+    const presented: ReturnType<typeof resolveTicketSyncState>[] = [];
+    try {
+      await performSyncOnSave(editor.document, editor, {
+        ticketsPresentation: {
+          ...makeNoopProvider(),
+          notifyChange: () => { presented.push(resolveTicketSyncState(ticketId)); },
+        },
+        commentsPresentation: makeNoopProvider(),
+        unsyncedPresentation: makeNoopProvider(),
+        notifications: { notifyTicketSaveResult: () => undefined, notifyCommentSaveResult: () => undefined },
+        updateTicketListSubject: () => undefined,
+        offlineSyncMode: "manual",
+      });
+      assert.strictEqual(editor.document.getText(), newerEdit);
+      assert.match(getOfflineSyncQueue(scope).tickets.get(ticketId)?.description ?? "", /^Saved edit/);
+      assert.strictEqual(presented.at(-1), "Dirty");
+    } finally {
+      unsubscribe();
+    }
+  });
+
+  test("保存イベント後に入力した未保存の変更をキューに含めない", async () => {
+    const ticketId = 105;
+    initializeTicketDraft(ticketId, "Original", "Body", buildIssueMetadataFixture(), undefined, scope);
+    const editor = createMutableEditorStub(vscode.Uri.file("/tmp/redmine-client-ticket-105.md"),
+      createTicketContentFixture("Original", "Saved edit"));
+    registerTicketEditor(ticketId, editor, "primary", "ticket", 1, scope);
+    const presented = new Promise<ReturnType<typeof resolveTicketSyncState>>((resolve) => {
+      const controller = createSyncController({
+        ticketsPresentation: {
+          ...makeNoopProvider(),
+          notifyChange: () => resolve(resolveTicketSyncState(ticketId)),
+        },
+        commentsPresentation: makeNoopProvider(),
+        unsyncedPresentation: makeNoopProvider(),
+        notifications: { notifyTicketSaveResult: () => undefined, notifyCommentSaveResult: () => undefined },
+        registerEditorDocument: () => undefined,
+        offlineSyncMode: "manual",
+        syncEngine: createSyncEngine(),
+      });
+      controller.syncOnSave(editor.document);
+      editor.document.setText(createTicketContentFixture("Original", "Newer edit"));
+    });
+
+    assert.strictEqual(await presented, "Dirty");
+    assert.strictEqual(getOfflineSyncQueue(scope).tickets.get(ticketId)?.description, "Saved edit");
+    assert.strictEqual(getTicketDraftContent(ticketId, scope)?.description, "Newer edit");
+  });
+
+  for (const mode of ["manual", "auto"] as const) {
+    test(`保存したエディターを閉じても編集中に戻らない (${mode})`, async () => {
+      const ticketId = 106;
+      const dir = await mkdtemp(join(tmpdir(), "redmine-save-close-"));
+      const uri = vscode.Uri.file(join(dir, "ticket.md"));
+      const context = { subscriptions: [] as vscode.Disposable[] };
+      const metadata = buildIssueMetadataFixture();
+      const children = mode === "manual" ? ["Child"] : [];
+      const expectedStatus = mode === "manual" ? "Queued" : "Synced";
+      initializeTicketDraft(ticketId, "Original", "Body", metadata, undefined, scope);
+      try {
+        registerEditorEvents(context, {
+          registerEditorDocument: () => undefined,
+          updateTicketStatus: () => undefined,
+          notifyTicketChanged: () => undefined,
+          sync: { syncOnSave: () => undefined },
+        });
+        const savedContent = createTicketContentFixture("Original", "Saved edit", { children });
+        await vscode.workspace.fs.writeFile(uri, Buffer.from(savedContent));
+        const document = await vscode.workspace.openTextDocument(uri);
+        const editor = await vscode.window.showTextDocument(document);
+        registerTicketEditor(ticketId, editor, "primary", "ticket", 1, scope);
+        await performSyncOnSave(document, editor, {
+          ticketsPresentation: makeNoopProvider(),
+          commentsPresentation: makeNoopProvider(),
+          unsyncedPresentation: makeNoopProvider(),
+          notifications: { notifyTicketSaveResult: () => undefined, notifyCommentSaveResult: () => undefined },
+          updateTicketListSubject: () => undefined,
+          offlineSyncMode: mode,
+          syncEngine: {
+            syncOne: async () => {
+              await clearOfflineSyncQueueAsync(scope);
+              updateDraftAfterSave(ticketId, "Original", "Canonical body", metadata, undefined, scope);
+              return { kind: "completed", ticketId };
+            },
+          },
+        });
+        assert.strictEqual(resolveTicketSyncState(ticketId), expectedStatus);
+        await vscode.commands.executeCommand(mode === "manual"
+          ? "workbench.action.revertAndCloseActiveEditor"
+          : "workbench.action.closeActiveEditor");
+        assert.notStrictEqual(vscode.window.activeTextEditor?.document, document);
+        assert.strictEqual(resolveTicketSyncState(ticketId), expectedStatus);
+        if (mode === "manual") {
+          assert.deepStrictEqual(getOfflineSyncQueue(scope).tickets.get(ticketId)?.metadata.children, children);
+        }
+      } finally {
+        context.subscriptions.forEach((subscription) => subscription.dispose());
+        await rm(dir, { recursive: true, force: true });
+      }
+    });
+  }
+
   test("RT-01: auto モード時は Ctrl+S でキューイング後に即座に Redmine 同期が実行される", async () => {
     const uri = vscode.Uri.parse("file:///tmp/project-1_ticket-102.md");
     const initialMetadata = buildIssueMetadataFixture({ status: "New" });
@@ -126,9 +283,13 @@ suite("saveSyncExecutor auto/manual mode policy (RT-01, RT-02)", () => {
 
     let syncQueueItemCalls = 0;
     const notifications: { status: string; message: string }[] = [];
+    const presented: ReturnType<typeof resolveTicketSyncState>[] = [];
 
     await performSyncOnSave(editor.document, editor, {
-      ticketsPresentation: makeNoopProvider(),
+      ticketsPresentation: {
+        ...makeNoopProvider(),
+        notifyChange: () => { presented.push(resolveTicketSyncState(102)); },
+      },
       commentsPresentation: makeNoopProvider(),
       unsyncedPresentation: makeNoopProvider(),
       notifications: {
@@ -142,7 +303,8 @@ suite("saveSyncExecutor auto/manual mode policy (RT-01, RT-02)", () => {
           syncQueueItem: async (key) => {
             syncQueueItemCalls++;
             assert.strictEqual(key.kind, "ticket");
-            assert.strictEqual((key as any).ticketId, 102);
+            assert.strictEqual(key.ticketId, 102);
+            await clearOfflineSyncQueueAsync(scope);
             return { kind: "completed", ticketId: 102 };
           },
           syncAll: async () => ({ plan: [], results: [], remaining: [], cancelled: false }),
@@ -152,6 +314,8 @@ suite("saveSyncExecutor auto/manual mode policy (RT-01, RT-02)", () => {
     });
 
     assert.strictEqual(syncQueueItemCalls, 1, "auto モードでは即時同期が実行されること");
+    assert.strictEqual(presented[0], "Queued");
+    assert.strictEqual(presented.at(-1), "Synced");
   });
 
   for (const mode of ["auto", "manual"] as const) {

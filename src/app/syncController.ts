@@ -139,7 +139,7 @@ export const createSyncController = (deps: SyncControllerDeps): SyncController =
     }
   };
 
-  const handleSyncOnSave = async (document: vscode.TextDocument): Promise<void> => {
+  const handleSyncOnSave = async (document: vscode.TextDocument, savedContent: string): Promise<void> => {
     const editor =
       vscode.window.visibleTextEditors.find((candidate) => candidate.document === document) ??
       (vscode.window.activeTextEditor?.document === document
@@ -153,7 +153,7 @@ export const createSyncController = (deps: SyncControllerDeps): SyncController =
       updateTicketListSubject,
       syncEngine: deps.syncEngine,
       offlineSyncMode: deps.offlineSyncMode,
-    });
+    }, savedContent);
   };
 
   const syncOnSave = (document: vscode.TextDocument): void => {
@@ -166,7 +166,8 @@ export const createSyncController = (deps: SyncControllerDeps): SyncController =
       return;
     }
 
-    scheduleSave(uriString, () => handleSyncOnSave(document), async (error, uri) => {
+    const savedContent = document.getText();
+    scheduleSave(uriString, () => handleSyncOnSave(document, savedContent), async (error, uri) => {
       console.error("Save synchronization failed", uri, error);
       // The queue observes this Promise independently of subsequent saves.
       await vscode.window.showErrorMessage(vscode.l10n.t("Save synchronization failed."));

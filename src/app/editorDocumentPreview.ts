@@ -4,8 +4,8 @@ import { getTicketDraft, getTicketDraftContent, markDraftStatus, setTicketDraftC
 import { isSaveSyncSuppressed } from "../views/saveSyncSuppression";
 import {
   detectTicketChanges,
-  detectTicketIntentChanges,
   isSafeQueuedTicketUpdate,
+  matchesQueuedTicketIntent,
   parseQueuedTicketIntent,
 } from "../views/ticketSync/ticketChangeDetector";
 import { getOfflineSyncQueue, isAbandoned } from "../views/offlineSyncStore";
@@ -47,6 +47,9 @@ export const updateTicketDraftStatusFromDocument = (
   if (draft.status !== "Synced" && draft.status !== "Dirty" && draft.status !== "Queued") {
     return false;
   }
+  if (document.isDirty === false && draft.status !== "Dirty") {
+    return false;
+  }
 
   const prevDisplay = getTicketDraftContent(ticketId, connectionScope);
   const prevSubject = prevDisplay?.subject ?? draft.baseSubject;
@@ -62,11 +65,7 @@ export const updateTicketDraftStatusFromDocument = (
     const queued = getOfflineSyncQueue(connectionScope).tickets.get(ticketId);
     if (queued && isSafeQueuedTicketUpdate(queued)) {
       const queuedContent = parseQueuedTicketIntent(queued);
-      nextStatus = queuedContent && !detectTicketIntentChanges({
-        subject: queuedContent.subject,
-        description: queuedContent.description,
-        metadata: queuedContent.metadata,
-      }, content).hasChanges
+      nextStatus = queuedContent && matchesQueuedTicketIntent(queuedContent, content)
         ? "Queued"
         : "Dirty";
     } else {

@@ -78,6 +78,7 @@ export const queueTicketDraft = async (
     const scope = input.operationScope ?? getActiveScope();
     const queued = getOfflineSyncQueue(scope).tickets.get(input.ticketId);
     if (!queued) {
+      setTicketDraftContent(input.ticketId, parsed, input.operationScope);
       markDraftStatus(input.ticketId, "Synced", input.operationScope);
       return buildResult("no_change", "No changes to save.");
     }
@@ -110,14 +111,15 @@ export const queueTicketDraft = async (
   });
 
   const clearedMetadata: IssueMetadata = { ...parsed.metadata, children: [] };
-  const normalizedContent = buildTicketEditorContent({
+  const localContent = {
     subject,
     description: parsed.description,
     metadata: input.editor ? clearedMetadata : parsed.metadata,
     layout: parsed.layout,
     metadataBlock: parsed.metadataBlock,
     controlFields: parsed.controlFields,
-  });
+  };
+  const normalizedContent = buildTicketEditorContent(localContent);
 
   const registered = await addOfflineTicketUpdateAsync(input.ticketId, {
     ticketId: input.ticketId,
@@ -147,9 +149,10 @@ export const queueTicketDraft = async (
     return buildResult("no_change", "No changes to save.");
   }
   if (!input.queueUnchanged) {
+    setTicketDraftContent(input.ticketId, localContent, input.operationScope);
     markDraftStatus(input.ticketId, "Queued", input.operationScope);
   }
-  if (input.editor) {
+  if (input.editor && input.editor.document.getText() === input.content) {
     await applyEditorContent(input.editor, normalizedContent);
     setEditorDisplaySource(input.editor, "saved");
   }
@@ -171,6 +174,7 @@ export const queueTicketDraft = async (
 export const saveTicketDraftLocally = async (
   editor: vscode.TextEditor,
   operationScope?: string,
+  savedContent?: string,
 ): Promise<TicketSaveResult | undefined> => {
   if (!isTicketEditor(editor)) { return undefined; }
   if (getEditorContentType(editor) !== "ticket") { return undefined; }
@@ -184,7 +188,7 @@ export const saveTicketDraftLocally = async (
 
   return queueTicketDraft({
     ticketId,
-    content: editor.document.getText(),
+    content: savedContent ?? editor.document.getText(),
     editor,
     operationScope,
   });
@@ -192,13 +196,13 @@ export const saveTicketDraftLocally = async (
 
 export const handleTicketEditorSave = async (
   editor: vscode.TextEditor,
-  options: { onSubjectUpdated?: (ticketId: number, subject: string) => void; operationScope?: string } = {},
+  options: { onSubjectUpdated?: (ticketId: number, subject: string) => void; operationScope?: string; savedContent?: string } = {},
 ): Promise<TicketSaveResult | undefined> => {
   if (isSaveSyncSuppressed(editor.document.uri.toString())) {
     return undefined;
   }
 
-  const result = await saveTicketDraftLocally(editor, options.operationScope);
+  const result = await saveTicketDraftLocally(editor, options.operationScope, options.savedContent);
   if (result !== undefined) {
     return result;
   }

@@ -251,7 +251,7 @@ export interface EditorEventDeps {
 }
 
 export const registerEditorEvents = (
-  context: vscode.ExtensionContext,
+  context: Pick<vscode.ExtensionContext, "subscriptions">,
   deps: EditorEventDeps,
 ): void => {
   const {
@@ -284,7 +284,7 @@ export const registerEditorEvents = (
       if (previousActiveEditor && isTicketEditor(previousActiveEditor)) {
         const ticketId = getTicketIdForEditor(previousActiveEditor);
         const contentType = getEditorContentType(previousActiveEditor);
-        if (ticketId && contentType === "ticket") {
+        if (ticketId && contentType === "ticket" && previousActiveEditor.document.isDirty) {
           try {
             const parsed = parseTicketEditorContent(
               previousActiveEditor.document.getText(),
@@ -347,7 +347,9 @@ export const registerEditorEvents = (
 
   context.subscriptions.push(
     vscode.workspace.onDidChangeTextDocument((event) => {
-      documentChanges.schedule(event.document);
+      if (event.contentChanges.length > 0) {
+        documentChanges.schedule(event.document);
+      }
     }),
   );
 
