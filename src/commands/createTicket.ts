@@ -59,6 +59,7 @@ export interface CreateTicketDependencies {
   promptSubject?: () => Promise<string | undefined>;
   promptAttachments?: () => Promise<Array<IssueAttachmentSource | IssueUploadInput>>;
   getDefaultProjectId?: () => string;
+  onTicketCreated?: (ticketId: number, connectionScope: string) => void | Promise<void>;
 }
 
 export const createTicketFromEditor = async (
@@ -115,6 +116,12 @@ export const createTicketFromEditor = async (
     });
 
     if (outcome.kind === "completed") {
+      if (outcome.ticketId > 0 && deps.onTicketCreated) {
+        try {
+          await deps.onTicketCreated(outcome.ticketId, operationScope);
+        } catch {
+        }
+      }
       showInfo(vscode.l10n.t("Ticket created successfully."));
     } else if (outcome.kind === "remote_committed") {
       showWarning(outcome.message ?? vscode.l10n.t("Ticket was created, but local finalization is pending."));

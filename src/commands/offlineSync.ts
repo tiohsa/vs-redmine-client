@@ -4,6 +4,8 @@ import {
   isAbandoned,
   OfflineCommentUpdate,
   OfflineTicketUpdate,
+  resolveStoredOfflineOperation,
+  sameDocumentIdentity,
 } from "../views/offlineSyncStore";
 import { showInfo, showWarning } from "../utils/notifications";
 import { getCurrentConnectionScope } from "../config/connectionScope";
@@ -11,6 +13,8 @@ import { CreateOperationHttpError } from "../redmine/httpError";
 import { runWithConnectionScope } from "../redmine/client";
 import { createSyncEngine, createTicketSyncService } from "../app/ticketSync";
 import type { SyncEngine, TicketSyncService } from "../app/ticketSync";
+import { renameSyncedNewTicketFileIfEligible } from "../views/ticketSync/ticketEditorRewrite";
+import { refreshTicketEditorContexts } from "../app/editorEventController";
 
 const summarizeFailures = (
   ticketFailures: OfflineTicketUpdate[],
@@ -33,6 +37,8 @@ const summarizeFailures = (
 export type OfflineSyncRunResult = {
   remainingChanges?: number;
   newTicketDiagnostics?: readonly string[];
+  createdTicketIds?: readonly number[];
+  createdComments?: ReadonlyArray<{ ticketId: number; commentId: number }>;
 } & (
   | { status: "nothing_to_sync"; total: 0; synced: 0; failed: 0; conflicts: 0 }
   | { status: "success"; total: number; synced: number; failed: 0; conflicts: 0 }
@@ -87,6 +93,9 @@ const runOfflineSyncAtScope = async (
   const failedComments: OfflineCommentUpdate[] = [];
   const failedNewTickets: typeof queue.newTickets = [];
 
+  const newTicketSnapshot = queue.newTickets.map((item) => ({ ...item }));
+  const createdTicketIds: number[] = [];
+  const createdComments: Array<{ ticketId: number; commentId: number }> = [];
   const newTicketErrors = new Set<string>();
   let synced = 0;
   let conflicts = 0;
@@ -124,6 +133,41 @@ const runOfflineSyncAtScope = async (
           synced++;
         } else if (outcome.kind === "conflict") {
           conflicts++;
+        }
+
+        if (key.kind === "newTicket" && outcome.kind === "completed") {
+          const createdId =
+            "ticketId" in outcome && typeof outcome.ticketId === "number" && outcome.ticketId > 0
+              ? outcome.ticketId
+              : undefined;
+          if (createdId !== undefined) {
+            createdTicketIds.push(createdId);
+            const original = newTicketSnapshot.find((candidate) =>
+              (key.queueId && candidate.queueId === key.queueId) ||
+              (key.documentUri && sameDocumentIdentity(candidate.documentUri, key.documentUri))
+            );
+            const remainingEntry = resolveStoredOfflineOperation(getOfflineSyncQueue(operationScope), key)?.value;
+            if (original?.documentUri && !remainingEntry) {
+              await renameSyncedNewTicketFileIfEligible({
+                oldUri: vscode.Uri.parse(original.documentUri),
+                ticketId: createdId,
+                projectId: original.projectId,
+                connectionScope: operationScope,
+              });
+              refreshTicketEditorContexts();
+            }
+          }
+        }
+
+        if (
+          key.kind === "comment" &&
+          key.commentId === undefined &&
+          outcome.kind === "completed" &&
+          "commentId" in outcome &&
+          typeof outcome.commentId === "number" &&
+          outcome.commentId > 0
+        ) {
+          createdComments.push({ ticketId: key.ticketId, commentId: outcome.commentId });
         }
 
         if (outcome.kind !== "completed" && outcome.kind !== "no_change") {
@@ -189,6 +233,8 @@ const runOfflineSyncAtScope = async (
       failed,
       conflicts,
       ...(diagnostics.length > 0 ? { newTicketDiagnostics: diagnostics } : {}),
+      ...(createdTicketIds.length > 0 ? { createdTicketIds } : {}),
+      ...(createdComments.length > 0 ? { createdComments } : {}),
     };
     const parts: string[] = [];
     if (synced > 0) { parts.push(vscode.l10n.t("Synced: {0}", synced)); }
@@ -218,5 +264,14 @@ const runOfflineSyncAtScope = async (
   info(remainingChanges > 0
     ? vscode.l10n.t("Sync completed. Synced: {0}; local changes remaining: {1}.", synced, remainingChanges)
     : vscode.l10n.t("Sync completed. Synced: {0}.", synced));
-  return { status: "success", total: totalItems, synced, failed: 0, conflicts: 0, ...(remainingChanges > 0 ? { remainingChanges } : {}) };
+  return {
+    status: "success",
+    total: totalItems,
+    synced,
+    failed: 0,
+    conflicts: 0,
+    ...(remainingChanges > 0 ? { remainingChanges } : {}),
+    ...(createdTicketIds.length > 0 ? { createdTicketIds } : {}),
+    ...(createdComments.length > 0 ? { createdComments } : {}),
+  };
 };

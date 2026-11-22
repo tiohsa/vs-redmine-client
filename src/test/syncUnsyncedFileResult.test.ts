@@ -1,4 +1,8 @@
 import * as assert from "assert";
+import * as fs from "fs";
+import * as os from "os";
+import * as path from "path";
+import * as vscode from "vscode";
 import {
   clearOfflineSyncQueueAsync,
   initializeOfflineSyncStore,
@@ -212,5 +216,222 @@ suite("syncUnsyncedFileResult — 構造化戻り値", () => {
 
     assert.deepStrictEqual(result, { status: "queued", kind: "ticket", id: 123 });
     assert.strictEqual(syncOneCalls, 1);
+  });
+
+  test("local_finalize_pending の ticket は詳細理由付きメッセージとモーダル復旧で完了またはキャンセルできる", async () => {
+    const metadata = buildIssueMetadataFixture();
+    const scope = getCurrentConnectionScope();
+    await addOfflineTicketUpdateAsync(555, {
+      ticketId: 555,
+      operationId: "ticket:555",
+      baseSubject: "Base",
+      baseDescription: "Base",
+      baseMetadata: metadata,
+      subject: "Updated",
+      description: "Updated body",
+      metadata,
+      phase: "local_finalize_pending",
+    }, scope);
+
+    let resolveCalls = 0;
+    const fakeEngine = {
+      syncOne: async () => ({
+        kind: "remote_committed" as const,
+        ticketId: 555,
+        pending: "local_finalize" as const,
+        message: "Editor rewrite pending: stale_source",
+      }),
+      getRecoveryItems: () => [],
+      ticketService: () => ({}),
+      resolveLocalFinalize: async () => {
+        resolveCalls++;
+        return { kind: "completed" as const, ticketId: 555 };
+      },
+    } as unknown as ReturnType<typeof import("../app/syncEngine").createSyncEngine>;
+
+    const vscode = await import("vscode");
+    const originalShowWarningMessage = vscode.window.showWarningMessage;
+    try {
+      (vscode.window as unknown as { showWarningMessage: typeof originalShowWarningMessage }).showWarningMessage =
+        (async () => undefined) as unknown as typeof originalShowWarningMessage;
+      const cancelled = await syncUnsyncedFile(
+        { syncKey: { kind: "ticket", ticketId: 555 } },
+        {
+          suppressResultNotifications: true,
+          createTicketSyncService: (() => ({})) as never,
+          createSyncEngine: (() => fakeEngine) as never,
+        },
+      );
+      assert.deepStrictEqual(cancelled, { status: "cancelled", kind: "ticket" });
+      assert.strictEqual(resolveCalls, 0);
+
+      (vscode.window as unknown as { showWarningMessage: typeof originalShowWarningMessage }).showWarningMessage =
+        (async (_message: string, _options: unknown, ...items: string[]) => items[0]) as unknown as typeof originalShowWarningMessage;
+      const completed = await syncUnsyncedFile(
+        { syncKey: { kind: "ticket", ticketId: 555 } },
+        {
+          suppressResultNotifications: true,
+          createTicketSyncService: (() => ({})) as never,
+          createSyncEngine: (() => fakeEngine) as never,
+        },
+      );
+      assert.deepStrictEqual(completed, { status: "success", kind: "ticket", id: 555, hasRemainingChanges: true });
+      assert.strictEqual(resolveCalls, 1);
+
+      const noResolverEngine = {
+        ...fakeEngine,
+        resolveLocalFinalize: undefined,
+      } as unknown as ReturnType<typeof import("../app/syncEngine").createSyncEngine>;
+      const pending = await syncUnsyncedFile(
+        { syncKey: { kind: "ticket", ticketId: 555 } },
+        {
+          suppressResultNotifications: true,
+          createTicketSyncService: (() => ({})) as never,
+          createSyncEngine: (() => noResolverEngine) as never,
+        },
+      );
+      assert.strictEqual(pending?.status, "recovery_pending");
+      if (pending?.status === "recovery_pending") {
+        assert.ok(pending.message.includes("Editor rewrite pending: stale_source"));
+      }
+    } finally {
+      (vscode.window as unknown as { showWarningMessage: typeof originalShowWarningMessage }).showWarningMessage =
+        originalShowWarningMessage;
+    }
+  });
+
+  test("local_finalize_pending で閉じられたファイルが存在する場合は開いて syncOne を再試行する", async () => {
+    const metadata = buildIssueMetadataFixture();
+    const scope = getCurrentConnectionScope();
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "sync-reopen-"));
+    const tmpFile = path.join(tmpDir, "ticket-556.md");
+    fs.writeFileSync(tmpFile, "# Ticket 556\n", "utf8");
+    const documentUri = vscode.Uri.file(tmpFile).toString();
+
+    await addOfflineTicketUpdateAsync(556, {
+      ticketId: 556,
+      operationId: "ticket:556",
+      baseSubject: "Base",
+      baseDescription: "Base",
+      baseMetadata: metadata,
+      subject: "Updated",
+      description: "Updated body",
+      metadata,
+      documentUri,
+      phase: "local_finalize_pending",
+    }, scope);
+
+    let syncOneCalls = 0;
+    let openedBeforeRetry = false;
+    const fakeEngine = {
+      syncOne: async () => {
+        syncOneCalls++;
+        if (syncOneCalls === 1) {
+          return {
+            kind: "remote_committed" as const,
+            ticketId: 556,
+            pending: "local_finalize" as const,
+            message: "Document is closed or not available",
+          };
+        }
+        openedBeforeRetry = vscode.workspace.textDocuments.some(
+          (doc) => doc.uri.toString() === documentUri,
+        );
+        return { kind: "completed" as const, ticketId: 556 };
+      },
+      getRecoveryItems: () => [],
+      ticketService: () => ({}),
+      resolveLocalFinalize: async () => {
+        throw new Error("resolveLocalFinalize should not be called when reopen retry succeeds");
+      },
+    } as unknown as ReturnType<typeof import("../app/syncEngine").createSyncEngine>;
+
+    let warningCalls = 0;
+    const originalShowWarningMessage = vscode.window.showWarningMessage;
+    try {
+      (vscode.window as unknown as { showWarningMessage: typeof originalShowWarningMessage }).showWarningMessage =
+        (async () => {
+          warningCalls++;
+          return undefined;
+        }) as unknown as typeof originalShowWarningMessage;
+
+      const result = await syncUnsyncedFile(
+        { syncKey: { kind: "ticket", ticketId: 556 } },
+        {
+          suppressResultNotifications: true,
+          createTicketSyncService: (() => ({})) as never,
+          createSyncEngine: (() => fakeEngine) as never,
+        },
+      );
+      assert.strictEqual(syncOneCalls, 2);
+      assert.strictEqual(openedBeforeRetry, true);
+      assert.strictEqual(warningCalls, 0);
+      assert.deepStrictEqual(result, { status: "success", kind: "ticket", id: 556, hasRemainingChanges: true });
+    } finally {
+      (vscode.window as unknown as { showWarningMessage: typeof originalShowWarningMessage }).showWarningMessage =
+        originalShowWarningMessage;
+      await vscode.commands.executeCommand("workbench.action.closeAllEditors");
+      fs.rmSync(tmpDir, { recursive: true, force: true });
+    }
+  });
+
+  test("local_finalize_pending で閉じられたファイルが開けない場合は確認モーダルへフォールバックする", async () => {
+    const metadata = buildIssueMetadataFixture();
+    const scope = getCurrentConnectionScope();
+    const missingUri = vscode.Uri.file(path.join(os.tmpdir(), `non-existent-${Date.now()}.md`)).toString();
+
+    await addOfflineTicketUpdateAsync(557, {
+      ticketId: 557,
+      operationId: "ticket:557",
+      baseSubject: "Base",
+      baseDescription: "Base",
+      baseMetadata: metadata,
+      subject: "Updated",
+      description: "Updated body",
+      metadata,
+      documentUri: missingUri,
+      phase: "local_finalize_pending",
+    }, scope);
+
+    let syncOneCalls = 0;
+    const fakeEngine = {
+      syncOne: async () => {
+        syncOneCalls++;
+        return {
+          kind: "remote_committed" as const,
+          ticketId: 557,
+          pending: "local_finalize" as const,
+          message: "Document is closed or not available",
+        };
+      },
+      getRecoveryItems: () => [],
+      ticketService: () => ({}),
+      resolveLocalFinalize: async () => ({ kind: "completed" as const, ticketId: 557 }),
+    } as unknown as ReturnType<typeof import("../app/syncEngine").createSyncEngine>;
+
+    let warningCalls = 0;
+    const originalShowWarningMessage = vscode.window.showWarningMessage;
+    try {
+      (vscode.window as unknown as { showWarningMessage: typeof originalShowWarningMessage }).showWarningMessage =
+        (async () => {
+          warningCalls++;
+          return undefined;
+        }) as unknown as typeof originalShowWarningMessage;
+
+      const result = await syncUnsyncedFile(
+        { syncKey: { kind: "ticket", ticketId: 557 } },
+        {
+          suppressResultNotifications: true,
+          createTicketSyncService: (() => ({})) as never,
+          createSyncEngine: (() => fakeEngine) as never,
+        },
+      );
+      assert.strictEqual(syncOneCalls, 1);
+      assert.strictEqual(warningCalls, 1);
+      assert.deepStrictEqual(result, { status: "cancelled", kind: "ticket" });
+    } finally {
+      (vscode.window as unknown as { showWarningMessage: typeof originalShowWarningMessage }).showWarningMessage =
+        originalShowWarningMessage;
+    }
   });
 });

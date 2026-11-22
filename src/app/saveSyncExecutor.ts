@@ -2,7 +2,6 @@ import * as vscode from "vscode";
 import { handleConflict, handleCommentConflict } from "../views/conflictResolver";
 import {
   handleCommentEditorSave,
-  saveCommentDocumentLocally,
   shouldRefreshComments,
 } from "../views/commentSaveSync";
 import {
@@ -12,20 +11,18 @@ import {
   queueTicketDraft,
 } from "../views/ticketSaveSync";
 import {
+  getCommentIdForEditor,
   getConnectionScopeForDocument,
-  getProjectIdForUri,
   getTicketIdForDocument,
   getTicketIdForUri,
   NEW_TICKET_DRAFT_ID,
 } from "../views/ticketEditorRegistry";
-import { renameSyncedNewTicketFileIfEligible } from "../views/ticketSync/ticketEditorRewrite";
-import { refreshTicketEditorContexts } from "./editorEventController";
+import { updateTicketDraftStatusFromDocument } from "./editorDocumentPreview";
 import {
   addOfflineCommentUpdateAsync,
   getActiveScope,
   removeOfflineCommentEntryAsync,
 } from "../views/offlineSyncStore";
-import { markDraftStatus } from "../views/ticketDraftStore";
 import { computeNotesHash } from "../utils/notesHash";
 import type { NotificationController } from "./notificationController";
 import { classifyDocumentSave } from "./saveSyncClassifier";
@@ -40,11 +37,13 @@ import {
 } from "../config/connectionScope";
 import { showError } from "../utils/notifications";
 import { getOfflineSyncMode, type OfflineSyncMode } from "../config/settings";
-import type { SyncEngine, SyncEngineKey, SyncEngineOutcome } from "./syncEngine";
-import { createOutcomePresenter } from "./outcomePresenter";
+import type { SyncEngine, SyncEngineKey } from "./syncEngine";
 import type { TicketSaveResult } from "../views/ticketSaveTypes";
 import type { CommentSaveResult } from "../views/commentSaveTypes";
 import { invalidCommentUpdateMetadataMessage } from "../views/commentUpdateFile";
+import { saveLocalCommentDocument } from "./saveSyncLocalComment";
+import { finishExistingTicketDocumentSave, finishNewTicketDocumentSave } from "./saveSyncLocalTicket";
+import { createSaveSyncAutoSync } from "./saveSyncAutoSync";
 
 export interface SaveSyncExecutorDeps {
   ticketsPresentation: TicketPresentationPort;
@@ -62,6 +61,7 @@ export const performSyncOnSave = async (
   document: vscode.TextDocument,
   editor: vscode.TextEditor | undefined,
   deps: SaveSyncExecutorDeps,
+  savedContent = document.getText(),
 ): Promise<void> => {
   const currentScope = getActiveScope() || getCurrentConnectionScope();
   const operationScope = getConnectionScopeForDocument(document) ?? currentScope;
@@ -76,7 +76,13 @@ export const performSyncOnSave = async (
   const resolveTicketConflict = deps.resolveTicketConflict ?? handleConflict;
   const resolveCommentConflict = deps.resolveCommentConflict ?? handleCommentConflict;
   const syncMode = deps.offlineSyncMode ?? getOfflineSyncMode();
-  const presenter = createOutcomePresenter({
+  const syncIfAuto = createSaveSyncAutoSync({
+    editor,
+    operationScope,
+    syncMode,
+    syncEngine: deps.syncEngine,
+    resolveTicketConflict,
+    resolveCommentConflict,
     ticketsPresentation,
     commentsPresentation,
     unsyncedPresentation,
@@ -87,174 +93,34 @@ export const performSyncOnSave = async (
     commentsPresentation.refreshForTicket(ticketId);
   };
 
-  const resolveAutoConflict = async (
-    key: SyncEngineKey,
-    outcome: SyncEngineOutcome,
-  ): Promise<boolean> => {
-    if (outcome.kind !== "conflict") {
-      return false;
-    }
 
-    if (
-      editor &&
-      key.kind === "ticket" &&
-      "conflictContext" in outcome &&
-      outcome.conflictContext
-    ) {
-      const result: TicketSaveResult = await resolveTicketConflict(
-        {
-          status: "conflict",
-          message: outcome.message ?? vscode.l10n.t("Remote changes detected. Review diff before syncing."),
-          conflictContext: outcome.conflictContext,
-        },
-        editor,
-        undefined,
-        operationScope,
-        deps.syncEngine,
-      );
-      switch (result.status) {
-        case "created":
-        case "success":
-        case "no_change":
-          markDraftStatus(key.ticketId, "Synced", operationScope);
-          break;
-        case "merged":
-          markDraftStatus(key.ticketId, "Dirty", operationScope);
-          break;
-        case "queued":
-          markDraftStatus(key.ticketId, "Queued", operationScope);
-          break;
-        case "conflict":
-          markDraftStatus(key.ticketId, "Conflict", operationScope);
-          break;
-        default:
-          markDraftStatus(key.ticketId, "Failed", operationScope);
-      }
-      notifications.notifyTicketSaveResult(result);
-      if (result.status === "created") {
-        ticketsPresentation.refresh();
-      } else {
-        ticketsPresentation.notifyChange();
-      }
-      unsyncedPresentation.refresh();
-      return true;
-    }
-
-    if (
-      editor &&
-      key.kind === "comment" &&
-      "commentConflictContext" in outcome &&
-      outcome.commentConflictContext
-    ) {
-      const result: CommentSaveResult = await resolveCommentConflict(
-        {
-          status: "conflict",
-          message: outcome.message ?? vscode.l10n.t("Comment was updated in Redmine. Review diff before syncing."),
-          commentId: outcome.commentConflictContext.commentId,
-          conflictContext: outcome.commentConflictContext,
-        },
-        editor,
-        operationScope,
-        deps.syncEngine,
-      );
-      notifications.notifyCommentSaveResult(result);
-      if (shouldRefreshComments(result.status)) {
-        commentsPresentation.refreshForTicket(key.ticketId);
-      }
-      unsyncedPresentation.refresh();
-      return true;
-    }
-
-    if (key.kind === "comment") {
-      notifications.notifyCommentSaveResult({
-        status: "conflict",
-        message: outcome.message ?? vscode.l10n.t("A conflict was detected while synchronizing."),
-        commentId: key.commentId,
-      });
-      commentsPresentation.refreshForTicket(key.ticketId);
-      unsyncedPresentation.refresh();
-      return true;
-    }
-
-    return false;
-  };
-
-  const syncIfAuto = async (key: SyncEngineKey): Promise<void> => {
-    if (syncMode === "auto" && deps.syncEngine) {
-      if (key.kind === "ticket") {
-        markDraftStatus(key.ticketId, "Syncing", operationScope);
-      }
-      try {
-        const outcome = await deps.syncEngine.syncOne(key, { connectionScope: operationScope });
-        if (key.kind === "newTicket" && outcome.kind === "completed") {
-          if (key.documentUri && "ticketId" in outcome && outcome.ticketId) {
-            const oldUri = vscode.Uri.parse(key.documentUri);
-            await renameSyncedNewTicketFileIfEligible({
-              oldUri,
-              ticketId: outcome.ticketId,
-              projectId: getProjectIdForUri(oldUri),
-              connectionScope: operationScope,
-            });
-            refreshTicketEditorContexts(vscode.window.activeTextEditor);
-          }
-          ticketsPresentation.refresh();
-        }
-        const conflictHandled = await resolveAutoConflict(key, outcome);
-        if (!conflictHandled) {
-          if (key.kind === "ticket") {
-            switch (outcome.kind) {
-              case "completed":
-              case "no_change":
-                markDraftStatus(key.ticketId, "Synced", operationScope);
-                break;
-              case "conflict":
-                markDraftStatus(key.ticketId, "Conflict", operationScope);
-                break;
-              case "commit_unknown":
-              case "remote_committed":
-              case "failed_before_commit":
-                markDraftStatus(key.ticketId, "Failed", operationScope);
-                break;
-              case "queued":
-                markDraftStatus(key.ticketId, "Queued", operationScope);
-                break;
-            }
-          }
-          presenter.present(outcome, {
-            ticketId: key.kind === "ticket" ? key.ticketId : (key.kind === "comment" ? key.ticketId : undefined),
-            commentId: key.kind === "comment" ? key.commentId : undefined,
-            isAuto: true,
-          });
-        }
-      } catch (error) {
-        if (key.kind === "ticket") {
-          markDraftStatus(key.ticketId, "Failed", operationScope);
-        }
-        presenter.present(
-          { kind: "failed_before_commit", error: error as Error },
-          {
-            ticketId: key.kind === "ticket" ? key.ticketId : (key.kind === "comment" ? key.ticketId : undefined),
-            commentId: key.kind === "comment" ? key.commentId : undefined,
-            isAuto: true,
-          },
-        );
-      }
-    } else {
-      unsyncedPresentation.refresh();
-    }
+  const finishNewTicketSave = async (result: TicketSaveResult): Promise<void> => {
+    await finishNewTicketDocumentSave(document, result, { notifications, unsyncedPresentation, syncIfAuto });
   };
 
   const newTicketKey: SyncEngineKey = { kind: "newTicket", documentUri: document.uri.toString() };
-  const finishNewTicketSave = async (result: TicketSaveResult): Promise<void> => {
-    notifications.notifyTicketSaveResult(result);
-    if (result.status === "queued") { await syncIfAuto(newTicketKey); }
-    else { unsyncedPresentation.refresh(); }
+
+  const finishExistingTicketSave = async (
+    ticketId: number,
+    status: "queued" | "no_change",
+  ): Promise<void> => {
+    await finishExistingTicketDocumentSave(document, savedContent, ticketId, status, {
+      notifications,
+      ticketsPresentation,
+      unsyncedPresentation,
+      syncIfAuto,
+      updateDraftStatusFromDocument: (savedDocument) => {
+        updateTicketDraftStatusFromDocument(savedDocument);
+      },
+      shouldAutoSync: syncMode === "auto" && Boolean(deps.syncEngine),
+    });
   };
 
   if (editor) {
     let ticketResult = await handleTicketEditorSave(editor, {
       onSubjectUpdated: deps.updateTicketListSubject,
       operationScope,
+      savedContent,
     });
     if (ticketResult) {
       if (ticketResult.status === "conflict" && ticketResult.conflictContext) {
@@ -270,19 +136,22 @@ export const performSyncOnSave = async (
       if (ticketResult.status === "created") {
         ticketsPresentation.refresh();
         unsyncedPresentation.refresh();
-      } else if (ticketResult.status === "queued") {
+      } else if (ticketResult.status === "queued" || ticketResult.status === "no_change") {
         const ticketId = getTicketIdForDocument(editor.document) ?? getTicketIdForUri(editor.document.uri);
         if (ticketId && ticketId > 0) {
-          await syncIfAuto({ kind: "ticket", ticketId });
-        } else if (ticketId === NEW_TICKET_DRAFT_ID) {
-          await syncIfAuto(newTicketKey);
-        } else {
-          unsyncedPresentation.refresh();
+          await finishExistingTicketSave(ticketId, ticketResult.status);
+        } else if (ticketResult.status === "queued") {
+          if (ticketId === NEW_TICKET_DRAFT_ID) {
+            await syncIfAuto(newTicketKey);
+          } else {
+            unsyncedPresentation.refresh();
+          }
         }
       }
       return;
     }
 
+    const existingCommentId = getCommentIdForEditor(editor);
     let commentResult = await handleCommentEditorSave(editor, undefined, operationScope);
     if (commentResult) {
       if (commentResult.status === "conflict" && commentResult.conflictContext) {
@@ -300,11 +169,14 @@ export const performSyncOnSave = async (
       if (ticketId) {
         if (commentResult.status === "queued") {
           refreshQueuedComment(ticketId);
-          await syncIfAuto({
-            kind: "comment",
-            ticketId,
-            documentUri: editor.document.uri.toString(),
-          });
+          await syncIfAuto(
+            {
+              kind: "comment",
+              ticketId,
+              documentUri: editor.document.uri.toString(),
+            },
+            { isNewComment: existingCommentId === undefined },
+          );
         } else if (shouldRefreshComments(commentResult.status)) {
           commentsPresentation.refreshForTicket(ticketId);
           unsyncedPresentation.refresh();
@@ -354,26 +226,18 @@ export const performSyncOnSave = async (
       unsyncedPresentation.refresh();
       return;
 
-    case "localComment": {
-      const commentResult = await saveCommentDocumentLocally({
-        ticketId: classification.ticketId,
-        commentId: classification.commentId,
-        content: document.getText(),
-        documentUri: document.uri,
+    case "localComment":
+    case "draftCommentExisting":
+    case "draftCommentNew":
+    case "parsedComment": {
+      const commentId = "commentId" in classification ? classification.commentId : undefined;
+      await saveLocalCommentDocument(document, classification.ticketId, commentId, {
+        notifications,
+        refreshComments: refreshQueuedComment,
+        refreshUnsynced: () => unsyncedPresentation.refresh(),
+        syncIfAuto,
         operationScope,
       });
-      notifications.notifyCommentSaveResult(commentResult);
-      refreshQueuedComment(classification.ticketId);
-      if (commentResult.status === "queued") {
-        await syncIfAuto({
-          kind: "comment",
-          ticketId: classification.ticketId,
-          commentId: classification.commentId,
-          documentUri: document.uri.toString(),
-        });
-      } else {
-        unsyncedPresentation.refresh();
-      }
       return;
     }
 
@@ -393,13 +257,13 @@ export const performSyncOnSave = async (
     case "parsedTicket": {
       const result = await queueTicketDraft({
         ticketId: classification.ticketId,
-        content: document.getText(),
+        content: savedContent,
         documentUri: document.uri,
         operationScope,
       });
       notifications.notifyTicketSaveResult(result);
-      if (result.status === "queued") {
-        await syncIfAuto({ kind: "ticket", ticketId: classification.ticketId });
+      if (result.status === "queued" || result.status === "no_change") {
+        await finishExistingTicketSave(classification.ticketId, result.status);
       } else {
         unsyncedPresentation.refresh();
       }
@@ -422,73 +286,6 @@ export const performSyncOnSave = async (
         operationScope,
       });
       await finishNewTicketSave(result);
-      return;
-    }
-
-    case "draftCommentExisting": {
-      const commentResult = await saveCommentDocumentLocally({
-        ticketId: classification.ticketId,
-        commentId: classification.commentId,
-        content: document.getText(),
-        documentUri: document.uri,
-        operationScope,
-      });
-      notifications.notifyCommentSaveResult(commentResult);
-      refreshQueuedComment(classification.ticketId);
-      if (commentResult.status === "queued") {
-        await syncIfAuto({
-          kind: "comment",
-          ticketId: classification.ticketId,
-          commentId: classification.commentId,
-          documentUri: document.uri.toString(),
-        });
-      } else {
-        unsyncedPresentation.refresh();
-      }
-      return;
-    }
-
-    case "draftCommentNew": {
-      const commentResult = await saveCommentDocumentLocally({
-        ticketId: classification.ticketId,
-        content: document.getText(),
-        documentUri: document.uri,
-        operationScope,
-      });
-      notifications.notifyCommentSaveResult(commentResult);
-      refreshQueuedComment(classification.ticketId);
-      if (commentResult.status === "queued") {
-        await syncIfAuto({
-          kind: "comment",
-          ticketId: classification.ticketId,
-          documentUri: document.uri.toString(),
-        });
-      } else {
-        unsyncedPresentation.refresh();
-      }
-      return;
-    }
-
-    case "parsedComment": {
-      const commentResult = await saveCommentDocumentLocally({
-        ticketId: classification.ticketId,
-        commentId: classification.commentId,
-        content: document.getText(),
-        documentUri: document.uri,
-        operationScope,
-      });
-      notifications.notifyCommentSaveResult(commentResult);
-      refreshQueuedComment(classification.ticketId);
-      if (commentResult.status === "queued") {
-        await syncIfAuto({
-          kind: "comment",
-          ticketId: classification.ticketId,
-          commentId: classification.commentId,
-          documentUri: document.uri.toString(),
-        });
-      } else {
-        unsyncedPresentation.refresh();
-      }
       return;
     }
 

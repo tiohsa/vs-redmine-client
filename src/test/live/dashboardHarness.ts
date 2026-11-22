@@ -10,7 +10,7 @@ import { onOfflineSyncQueueChanged } from "../../views/offlineSyncStore";
 import type { LiveFixture } from "./liveFixture";
 
 type Completion = Extract<DashboardEvent, { type: "operation.success" | "operation.error" }>;
-interface Snapshot { text: string; disabled: boolean[]; feedback: string; feedbackClass: string }
+interface Snapshot { text: string; disabled: boolean[]; feedback: string; feedbackClass: string; matches?: string[] }
 
 /** 実VS Code Webview内のDOM操作を駆動する。製品コードにテスト用入口は追加しない。 */
 export const openLiveDashboard = async (live: LiveFixture) => {
@@ -50,7 +50,9 @@ export const openLiveDashboard = async (live: LiveFixture) => {
           !("feedback" in raw) || typeof raw.feedback !== "string" || !("feedbackClass" in raw) || typeof raw.feedbackClass !== "string") {
           waiter.reject(new Error("Webviewの検証結果が不正です")); return;
         }
-        waiter.resolve({ text: raw.text, disabled: raw.disabled, feedback: raw.feedback, feedbackClass: raw.feedbackClass });
+        waiter.resolve({ text: raw.text, disabled: raw.disabled, feedback: raw.feedback, feedbackClass: raw.feedbackClass,
+          matches: "matches" in raw && Array.isArray(raw.matches) &&
+            raw.matches.every((value): value is string => typeof value === "string") ? raw.matches : undefined });
         return;
       }
       await router.route(raw);
@@ -65,12 +67,19 @@ export const openLiveDashboard = async (live: LiveFixture) => {
       if(message.type !== 'test.dom') return;
       if(message.selector){
         const element=document.querySelector(message.selector);
-        if(element){ element.focus(); element.click(); if(message.twice) element.click(); }
+        if(element){
+          element.focus();
+          if(typeof message.value === 'string'){
+            element.value = message.value;
+            element.dispatchEvent(new Event(element.tagName === 'SELECT' ? 'change' : 'input', {bubbles:true}));
+          }else{ element.click(); if(message.twice) element.click(); }
+        }
       }
       queueMicrotask(() => vscode.postMessage({type:'test.snapshot',id:message.id,
         text:document.getElementById('unsynced-list').textContent,
         disabled:[...document.querySelectorAll('#unsynced-list .unsynced-actions button')].map(button=>button.disabled),
         feedback:document.getElementById('unsynced-feedback').textContent,
+        matches:message.read ? [...document.querySelectorAll(message.read)].map(element => element.dataset.id ?? element.textContent) : [],
         feedbackClass:document.getElementById('unsynced-feedback').className}));
     });
   `;
@@ -82,11 +91,11 @@ export const openLiveDashboard = async (live: LiveFixture) => {
       await new Promise((resolve) => setTimeout(resolve, 30));
     }
   };
-  const dom = (selector?: string, twice = false): Promise<Snapshot> => new Promise((resolve, reject) => {
+  const dom = (selector?: string, twice = false, read?: string, value?: string): Promise<Snapshot> => new Promise((resolve, reject) => {
     const id = randomUUID();
     const timer = setTimeout(() => { pending.delete(id); reject(new Error("Webview DOM応答がありません")); }, 15_000);
     pending.set(id, { resolve, reject, timer });
-    void panel.webview.postMessage({ type: "test.dom", id, selector, twice });
+    void panel.webview.postMessage({ type: "test.dom", id, selector, twice, read, value });
   });
   const dispose = () => {
     for (const item of pending.values()) { clearTimeout(item.timer); item.reject(new Error("Webview closed")); }
@@ -99,6 +108,9 @@ export const openLiveDashboard = async (live: LiveFixture) => {
   } catch (error) { dispose(); throw error; }
   return {
     dom, dispose, store, waitFor,
+    reveal: () => panel.reveal(),
+    setValue: (selector: string, value: string) => dom(selector, false, undefined, value),
+    async read(selector: string) { return (await dom(undefined, false, selector)).matches ?? []; },
     async click(selector: string, twice = false): Promise<{ result: Completion; snapshot: Snapshot }> {
       const count = completions.length;
       await dom(selector, twice);

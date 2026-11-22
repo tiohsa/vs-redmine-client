@@ -37,6 +37,8 @@ export const registerViews = (
     updateTicketSubject: (ticketId, subject) =>
       dashboardProvider.updateTicketSubject(ticketId, subject),
     setSelectedProjectId: (projectId) => dashboardProvider.selectProject(projectId),
+    revealCreatedTickets: (ticketIds, connectionScope) =>
+      dashboardProvider.revealCreatedTickets(ticketIds, connectionScope),
   };
   const commentsPresentation: CommentPresentationPort = {
     refresh: () => {
@@ -44,6 +46,8 @@ export const registerViews = (
       dashboardProvider.refreshTickets();
     },
     refreshForTicket: (ticketId) => dashboardProvider.refreshCommentsForTicket(ticketId),
+    revealCreatedComment: (ticketId, commentId, connectionScope) =>
+      dashboardProvider.revealCreatedComment(ticketId, commentId, connectionScope),
   };
   const unsyncedPresentation: UnsyncedPresentationPort = {
     refresh: () => dashboardProvider.refreshUnsynced(),

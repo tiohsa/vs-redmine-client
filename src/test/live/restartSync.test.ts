@@ -12,6 +12,7 @@ import { createIssue, getIssueDetail } from "../../redmine/issues";
 import { requestJson, runWithConnectionScope } from "../../redmine/client";
 import { initializeOfflineSyncStore } from "../../views/offlineSyncStore";
 import { getLiveHostContext } from "./hostContext";
+import { resolveLiveUpstream } from "./liveFixture";
 
 interface RestartState {
   hostPid?: number;
@@ -36,9 +37,8 @@ const phase = process.env.REDMINE_LIVE_PHASE;
 const statePath = process.env.REDMINE_LIVE_STATE_PATH;
 const markerPath = process.env.REDMINE_LIVE_MARKER_PATH;
 const tracePath = process.env.REDMINE_LIVE_TRACE_PATH;
-const upstream = "http://127.0.0.1:3000/";
+const upstream = resolveLiveUpstream() || "http://127.0.0.1:3000/";
 const proxyScope = process.env.REDMINE_LIVE_PROXY_URL;
-const liveTestEnabled = phase === "prepare" || phase === "resume";
 
 const loadState = (): RestartState => {
   if (!statePath || !fs.existsSync(statePath)) { return {}; }
@@ -85,7 +85,7 @@ const createIssueDirect = async (subject: string): Promise<number> => runWithCon
 suite("実Redmine同期プロセス再起動", function () {
   this.timeout(120_000);
 
-  (liveTestEnabled ? test : test.skip)("LIVE-P01: remote write後のhost再起動でoperation・SecretStorage・spoolを復旧する", async () => {
+  test("LIVE-P01: remote write後のhost再起動でoperation・SecretStorage・spoolを復旧する", async () => {
     assert.ok(phase === "prepare" || phase === "resume");
     assert.ok(statePath && markerPath && tracePath);
     assert.ok(proxyScope, "runner常駐proxy URLが設定されていること");

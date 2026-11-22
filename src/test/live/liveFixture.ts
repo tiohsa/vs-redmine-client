@@ -23,9 +23,22 @@ import { DurableUploadSpoolStore, setDefaultUploadSpoolStore } from "../../app/t
 import { getLiveHostContext } from "./hostContext";
 import { createFaultProxy, type FaultProxy, type ProxyTrace } from "./faultProxy";
 
-const upstream = "http://127.0.0.1:3000/";
-export const liveEnabled = process.env.REDMINE_SYNC_LIVE_URL?.replace(/\/$/, "") === upstream.slice(0, -1) &&
-  Boolean(process.env.REDMINE_API_KEY) && process.env.REDMINE_LIVE_PHASE === undefined;
+export const resolveLiveUpstream = (): string => {
+  const raw = process.env.REDMINE_SYNC_LIVE_URL?.trim() || "http://127.0.0.1:3000/";
+  try {
+    const parsed = new URL(raw);
+    const isLoopback = parsed.hostname === "127.0.0.1" || parsed.hostname === "localhost" || parsed.hostname === "::1" || parsed.hostname === "[::1]";
+    if (parsed.protocol !== "http:" || !isLoopback) {
+      return "";
+    }
+    if (!parsed.pathname.endsWith("/")) { parsed.pathname += "/"; }
+    return parsed.toString();
+  } catch {
+    return "";
+  }
+};
+const upstream = resolveLiveUpstream();
+export const liveEnabled = Boolean(upstream) && Boolean(process.env.REDMINE_API_KEY) && process.env.REDMINE_LIVE_PHASE === undefined;
 
 export interface LiveFixture {
   scope: string;
@@ -140,8 +153,8 @@ if (liveEnabled) {
 }
 
 export const liveTest = (id: string, title: string, operation: (fixture: LiveFixture) => Promise<void>): void => {
-  const register = liveEnabled ? test : test.skip;
-  register(`${id}: ${title}`, async function () {
+  if (!liveEnabled) { throw new Error("実Redmine専用ランナーでテストを実行してください。"); }
+  test(`${id}: ${title}`, async function () {
     this.timeout(120_000);
     const current = state;
     if (!current) { throw new Error("実Redmine fixtureが初期化されていません。"); }

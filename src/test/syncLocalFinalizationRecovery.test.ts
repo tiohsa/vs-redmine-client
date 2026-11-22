@@ -357,4 +357,68 @@ suite("sync local finalization recovery", () => {
       assert.strictEqual(document.getText(), entry.body);
     });
   }
+
+  test("resolveLocalFinalize は世代・phase検証を通りskipDocumentRewriteで完了でき、不一致は拒否する", async () => {
+    const operation = ticketOperation();
+    const content = createTicketContentFixture("Local subject", "Local body");
+    await addOfflineTicketUpdateAsync(TICKET_ID, {
+      ticketId: TICKET_ID,
+      operationId: operation.operationId,
+      baseSubject: "Base",
+      baseDescription: "Base body",
+      baseMetadata: buildIssueMetadataFixture(),
+      subject: "Local subject",
+      description: "Local body",
+      metadata: buildIssueMetadataFixture(),
+      content,
+      documentUri: operation.documentUri,
+      phase: "local_finalize_pending",
+      effects: [{
+        effectId: "ticket-update",
+        kind: "ticket_update",
+        operationRevision: 1,
+        attemptGeneration: 1,
+        state: "committed",
+        target: { ticketId: TICKET_ID },
+        remoteId: TICKET_ID,
+      }],
+    }, SCOPE);
+    const stored = getOfflineSyncQueue(SCOPE).tickets.get(TICKET_ID)!;
+    const coordinator = new SyncCoordinator();
+    const key = { kind: "ticket" as const, ticketId: TICKET_ID };
+    const options = {
+      ticketUpdate: {
+        getIssueDetail: async () => remoteDetail(),
+      },
+      documents: {
+        rewriteNewTicket: async () => ({ kind: "not_available" as const }),
+        findOpenDocument: () => undefined,
+        rewriteTicket: async () => {
+          throw new Error("rewriteTicket must not be called when skipping document rewrite");
+        },
+      },
+    };
+
+    const staleGen = await coordinator.resolveLocalFinalize({
+      key,
+      operationId: stored.operationId!,
+      operationRevision: stored.intentRevision ?? stored.revision ?? 1,
+      attemptGeneration: (stored.attemptGeneration ?? 1) + 1,
+      context: { connectionScope: SCOPE },
+      deps: options,
+    });
+    assert.strictEqual(staleGen.kind, "failed_before_commit");
+    assert.strictEqual(getOfflineSyncQueue(SCOPE).tickets.get(TICKET_ID)?.phase, "local_finalize_pending");
+
+    const completed = await coordinator.resolveLocalFinalize({
+      key,
+      operationId: stored.operationId!,
+      operationRevision: stored.intentRevision ?? stored.revision ?? 1,
+      attemptGeneration: stored.attemptGeneration ?? 1,
+      context: { connectionScope: SCOPE },
+      deps: options,
+    });
+    assert.strictEqual(completed.kind, "completed");
+    assert.strictEqual(getOfflineSyncQueue(SCOPE).tickets.has(TICKET_ID), false);
+  });
 });

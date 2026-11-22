@@ -1,4 +1,5 @@
 import typescriptEslint from "typescript-eslint";
+import meaningfulTest from "./verification/test-quality-rule.mjs";
 
 export default [{
     files: ["**/*.ts"],
@@ -23,5 +24,17 @@ export default [{
         eqeqeq: "warn",
         "no-throw-literal": "warn",
         semi: "warn",
+    },
+}, {
+    files: ["src/test/**/*.ts", "verification/**/*.test.cjs"],
+    linterOptions: {
+        noInlineConfig: true,
+    },
+    plugins: {
+        "test-quality": { rules: { "meaningful-test": meaningfulTest } },
+    },
+    rules: {
+        "test-quality/meaningful-test": "error",
+        "no-unreachable": "error",
     },
 }];

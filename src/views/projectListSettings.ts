@@ -4,6 +4,7 @@ import { MAX_VIEW_ITEMS } from "./viewLimits";
 export type TicketSortField = "priority" | "status" | "tracker" | "assignee" | "dueDate" | "startDate";
 export type SortDirection = "asc" | "desc";
 export type DueDateWindow = "within1Day" | "within3Days" | "within7Days" | "overdue";
+export type TicketSyncFilter = "all" | "dirty" | "editing" | "unsynced";
 
 export interface TicketFilterSelection {
   subjectQuery: string;
@@ -12,6 +13,7 @@ export interface TicketFilterSelection {
   trackerIds: number[];
   assigneeIds: number[];
   includeUnassigned: boolean;
+  syncFilter?: TicketSyncFilter;
 }
 
 export interface TicketSortPreference {
@@ -40,6 +42,7 @@ export const DEFAULT_TICKET_LIST_SETTINGS: TicketListSettings = {
     trackerIds: [],
     assigneeIds: [],
     includeUnassigned: true,
+    syncFilter: "all",
   },
   sort: {
     field: undefined,

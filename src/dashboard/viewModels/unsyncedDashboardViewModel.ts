@@ -58,7 +58,7 @@ export const buildUnsyncedDashboardItems = (abandoned = false): DashboardUnsynce
       } : {}) },
       label: `${formatTicketLabel(ticketId)} ${vscode.l10n.t("Ticket update")}`,
       detail: [subject, describeOfflineSync(update).detail].filter(Boolean).join(" · "),
-      documentUri: undefined,
+      documentUri: update.documentUri,
       lifecycle: policy.lifecycle,
       canDiscard: policy.canDiscard,
       discardMode: policy.discardMode,

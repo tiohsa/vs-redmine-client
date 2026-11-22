@@ -10,6 +10,35 @@ let activeScope = "";
 const cachesByScope = new Map<string, Map<number, TicketDraftState>>();
 const storageByScope = new Map<string, DraftStorage>();
 
+export interface TicketDraftSavedEvent {
+  ticketId: number;
+  connectionScope: string;
+  draft: TicketDraftState;
+  remoteTicket?: Ticket;
+}
+
+type TicketDraftSavedListener = (event: TicketDraftSavedEvent) => void;
+const draftSavedListeners = new Set<TicketDraftSavedListener>();
+
+export const onTicketDraftSaved = (
+  listener: TicketDraftSavedListener,
+): (() => void) => {
+  draftSavedListeners.add(listener);
+  return () => {
+    draftSavedListeners.delete(listener);
+  };
+};
+
+const emitTicketDraftSaved = (event: TicketDraftSavedEvent): void => {
+  for (const listener of draftSavedListeners) {
+    try {
+      listener(event);
+    } catch {
+      // Ignore listener errors so draft persistence remains reliable.
+    }
+  }
+};
+
 const getCache = (scope = activeScope): Map<number, TicketDraftState> => {
   let cache = cachesByScope.get(scope);
   if (!cache) {
@@ -45,6 +74,11 @@ export const getTicketDraft = (
   ticketId: number,
   scope = activeScope,
 ): TicketDraftState | undefined => getCache(scope).get(ticketId);
+
+export const getPendingTicketDraftIds = (scope: string): number[] =>
+  Array.from(getCache(scope).values())
+    .filter(draft => draft.status !== "clean" && draft.status !== "Synced")
+    .map(draft => draft.ticketId);
 
 export interface NewTicketInitialValues {
   subject?: string;
@@ -217,7 +251,11 @@ export const setTicketDraftContent = (
   persist(ticketId, draft, scope);
 };
 
-export const clearTicketDraftContent = (ticketId: number, scope = activeScope): void => {
+export const clearTicketDraftContent = (
+  ticketId: number,
+  scope = activeScope,
+  status?: TicketDraftStatus,
+): void => {
   const draft = getCache(scope).get(ticketId);
   if (!draft) {
     return;
@@ -226,6 +264,7 @@ export const clearTicketDraftContent = (ticketId: number, scope = activeScope): 
   draft.draftSubject = undefined;
   draft.draftDescription = undefined;
   draft.draftMetadata = undefined;
+  if (status !== undefined) { draft.status = status; }
   persist(ticketId, draft, scope);
 };
 
@@ -236,10 +275,12 @@ export const updateDraftAfterSave = (
   metadata: IssueMetadata,
   lastKnownRemoteUpdatedAt?: string,
   scope = activeScope,
+  remoteTicket?: Ticket,
 ): void => {
-  const draft = getCache(scope).get(ticketId);
-  if (!draft) {
-    initializeTicketDraft(
+  const existing = getCache(scope).get(ticketId);
+  let savedDraft: TicketDraftState;
+  if (!existing) {
+    savedDraft = initializeTicketDraft(
       ticketId,
       subject,
       description,
@@ -247,19 +288,26 @@ export const updateDraftAfterSave = (
       lastKnownRemoteUpdatedAt,
       scope,
     );
-    return;
+  } else {
+    existing.baseSubject = subject;
+    existing.baseDescription = description;
+    existing.baseMetadata = metadata;
+    existing.lastKnownRemoteUpdatedAt = lastKnownRemoteUpdatedAt ?? existing.lastKnownRemoteUpdatedAt;
+    existing.lastSyncedAt = Date.now();
+    existing.status = "Synced";
+    existing.draftSubject = undefined;
+    existing.draftDescription = undefined;
+    existing.draftMetadata = undefined;
+    persist(ticketId, existing, scope);
+    savedDraft = existing;
   }
 
-  draft.baseSubject = subject;
-  draft.baseDescription = description;
-  draft.baseMetadata = metadata;
-  draft.lastKnownRemoteUpdatedAt = lastKnownRemoteUpdatedAt ?? draft.lastKnownRemoteUpdatedAt;
-  draft.lastSyncedAt = Date.now();
-  draft.status = "Synced";
-  draft.draftSubject = undefined;
-  draft.draftDescription = undefined;
-  draft.draftMetadata = undefined;
-  persist(ticketId, draft, scope);
+  emitTicketDraftSaved({
+    ticketId,
+    connectionScope: scope,
+    draft: savedDraft,
+    remoteTicket,
+  });
 };
 
 export const markDraftStatus = (

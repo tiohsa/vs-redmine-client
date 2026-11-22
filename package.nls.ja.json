@@ -31,10 +31,10 @@
   "command.toggleCompactMode.title": "Redmine: 表示密度を切替",
   "command.createChildTicketFromList.title": "Redmine: 子チケットを追加",
   "command.openProjectInBrowser.title": "Redmine: プロジェクトをブラウザで開く",
+  "command.openInBrowser.title": "Redmine: ブラウザで開く",
   "command.openTicketInBrowser.title": "Redmine: チケットをブラウザで開く",
   "command.openCommentInBrowser.title": "Redmine: コメントをブラウザで開く",
   "command.editComment.title": "Redmine: コメントを編集",
-  "command.addComment.title": "Redmine: コメントを追加",
   "command.addCommentFromComments.title": "Redmine: コメントを追加",
   "command.runOfflineSync.title": "Redmine: オフライン同期を実行",
   "command.syncUnsyncedFile.title": "Redmine: このファイルを同期",
@@ -59,6 +59,7 @@
   "config.requestTimeoutMs.description": "HTTP リクエストタイムアウト（ミリ秒、デフォルト: 30000ms = 30秒）。",
   "config.ticketList.showStatus.description": "ダッシュボードの各チケット行にステータスバッジを表示します。",
   "config.ticketList.showDueDate.description": "ダッシュボードのチケット行に期日バッジを表示します。無効にすると、期日ウィンドウごとの表示設定に関わらずすべての期日バッジが非表示になります。",
+  "config.ticketList.followActiveEditor.description": "チケットまたはコメントのエディタに切り替えたとき、ダッシュボードのチケット一覧で該当チケットを自動選択します。",
   "command.referenceExample": "Redmine: 参照例を実行",
   "command.editFieldViaQuickPick.title": "Redmine: フィールド値を編集"
 }

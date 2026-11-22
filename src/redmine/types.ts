@@ -120,6 +120,11 @@ export interface RedmineIssueListResponse {
   offset?: number;
 }
 
+export interface RedmineIssueChild {
+  id: number;
+  children?: RedmineIssueChild[];
+}
+
 export interface RedmineIssueDetailResponse {
   issue: {
     id: number;
@@ -127,6 +132,7 @@ export interface RedmineIssueDetailResponse {
     description?: string;
     project: { id: number; name: string };
     parent?: { id: number };
+    children?: RedmineIssueChild[];
     status?: { id: number; name: string };
     priority?: { id: number; name: string };
     tracker?: { id: number; name: string };

@@ -2306,4 +2306,146 @@ suite("TicketSyncService durable lifecycle", () => {
     assert.match(documentContent, /Edited after finalizer snapshot/);
     assert.strictEqual(getOfflineSyncQueue(SCOPE).tickets.get(502)?.phase, "local_finalize_pending");
   });
+
+  test("422 バリデーションエラー後に新規チケット内容を修正して保存すると再登録できる", async () => {
+    initializeOfflineSyncStore(createTestMemento(), SCOPE);
+    const postedStartDates: Array<string | undefined> = [];
+    let lastRequest: { startDate?: string; dueDate?: string } = {};
+    const invalidContent = buildTicketEditorContent({
+      subject: "Invalid date order",
+      description: "Body",
+      metadata: buildIssueMetadataFixture({ start_date: "2026-11-20", due_date: "2026-11-10" }),
+      controlFields: { mode: "ticket-create", issue_id: null, project_id: 12 },
+    });
+    const fixedContent = invalidContent.replace(/due_date:\s*2026-11-10/, "due_date: 2026-11-25");
+    assert.notStrictEqual(fixedContent, invalidContent);
+
+    const service = new TicketSyncService({
+      create: {
+        ...metadataDeps,
+        createIssue: async (request) => {
+          postedStartDates.push(request.startDate);
+          lastRequest = { startDate: request.startDate, dueDate: request.dueDate };
+          if (request.dueDate && request.startDate && request.dueDate < request.startDate) {
+            throw new RedmineHttpError(422, "Due date must be greater than start date");
+          }
+          return 201;
+        },
+        getIssueDetail: async () => ({
+          ticket: {
+            ...issueDetail(201).ticket,
+            subject: "Invalid date order",
+            description: "Body",
+            statusName: "In Progress",
+            startDate: lastRequest.startDate,
+            dueDate: lastRequest.dueDate,
+          },
+          comments: [],
+        }),
+      },
+      documents: { rewriteNewTicket: async () => ({ kind: "applied" }), findOpenDocument: () => undefined },
+    });
+    const key = { kind: "newTicket", documentUri: DOCUMENT_URI } as const;
+    const context = { connectionScope: SCOPE };
+
+    const first = await service.syncNewTicket({
+      context,
+      operation: { content: invalidContent, projectId: 12, documentUri: DOCUMENT_URI },
+    });
+    assert.strictEqual(first.kind, "failed_before_commit");
+    assert.strictEqual(postedStartDates.length, 1);
+
+    // 同じ内容のままでは自動再送されない
+    const sameRetry = await service.syncQueueItem(key, context);
+    assert.strictEqual(sameRetry.kind, "failed_before_commit");
+    assert.strictEqual(postedStartDates.length, 1);
+
+    // 日付を修正して保存すると revision が進み再登録できる
+    await addOfflineNewTicketAsync({ content: fixedContent, projectId: 12, documentUri: DOCUMENT_URI }, SCOPE);
+    const second = await service.syncQueueItem(key, context);
+    assert.strictEqual(second.kind, "completed", second.kind === "failed_before_commit" ? second.error.message : second.kind);
+    assert.strictEqual(postedStartDates.length, 2);
+  });
+
+  test("422 バリデーションエラー後に既存チケット内容を修正して保存すると再更新できる", async () => {
+    initializeOfflineSyncStore(createTestMemento(), SCOPE);
+    let updateCalls = 0;
+    let remoteStartDate = "2026-11-01";
+    let remoteDueDate = "2026-11-30";
+    const baseMetadata = buildIssueMetadataFixture({ start_date: "2026-11-01", due_date: "2026-11-30" });
+    const invalidMetadata = { ...baseMetadata, start_date: "2026-11-20", due_date: "2026-11-10" };
+    const fixedMetadata = { ...baseMetadata, start_date: "2026-11-20", due_date: "2026-11-25" };
+
+    await addOfflineTicketUpdateAsync(601, {
+      ticketId: 601,
+      baseSubject: "Title",
+      baseDescription: "Body",
+      baseMetadata,
+      subject: "Title",
+      description: "Body",
+      metadata: invalidMetadata,
+      controlFields: { mode: "ticket-update", issue_id: 601, project_id: 12 },
+      connectionScope: SCOPE,
+      phase: "queued",
+      documentUri: "file:///tmp/ticket-601.md",
+    }, SCOPE);
+
+    const service = new TicketSyncService({
+      update: {
+        updateIssue: async (input) => {
+          updateCalls += 1;
+          if (input.fields.dueDate && input.fields.startDate && input.fields.dueDate < input.fields.startDate) {
+            throw new RedmineHttpError(422, "Due date must be greater than start date");
+          }
+          remoteStartDate = input.fields.startDate ?? remoteStartDate;
+          remoteDueDate = input.fields.dueDate ?? remoteDueDate;
+        },
+        getIssueDetail: async () => ({
+          ticket: {
+            ...issueDetail(601).ticket,
+            subject: "Title",
+            description: "Body",
+            statusName: "In Progress",
+            startDate: remoteStartDate,
+            dueDate: remoteDueDate,
+          },
+          comments: [],
+        }),
+        listIssueStatuses: metadataDeps.listIssueStatuses,
+        listTrackers: metadataDeps.listTrackers,
+        listIssuePriorities: metadataDeps.listIssuePriorities,
+        searchUsers: metadataDeps.searchUsers,
+      },
+      documents: {
+        rewriteNewTicket: async () => ({ kind: "applied" }),
+        rewriteTicket: async () => ({ kind: "applied" }),
+        findOpenDocument: () => undefined,
+      },
+    });
+    const key = { kind: "ticket", ticketId: 601 } as const;
+    const context = { connectionScope: SCOPE };
+
+    const first = await service.syncQueueItem(key, context);
+    assert.strictEqual(first.kind, "failed_before_commit");
+    assert.strictEqual(updateCalls, 1);
+
+    // 日付を修正して保存すると revision が進み再更新できる
+    await addOfflineTicketUpdateAsync(601, {
+      ticketId: 601,
+      baseSubject: "Title",
+      baseDescription: "Body",
+      baseMetadata,
+      subject: "Title",
+      description: "Body",
+      metadata: fixedMetadata,
+      controlFields: { mode: "ticket-update", issue_id: 601, project_id: 12 },
+      connectionScope: SCOPE,
+      phase: "queued",
+      documentUri: "file:///tmp/ticket-601.md",
+    }, SCOPE);
+
+    const second = await service.syncQueueItem(key, context);
+    assert.strictEqual(second.kind, "completed", second.kind === "failed_before_commit" ? second.error.message : second.kind);
+    assert.strictEqual(updateCalls, 2);
+  });
 });

@@ -51,6 +51,7 @@ export interface DashboardStrings {
   quickOpen: string;
   quickOverdue: string;
   quickHighPriority: string;
+  quickEditing: string;
   quickUnsynced: string;
   clearFilters: string;
   openSettingsJson: string;
@@ -68,15 +69,9 @@ export interface DashboardStrings {
   shownLoadedTotal: string;
   loadedTickets: string;
   shownLoadedTickets: string;
-  syncTrayAllClear: string;
-  syncTrayItems: string;
-  syncTrayAttention: string;
-  syncTrayReviewConflict: string;
-  syncTrayOpenUnsynced: string;
-  syncTrayOpenEditor: string;
-  syncTrayFailedTicket: string;
   // Sync states
   syncDirty: string;
+  syncEditing: string;
   syncQueued: string;
   syncRecoveryPending: string;
   syncOutcomeUnknown: string;
@@ -96,6 +91,7 @@ export interface DashboardStrings {
   openInEditor: string;
   addCommentAction: string;
   openInBrowser: string;
+  deleteAction: string;
   createChildTicket: string;
   // Ticket list states
   noProjectSelected: string;
@@ -112,7 +108,6 @@ export interface DashboardStrings {
   resolveRecovery: string;
   resolveRecoveryTooltip: string;
   syncTicketTooltip: string;
-  editingState: string;
   remoteDescription: string;
   descriptionUnsyncedWarning: string;
   noDescription: string;
@@ -125,6 +120,7 @@ export interface DashboardStrings {
   notSet: string;
   closeDetail: string;
   openDetail: string;
+  resizeCommentPanel: string;
   statusFallbackHint: string;
   loadingEditOptions: string;
   trackerUnavailable: string;
@@ -141,12 +137,12 @@ export interface DashboardStrings {
   filterIncludeUnassigned: string;
   filterStatusCount: string;
   // Unsynced tab
-  noUnsyncedChanges: string;
   unsyncedKindTicket: string;
   unsyncedKindNewTicket: string;
   unsyncedKindComment: string;
   unsyncedKindFile: string;
   discardAction: string;
+  discardPendingDraft: string;
   discardLaterChangesAction: string;
   discardTitle: string;
   discardLaterChangesTitle: string;
@@ -162,6 +158,8 @@ export interface DashboardStrings {
   syncAbandoned: string;
   syncAllBtn: string;
   unsyncedCountLabel: string;
+  localPendingChanges: string;
+  openPendingPreview: string;
   // Comments tab
   commentsForTicket: string;
   reloadComments: string;
@@ -201,6 +199,11 @@ export interface DashboardStrings {
   filterIncludeUnassignedLabel: string;
   filterStatusLabel: string;
   filterStatusAria: string;
+  filterSyncStateLabel: string;
+  filterSyncAll: string;
+  filterSyncDirtyOnly: string;
+  filterSyncEditing: string;
+  filterSyncUnsynced: string;
   sectionSort: string;
   sortFieldLabel: string;
   sortDefaultOption: string;
@@ -222,6 +225,7 @@ export interface DashboardStrings {
   showTrackerLabel: string;
   showPriorityLabel: string;
   showAssigneeLabel: string;
+  followActiveEditorLabel: string;
   sectionGeneral: string;
   ticketLimitLabel: string;
   resetSettings: string;
@@ -288,6 +292,7 @@ export const buildDashboardStrings = (): DashboardStrings => ({
   quickOpen: vscode.l10n.t("Open issues"),
   quickOverdue: vscode.l10n.t("Overdue"),
   quickHighPriority: vscode.l10n.t("High priority"),
+  quickEditing: vscode.l10n.t("Editing"),
   quickUnsynced: vscode.l10n.t("Unsynced"),
   clearFilters: vscode.l10n.t("Clear filters"),
   openSettingsJson: vscode.l10n.t("Open settings.json"),
@@ -305,15 +310,9 @@ export const buildDashboardStrings = (): DashboardStrings => ({
   loadedTickets: vscode.l10n.t("{0} tickets loaded"),
   shownLoadedTickets: vscode.l10n.t("{0} shown / {1} tickets loaded"),
   shownLoadedTotal: vscode.l10n.t("{0} shown · {1} loaded · {2} total"),
-  syncTrayAllClear: vscode.l10n.t("No unsynced items in sync queue"),
-  syncTrayItems: vscode.l10n.t("{0} unsynced items"),
-  syncTrayAttention: vscode.l10n.t("Sync attention required"),
-  syncTrayReviewConflict: vscode.l10n.t("Review conflict"),
-  syncTrayOpenUnsynced: vscode.l10n.t("Open Unsynced"),
-  syncTrayOpenEditor: vscode.l10n.t("Open in Editor"),
-  syncTrayFailedTicket: vscode.l10n.t("Ticket #{0} failed to sync"),
   // Sync states
   syncDirty: vscode.l10n.t("Unsynced changes"),
+  syncEditing: vscode.l10n.t("Editing"),
   syncQueued: vscode.l10n.t("Waiting to sync"),
   syncRecoveryPending: vscode.l10n.t("Recovery pending"),
   syncOutcomeUnknown: vscode.l10n.t("Remote outcome unknown"),
@@ -333,6 +332,7 @@ export const buildDashboardStrings = (): DashboardStrings => ({
   openInEditor: vscode.l10n.t("Edit in VS Code"),
   addCommentAction: vscode.l10n.t("Add comment"),
   openInBrowser: vscode.l10n.t("Open in browser"),
+  deleteAction: vscode.l10n.t("Delete"),
   createChildTicket: vscode.l10n.t("Create child ticket"),
   // Ticket list states
   noProjectSelected: vscode.l10n.t("Enter a ticket number or text to search all projects."),
@@ -349,7 +349,6 @@ export const buildDashboardStrings = (): DashboardStrings => ({
   resolveRecovery: vscode.l10n.t("Review recovery"),
   resolveRecoveryTooltip: vscode.l10n.t("Review available recovery actions before continuing."),
   syncTicketTooltip: vscode.l10n.t("Sync VS Code editor changes to Redmine"),
-  editingState: vscode.l10n.t("Editing state"),
   remoteDescription: vscode.l10n.t("Description (on Redmine)"),
   descriptionUnsyncedWarning: vscode.l10n.t("Changes may not yet be reflected in the Redmine description below."),
   noDescription: vscode.l10n.t("No description."),
@@ -362,6 +361,7 @@ export const buildDashboardStrings = (): DashboardStrings => ({
   notSet: vscode.l10n.t("Not set"),
   closeDetail: vscode.l10n.t("Close detail"),
   openDetail: vscode.l10n.t("Open detail"),
+  resizeCommentPanel: vscode.l10n.t("Resize comment panel height"),
   statusFallbackHint: vscode.l10n.t("Status options using global fallback."),
   loadingEditOptions: vscode.l10n.t("Loading edit options…"),
   trackerUnavailable: vscode.l10n.t("Cannot edit: tracker options unavailable."),
@@ -378,12 +378,12 @@ export const buildDashboardStrings = (): DashboardStrings => ({
   filterIncludeUnassigned: vscode.l10n.t("Include unassigned"),
   filterStatusCount: vscode.l10n.t("Status"),
   // Unsynced tab
-  noUnsyncedChanges: vscode.l10n.t("No unsynced changes."),
   unsyncedKindTicket: vscode.l10n.t("Ticket"),
   unsyncedKindNewTicket: vscode.l10n.t("New ticket"),
   unsyncedKindComment: vscode.l10n.t("Comment"),
   unsyncedKindFile: vscode.l10n.t("File"),
   discardAction: vscode.l10n.t("Discard"),
+  discardPendingDraft: vscode.l10n.t("Discard draft"),
   discardLaterChangesAction: vscode.l10n.t("Discard later changes"),
   discardTitle: vscode.l10n.t("Discard unsynced local changes"),
   discardLaterChangesTitle: vscode.l10n.t("Discard later local changes and keep the recovery checkpoint"),
@@ -399,6 +399,8 @@ export const buildDashboardStrings = (): DashboardStrings => ({
   syncAbandoned: vscode.l10n.t("Sync abandoned"),
   syncAllBtn: vscode.l10n.t("Sync all"),
   unsyncedCountLabel: vscode.l10n.t("Unsynced changes: {0}"),
+  localPendingChanges: vscode.l10n.t("Local pending changes"),
+  openPendingPreview: vscode.l10n.t("Open read-only copy"),
   // Comments tab
   commentsForTicket: vscode.l10n.t("Comments for ticket"),
   reloadComments: vscode.l10n.t("Refresh"),
@@ -438,6 +440,11 @@ export const buildDashboardStrings = (): DashboardStrings => ({
   filterIncludeUnassignedLabel: vscode.l10n.t("Include unassigned"),
   filterStatusLabel: vscode.l10n.t("Status"),
   filterStatusAria: vscode.l10n.t("Status filter"),
+  filterSyncStateLabel: vscode.l10n.t("Sync state"),
+  filterSyncAll: vscode.l10n.t("All"),
+  filterSyncDirtyOnly: vscode.l10n.t("Editing (existing tickets only)"),
+  filterSyncEditing: vscode.l10n.t("Editing (including #NEW drafts)"),
+  filterSyncUnsynced: vscode.l10n.t("All unsynced"),
   sectionSort: vscode.l10n.t("Sort"),
   sortFieldLabel: vscode.l10n.t("Sort field"),
   sortDefaultOption: vscode.l10n.t("Default"),
@@ -459,6 +466,7 @@ export const buildDashboardStrings = (): DashboardStrings => ({
   showTrackerLabel: vscode.l10n.t("Show tracker"),
   showPriorityLabel: vscode.l10n.t("Show priority"),
   showAssigneeLabel: vscode.l10n.t("Show assignee name"),
+  followActiveEditorLabel: vscode.l10n.t("Follow active editor"),
   sectionGeneral: vscode.l10n.t("General"),
   ticketLimitLabel: vscode.l10n.t("Tickets per load"),
   resetSettings: vscode.l10n.t("Reset display settings"),

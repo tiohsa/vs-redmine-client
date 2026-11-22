@@ -28,9 +28,10 @@ suite("Redmine URL builders", () => {
     assert.strictEqual(result.url, "https://example.com/issues/10#note-99");
   });
 
-  test("prefers note index when provided", () => {
-    const result = buildCommentUrl("https://example.com", 10, 99, 3);
-    assert.strictEqual(result.url, "https://example.com/issues/10#note-3");
+  test("requires the comment position and excludes credentials from browser URLs", () => {
+    const baseUrl = "https://user:password@example.com/redmine/";
+    assert.strictEqual(buildCommentUrl(baseUrl, 10).errorMessage, "Comment position is missing.");
+    assert.strictEqual(buildCommentUrl(baseUrl, 10, 3).url, "https://example.com/redmine/issues/10#note-3");
   });
 
   test("returns error when base URL is missing", () => {

@@ -221,6 +221,36 @@ export class SyncEngine {
     }) as any;
   }
 
+  public async resolveLocalFinalize(input: {
+    key: SyncEngineKey;
+    operationId: string;
+    operationRevision: number;
+    attemptGeneration?: number;
+    context: SyncContext;
+  }): Promise<SyncEngineOutcome> {
+    const attemptGeneration = input.attemptGeneration;
+    if (typeof attemptGeneration !== "number" || !Number.isInteger(attemptGeneration) || attemptGeneration <= 0) {
+      return {
+        kind: "failed_before_commit",
+        error: new Error("Recovery attemptGeneration is required and must be a positive integer."),
+      };
+    }
+    return this.coordinator.resolveLocalFinalize({
+      key: input.key as any,
+      operationId: input.operationId,
+      operationRevision: input.operationRevision,
+      attemptGeneration,
+      context: input.context,
+      deps: {
+        uploadSpoolStore: this.uploadSpoolStore,
+        ticketCreate: this.rawTicketDeps,
+        ticketUpdate: this.rawTicketDeps,
+        comment: this.comments,
+        documents: this.documents,
+      },
+    }) as any;
+  }
+
   public async syncOne(
     key: SyncEngineKey,
     context: SyncContext,

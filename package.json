@@ -2,7 +2,7 @@
   "name": "redmine-client",
   "displayName": "%displayName%",
   "description": "%description%",
-  "version": "0.9.0",
+  "version": "0.10.0",
   "publisher": "tiohsa",
   "author": {
     "name": "tiohsa",
@@ -171,6 +171,11 @@
         "icon": "$(link-external)"
       },
       {
+        "command": "redmine-client.openInBrowser",
+        "title": "%command.openInBrowser.title%",
+        "icon": "$(link-external)"
+      },
+      {
         "command": "redmine-client.openTicketInBrowser",
         "title": "%command.openTicketInBrowser.title%",
         "icon": "$(link-external)"
@@ -183,10 +188,6 @@
       {
         "command": "redmine-client.editComment",
         "title": "%command.editComment.title%"
-      },
-      {
-        "command": "redmine-client.addComment",
-        "title": "%command.addComment.title%"
       },
       {
         "command": "redmine-client.addCommentFromComments",
@@ -249,6 +250,16 @@
       ]
     },
     "menus": {
+      "commandPalette": [
+        {
+          "command": "redmine-client.openTicketInBrowser",
+          "when": "false"
+        },
+        {
+          "command": "redmine-client.openCommentInBrowser",
+          "when": "false"
+        }
+      ],
       "view/title": [
         {
           "command": "redmine-client.refreshTickets",
@@ -273,7 +284,7 @@
           "group": "navigation@1"
         },
         {
-          "command": "redmine-client.openTicketInBrowser",
+          "command": "redmine-client.openInBrowser",
           "when": "redmine-client.isExistingTicketEditor",
           "group": "navigation@2"
         }
@@ -363,6 +374,11 @@
           "type": "boolean",
           "default": true,
           "description": "%config.ticketList.showAssignee.description%"
+        },
+        "redmine-client.ticketList.followActiveEditor": {
+          "type": "boolean",
+          "default": false,
+          "description": "%config.ticketList.followActiveEditor.description%"
         }
       }
     }
@@ -375,13 +391,16 @@
     "compile-tests": "node ./scripts/clean-test-output.js && tsc -p . --outDir out",
     "watch-tests": "tsc -p . -w --outDir out",
     "pretest": "pnpm run compile-tests && pnpm run compile && pnpm run lint",
-    "lint": "eslint src && node scripts/check-architecture.cjs",
+    "lint": "eslint src \"verification/**/*.test.cjs\" && node scripts/check-architecture.cjs",
     "test": "vscode-test",
     "test:dashboard-ui": "pnpm run compile-tests && node scripts/check-dashboard-ui.cjs",
     "test:live-redmine": "pnpm run compile-tests && node scripts/run-live-redmine-tests.cjs",
+    "test:e2e:up": "node scripts/redmine-test-env.cjs up",
+    "test:e2e:down": "node scripts/redmine-test-env.cjs down",
+    "test:e2e": "node scripts/redmine-test-env.cjs test",
     "test:unsafe": "bash ./scripts/vscode-test-nosandbox.sh",
     "verify": "node verification/driver-cli.cjs",
-    "verify:all": "pnpm run lint && node --test verification/architecture.test.cjs && pnpm run compile-tests && pnpm run compile && pnpm run verify run"
+    "verify:all": "pnpm run lint && node --test verification/architecture.test.cjs verification/test-quality.test.cjs && pnpm run compile-tests && pnpm run compile && pnpm run verify run"
   },
   "pnpm": {
     "onlyBuiltDependencies": [

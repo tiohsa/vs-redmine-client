@@ -137,16 +137,30 @@ export interface DashboardUnsyncedItem {
   abandonedAt?: number;
   hasLaterChanges?: boolean;
   processingRecord?: string;
+  pendingFocusIds?: string[];
+  inProgress?: boolean;
+}
+
+export interface DashboardLocalPendingChange {
+  id: string;
+  focusIds: string[];
+  label: string;
+  detail: string;
+  open?: "editor" | "preview";
+  canDiscard?: boolean;
+  reason?: string;
 }
 
 export interface DashboardCommentItem {
   id?: number;
+  noteIndex?: number;
   authorName: string;
   body: string;
   createdAt?: string;
   updatedAt?: string;
   editableByCurrentUser: boolean;
   hasUnsyncedEdit: boolean;
+  isEditing?: boolean;
   syncKey?: DashboardUnsyncedKey;
   isLocalUnsynced?: boolean;
 }
@@ -167,6 +181,7 @@ export interface DashboardTicketSettingsViewModel {
   showTracker: boolean;
   showPriority: boolean;
   showAssignee: boolean;
+  followActiveEditor: boolean;
   editorStorageDirectory: string;
   editorDefaults: {
     subject: string;
@@ -233,6 +248,7 @@ export type DashboardWorkPanel =
 export type DashboardSearchScope = { kind: "all" } | { kind: "project"; projectId: number };
 
 export interface DashboardState {
+  connectionGeneration: number;
   ticketSearch?: { query: string; scope: DashboardSearchScope; includeChildProjects: boolean };
   selectedProject?: DashboardSelectedProject;
   currentUserId?: number;
@@ -256,9 +272,13 @@ export interface DashboardState {
     totalCount: number;
     items: DashboardUnsyncedItem[];
     abandonedItems?: DashboardUnsyncedItem[];
+    localChanges?: DashboardLocalPendingChange[];
+    reveal?: { sequence: number; focusIds: string[] };
   };
   comments: {
     ticketId?: number;
+    selectedCommentId?: number;
+    selectedCommentUri?: string;
     loading: boolean;
     items: DashboardCommentItem[];
     error?: string;
@@ -311,6 +331,7 @@ export interface DashboardGeneralSettingsPatch {
   showTracker?: boolean;
   showPriority?: boolean;
   showAssignee?: boolean;
+  followActiveEditor?: boolean;
 }
 
 export type DashboardRequest =
@@ -327,6 +348,8 @@ export type DashboardRequest =
   | { type: "ticket.select"; requestId: string; ticketId: number; preserveFocus?: boolean }
   | { type: "ticket.openEditor"; requestId: string; ticketId: number }
   | { type: "ticket.openBrowser"; requestId: string; ticketId: number }
+  | { type: "deleteTicket"; requestId: string; ticketId: number; connectionGeneration: number }
+  | { type: "deleteComment"; requestId: string; ticketId: number; commentId: number; connectionGeneration: number }
   | { type: "ticket.create"; requestId: string; projectId?: number }
   | { type: "ticket.openDraft"; requestId: string; queueId: string; documentUri: string; preserveFocus?: boolean }
   | { type: "ticket.syncDraft"; requestId: string; queueId: string; documentUri: string }
@@ -353,8 +376,11 @@ export type DashboardRequest =
   | { type: "comment.add"; requestId: string; ticketId: number }
   | { type: "comment.edit"; requestId: string; ticketId: number; commentId: number }
   | { type: "comment.openBrowser"; requestId: string; ticketId: number; commentId: number; noteIndex?: number }
+  | { type: "comment.syncSelected"; requestId: string; ticketId: number; commentId?: number; documentUri?: string }
   | { type: "comment.reload"; requestId: string; ticketId: number }
   | { type: "unsynced.openLocalFile"; requestId: string; documentUri: string }
+  | { type: "unsynced.openPendingChange"; requestId: string; itemId: string }
+  | { type: "unsynced.discardPendingChange"; requestId: string; itemId: string }
   | { type: "unsynced.syncOne"; requestId: string; key: DashboardUnsyncedKey }
   | { type: "unsynced.discardOne"; requestId: string; key: DashboardUnsyncedKey }
   | { type: "unsynced.abandonOne"; requestId: string; key: DashboardUnsyncedKey }
@@ -379,6 +405,7 @@ export type DashboardEvent =
   | { type: "operation.success"; requestId: string; message: string; level?: "success" | "info" | "warning" }
   | { type: "operation.error"; requestId: string; message: string }
   | { type: "toast"; level: "info" | "warning" | "error" | "success"; message: string }
-  | { type: "view.toggleCompactMode" };
+  | { type: "view.toggleCompactMode" }
+  | { type: "view.focusTicketSearch" };
 
 export const VIEW_ID_DASHBOARD = "redmine-clientActivityDashboard";

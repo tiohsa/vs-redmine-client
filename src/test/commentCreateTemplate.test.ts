@@ -10,12 +10,10 @@ import {
 suite("Comment Create Template (mode: comment-create)", () => {
   test("buildCommentCreateFileContent は mode: comment-create と issue_id のテンプレートを生成する", () => {
     const content = buildCommentCreateFileContent(42);
-    assert.ok(content.startsWith("---\nmode: comment-create\nissue_id: 42\n---\n\n# "));
-    assert.ok(content.includes("#42"));
-    assert.ok(content.endsWith("\n\n"));
+    assert.strictEqual(content, "---\nmode: comment-create\nissue_id: 42\n---\n\n");
   });
 
-  test("parseCommentCreateFile は issueId と本文を抽出し、見出し行を除外する", () => {
+  test("parseCommentCreateFile は issueId と本文を抽出し、通常の見出しを保持する", () => {
     const template = buildCommentCreateFileContent(15);
     const parsedEmpty = parseCommentCreateFile(template);
     assert.ok(parsedEmpty);
@@ -27,6 +25,30 @@ suite("Comment Create Template (mode: comment-create)", () => {
     assert.ok(parsedWithBody);
     assert.strictEqual(parsedWithBody.issueId, 15);
     assert.strictEqual(parsedWithBody.body, "Line 1\n\nLine 2");
+
+    const initialHeading = parseCommentCreateFile(
+      `${buildCommentCreateFileContent(15)}# My comment\n\nBody`,
+    );
+    assert.ok(initialHeading);
+    assert.strictEqual(initialHeading.body, "# My comment\n\nBody");
+
+    const bareHeading = parseCommentCreateFile(`${buildCommentCreateFileContent(15)}#`);
+    assert.ok(bareHeading);
+    assert.strictEqual(bareHeading.body, "#");
+  });
+
+  test("parseCommentCreateFile は旧自動見出しだけを除外する", () => {
+    const legacy = parseCommentCreateFile(
+      "---\nmode: comment-create\nissue_id: 15\n---\n\n# Comment on ticket #15\n\n# 調査結果\n\nBody",
+    );
+    assert.ok(legacy);
+    assert.strictEqual(legacy.body, "# 調査結果\n\nBody");
+
+    const otherTicketHeading = parseCommentCreateFile(
+      "---\nmode: comment-create\nissue_id: 15\n---\n\n# Comment on ticket #99\n\nBody",
+    );
+    assert.ok(otherTicketHeading);
+    assert.strictEqual(otherTicketHeading.body, "# Comment on ticket #99\n\nBody");
   });
 
   test("parseCommentCreateFile は不正または別モードの文書で undefined を返す", () => {

@@ -1,3 +1,4 @@
+import * as vscode from "vscode";
 import { requestJson, type RequestOptions } from "./client";
 import {
   Comment,
@@ -108,6 +109,7 @@ export const listIssues = async (input: IssuesListInput): Promise<IssuesListResu
 export interface IssueDetailResult {
   ticket: Ticket;
   comments: Comment[];
+  childIssueIds?: number[];
 }
 
 export type IssueUploadInput = UploadToken;
@@ -222,13 +224,11 @@ export const updateIssue = async (input: IssueUpdateInput): Promise<void> => {
   });
 };
 
-export const getIssueDetail = async (issueId: number): Promise<IssueDetailResult> => {
+export const getIssueDetail = async (issueId: number, includeChildren = false): Promise<IssueDetailResult> => {
   const response = await requestJson<RedmineIssueDetailResponse>({
     method: "GET",
     path: `/issues/${issueId}.json`,
-    query: {
-      include: "journals",
-    },
+    query: { include: includeChildren ? "journals,children" : "journals" },
   });
 
   const issue = response.issue;
@@ -269,7 +269,16 @@ export const getIssueDetail = async (issueId: number): Promise<IssueDetailResult
       editableByCurrentUser: false,
     }));
 
-  return { ticket, comments };
+  if (!includeChildren || issue.children === undefined) { return { ticket, comments }; }
+  const childIssueIds: number[] = [];
+  const descendants = [...issue.children];
+  while (descendants.length > 0) {
+    const child = descendants.pop();
+    if (!child) { throw new Error(vscode.l10n.t("Redmine returned an invalid ticket hierarchy.")); }
+    childIssueIds.push(child.id);
+    for (const nestedChild of child.children ?? []) { descendants.push(nestedChild); }
+  }
+  return { ticket, comments, childIssueIds };
 };
 
 export const listIssueStatuses = async (

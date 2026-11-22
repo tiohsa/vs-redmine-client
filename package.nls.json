@@ -31,10 +31,10 @@
   "command.toggleCompactMode.title": "Redmine: Toggle Compact Mode",
   "command.createChildTicketFromList.title": "Redmine: Add Child Ticket",
   "command.openProjectInBrowser.title": "Redmine: Open Project in Browser",
+  "command.openInBrowser.title": "Redmine: Open in Browser",
   "command.openTicketInBrowser.title": "Redmine: Open Ticket in Browser",
   "command.openCommentInBrowser.title": "Redmine: Open Comment in Browser",
   "command.editComment.title": "Redmine: Edit Comment",
-  "command.addComment.title": "Redmine: Add Comment",
   "command.addCommentFromComments.title": "Redmine: Add Comment",
   "command.runOfflineSync.title": "Redmine: Run Offline Sync",
   "command.syncUnsyncedFile.title": "Redmine: Sync This File",
@@ -62,6 +62,7 @@
   "config.ticketList.showTracker.description": "Show the tracker badge on each ticket row in the dashboard.",
   "config.ticketList.showPriority.description": "Show the priority badge on each ticket row in the dashboard.",
   "config.ticketList.showAssignee.description": "Show assignee names in the ticket list.",
+  "config.ticketList.followActiveEditor.description": "Automatically select the corresponding ticket in the dashboard list when switching to a ticket or comment editor.",
   "command.referenceExample": "Redmine: Run Reference Example",
   "command.editFieldViaQuickPick.title": "Redmine: Edit Ticket Field"
 }

@@ -27,6 +27,34 @@ function location(file) {
   return { layer, feature };
 }
 
+function isClassExpression(expression) {
+  while (expression && (ts.isParenthesizedExpression(expression) || ts.isAsExpression(expression) ||
+    ts.isSatisfiesExpression(expression) || ts.isTypeAssertionExpression(expression) || ts.isNonNullExpression(expression))) {
+    expression = expression.expression;
+  }
+  return expression !== undefined && ts.isClassExpression(expression);
+}
+
+function implementationClasses(source) {
+  if (source.isDeclarationFile) {
+    return [];
+  }
+  return source.statements.flatMap(statement => {
+    if (ts.isClassDeclaration(statement) && !statement.modifiers?.some(modifier => modifier.kind === ts.SyntaxKind.DeclareKeyword)) {
+      return [{ name: statement.name?.text ?? "default", node: statement }];
+    }
+    if (ts.isVariableStatement(statement)) {
+      return statement.declarationList.declarations
+        .filter(declaration => isClassExpression(declaration.initializer))
+        .map(node => ({ name: node.name.getText(source), node }));
+    }
+    if (ts.isExportAssignment(statement) && isClassExpression(statement.expression)) {
+      return [{ name: statement.isExportEquals ? "export =" : "default", node: statement }];
+    }
+    return [];
+  });
+}
+
 for (const input of program.getSourceFiles()) {
   const file = relative(input.fileName);
   if (!file.startsWith("src/") || file.startsWith("src/test/")) {
@@ -52,6 +80,12 @@ for (const input of program.getSourceFiles()) {
 
   if (layer && !config.layers.includes(layer)) {
     report("runtime", 0, layer, "architecture.config.json に定義されたランタイムに配置してください。");
+  }
+  const classes = implementationClasses(source);
+  if (classes.length > 1) {
+    const names = classes.map(implementation => implementation.name).sort();
+    report("multiple-implementation-classes", classes[1].node.getStart(source), JSON.stringify(names),
+      `トップレベルの実装クラスを1ファイルに1つまで置き、実装を別ファイルに分けてください（${names.join("、")}）。`);
   }
   const comments = new Set();
   function checkComments(ranges) {

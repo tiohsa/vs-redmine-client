@@ -19,6 +19,7 @@ import type {
 } from "../dashboardProtocol";
 import {
   detectTicketIntentChanges,
+  matchesQueuedTicketIntent,
   parseQueuedTicketIntent,
 } from "../../views/ticketSync/ticketChangeDetector";
 import { parseTicketEditorContent } from "../../views/ticketEditorContent";
@@ -53,11 +54,7 @@ export const resolveTicketSyncState = (ticketId: number): DashboardSyncState => 
     if (!currentContent || !queuedContent) {
       return draft?.status === "Dirty" ? "Dirty" : "Queued";
     }
-    return !detectTicketIntentChanges({
-      subject: queuedContent.subject,
-      description: queuedContent.description,
-      metadata: queuedContent.metadata,
-    }, currentContent).hasChanges ? "Queued" : "Dirty";
+    return matchesQueuedTicketIntent(queuedContent, currentContent) ? "Queued" : "Dirty";
   };
 
   if (draft) {

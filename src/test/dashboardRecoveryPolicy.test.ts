@@ -325,6 +325,7 @@ suite("Dashboard recovery policy — lifecycle matrix", () => {
           notifyToast: () => {}, onTicketsRefreshed: () => {},
         });
         controller.refreshUnsyncedPresentation();
+        const previousLocalChanges = store.getState().unsynced.localChanges ?? [];
         const original = vscode.window.showWarningMessage;
         Object.defineProperty(vscode.window, "showWarningMessage", {
           configurable: true, writable: true, value: async (...args: unknown[]) => {
@@ -353,7 +354,11 @@ suite("Dashboard recovery policy — lifecycle matrix", () => {
           assert.strictEqual(warningArguments[0][2], vscode.l10n.t("Discard"));
           assert.deepStrictEqual(errors, [vscode.l10n.t("The unsynced item changed. Refresh and try again.")]);
           assert.deepStrictEqual(successes, []);
-          assert.deepStrictEqual(store.getState().unsynced, { items: [], totalCount: 0, abandonedItems: [] });
+          const unsynced = store.getState().unsynced;
+          assert.deepStrictEqual(unsynced.items, []);
+          assert.deepStrictEqual(unsynced.abandonedItems, []);
+          assert.deepStrictEqual(unsynced.localChanges ?? [], previousLocalChanges);
+          assert.strictEqual(unsynced.totalCount, previousLocalChanges.length);
         } else {
           assert.strictEqual(warningArguments.length, 1);
           assert.strictEqual(warningArguments[0][0], vscode.l10n.t(outcome === "discarded_next"
@@ -394,6 +399,8 @@ suite("Dashboard recovery policy — lifecycle matrix", () => {
         notifyError: (_id, message) => { errors.push(message); },
         notifyToast: () => {}, onTicketsRefreshed: () => {},
       });
+      controller.refreshUnsyncedPresentation();
+      const previousLocalChanges = store.getState().unsynced.localChanges ?? [];
       let afterTransition: OfflineSyncQueue | undefined;
       let writeCount = 0;
       let confirmations = 0;
@@ -427,7 +434,10 @@ suite("Dashboard recovery policy — lifecycle matrix", () => {
       assert.deepStrictEqual(errors, [vscode.l10n.t("The unsynced item changed. Refresh and try again.")]);
       assert.deepStrictEqual(successes, []);
       assert.deepStrictEqual(getOfflineSyncQueue(scope), afterTransition);
-      assert.strictEqual(store.getState().unsynced.totalCount, 3);
+      const unsynced = store.getState().unsynced;
+      assert.strictEqual(unsynced.items.length, 3);
+      assert.deepStrictEqual(unsynced.localChanges ?? [], previousLocalChanges);
+      assert.strictEqual(unsynced.totalCount, unsynced.items.length + previousLocalChanges.length);
       assert.strictEqual(writes, writeCount, "stale の破棄は永続化しない");
     });
   }

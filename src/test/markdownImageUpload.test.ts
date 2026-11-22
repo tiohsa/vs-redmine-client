@@ -92,40 +92,46 @@ suite("Markdown image upload", () => {
     assert.strictEqual(result.content, "![img](image-25.png)");
   });
 
-  test("rejects absolute paths, traversal, and symlink escapes", async function () {
+  const assertUploadRejected = async (baseDir: string, value: string): Promise<void> => {
+    let uploadCalls = 0;
+    const result = await processMarkdownImageUploads({
+      content: `![secret](${value})`,
+      baseDir,
+      uploadFile: async () => {
+        uploadCalls++;
+        return { token: "unexpected", filename: "secret.png", contentType: "image/png" };
+      },
+      validatePath: async () => ({ valid: true }),
+    });
+
+    assert.strictEqual(uploadCalls, 0, `upload must be rejected for ${value}`);
+    assert.strictEqual(result.uploads.length, 0, `no token must be produced for ${value}`);
+  };
+
+  test("rejects absolute paths and traversal", async () => {
     const baseDir = fs.mkdtempSync(path.join(os.tmpdir(), "markdown-image-base-"));
-    const outsideDir = fs.mkdtempSync(path.join(os.tmpdir(), "markdown-image-outside-"));
-    const outsideFile = path.join(outsideDir, "secret.png");
-    fs.writeFileSync(outsideFile, "secret");
-
-    const symlinkDir = path.join(baseDir, "linked");
     try {
-      fs.symlinkSync(outsideDir, symlinkDir, "junction");
-    } catch {
-      this.skip();
-      return;
+      for (const value of ["../secret.png", "../../secret.png", "/home/user/secret.png", "C:\\Users\\user\\secret.png"]) {
+        await assertUploadRejected(baseDir, value);
+      }
+    } finally {
+      fs.rmSync(baseDir, { recursive: true, force: true });
     }
+  });
 
-    for (const value of [
-      "../secret.png",
-      "../../secret.png",
-      "/home/user/secret.png",
-      "C:\\Users\\user\\secret.png",
-      "./linked/secret.png",
-    ]) {
-      let uploadCalls = 0;
-      const result = await processMarkdownImageUploads({
-        content: `![secret](${value})`,
-        baseDir,
-        uploadFile: async () => {
-          uploadCalls++;
-          return { token: "unexpected", filename: "secret.png", contentType: "image/png" };
-        },
-        validatePath: async () => ({ valid: true }),
-      });
+  test("rejects symlink escapes", async () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), "markdown-image-symlink-"));
+    try {
+      const baseDir = path.join(root, "base");
+      const outsideDir = path.join(root, "outside");
+      fs.mkdirSync(baseDir);
+      fs.mkdirSync(outsideDir);
+      fs.writeFileSync(path.join(outsideDir, "secret.png"), "secret");
+      fs.symlinkSync(outsideDir, path.join(baseDir, "linked"), "junction");
 
-      assert.strictEqual(uploadCalls, 0, `upload must be rejected for ${value}`);
-      assert.strictEqual(result.uploads.length, 0, `no token must be produced for ${value}`);
+      await assertUploadRejected(baseDir, "./linked/secret.png");
+    } finally {
+      fs.rmSync(root, { recursive: true, force: true });
     }
   });
 });

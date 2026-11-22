@@ -2,6 +2,8 @@ import * as assert from "assert";
 import * as http from "http";
 import * as fs from "fs";
 import * as path from "path";
+import * as vscode from "vscode";
+import { openLiveDashboard } from "./dashboardHarness";
 import { randomUUID } from "crypto";
 import { createSyncEngine } from "../../app/syncEngine";
 import { setApiKeyForScope, clearApiKeyForScope } from "../../config/apiKeyStore";
@@ -9,10 +11,10 @@ import { runWithConnectionScope, requestJson } from "../../redmine/client";
 import { extractHttpStatusCode } from "../../redmine/httpError";
 import { getOfflineSyncQueue } from "../../views/offlineSyncStore";
 import { createFaultProxy } from "./faultProxy";
-import { liveTest } from "./liveFixture";
+import { liveTest, resolveLiveUpstream } from "./liveFixture";
 
 liveTest("LIVE-I01", "別の論理接続先へAPI keyを継承しない", async (live) => {
-  const proxy = await createFaultProxy("http://127.0.0.1:3000/");
+  const proxy = await createFaultProxy(resolveLiveUpstream());
   try {
     await assert.rejects(runWithConnectionScope(proxy.origin, () => requestJson({ method: "GET", path: "/users/current.json" })), /API key/);
     assert.strictEqual(proxy.hits().length, 0);
@@ -22,15 +24,21 @@ liveTest("LIVE-I01", "別の論理接続先へAPI keyを継承しない", async 
 
 liveTest("LIVE-I02", "不正なAPI keyに対する実HTTP 401では書き込みを開始しない", async (live) => {
   const key = await live.queueNewTicket({ subject: "LIVE-I02 invalid key" });
-  const savedKey = process.env.REDMINE_API_KEY;
-  assert.ok(savedKey);
-  await setApiKeyForScope(live.scope, "invalid-live-test-api-key");
+  const proxy = await createFaultProxy(resolveLiveUpstream());
+  const engine = live.engine();
   try {
-    const outcome = await live.engine().syncOne(key, live.context);
+    const operation = engine.getRepository().getOperation(key, live.scope);
+    assert.ok(operation);
+    await engine.getRepository().saveOperation({ ...operation, connectionScope: proxy.origin }, proxy.origin);
+    await setApiKeyForScope(proxy.origin, "invalid-live-test-api-key");
+    const outcome = await engine.syncOne(key, { connectionScope: proxy.origin });
     assert.notStrictEqual(outcome.kind, "completed");
-    assert.ok(live.proxy.hits().some((hit) => hit.status === 401));
-    assert.strictEqual(live.proxy.hits().filter((hit) => hit.forwarded && hit.method === "POST" && hit.path === "/issues.json").length, 0);
-  } finally { await setApiKeyForScope(live.scope, savedKey); }
+    assert.ok(proxy.hits().some((hit) => hit.status === 401));
+    assert.strictEqual(proxy.hits().filter((hit) => hit.forwarded && hit.method === "POST" && hit.path === "/issues.json").length, 0);
+  } finally {
+    try { await engine.getRepository().deleteOperation(key, proxy.origin); }
+    finally { await clearApiKeyForScope(proxy.origin); await proxy.close(); }
+  }
 });
 
 liveTest("LIVE-I03", "別接続先の同じticket IDのキューとOperationを分離する", async (live) => {
@@ -38,7 +46,7 @@ liveTest("LIVE-I03", "別接続先の同じticket IDのキューとOperationを�
   const key = await live.queueTicket(id, { subject: "LIVE-I03 first scope" });
   const first = live.engine().getRepository().getOperation(key, live.scope);
   assert.ok(first);
-  const proxy = await createFaultProxy("http://127.0.0.1:3000/");
+  const proxy = await createFaultProxy(resolveLiveUpstream());
   const apiKey = process.env.REDMINE_API_KEY;
   assert.ok(apiKey);
   await setApiKeyForScope(proxy.origin, apiKey);
@@ -74,7 +82,7 @@ liveTest("LIVE-I04", "別接続先を指定した復旧callbackは元Operation�
 });
 
 const keyForUser = (login: string, password: string): Promise<string> => new Promise((resolve, reject) => {
-  const request = http.get("http://127.0.0.1:3000/users/current.json", {
+  const request = http.get(new URL("users/current.json", resolveLiveUpstream()), {
     headers: { Authorization: `Basic ${Buffer.from(`${login}:${password}`).toString("base64")}` },
   }, (response) => {
     const chunks: Buffer[] = [];
@@ -100,7 +108,7 @@ liveTest("LIVE-I05", "他人のコメントを更新できないユーザーで�
     user: { login, password, firstname: "Live", lastname: "Sync", mail: `${login}@example.invalid`,
       must_change_passwd: false, mail_notification: "none" },
   } });
-  const proxy = await createFaultProxy("http://127.0.0.1:3000/");
+  const proxy = await createFaultProxy(resolveLiveUpstream());
   try {
     await live.request({ method: "PUT", path: `/projects/${live.projectId}.json`, body: { project: { is_public: true } } });
     const id = await live.createIssue();
@@ -117,6 +125,26 @@ liveTest("LIVE-I05", "他人のコメントを更新できないユーザーで�
     assert.strictEqual(outcome.kind, "failed_before_commit");
     assert.ok(proxy.hits().some((hit) => hit.method === "PUT" && hit.status === 403));
     assert.strictEqual((await live.readIssue(id)).comments.find((item) => item.id === comment.id)?.body, comment.body);
+    const configuration = vscode.workspace.getConfiguration("redmine-client");
+    await configuration.update("baseUrl", proxy.origin, vscode.ConfigurationTarget.Workspace);
+    try {
+      const dashboard = await openLiveDashboard(live);
+      try {
+        await dashboard.dom("#tab-tickets");
+        await dashboard.dom("#project-select-trigger");
+        await dashboard.dom(`[role="option"][data-project-id="${live.projectId}"]`);
+        await dashboard.waitFor(() => dashboard.store.getState().tickets.some((ticket) => ticket.id === id), "public ticket");
+        await dashboard.dom(`.ticket-row[data-id="${id}"]`);
+        await dashboard.waitFor(() => dashboard.store.getState().selectedTicket?.id === id, "selected public ticket");
+        await dashboard.waitFor(() => dashboard.store.getState().comments.items.some((item) => item.id === comment.id), "other user's comment");
+        assert.ok((await dashboard.read("#comments-list .comment-body")).includes(comment.body));
+        assert.deepStrictEqual(await dashboard.read(`[data-editable-comment="${comment.id}"]`), []);
+      } finally {
+        dashboard.dispose();
+      }
+    } finally {
+      await configuration.update("baseUrl", live.scope, vscode.ConfigurationTarget.Workspace);
+    }
   } finally {
     await clearApiKeyForScope(proxy.origin);
     await proxy.close();
@@ -139,7 +167,7 @@ liveTest("LIVE-I07", "Effect復旧は選択中の接続先に依存せず元のs
   const key = await live.queueNewTicket({ attachments: [{ kind: "file", filePath: file }] });
   const operation = live.engine().getRepository().getOperation(key, live.scope);
   assert.ok(operation);
-  const proxy = await createFaultProxy("http://127.0.0.1:3000/");
+  const proxy = await createFaultProxy(resolveLiveUpstream());
   const apiKey = process.env.REDMINE_API_KEY;
   assert.ok(apiKey);
   await setApiKeyForScope(proxy.origin, apiKey);

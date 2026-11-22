@@ -24,7 +24,7 @@ Module._load = originalLoad;
 
 const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'dashboard-ui-'));
 const fixture = path.join(directory, 'dashboard.html');
-const bootstrap = `<style nonce="ui-check">:root{--vscode-font-family:system-ui;--vscode-font-size:13px;--vscode-button-background:#1456f0;--vscode-button-foreground:#fff;--vscode-focusBorder:#1456f0;--vscode-sideBar-background:#f0f0f0;--vscode-editor-background:#fff;--vscode-foreground:#222;--vscode-descriptionForeground:#45515e;--vscode-panel-border:#e5e7eb;--vscode-errorForeground:#b3261e;--vscode-editorWarning-foreground:#795e00;--vscode-testing-iconPassed:#16825d}:root:has(body.vscode-dark){--vscode-sideBar-background:#252526;--vscode-editor-background:#1e1e1e;--vscode-foreground:#ddd;--vscode-descriptionForeground:#bbb;--vscode-panel-border:#2b2b2b;--vscode-button-background:#007acc;--vscode-focusBorder:#007acc;--vscode-list-activeSelectionBackground:#094771;--vscode-list-activeSelectionForeground:#fff;--vscode-editorWidget-background:#252526}:root:has(body.vscode-high-contrast-light){--vscode-contrastBorder:#000;--vscode-panel-border:#000}:root:has(body.vscode-high-contrast){--vscode-sideBar-background:#000;--vscode-editor-background:#000;--vscode-foreground:#fff;--vscode-descriptionForeground:#fff;--vscode-contrastBorder:#fff;--vscode-focusBorder:#f38518;--vscode-panel-border:#fff}</style><script nonce="ui-check">window.messages=[];let uiState;window.acquireVsCodeApi=()=>({postMessage:m=>window.messages.push(m),getState:()=>uiState,setState:value=>{uiState=value;return value}});const NativeDate=Date;const fixedNow=NativeDate.UTC(2026,8,14,16,0,0);window.Date=class extends NativeDate{constructor(...args){if(args.length===0)super(fixedNow);else super(...args)}static now(){return fixedNow}};</script>`;
+const bootstrap = `<style nonce="ui-check">:root{--vscode-font-family:system-ui;--vscode-font-size:13px;--vscode-button-background:#1456f0;--vscode-button-foreground:#fff;--vscode-focusBorder:#1456f0;--vscode-sideBar-background:#f0f0f0;--vscode-editor-background:#fff;--vscode-foreground:#222;--vscode-descriptionForeground:#45515e;--vscode-panel-border:#e5e7eb;--vscode-errorForeground:#b3261e;--vscode-editorWarning-foreground:#795e00;--vscode-testing-iconPassed:#16825d}:root:has(body.vscode-dark){--vscode-sideBar-background:#252526;--vscode-editor-background:#1e1e1e;--vscode-foreground:#ddd;--vscode-descriptionForeground:#bbb;--vscode-panel-border:#2b2b2b;--vscode-button-background:#007acc;--vscode-focusBorder:#007acc;--vscode-list-activeSelectionBackground:#094771;--vscode-list-activeSelectionForeground:#fff;--vscode-editorWidget-background:#252526}:root:has(body.vscode-high-contrast-light){--vscode-contrastBorder:#000;--vscode-panel-border:#000}:root:has(body.vscode-high-contrast){--vscode-sideBar-background:#000;--vscode-editor-background:#000;--vscode-foreground:#fff;--vscode-descriptionForeground:#fff;--vscode-contrastBorder:#fff;--vscode-focusBorder:#f38518;--vscode-panel-border:#fff}</style><script nonce="ui-check">window.messages=[];let uiState=window.__initialUiState;window.acquireVsCodeApi=()=>({postMessage:m=>window.messages.push(m),getState:()=>uiState,setState:value=>{uiState=value;return value}});const NativeDate=Date;const fixedNow=NativeDate.UTC(2026,8,14,16,0,0);window.Date=class extends NativeDate{constructor(...args){if(args.length===0)super(fixedNow);else super(...args)}static now(){return fixedNow}};</script>`;
 fs.writeFileSync(fixture, buildDashboardHtml('ui-check', strings).replace('<head>', '<head>' + bootstrap));
 const chrome = spawn(process.env.CHROME_BIN || 'google-chrome', [
   '--headless', '--disable-gpu', '--no-first-run', '--no-default-browser-check',
@@ -141,6 +141,698 @@ async function checkLoadMoreState() {
   // 長い一覧から戻した際の scroll イベントが、次の picker 操作へ残らないよう待つ。
   await evaluate(`new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)))`);
 }
+async function checkTicketSelectionHighlight() {
+  const originalState = structuredClone(state);
+  const originalBodyClass = await evaluate(`document.body.className`);
+  const originalCompact = await evaluate(`document.getElementById('ticket-list').classList.contains('is-compact')`);
+  const tokenNames = [
+    '--vscode-list-hoverBackground',
+    '--vscode-list-inactiveSelectionBackground',
+    '--vscode-list-activeSelectionBackground',
+    '--vscode-list-activeSelectionForeground',
+  ];
+  const isSoftBlue = (c) => c.b > c.r && c.b > c.g;
+  await evaluate(`(() => {
+    if (window.__selectionColorHelper) return;
+    const canvas = document.createElement('canvas');
+    canvas.width = 1;
+    canvas.height = 1;
+    const ctx = canvas.getContext('2d');
+    const parse = (cssColor) => {
+      ctx.clearRect(0, 0, 1, 1);
+      ctx.fillStyle = 'rgba(0, 0, 0, 0)';
+      ctx.fillStyle = cssColor;
+      ctx.fillRect(0, 0, 1, 1);
+      const [r, g, b, a] = ctx.getImageData(0, 0, 1, 1).data;
+      return { r, g, b, a };
+    };
+    const over = (fg, bg) => {
+      const t = fg.a / 255;
+      return {
+        r: Math.round(fg.r * t + bg.r * (1 - t)),
+        g: Math.round(fg.g * t + bg.g * (1 - t)),
+        b: Math.round(fg.b * t + bg.b * (1 - t)),
+        a: 255,
+      };
+    };
+    const linear = (v) => { const s = v / 255; return s <= 0.03928 ? s / 12.92 : ((s + 0.055) / 1.055) ** 2.4; };
+    const luminance = (c) => 0.2126 * linear(c.r) + 0.7152 * linear(c.g) + 0.0722 * linear(c.b);
+    const contrast = (a, b) => { const la = luminance(a), lb = luminance(b); return (Math.max(la, lb) + 0.05) / (Math.min(la, lb) + 0.05); };
+    const distance = (a, b) => Math.hypot(a.r - b.r, a.g - b.g, a.b - b.b);
+    const key = (c) => c.r + ',' + c.g + ',' + c.b + ',' + c.a;
+    window.__selectionColorHelper = { parse, over, contrast, distance, key };
+  })()`);
+
+  const setTokens = async (tokens) => {
+    await evaluate(`(() => {
+      const root = document.documentElement.style;
+      for (const name of ${JSON.stringify(tokenNames)}) {
+        const value = ${JSON.stringify(tokens)}[name];
+        if (value === undefined) root.removeProperty(name);
+        else root.setProperty(name, value);
+      }
+    })()`);
+  };
+
+  const measureSelection = async (selector) => evaluate(`(() => {
+    const helper = window.__selectionColorHelper;
+    const scroll = document.getElementById('ticket-scroll');
+    const row = document.querySelector(${JSON.stringify(selector)});
+    const subject = row.querySelector('.ticket-subject');
+    const rowStyle = getComputedStyle(row);
+    const scrollBg = helper.parse(getComputedStyle(scroll).backgroundColor);
+    const rawRowBg = helper.parse(rowStyle.backgroundColor);
+    const resolvedRowBg = helper.over(rawRowBg, scrollBg);
+    const subjectColor = helper.parse(getComputedStyle(subject).color);
+    return {
+      focusWithin: document.querySelector('body:focus-within') !== null,
+      rawAlpha: rawRowBg.a,
+      bg: resolvedRowBg,
+      bgKey: helper.key(resolvedRowBg),
+      scrollBgKey: helper.key(scrollBg),
+      distanceFromScroll: helper.distance(resolvedRowBg, scrollBg),
+      subjectContrast: helper.contrast(subjectColor, resolvedRowBg),
+      outlineStyle: rowStyle.outlineStyle,
+      borderLeftWidth: rowStyle.borderLeftWidth,
+      paddingLeft: rowStyle.paddingLeft,
+    };
+  })()`);
+
+  const measureCommentSelection = async (selector) => evaluate(`(() => {
+    const helper = window.__selectionColorHelper;
+    const bodyBg = helper.parse(getComputedStyle(document.body).backgroundColor);
+    const detailCard = document.getElementById('ticket-detail-card');
+    const detailBg = helper.over(helper.parse(getComputedStyle(detailCard).backgroundColor), bodyBg);
+    const card = document.querySelector(${JSON.stringify(selector)});
+    const cardStyle = getComputedStyle(card);
+    const rawCardBg = helper.parse(cardStyle.backgroundColor);
+    const resolvedCardBg = helper.over(rawCardBg, detailBg);
+    const bodyColor = helper.parse(getComputedStyle(card.querySelector('.comment-body')).color);
+    const authorColor = helper.parse(getComputedStyle(card.querySelector('.comment-author')).color);
+    return {
+      focusWithin: document.querySelector('body:focus-within') !== null,
+      rawAlpha: rawCardBg.a,
+      bg: resolvedCardBg,
+      bgKey: helper.key(resolvedCardBg),
+      detailBgKey: helper.key(detailBg),
+      distanceFromDetail: helper.distance(resolvedCardBg, detailBg),
+      bodyContrast: helper.contrast(bodyColor, resolvedCardBg),
+      authorContrast: helper.contrast(authorColor, resolvedCardBg),
+      boxShadow: cardStyle.boxShadow,
+      outlineStyle: cardStyle.outlineStyle,
+    };
+  })()`);
+
+  try {
+    await call('Emulation.setDeviceMetricsOverride', { width: 440, height: 900, deviceScaleFactor: 1, mobile: false });
+    await evaluate(`document.getElementById('tab-tickets').click()`);
+    state.selectedProject = { id: 1, name: '検証プロジェクト' };
+    state.projects = [{ id: 1, name: '検証プロジェクト', level: 0 }];
+    state.metadataOptions.statuses = [{ id: 1, name: '進行中', isClosed: false }];
+    state.draftTickets = [{
+      queueId: 'sel-draft',
+      documentUri: 'file:///tmp/selection-draft.md',
+      subject: '選択確認ドラフト',
+      projectId: 1,
+      trackerName: 'Bug',
+      statusName: '進行中',
+      priorityName: 'Normal',
+      syncState: 'Draft',
+    }];
+    state.tickets = [
+      {
+        id: 510,
+        subject: '通常選択確認チケット',
+        level: 0,
+        trackerName: 'Bug',
+        statusId: 1,
+        statusName: '進行中',
+        syncState: 'Synced',
+        children: [{
+          id: 511,
+          subject: '子チケット選択確認',
+          level: 1,
+          trackerName: 'Feature',
+          statusId: 1,
+          statusName: '進行中',
+          syncState: 'Synced',
+          children: [],
+        }],
+      },
+      {
+        id: 512,
+        subject: '未同期選択確認チケット',
+        level: 0,
+        trackerName: 'Task',
+        statusId: 1,
+        statusName: '進行中',
+        syncState: 'Dirty',
+        children: [],
+      },
+    ];
+    state.loadedTicketCount = 3;
+    state.totalTicketCount = 3;
+    state.selectedTicketId = 510;
+    state.selectedTicket = { ...state.tickets[0], projectName: '検証プロジェクト' };
+    state.comments = {
+      ticketId: 510,
+      loading: false,
+      items: [
+        {
+          id: 901,
+          noteIndex: 1,
+          authorName: 'Taro',
+          body: 'リモート選択確認コメント',
+          updatedAt: '2026-09-14T10:00:00Z',
+          editableByCurrentUser: true,
+          isEditing: false,
+          hasUnsyncedEdit: false,
+        },
+        {
+          authorName: 'Local draft',
+          body: 'ローカル下書き選択確認コメント',
+          editableByCurrentUser: false,
+          hasUnsyncedEdit: true,
+          isLocalUnsynced: true,
+          syncKey: { kind: 'comment', ticketId: 510, documentUri: 'file:///tmp/sel-comment-draft.md' },
+        },
+      ],
+      selectedCommentId: 901,
+      selectedCommentUri: undefined,
+    };
+    await push();
+
+    // トラッカー縦バーが存在せず、左パディングとインデントガイドが維持される。
+    assert.equal(await evaluate(`document.querySelectorAll('.ticket-tracker-bar').length`), 0, 'no ticket tracker bar');
+    assert.equal(await evaluate(`document.querySelectorAll('.detail-tracker-bar').length`), 0, 'no detail tracker bar');
+    assert.equal(await evaluate(`document.querySelectorAll('.ticket-row[data-id="511"] .ticket-indent-guide').length`), 1, 'child indent guide intact');
+    assert.equal(await evaluate(`document.querySelectorAll('.ticket-row[data-id="511"] .ticket-indent-branch').length`), 1, 'child indent branch intact');
+
+    const themedCases = [
+      {
+        theme: 'vscode-light',
+        tokens: {
+          '--vscode-list-hoverBackground': '#e8e8e8',
+          '--vscode-list-inactiveSelectionBackground': '#e4e6f1',
+          '--vscode-list-activeSelectionBackground': '#0060c0',
+          '--vscode-list-activeSelectionForeground': '#ffffff',
+        },
+      },
+      {
+        theme: 'vscode-dark',
+        tokens: {
+          '--vscode-list-hoverBackground': '#2a2d2e',
+          '--vscode-list-inactiveSelectionBackground': '#37373d',
+          '--vscode-list-activeSelectionBackground': '#094771',
+          '--vscode-list-activeSelectionForeground': '#ffffff',
+        },
+      },
+    ];
+
+    for (const { theme, tokens } of themedCases) {
+      await evaluate(`document.body.className=${JSON.stringify(theme)}`);
+      await setTokens(tokens);
+      state.comments.selectedCommentId = 901;
+      state.comments.selectedCommentUri = undefined;
+      await push();
+      await evaluate(`document.activeElement?.blur?.()`);
+      const inactive = await measureSelection('.ticket-row[data-id="510"].selected');
+      assert.equal(inactive.focusWithin, false, `${theme}: inactive focusWithin`);
+      assert.ok(inactive.rawAlpha > 0, `${theme}: inactive alpha`);
+      assert.equal(inactive.borderLeftWidth, '0px', `${theme}: selected ticket has no left border`);
+      assert.equal(inactive.paddingLeft, '12px', `${theme}: level 0 paddingLeft intact`);
+      assert.ok(isSoftBlue(inactive.bg), `${theme}: ticket inactive soft blue ${JSON.stringify(inactive.bg)}`);
+      assert.notEqual(inactive.bgKey, inactive.scrollBgKey, `${theme}: inactive differs from list`);
+      const baseline = await evaluate(`(() => {
+        const helper = window.__selectionColorHelper;
+        const scrollBg = helper.parse(getComputedStyle(document.getElementById('ticket-scroll')).backgroundColor);
+        const hover = helper.parse(${JSON.stringify(tokens['--vscode-list-hoverBackground'])});
+        const rawInactive = helper.parse(${JSON.stringify(tokens['--vscode-list-inactiveSelectionBackground'])});
+        return {
+          hoverKey: helper.key(hover),
+          rawInactiveKey: helper.key(rawInactive),
+          rawInactiveDistance: helper.distance(rawInactive, scrollBg),
+        };
+      })()`);
+      assert.notEqual(inactive.bgKey, baseline.hoverKey, `${theme}: inactive differs from hover`);
+      assert.notEqual(inactive.bgKey, baseline.rawInactiveKey, `${theme}: inactive differs from raw token`);
+      assert.ok(inactive.distanceFromScroll > baseline.rawInactiveDistance, `${theme}: inactive strengthens contrast`);
+      assert.ok(inactive.subjectContrast >= 4.5, `${theme}: inactive contrast ${inactive.subjectContrast}`);
+
+      const commentInactive = await measureCommentSelection('.comment-card[data-comment-id="901"].selected');
+      assert.equal(commentInactive.focusWithin, false, `${theme}: comment inactive focusWithin`);
+      assert.ok(commentInactive.rawAlpha > 0, `${theme}: comment inactive alpha`);
+      assert.equal(commentInactive.boxShadow, 'none', `${theme}: comment selected has no left inset shadow`);
+      assert.ok(isSoftBlue(commentInactive.bg), `${theme}: comment inactive soft blue ${JSON.stringify(commentInactive.bg)}`);
+      assert.notEqual(commentInactive.bgKey, commentInactive.detailBgKey, `${theme}: comment inactive differs from detail bg`);
+      assert.notEqual(commentInactive.bgKey, baseline.hoverKey, `${theme}: comment inactive differs from hover`);
+      assert.ok(commentInactive.bodyContrast >= 4.5, `${theme}: comment inactive body contrast ${commentInactive.bodyContrast}`);
+      assert.ok(commentInactive.authorContrast >= 4.5, `${theme}: comment inactive author contrast ${commentInactive.authorContrast}`);
+
+      await evaluate(`document.querySelector('.ticket-row[data-id="510"]').focus()`);
+      const active = await measureSelection('.ticket-row[data-id="510"].selected');
+      assert.equal(active.focusWithin, true, `${theme}: active focusWithin`);
+      assert.ok(isSoftBlue(active.bg), `${theme}: ticket active soft blue ${JSON.stringify(active.bg)}`);
+      assert.notEqual(active.bgKey, active.scrollBgKey, `${theme}: active differs from list`);
+      assert.notEqual(active.bgKey, inactive.bgKey, `${theme}: active differs from inactive`);
+      assert.ok(active.distanceFromScroll >= inactive.distanceFromScroll, `${theme}: active >= inactive`);
+      assert.ok(active.subjectContrast >= 4.5, `${theme}: active contrast ${active.subjectContrast}`);
+
+      await evaluate(`document.querySelector('.comment-card[data-comment-id="901"]').focus()`);
+      const commentActive = await measureCommentSelection('.comment-card[data-comment-id="901"].selected');
+      assert.equal(commentActive.focusWithin, true, `${theme}: comment active focusWithin`);
+      assert.equal(commentActive.boxShadow, 'none', `${theme}: comment active boxShadow none`);
+      assert.ok(isSoftBlue(commentActive.bg), `${theme}: comment active soft blue ${JSON.stringify(commentActive.bg)}`);
+      assert.notEqual(commentActive.bgKey, commentActive.detailBgKey, `${theme}: comment active differs from detail bg`);
+      assert.notEqual(commentActive.bgKey, baseline.hoverKey, `${theme}: comment active differs from hover`);
+      assert.notEqual(commentActive.bgKey, commentInactive.bgKey, `${theme}: comment active differs from inactive`);
+      assert.ok(commentActive.bodyContrast >= 4.5, `${theme}: comment active body contrast ${commentActive.bodyContrast}`);
+      assert.ok(commentActive.authorContrast >= 4.5, `${theme}: comment active author contrast ${commentActive.authorContrast}`);
+
+      // ローカル下書きコメント選択もリモート選択と一貫したソフトブルー背景を持つ。
+      state.comments.selectedCommentId = undefined;
+      state.comments.selectedCommentUri = 'file:///tmp/sel-comment-draft.md';
+      await push();
+      await evaluate(`document.activeElement?.blur?.()`);
+      const draftCommentInactive = await measureCommentSelection('.comment-card[data-comment-uri="file:///tmp/sel-comment-draft.md"].selected');
+      assert.equal(draftCommentInactive.bgKey, commentInactive.bgKey, `${theme}: draft comment inactive matches remote`);
+      assert.equal(draftCommentInactive.boxShadow, 'none', `${theme}: draft comment boxShadow none`);
+      assert.ok(isSoftBlue(draftCommentInactive.bg), `${theme}: draft comment inactive soft blue`);
+      assert.ok(draftCommentInactive.bodyContrast >= 4.5, `${theme}: draft comment inactive body contrast`);
+      await evaluate(`document.querySelector('.comment-card[data-comment-uri="file:///tmp/sel-comment-draft.md"]').focus()`);
+      const draftCommentActive = await measureCommentSelection('.comment-card[data-comment-uri="file:///tmp/sel-comment-draft.md"].selected');
+      assert.equal(draftCommentActive.bgKey, commentActive.bgKey, `${theme}: draft comment active matches remote`);
+      assert.ok(isSoftBlue(draftCommentActive.bg), `${theme}: draft comment active soft blue`);
+      assert.ok(draftCommentActive.bodyContrast >= 4.5, `${theme}: draft comment active body contrast`);
+
+      state.comments.selectedCommentId = 901;
+      state.comments.selectedCommentUri = undefined;
+      await push();
+
+      // 未定義トークン時のフォールバック検証
+      await setTokens({
+        '--vscode-list-hoverBackground': 'initial',
+        '--vscode-list-inactiveSelectionBackground': 'initial',
+        '--vscode-list-activeSelectionBackground': 'initial',
+        '--vscode-list-activeSelectionForeground': 'initial',
+      });
+      await evaluate(`document.activeElement?.blur?.()`);
+      const fallbackInactive = await measureSelection('.ticket-row[data-id="510"].selected');
+      assert.equal(fallbackInactive.focusWithin, false);
+      assert.ok(fallbackInactive.rawAlpha > 0, `${theme}: fallback inactive alpha`);
+      assert.ok(isSoftBlue(fallbackInactive.bg), `${theme}: fallback ticket inactive soft blue`);
+      assert.notEqual(fallbackInactive.bgKey, fallbackInactive.scrollBgKey, `${theme}: fallback inactive differs from list`);
+      assert.ok(fallbackInactive.subjectContrast >= 4.5, `${theme}: fallback inactive contrast ${fallbackInactive.subjectContrast}`);
+
+      const fallbackCommentInactive = await measureCommentSelection('.comment-card[data-comment-id="901"].selected');
+      assert.equal(fallbackCommentInactive.boxShadow, 'none', `${theme}: fallback comment boxShadow none`);
+      assert.ok(isSoftBlue(fallbackCommentInactive.bg), `${theme}: fallback comment inactive soft blue`);
+      assert.notEqual(fallbackCommentInactive.bgKey, fallbackCommentInactive.detailBgKey, `${theme}: fallback comment inactive differs from detail`);
+      assert.ok(fallbackCommentInactive.bodyContrast >= 4.5, `${theme}: fallback comment inactive contrast`);
+
+      await evaluate(`document.querySelector('.ticket-row[data-id="510"]').focus()`);
+      const fallbackActive = await measureSelection('.ticket-row[data-id="510"].selected');
+      assert.equal(fallbackActive.focusWithin, true);
+      assert.ok(fallbackActive.rawAlpha > 0, `${theme}: fallback active alpha`);
+      assert.ok(isSoftBlue(fallbackActive.bg), `${theme}: fallback ticket active soft blue`);
+      assert.notEqual(fallbackActive.bgKey, fallbackActive.scrollBgKey, `${theme}: fallback active differs from list`);
+      assert.notEqual(fallbackActive.bgKey, fallbackInactive.bgKey, `${theme}: fallback active differs from inactive`);
+      assert.ok(fallbackActive.subjectContrast >= 4.5, `${theme}: fallback active contrast ${fallbackActive.subjectContrast}`);
+
+      await evaluate(`document.querySelector('.comment-card[data-comment-id="901"]').focus()`);
+      const fallbackCommentActive = await measureCommentSelection('.comment-card[data-comment-id="901"].selected');
+      assert.equal(fallbackCommentActive.boxShadow, 'none', `${theme}: fallback comment active boxShadow none`);
+      assert.ok(isSoftBlue(fallbackCommentActive.bg), `${theme}: fallback comment active soft blue`);
+      assert.notEqual(fallbackCommentActive.bgKey, fallbackCommentInactive.bgKey, `${theme}: fallback comment active differs from inactive`);
+      assert.ok(fallbackCommentActive.bodyContrast >= 4.5, `${theme}: fallback comment active contrast`);
+    }
+
+    // 全行種別・コンパクトモードの一貫性と左ボーダーなし・パディング維持
+    await evaluate(`document.body.className='vscode-dark'`);
+    await setTokens(themedCases[1].tokens);
+    for (const compact of [false, true]) {
+      await evaluate(`document.getElementById('ticket-list').classList.toggle('is-compact', ${compact})`);
+      state.selectedTicketId = 510;
+      state.selectedTicket = { ...state.tickets[0], projectName: '検証プロジェクト' };
+      await push();
+      assert.equal(await evaluate(`document.querySelectorAll('.ticket-tracker-bar, .detail-tracker-bar').length`), 0, `compact=${compact}: no tracker bars`);
+      await evaluate(`document.activeElement?.blur?.()`);
+      const normalInactive = await measureSelection('.ticket-row[data-id="510"].selected');
+      const childUnselected = await measureSelection('.ticket-row[data-id="511"]');
+      const unsyncedUnselected = await measureSelection('.ticket-row[data-id="512"]');
+      assert.equal(normalInactive.borderLeftWidth, '0px', `compact=${compact} normal borderLeftWidth`);
+      assert.equal(normalInactive.paddingLeft, '12px', `compact=${compact} normal paddingLeft`);
+      assert.equal(childUnselected.borderLeftWidth, '0px', `compact=${compact} child borderLeftWidth`);
+      assert.equal(childUnselected.paddingLeft, '26px', `compact=${compact} child paddingLeft`);
+      assert.equal(unsyncedUnselected.borderLeftWidth, '0px', `compact=${compact} unsynced borderLeftWidth`);
+      assert.equal(unsyncedUnselected.paddingLeft, '12px', `compact=${compact} unsynced paddingLeft`);
+      await evaluate(`document.querySelector('.ticket-row[data-id="510"]').focus()`);
+      const normalActive = await measureSelection('.ticket-row[data-id="510"].selected');
+
+      for (const ticket of [state.tickets[0].children[0], state.tickets[1]]) {
+        state.selectedTicketId = ticket.id;
+        state.selectedTicket = { ...ticket, projectName: '検証プロジェクト' };
+        await push();
+        await evaluate(`document.activeElement?.blur?.()`);
+        const rowInactive = await measureSelection(`.ticket-row[data-id="${ticket.id}"].selected`);
+        assert.equal(rowInactive.borderLeftWidth, '0px', `compact=${compact} id=${ticket.id} borderLeftWidth`);
+        assert.equal(rowInactive.bgKey, normalInactive.bgKey, `compact=${compact} id=${ticket.id} inactive`);
+        assert.ok(isSoftBlue(rowInactive.bg), `compact=${compact} id=${ticket.id} soft blue`);
+        assert.notEqual(rowInactive.bgKey, unsyncedUnselected.bgKey, `compact=${compact} id=${ticket.id} != unsynced`);
+        await evaluate(`document.querySelector('.ticket-row[data-id="${ticket.id}"]').focus()`);
+        const rowActive = await measureSelection(`.ticket-row[data-id="${ticket.id}"].selected`);
+        assert.equal(rowActive.bgKey, normalActive.bgKey, `compact=${compact} id=${ticket.id} active`);
+      }
+
+      await evaluate(`document.querySelector('.ticket-row.is-draft').click()`);
+      await evaluate(`document.activeElement?.blur?.()`);
+      const draftInactive = await measureSelection('.ticket-row.is-draft.selected');
+      assert.equal(draftInactive.borderLeftWidth, '0px', `compact=${compact} draft borderLeftWidth`);
+      assert.equal(draftInactive.paddingLeft, '12px', `compact=${compact} draft paddingLeft`);
+      assert.equal(draftInactive.bgKey, normalInactive.bgKey, `compact=${compact} draft inactive`);
+      assert.ok(isSoftBlue(draftInactive.bg), `compact=${compact} draft soft blue`);
+      assert.notEqual(draftInactive.bgKey, unsyncedUnselected.bgKey, `compact=${compact} draft != unsynced`);
+      await evaluate(`document.querySelector('.ticket-row.is-draft').focus()`);
+      const draftActive = await measureSelection('.ticket-row.is-draft.selected');
+      assert.equal(draftActive.bgKey, normalActive.bgKey, `compact=${compact} draft active`);
+    }
+
+    // High Contrast 維持（チケット行・コメント行の双方）
+    await evaluate(`document.getElementById('ticket-list').classList.remove('is-compact')`);
+    state.selectedTicketId = 510;
+    state.selectedTicket = { ...state.tickets[0], projectName: '検証プロジェクト' };
+    state.comments.selectedCommentId = 901;
+    state.comments.selectedCommentUri = undefined;
+    await push();
+    await setTokens({});
+    for (const hcTheme of ['vscode-high-contrast', 'vscode-high-contrast-light']) {
+      await evaluate(`document.body.className=${JSON.stringify(hcTheme)}`);
+      await evaluate(`document.activeElement?.blur?.()`);
+      const hcInactive = await measureSelection('.ticket-row[data-id="510"].selected');
+      assert.notEqual(hcInactive.outlineStyle, 'none', `${hcTheme}: ticket outline`);
+      assert.ok(hcInactive.rawAlpha > 0, `${hcTheme}: ticket alpha`);
+      assert.ok(hcInactive.subjectContrast >= 4.5, `${hcTheme}: ticket contrast ${hcInactive.subjectContrast}`);
+      const hcCommentInactive = await measureCommentSelection('.comment-card[data-comment-id="901"].selected');
+      assert.notEqual(hcCommentInactive.outlineStyle, 'none', `${hcTheme}: comment outline`);
+      assert.ok(hcCommentInactive.rawAlpha > 0, `${hcTheme}: comment alpha`);
+      assert.ok(hcCommentInactive.bodyContrast >= 4.5, `${hcTheme}: comment contrast ${hcCommentInactive.bodyContrast}`);
+    }
+  } finally {
+    await setTokens({});
+    await evaluate(`document.body.className=${JSON.stringify(originalBodyClass)}`);
+    await evaluate(`document.getElementById('ticket-list').classList.toggle('is-compact', ${originalCompact})`);
+    for (const k of Object.keys(state)) delete state[k];
+    Object.assign(state, originalState);
+    await push();
+    await evaluate(`document.activeElement?.blur?.()`);
+    await evaluate(`new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)))`);
+  }
+}
+
+async function checkDetailPanelResize() {
+  const originalState = structuredClone(state);
+  const originalBodyClass = await evaluate(`document.body.className`);
+  const waitFrames = async (target = sessionId) => {
+    await call('Runtime.evaluate', {
+      expression: `new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)))`,
+      returnByValue: true,
+      awaitPromise: true,
+    }, target);
+  };
+  const readMetrics = async () => evaluate(`(() => {
+    const layout = document.querySelector('.tickets-layout');
+    const master = document.querySelector('.tickets-master');
+    const detail = document.querySelector('.tickets-detail');
+    const handle = document.getElementById('detail-resize-handle');
+    const handleStyle = getComputedStyle(handle);
+    return {
+      layoutHeight: layout.getBoundingClientRect().height,
+      layoutScrollHeight: layout.scrollHeight,
+      layoutClientHeight: layout.clientHeight,
+      masterHeight: master.getBoundingClientRect().height,
+      detailHeight: detail.getBoundingClientRect().height,
+      handleRect: handle.getBoundingClientRect().toJSON(),
+      handleDisplay: handleStyle.display,
+      handleCursor: handleStyle.cursor,
+      role: handle.getAttribute('role'),
+      ariaOrientation: handle.getAttribute('aria-orientation'),
+      ariaControls: handle.getAttribute('aria-controls'),
+      ariaValueMin: handle.getAttribute('aria-valuemin'),
+      ariaValueMax: handle.getAttribute('aria-valuemax'),
+      ariaValueNow: handle.getAttribute('aria-valuenow'),
+      tabIndex: handle.tabIndex,
+      cssVar: layout.style.getPropertyValue('--detail-panel-height').trim(),
+      isResizing: document.body.classList.contains('is-resizing-detail'),
+      isDragging: handle.classList.contains('is-dragging'),
+      persistedPercent: uiState?.detailHeightPercent,
+    };
+  })()`);
+
+  try {
+    await call('Emulation.setDeviceMetricsOverride', { width: 440, height: 800, deviceScaleFactor: 1, mobile: false });
+    await evaluate(`document.body.className='vscode-dark';document.getElementById('tab-tickets').click()`);
+    await evaluate(`document.getElementById('ticket-layout-mode').value='auto';document.getElementById('ticket-layout-mode').dispatchEvent(new Event('change'));if(document.getElementById('detail-focus-toggle').checked)document.getElementById('detail-focus-toggle').click();`);
+    state.selectedProject = { id: 1, name: '検証プロジェクト' };
+    state.projects = [{ id: 1, name: '検証プロジェクト', level: 0 }];
+    state.tickets = Array.from({ length: 12 }, (_, idx) => ({
+      id: 700 + idx,
+      subject: `リサイズ検証チケット ${idx + 1}`,
+      level: 0,
+      statusName: '進行中',
+      syncState: 'Synced',
+      children: [],
+    }));
+    state.loadedTicketCount = state.tickets.length;
+    state.totalTicketCount = state.tickets.length;
+    state.selectedTicketId = 700;
+    state.selectedTicket = { ...state.tickets[0], projectName: '検証プロジェクト' };
+    state.comments = {
+      ticketId: 700,
+      loading: false,
+      items: [
+        { id: 801, noteIndex: 1, authorName: 'Taro', body: 'リサイズ検証コメント1', editableByCurrentUser: true },
+        { id: 802, noteIndex: 2, authorName: 'Hanako', body: 'リサイズ検証コメント2', editableByCurrentUser: false },
+      ],
+    };
+    await push();
+    await waitFrames();
+
+    // auto モード・幅 440px・詳細表示時にハンドルが表示される。
+    const initial = await readMetrics();
+    assert.notEqual(initial.handleDisplay, 'none', 'resize handle visible at 440px auto');
+    assert.equal(initial.handleCursor, 'ns-resize', 'resize handle cursor is ns-resize');
+    assert.equal(initial.role, 'separator');
+    assert.equal(initial.ariaOrientation, 'horizontal');
+    assert.equal(initial.ariaControls, 'ticket-detail-card');
+    assert.equal(initial.tabIndex, 0);
+    assert.equal(initial.cssVar, '48%');
+    assert.equal(initial.ariaValueNow, '48');
+
+    // 右クリックではリサイズを開始しない。
+    await evaluate(`window.messages.length=0`);
+    const startX = Math.round(initial.handleRect.left + initial.handleRect.width / 2);
+    const startY = Math.round(initial.handleRect.top + initial.handleRect.height / 2);
+    await call('Input.dispatchMouseEvent', { type: 'mousePressed', x: startX, y: startY, button: 'right', buttons: 2, clickCount: 1 });
+    await call('Input.dispatchMouseEvent', { type: 'mouseMoved', x: startX, y: startY - 90, button: 'none', buttons: 2 });
+    const duringRightClick = await readMetrics();
+    assert.equal(duringRightClick.isResizing, false, 'right click does not start resize');
+    assert.equal(Math.round(duringRightClick.detailHeight), Math.round(initial.detailHeight), 'right click does not change height');
+    await call('Input.dispatchMouseEvent', { type: 'mouseReleased', x: startX, y: startY - 90, button: 'right', buttons: 0, clickCount: 1 });
+
+    // 左ボタンドラッグ（上方向・下方向）でリアルタイム更新し、postMessage 0件で解放時に永続化する。
+    await evaluate(`window.messages.length=0`);
+    await call('Input.dispatchMouseEvent', { type: 'mousePressed', x: startX, y: startY, button: 'left', buttons: 1, clickCount: 1 });
+    await call('Input.dispatchMouseEvent', { type: 'mouseMoved', x: startX, y: startY - 100, button: 'none', buttons: 1 });
+    const midDragUp = await readMetrics();
+    assert.equal(midDragUp.isResizing, true, 'body.is-resizing-detail active during drag');
+    assert.equal(midDragUp.isDragging, true, 'handle.is-dragging active during drag');
+    assert.ok(midDragUp.detailHeight > initial.detailHeight + 50, `drag up grew detail: ${midDragUp.detailHeight} vs ${initial.detailHeight}`);
+    assert.equal(await evaluate(`window.messages.length`), 0, 'no postMessage during drag up');
+    await call('Input.dispatchMouseEvent', { type: 'mouseReleased', x: startX, y: startY - 100, button: 'left', buttons: 0, clickCount: 1 });
+    const afterDragUp = await readMetrics();
+    assert.equal(afterDragUp.isResizing, false, 'body.is-resizing-detail cleared after release');
+    assert.equal(afterDragUp.isDragging, false, 'handle.is-dragging cleared after release');
+    assert.equal(await evaluate(`window.messages.length`), 0, 'no postMessage after drag release');
+    assert.ok(typeof afterDragUp.persistedPercent === 'number' && afterDragUp.persistedPercent > 48, `persisted detailHeightPercent > 48: ${afterDragUp.persistedPercent}`);
+
+    const downStartY = Math.round(afterDragUp.handleRect.top + afterDragUp.handleRect.height / 2);
+    await call('Input.dispatchMouseEvent', { type: 'mousePressed', x: startX, y: downStartY, button: 'left', buttons: 1, clickCount: 1 });
+    await call('Input.dispatchMouseEvent', { type: 'mouseMoved', x: startX, y: downStartY + 160, button: 'none', buttons: 1 });
+    await call('Input.dispatchMouseEvent', { type: 'mouseReleased', x: startX, y: downStartY + 160, button: 'left', buttons: 0, clickCount: 1 });
+    const afterDragDown = await readMetrics();
+    assert.ok(afterDragDown.detailHeight < afterDragUp.detailHeight - 100, `drag down shrank detail: ${afterDragDown.detailHeight} vs ${afterDragUp.detailHeight}`);
+    assert.ok(afterDragDown.persistedPercent < afterDragUp.persistedPercent, 'persisted percent decreased');
+    assert.equal(await evaluate(`window.messages.length`), 0, 'no postMessage during drag down');
+
+    // 極端な上下ドラッグでもチケット一覧 >= 100px、コメントパネル >= 120px にクランプする。
+    const clampUpY = Math.round(afterDragDown.handleRect.top + afterDragDown.handleRect.height / 2);
+    await call('Input.dispatchMouseEvent', { type: 'mousePressed', x: startX, y: clampUpY, button: 'left', buttons: 1, clickCount: 1 });
+    await call('Input.dispatchMouseEvent', { type: 'mouseMoved', x: startX, y: 10, button: 'none', buttons: 1 });
+    await call('Input.dispatchMouseEvent', { type: 'mouseReleased', x: startX, y: 10, button: 'left', buttons: 0, clickCount: 1 });
+    const clampedTop = await readMetrics();
+    assert.ok(clampedTop.masterHeight >= 99.5, `clamped top keeps ticket list >= 100px: ${clampedTop.masterHeight}`);
+    assert.ok(clampedTop.detailHeight >= 119.5, `clamped top keeps detail >= 120px: ${clampedTop.detailHeight}`);
+
+    const clampDownY = Math.round(clampedTop.handleRect.top + clampedTop.handleRect.height / 2);
+    await call('Input.dispatchMouseEvent', { type: 'mousePressed', x: startX, y: clampDownY, button: 'left', buttons: 1, clickCount: 1 });
+    await call('Input.dispatchMouseEvent', { type: 'mouseMoved', x: startX, y: 795, button: 'none', buttons: 1 });
+    await call('Input.dispatchMouseEvent', { type: 'mouseReleased', x: startX, y: 795, button: 'left', buttons: 0, clickCount: 1 });
+    const clampedBottom = await readMetrics();
+    assert.ok(clampedBottom.detailHeight >= 119.5, `clamped bottom keeps detail >= 120px: ${clampedBottom.detailHeight}`);
+    assert.ok(clampedBottom.masterHeight >= 99.5, `clamped bottom keeps ticket list >= 100px: ${clampedBottom.masterHeight}`);
+
+    // ダブルクリックで 48% へリセットする。
+    const dblY = Math.round(clampedBottom.handleRect.top + clampedBottom.handleRect.height / 2);
+    await call('Input.dispatchMouseEvent', { type: 'mousePressed', x: startX, y: dblY, button: 'left', buttons: 1, clickCount: 1 });
+    await call('Input.dispatchMouseEvent', { type: 'mouseReleased', x: startX, y: dblY, button: 'left', buttons: 0, clickCount: 1 });
+    await call('Input.dispatchMouseEvent', { type: 'mousePressed', x: startX, y: dblY, button: 'left', buttons: 1, clickCount: 2 });
+    await call('Input.dispatchMouseEvent', { type: 'mouseReleased', x: startX, y: dblY, button: 'left', buttons: 0, clickCount: 2 });
+    const afterDblClick = await readMetrics();
+    assert.equal(afterDblClick.cssVar, '48%', 'dblclick resets css var to 48%');
+    assert.equal(afterDblClick.persistedPercent, 48, 'dblclick persists 48');
+    assert.equal(afterDblClick.ariaValueNow, '48', 'dblclick resets aria-valuenow');
+
+    // キーボード操作（ArrowUp / ArrowDown / Home / End / Enter）。
+    await evaluate(`document.getElementById('detail-resize-handle').focus()`);
+    await key('ArrowUp');
+    const afterArrowUp = await readMetrics();
+    assert.equal(afterArrowUp.persistedPercent, 53, 'ArrowUp adds 5%');
+    assert.equal(afterArrowUp.ariaValueNow, '53');
+    assert.ok(afterArrowUp.detailHeight > afterDblClick.detailHeight, 'ArrowUp increases detail height');
+
+    await key('ArrowDown');
+    const afterArrowDown = await readMetrics();
+    assert.equal(afterArrowDown.persistedPercent, 48, 'ArrowDown subtracts 5%');
+    assert.equal(afterArrowDown.ariaValueNow, '48');
+
+    await key('Home');
+    const afterHome = await readMetrics();
+    assert.equal(afterHome.ariaValueNow, afterHome.ariaValueMin, 'Home moves to aria-valuemin');
+    assert.ok(afterHome.detailHeight >= 119.5 && afterHome.detailHeight < 150, `Home detail height: ${afterHome.detailHeight}`);
+
+    await key('End');
+    const afterEnd = await readMetrics();
+    assert.equal(afterEnd.ariaValueNow, afterEnd.ariaValueMax, 'End moves to aria-valuemax');
+    assert.ok(afterEnd.masterHeight >= 99.5 && afterEnd.masterHeight < 150, `End master height: ${afterEnd.masterHeight}`);
+
+    // ウィンドウ縮小時の再クランプと超低ビューポート（< 226px）の破綻防止。
+    await call('Emulation.setDeviceMetricsOverride', { width: 440, height: 360, deviceScaleFactor: 1, mobile: false });
+    await waitFrames();
+    const afterShrink = await readMetrics();
+    assert.ok(afterShrink.detailHeight >= 119.5, `shrink re-clamp detail >= 120px: ${afterShrink.detailHeight}`);
+    assert.ok(afterShrink.masterHeight >= 99.5, `shrink re-clamp master >= 100px: ${afterShrink.masterHeight}`);
+    assert.ok(afterShrink.layoutScrollHeight <= afterShrink.layoutClientHeight + 1, 'shrink has no vertical overflow');
+
+    await call('Emulation.setDeviceMetricsOverride', { width: 440, height: 240, deviceScaleFactor: 1, mobile: false });
+    await waitFrames();
+    const ultraShort = await readMetrics();
+    assert.ok(ultraShort.layoutHeight < 226, `ultra-short layout height < 226px: ${ultraShort.layoutHeight}`);
+    assert.ok(ultraShort.masterHeight > 20, `ultra-short master remains visible: ${ultraShort.masterHeight}`);
+    assert.ok(ultraShort.detailHeight > 20, `ultra-short detail remains visible: ${ultraShort.detailHeight}`);
+    assert.ok(!ultraShort.cssVar.includes('NaN') && !ultraShort.cssVar.startsWith('-'), `valid cssVar: ${ultraShort.cssVar}`);
+    assert.ok(ultraShort.masterHeight + ultraShort.handleRect.height + ultraShort.detailHeight <= ultraShort.layoutHeight + 2, 'ultra-short panes do not overflow layout');
+
+    await call('Emulation.setDeviceMetricsOverride', { width: 440, height: 800, deviceScaleFactor: 1, mobile: false });
+    await waitFrames();
+    await evaluate(`document.getElementById('detail-resize-handle').focus()`);
+    await key('Enter');
+    const afterEnter = await readMetrics();
+    assert.equal(afterEnter.cssVar, '48%', 'Enter resets to 48%');
+    assert.equal(afterEnter.persistedPercent, 48);
+    assert.equal(afterEnter.ariaValueNow, '48');
+
+    // Reset View State で 48% へ戻り、保存済み detailHeightPercent が削除される。
+    await key('ArrowUp');
+    await key('ArrowUp');
+    assert.equal((await readMetrics()).persistedPercent, 58);
+    await evaluate(`document.getElementById('tab-settings').click();document.getElementById('settings-maintenance').open=true;document.getElementById('settings-reset-view-btn').click();document.getElementById('tab-tickets').click()`);
+    await waitFrames();
+    const afterResetView = await readMetrics();
+    assert.equal(afterResetView.persistedPercent, undefined, 'Reset View State deletes saved detailHeightPercent');
+    assert.equal(afterResetView.cssVar, '48%', 'Reset View State restores 48% height');
+    assert.equal(afterResetView.ariaValueNow, '48');
+
+    // 非対象モード・幅 >= 700px・詳細非表示時はハンドル非表示。
+    state.selectedTicketId = undefined;
+    state.selectedTicket = undefined;
+    await push();
+    assert.equal((await readMetrics()).handleDisplay, 'none', 'hidden when detail panel closed');
+
+    state.selectedTicketId = 700;
+    state.selectedTicket = { ...state.tickets[0], projectName: '検証プロジェクト' };
+    await push();
+    assert.notEqual((await readMetrics()).handleDisplay, 'none', 'visible again when detail panel reopens');
+
+    await call('Emulation.setDeviceMetricsOverride', { width: 700, height: 800, deviceScaleFactor: 1, mobile: false });
+    await waitFrames();
+    assert.equal((await readMetrics()).handleDisplay, 'none', 'hidden at width >= 700px');
+
+    await call('Emulation.setDeviceMetricsOverride', { width: 440, height: 800, deviceScaleFactor: 1, mobile: false });
+    await waitFrames();
+    for (const mode of ['split', 'single']) {
+      await evaluate(`document.getElementById('ticket-layout-mode').value=${JSON.stringify(mode)};document.getElementById('ticket-layout-mode').dispatchEvent(new Event('change'))`);
+      await waitFrames();
+      assert.equal((await readMetrics()).handleDisplay, 'none', `hidden in layout-${mode}`);
+    }
+    await evaluate(`document.getElementById('ticket-layout-mode').value='auto';document.getElementById('ticket-layout-mode').dispatchEvent(new Event('change'));document.getElementById('detail-focus-toggle').click()`);
+    await waitFrames();
+    assert.equal((await readMetrics()).handleDisplay, 'none', 'hidden in layout-detail-focus');
+    await evaluate(`document.getElementById('detail-focus-toggle').click()`);
+    await waitFrames();
+    assert.notEqual((await readMetrics()).handleDisplay, 'none', 'restored after exiting layout-detail-focus');
+
+    // 初期状態に不正な detailHeightPercent が保存されている場合は 48% にフォールバックし、有効値は復元する。
+    const { targetId: bootTargetId } = await call('Target.createTarget', { url: 'about:blank' }, null);
+    try {
+      const { sessionId: bootSessionId } = await call('Target.attachToTarget', { targetId: bootTargetId, flatten: true }, null);
+      await call('Runtime.enable', {}, bootSessionId);
+      await call('Page.enable', {}, bootSessionId);
+      await call('Emulation.setDeviceMetricsOverride', { width: 440, height: 800, deviceScaleFactor: 1, mobile: false }, bootSessionId);
+      const bootEval = async (expr) => {
+        const res = await call('Runtime.evaluate', { expression: expr, returnByValue: true, awaitPromise: true }, bootSessionId);
+        if (res.exceptionDetails) throw new Error(JSON.stringify(res.exceptionDetails));
+        return res.result.value;
+      };
+      const bootCases = [
+        { expr: '{ detailHeightPercent: NaN }', expectedVar: '48%', expectedAria: '48', label: 'NaN' },
+        { expr: '{ detailHeightPercent: -5 }', expectedVar: '48%', expectedAria: '48', label: '-5' },
+        { expr: '{ detailHeightPercent: 150 }', expectedVar: '48%', expectedAria: '48', label: '150' },
+        { expr: `{ detailHeightPercent: 'bad' }`, expectedVar: '48%', expectedAria: '48', label: 'bad string' },
+        { expr: '{ detailHeightPercent: 62 }', expectedVar: '62%', expectedAria: '62', label: 'valid 62' },
+      ];
+      for (const bootCase of bootCases) {
+        const { identifier } = await call('Page.addScriptToEvaluateOnNewDocument', {
+          source: `window.__initialUiState=${bootCase.expr};window.cspViolations=[];document.addEventListener('securitypolicyviolation',e=>window.cspViolations.push({directive:e.effectiveDirective,blockedURI:e.blockedURI}));`,
+        }, bootSessionId);
+        await call('Page.navigate', { url: 'file://' + fixture }, bootSessionId);
+        await bootEval(`new Promise(resolve=>{if(document.readyState==='complete')resolve();else window.addEventListener('load',resolve,{once:true})})`);
+        await bootEval(`window.dispatchEvent(new MessageEvent('message',{data:{type:'dashboard.state',state:${JSON.stringify(state)}}}))`);
+        await waitFrames(bootSessionId);
+        const bootResult = await bootEval(`({
+          cssVar: document.querySelector('.tickets-layout').style.getPropertyValue('--detail-panel-height').trim(),
+          ariaNow: document.getElementById('detail-resize-handle').getAttribute('aria-valuenow'),
+          cspViolations: window.cspViolations,
+        })`);
+        assert.equal(bootResult.cssVar, bootCase.expectedVar, `boot fallback/restore cssVar for ${bootCase.label}`);
+        assert.equal(bootResult.ariaNow, bootCase.expectedAria, `boot fallback/restore aria-valuenow for ${bootCase.label}`);
+        assert.deepEqual(bootResult.cspViolations, [], `no CSP violations on boot for ${bootCase.label}`);
+        await call('Page.removeScriptToEvaluateOnNewDocument', { identifier }, bootSessionId);
+      }
+    } finally {
+      await call('Target.closeTarget', { targetId: bootTargetId }, null);
+    }
+  } finally {
+    await call('Emulation.setDeviceMetricsOverride', { width: 440, height: 800, deviceScaleFactor: 1, mobile: false });
+    await evaluate(`document.body.className=${JSON.stringify(originalBodyClass)}`);
+    await evaluate(`document.getElementById('ticket-layout-mode').value='auto';document.getElementById('ticket-layout-mode').dispatchEvent(new Event('change'));if(document.getElementById('detail-focus-toggle').checked)document.getElementById('detail-focus-toggle').click();`);
+    await evaluate(`document.getElementById('tab-settings').click();document.getElementById('settings-maintenance').open=true;document.getElementById('settings-reset-view-btn').click();document.getElementById('tab-tickets').click();document.getElementById('toast-area').replaceChildren()`);
+    for (const k of Object.keys(state)) delete state[k];
+    Object.assign(state, originalState);
+    await push();
+    await evaluate(`document.activeElement?.blur?.()`);
+    await waitFrames();
+  }
+}
 async function main() {
   const url = await new Promise((resolve, reject) => {
     let output = '';
@@ -175,6 +867,15 @@ async function main() {
   await call('Page.navigate', { url: 'file://' + fixture });
   await evaluate(`new Promise(resolve=>{if(document.readyState==='complete')resolve();else window.addEventListener('load',resolve,{once:true})})`);
   assert.equal(await evaluate('document.documentElement.lang'), 'ja');
+  const focusTicketSearch = () => evaluate(`window.dispatchEvent(new MessageEvent('message', { data: { type: 'view.focusTicketSearch' } }))`);
+  await focusTicketSearch();
+  assert.equal(await evaluate(`document.activeElement.id`), 'search-input');
+  assert.deepEqual(await evaluate(`window.messages.map(message => message.type)`), ['dashboard.ready']);
+  state.loading.tickets = true;
+  await push();
+  assert.equal(await evaluate(`document.activeElement.id`), 'search-input');
+  await evaluate(`document.activeElement.blur()`);
+  state.loading.tickets = false;
   // 重複排除で表示件数が総件数未満でも、API取得完了なら追加ボタンを隠す。
   state.totalTicketCount = 3;
   state.hasMoreTickets = true;
@@ -411,7 +1112,7 @@ async function main() {
   await evaluate(`document.getElementById('tab-tickets').click()`);
   assert.deepEqual(await evaluate(`Array.from(document.querySelectorAll('#tabs [role="tab"]')).map(tab=>tab.dataset.tab)`), ['tickets','unsynced','settings']);
   assert.equal(await evaluate(`document.getElementById('tab-comments')`), null);
-  assert.ok(await evaluate(`document.getElementById('sync-tray') !== null`));
+  assert.equal(await evaluate(`document.getElementById('sync-tray')`), null);
   state.currentUserId = 7;
   state.quickFilterCapabilities = { mine: 'available', open: 'available' };
   state.metadataOptions.statuses = [{ id: 1, name: '進行中', isClosed: false }, { id: 2, name: '完了', isClosed: true }];
@@ -419,6 +1120,8 @@ async function main() {
   state.tickets[0].statusId = 1;
   await push();
   assert.equal(await evaluate(`document.querySelector('[data-quick-filter="unsynced"]') === null`), true);
+  assert.equal(await evaluate(`document.querySelector('[data-quick-filter="editing"]') !== null`), true);
+  assert.equal(await evaluate(`document.querySelector('[data-quick-filter="editing"]').getAttribute('aria-pressed')`), 'false');
   assert.equal(await evaluate(`document.querySelector('[data-quick-filter="open"]').getAttribute('aria-pressed')`), 'true');
   await evaluate(`document.querySelector('[data-quick-filter="mine"]').click()`);
   assert.equal(await evaluate(`document.querySelector('[data-quick-filter="mine"]').getAttribute('aria-pressed')`), 'true');
@@ -438,9 +1141,8 @@ async function main() {
     { key: { kind: 'newTicket', queueId: 'failed-create' }, label: 'New ticket', lifecycle: 'queued', canRetrySync: true, canSync: true },
   ] };
   await push();
-  assert.equal(await evaluate(`document.querySelector('#sync-tray button').textContent`), strings.retrySync);
   assert.ok(await evaluate(`document.querySelector('[data-sync-key]').textContent.includes(${JSON.stringify(strings.retrySync)})`));
-  await evaluate(`document.querySelector('#sync-tray button').click()`);
+  await evaluate(`document.querySelector('[data-sync-key]').click()`);
   const retryMessage = await evaluate(`window.messages.filter(m=>m.type==='unsynced.syncOne').at(-1)`);
   assert.equal(retryMessage.key.queueId, 'failed-create');
   await evaluate(`window.dispatchEvent(new MessageEvent('message',{data:{type:'operation.success',requestId:${JSON.stringify(retryMessage.requestId)},message:'OK'}}))`);
@@ -452,8 +1154,6 @@ async function main() {
     { key: { kind: 'newTicket', queueId: 'queued-unsafe' }, label: 'New ticket', lifecycle: 'queued', canDiscard: false, discardMode: 'none', canSync: true },
   ] };
   await push();
-  assert.ok(await evaluate(`document.getElementById('sync-tray').textContent.includes('3')`));
-  assert.equal(await evaluate(`document.querySelectorAll('#sync-tray button').length`), 1);
   await evaluate(`document.getElementById('tab-unsynced').click()`);
   assert.equal(await evaluate(`document.querySelectorAll('#unsynced-list .unsynced-actions button:disabled').length`), 3);
   assert.equal(await evaluate(`document.querySelectorAll('#unsynced-list [data-discard-key]').length`), 0);
@@ -553,7 +1253,75 @@ async function main() {
   state.unsynced = { totalCount: 0, items: [] };
   await push();
   assert.equal(await evaluate(`document.activeElement.id`), 'unsynced-list', 'empty queue keeps focus even before result feedback arrives');
-  assert.ok(await evaluate(`document.getElementById('sync-tray').textContent.includes(${JSON.stringify(strings.syncTrayAllClear)})`));
+  await evaluate(`document.getElementById('tab-tickets').click()`);
+  const pendingId = 'a'.repeat(64);
+  const pendingFocus = 'b'.repeat(64);
+  state.unsynced = { totalCount: 2, items: [], reveal: { sequence: 1, focusIds: [pendingFocus] }, localChanges: [
+    { id: pendingId, focusIds: [pendingFocus], label: '未保存の編集', detail: '新規下書き · 親 #89', open: 'editor' },
+    { id: 'c'.repeat(64), focusIds: ['d'.repeat(64)], label: 'コメント下書き', detail: '#10', reason: '変更内容を確認できません。' },
+  ] };
+  await push();
+  assert.equal(await evaluate(`document.getElementById('tab-unsynced').getAttribute('aria-selected')`), 'true');
+  assert.equal(await evaluate(`document.activeElement.dataset.pendingFocus`), pendingFocus);
+  assert.equal(await evaluate(`document.getElementById('unsynced-badge').textContent`), '2');
+  assert.equal(await evaluate(`document.getElementById('sync-all-btn').classList.contains('hidden')`), true);
+  assert.equal(await evaluate(`document.querySelectorAll('#unsynced-list [data-sync-key], #unsynced-list [data-discard-key]').length`), 0);
+  assert.match(await evaluate(`document.getElementById('unsynced-list').textContent`), /親 #89.*変更内容を確認できません/);
+  await evaluate(`document.activeElement.querySelector('button').focus();window.messages.length=0`);
+  await key('Enter');
+  assert.deepEqual(await evaluate(`(({type,itemId})=>({type,itemId}))(window.messages.at(-1))`), { type: 'unsynced.openPendingChange', itemId: pendingId });
+  const previewId = 'e'.repeat(64);
+  const previewReason = '元のエディターを開けません。読み取り専用で下書きの内容を確認できます。';
+  state.unsynced = { totalCount: 4, items: [], localChanges: [
+    { id: previewId, focusIds: ['1'.repeat(64)], label: 'チケットの下書き', detail: '#10', reason: previewReason, open: 'preview', canDiscard: true },
+    { id: '2'.repeat(64), focusIds: ['3'.repeat(64)], label: '編集中', detail: '#11', open: 'editor', canDiscard: true },
+    { id: '4'.repeat(64), focusIds: ['5'.repeat(64)], label: '保護済み', detail: '#12', open: 'preview', canDiscard: false },
+    { id: '6'.repeat(64), focusIds: ['7'.repeat(64)], label: '確認不可', detail: '#13', canDiscard: true },
+  ] };
+  await push();
+  for (const width of [440, 280, 768]) {
+    await call('Emulation.setDeviceMetricsOverride', { width, height: 800, deviceScaleFactor: 1, mobile: false });
+    await settleViewport();
+    const draftCardFits = await evaluate(`(() => {
+      const card = document.querySelector('[data-discard-pending-id]').closest('.unsynced-card');
+      const message = [...card.querySelectorAll('.unsynced-detail')].find(detail => detail.textContent === ${JSON.stringify(previewReason)});
+      const box = card.getBoundingClientRect();
+      if (!message) return false;
+      const range = document.createRange();
+      range.selectNodeContents(message);
+      const items = [...range.getClientRects(), ...[...card.querySelectorAll('button')].map(button => button.getBoundingClientRect())];
+      return items.every(item => item.left >= box.left && item.right <= box.right && item.top >= box.top && item.bottom <= box.bottom);
+    })()`);
+    assert.equal(draftCardFits, true, `draft card message and buttons stay within the card at ${width}px`);
+  }
+  await call('Emulation.setDeviceMetricsOverride', { width: queueViewport.width, height: queueViewport.height, deviceScaleFactor: 1, mobile: false });
+  await settleViewport();
+  assert.equal(await evaluate(`document.querySelectorAll('[data-discard-pending-id]').length`), 1);
+  assert.equal(await evaluate(`document.querySelector('[data-discard-pending-id]').textContent.trim()`), strings.discardPendingDraft);
+  await evaluate(`window.messages.length=0;document.querySelector('[data-discard-pending-id]').focus()`);
+  await key('Enter');
+  const pendingDiscard = await evaluate(`window.messages.at(-1)`);
+  assert.deepEqual(Object.keys(pendingDiscard).sort(), ['itemId', 'requestId', 'type']);
+  assert.equal(pendingDiscard.type, 'unsynced.discardPendingChange');
+  assert.equal(pendingDiscard.itemId, previewId);
+  assert.match(pendingDiscard.requestId, /^req-/);
+  assert.equal(await evaluate(`document.querySelector('[data-discard-pending-id]').disabled`), true);
+  state.unsynced.localChanges.shift(); state.unsynced.totalCount--;
+  await push();
+  assert.equal(await evaluate(`document.activeElement.dataset.pendingFocus`), '3'.repeat(64), 'removed draft moves focus to the next card');
+  const discardMessage = `チケット #10 の下書きを破棄しました。 https://redmine.example.test/${'ticketdraft'.repeat(12)}`;
+  await call('Emulation.setDeviceMetricsOverride', { width: 280, height: 800, deviceScaleFactor: 1, mobile: false });
+  await settleViewport();
+  await evaluate(`window.dispatchEvent(new MessageEvent('message',{data:{type:'operation.success',requestId:${JSON.stringify(pendingDiscard.requestId)},message:${JSON.stringify(discardMessage)}}}))`);
+  assert.equal(await evaluate(`document.getElementById('unsynced-feedback').textContent`), discardMessage);
+  assert.equal(await evaluate(`(() => { const message = document.getElementById('unsynced-feedback'); const bounds = message.getBoundingClientRect(); return message.scrollWidth <= message.clientWidth && bounds.left >= 0 && bounds.right <= innerWidth; })()`), true, 'draft discard feedback wraps within its box');
+  await evaluate(`document.getElementById('toast-area').replaceChildren();window.dispatchEvent(new MessageEvent('message',{data:{type:'toast',level:'error',message:${JSON.stringify(discardMessage)}}}))`);
+  assert.equal(await evaluate(`(() => { const message = document.querySelector('#toast-area .toast'); const bounds = message.getBoundingClientRect(); return message.scrollWidth <= message.clientWidth && bounds.left >= 0 && bounds.right <= innerWidth; })()`), true, 'draft discard toast wraps within the sidebar');
+  await evaluate(`document.getElementById('toast-area').replaceChildren()`);
+  await call('Emulation.setDeviceMetricsOverride', { width: queueViewport.width, height: queueViewport.height, deviceScaleFactor: 1, mobile: false });
+  await settleViewport();
+  state.unsynced = { totalCount: 0, items: [] };
+  await push();
   await evaluate(`document.getElementById('tab-tickets').click()`);
   assert.equal(await evaluate(`document.querySelectorAll('#search-clear-btn').length`), 1);
   assert.equal(await evaluate(`getComputedStyle(document.querySelector('.ticket-row[data-id="10"]')).paddingLeft`), '12px');
@@ -573,28 +1341,52 @@ async function main() {
   // 日付は詳細へ集約し、一覧では重複しない。
   assert.equal(await evaluate(`document.querySelectorAll('.ticket-row .due-overdue').length`), 0);
 
-  // 担当者は詳細の2列メタグリッドで示す。
+  // 一覧に担当者表示や旧表示設定トグルを出さず、詳細ドロワーはコメント専用パネルとして表示する。
   state.selectedTicketId = 10;
   state.tickets[0].assigneeName = 'Taro Yamada';
   state.selectedTicket = { ...state.tickets[0], projectName: '検証プロジェクト', description: '担当者表示を確認します。' };
   await push();
   assert.equal(await evaluate(`document.querySelectorAll('.ticket-assignee').length`), 0);
-  assert.equal(await evaluate(`document.querySelector('.detail-metadata-grid').textContent.includes('Taro Yamada')`), true);
+  assert.equal(await evaluate(`document.querySelectorAll('.detail-metadata-grid, .detail-tabs, .detail-description-section, .detail-description-warning').length`), 0);
   assert.equal(await evaluate(`document.querySelectorAll('#set-show-assignee,#set-show-tracker,#set-show-priority,#set-show-due-date').length`), 0);
 
   // 一覧・詳細・コメント・未同期の同じ操作はラベルと SVG が一致する。
   state.comments.ticketId = 10;
-  state.comments.items = [{ id: 20, authorName: 'Taro', body: 'Comment', editableByCurrentUser: true, syncKey: { kind: 'comment', ticketId: 10, commentId: 20 } }];
+  state.comments.items = [{ id: 20, noteIndex: 3, authorName: 'Taro', body: 'Comment', editableByCurrentUser: true, syncKey: { kind: 'comment', ticketId: 10, commentId: 20 } }];
   state.unsynced = { totalCount: 1, items: [{ key: { kind: 'ticket', ticketId: 10 }, label: 'Ticket', documentUri: 'file:///tmp/ticket.md', lifecycle: 'queued' }] };
   await push();
   async function assertSameAction(selectors) {
     const appearances = await evaluate(`(${JSON.stringify(selectors)}).map(selector=>{const button=document.querySelector(selector);return {label:button.textContent.trim(),icon:button.querySelector('svg').outerHTML};})`);
     appearances.slice(1).forEach(actual => assert.deepEqual(actual, appearances[0]));
   }
-  assert.equal(await evaluate(`document.querySelector('#detail-browser-btn') !== null`), true);
+  assert.equal(await evaluate(`document.querySelector('#detail-sync-btn')`), null);
+  assert.equal(await evaluate(`document.querySelector('#detail-browser-btn')`), null);
+  assert.equal(await evaluate(`document.querySelector('.ticket-row[data-id="10"] [data-ticket-action="sync"]') !== null`), true);
+  assert.equal(await evaluate(`document.querySelector('.ticket-row[data-id="10"] [data-ticket-action="browser"]') !== null`), true);
+  assert.equal(await evaluate(`document.querySelector('.comment-card[data-comment-id="20"] [data-comment-action="sync"]') !== null`), true);
+  assert.equal(await evaluate(`document.querySelector('.comment-card[data-comment-id="20"] [data-comment-action="browser"]') !== null`), true);
   assert.equal(await evaluate(`document.querySelector('#add-comment-btn') !== null`), true);
-  await assertSameAction(['#detail-sync-btn', '[data-sync-key]', '[data-sync-comment-key]']);
-  assert.equal(await evaluate(`document.querySelector('#sync-all-btn svg').outerHTML`), await evaluate(`document.querySelector('#detail-sync-btn svg').outerHTML`));
+  assert.equal(await evaluate(`document.querySelector('#sync-all-btn svg').outerHTML`), await evaluate(`document.querySelector('.ticket-row[data-id="10"] [data-ticket-action="sync"] svg').outerHTML`));
+  assert.equal(await evaluate(`document.querySelector('.comment-card[data-comment-id="20"] [data-comment-action="sync"] svg').outerHTML`), await evaluate(`document.querySelector('.ticket-row[data-id="10"] [data-ticket-action="sync"] svg').outerHTML`));
+  assert.equal(await evaluate(`document.querySelector('.comment-card[data-comment-id="20"] [data-comment-action="browser"] svg').outerHTML`), await evaluate(`document.querySelector('.ticket-row[data-id="10"] [data-ticket-action="browser"] svg').outerHTML`));
+  // 削除操作は選択中の行ではなく、操作した行の永続 ID と描画時の接続世代を送る。
+  state.connectionGeneration = 9;
+  state.comments.items.push({ authorName: 'Local draft', body: 'Draft', isLocalUnsynced: true, syncKey: { kind: 'comment', ticketId: 10, documentUri: 'file:///draft.md' } });
+  await push();
+  assert.equal(await evaluate(`document.querySelectorAll('.comment-card:not([data-comment-id]) [data-comment-action="delete"]').length`), 0);
+  assert.equal(await evaluate(`getComputedStyle(document.querySelector('.ticket-row[data-id="11"] .ticket-hover-actions')).display`), 'none');
+  await evaluate(`document.querySelector('.ticket-row[data-id="11"]').focus();window.messages.length=0`);
+  assert.equal(await evaluate(`getComputedStyle(document.querySelector('.ticket-row[data-id="11"] .ticket-hover-actions')).display`), 'flex');
+  await evaluate(`document.querySelector('.ticket-row[data-id="11"] [data-ticket-action="delete"]').focus()`);
+  await key('Enter');
+  assert.deepEqual(await evaluate(`(({type,ticketId,connectionGeneration})=>({type,ticketId,connectionGeneration}))(window.messages.at(-1))`), { type: 'deleteTicket', ticketId: 11, connectionGeneration: 9 });
+  await evaluate(`window.messages.length=0`);
+  const commentPoint = await evaluate(`(()=>{const r=document.querySelector('.comment-card[data-comment-id="20"]').getBoundingClientRect();return {x:r.right-20,y:r.top+10}})()`);
+  await call('Input.dispatchMouseEvent', { type: 'mouseMoved', ...commentPoint });
+  const deletePoint = await evaluate(`(()=>{const r=document.querySelector('.comment-card[data-comment-id="20"] [data-comment-action="delete"]').getBoundingClientRect();return {x:r.x+r.width/2,y:r.y+r.height/2}})()`);
+  await call('Input.dispatchMouseEvent', { type: 'mousePressed', ...deletePoint, button: 'left', buttons: 1, clickCount: 1 });
+  await call('Input.dispatchMouseEvent', { type: 'mouseReleased', ...deletePoint, button: 'left', buttons: 0, clickCount: 1 });
+  assert.deepEqual(await evaluate(`(({type,ticketId,commentId,connectionGeneration})=>({type,ticketId,commentId,connectionGeneration}))(window.messages.at(-1))`), { type: 'deleteComment', ticketId: 10, commentId: 20, connectionGeneration: 9 });
   state.comments.items = [];
   state.unsynced = { totalCount: 0, items: [] };
   await push();
@@ -639,6 +1431,44 @@ async function main() {
   await push();
   assert.equal(await evaluate(`document.querySelectorAll('.ticket-row').length`), 1);
   assert.equal(await evaluate(`document.querySelector('.ticket-row').dataset.id`), '11');
+  // 外部コマンドは検索条件を維持して、モーダルと詳細集中表示から検索欄へ戻す。
+  state.selectedTicketId=11;
+  state.selectedTicket={...state.tickets[0],projectName:'検証プロジェクト'};
+  state.workPanel={mode:'detail',ticketId:11};
+  await push();
+  const focusSearchFilters = await evaluate(`window.acquireVsCodeApi().getState()?.quickFilters || []`);
+  await evaluate(`
+    const layoutControl = document.getElementById('ticket-layout-mode');
+    layoutControl.value = 'split';
+    layoutControl.dispatchEvent(new Event('change'));
+    document.getElementById('detail-focus-toggle').click();
+    document.getElementById('tab-settings').click();
+    document.getElementById('project-select-trigger').click();
+    window.messages.length = 0;
+  `);
+  await focusTicketSearch();
+  assert.equal(await evaluate(`document.activeElement.id`), 'search-input');
+  assert.equal(await evaluate(`document.getElementById('tab-tickets').getAttribute('aria-selected')`), 'true');
+  assert.equal(await evaluate(`document.getElementById('project-picker-popup').hidden`), true);
+  assert.equal(await evaluate(`document.getElementById('ticket-detail-card').classList.contains('hidden')`), false);
+  assert.deepEqual(await evaluate(`(({detailFocus,ticketLayoutMode,quickFilters})=>({detailFocus,ticketLayoutMode,quickFilters}))(window.acquireVsCodeApi().getState())`), {detailFocus:false,ticketLayoutMode:'split',quickFilters:focusSearchFilters});
+  assert.equal(await evaluate(`document.getElementById('search-input').value`), '本文だけ');
+  assert.equal(await evaluate(`window.messages.filter(m=>m.type==='tickets.search').length`), 0);
+  await evaluate(`
+    document.getElementById('advanced-filters-btn').click();
+    document.getElementById('advanced-unassigned').checked = false;
+    window.messages.length = 0;
+  `);
+  await focusTicketSearch();
+  assert.equal(await evaluate(`document.getElementById('advanced-filter-dialog').classList.contains('hidden')`), true);
+  assert.equal(await evaluate(`document.activeElement.id`), 'search-input');
+  assert.equal(await evaluate(`window.messages.length`), 0);
+  await typeText('x');
+  await new Promise(resolve => setTimeout(resolve,350));
+  assert.deepEqual(await evaluate(`(({query,scope})=>({query,scope}))(window.messages.at(-1))`), {query:'本文だけx',scope:{kind:'project',projectId:1}});
+  await evaluate(`document.getElementById('search-input').value='本文だけ';document.getElementById('ticket-layout-mode').value='auto';document.getElementById('ticket-layout-mode').dispatchEvent(new Event('change'))`);
+  state.selectedTicketId=undefined; state.selectedTicket=undefined; state.workPanel=undefined;
+  await push();
   await evaluate(`document.getElementById('project-select-trigger').click();document.getElementById('project-option-0').click()`);
   assert.deepEqual(await evaluate(`(({type,query})=>({type,query}))(window.messages.at(-1))`), {type:'project.selectAll',query:'本文だけ'});
   state.selectedProject=undefined;
@@ -662,48 +1492,100 @@ async function main() {
   assert.equal(await evaluate(`window.messages.at(-1).type`),'ticket.select');
   assert.equal(await evaluate(`window.messages.at(-1).ticketId`),10);
 
-  // Detail の主要操作は既存 request のまま。Markdown preview は安全な読み取り専用。
+  // Detail の主要操作は既存 request のまま。コメント専用パネルと安全なコメント表示を確認する。
   state.selectedProject = { id: 1, name: '検証プロジェクト' };
   state.selectedTicketId = 10;
   state.selectedTicket = { id: 10, subject: '詳細操作の検証', projectName: '検証プロジェクト', trackerName: 'Bug', priorityName: 'Normal', statusName: 'Open', assigneeName: 'Taro', startDate: '2026-09-21', dueDate: '2026-09-30', syncState: 'Synced', description: '<img src=x onerror=alert(1)>\nRedmine の説明\n3行目\n4行目' };
   state.editOptions = { ticketId: 10, projectId: 1, loading: false, statusFallback: false, trackers: [{ id: 1, name: 'Bug' }, { id: 2, name: 'Task' }], priorities: [{ id: 1, name: 'Normal' }, { id: 2, name: 'High' }], statuses: [{ id: 1, name: 'Open' }, { id: 2, name: 'Closed' }], assignees: [{ id: 1, name: 'Taro' }] };
   await push();
-  assert.equal(await evaluate(`document.querySelectorAll('#ticket-detail-card .detail-tabs [role="tab"]').length`), 2);
-  state.tickets[0].syncState = 'Conflict';
-  await push();
-  assert.ok(await evaluate(`document.getElementById('sync-tray').textContent.includes(${JSON.stringify(strings.syncTrayAttention)})`));
-  await evaluate(`document.querySelector('#sync-tray [data-sync-tray-action]').click()`);
-  assert.equal(await evaluate(`window.messages.at(-1).type`), 'ticket.reviewConflict');
-  state.tickets[0].syncState = 'Queued';
-  await evaluate(`window.dispatchEvent(new MessageEvent('message',{data:{type:'operation.success',requestId:window.messages.at(-1).requestId,message:'完了'}}))`);
-  await push();
-  await evaluate(`document.getElementById('detail-tab-overview').focus()`);
-  await key('ArrowRight');
-  assert.equal(await evaluate(`document.activeElement.id`), 'detail-tab-comments');
+  assert.equal(await evaluate(`document.querySelectorAll('#ticket-detail-card .detail-tabs, #detail-tab-overview, #detail-tab-comments, .detail-metadata-grid, .detail-description, .detail-description-warning').length`), 0);
+  assert.equal(await evaluate(`document.querySelector('#ticket-detail-card .detail-header-fixed') !== null && document.querySelectorAll('#ticket-detail-card .detail-subject, #ticket-detail-card .detail-project-name, #ticket-detail-card .detail-head-row2').length === 0`), true);
   assert.equal(await evaluate(`document.getElementById('detail-comments').hidden`), false);
-  await key('Home');
-  assert.equal(await evaluate(`document.activeElement.id`), 'detail-tab-overview');
+  assert.equal(await evaluate(`document.getElementById('detail-comment-count').textContent`), '0');
+  state.tickets[0].syncState = 'Queued';
+  await push();
   assert.equal(await evaluate(`document.querySelector('.ticket-row[data-id="10"]').getAttribute('aria-current')`), 'true');
-  assert.equal(await evaluate(`document.querySelector('.detail-description').textContent`), state.selectedTicket.description);
-  assert.equal(await evaluate(`document.querySelectorAll('#ticket-detail-card textarea, .detail-description img, .detail-description [contenteditable]').length`), 0);
+  assert.equal(await evaluate(`document.querySelectorAll('#ticket-detail-card textarea, #comments-list img, #comments-list [contenteditable]').length`), 0);
   state.comments.ticketId = 10;
   state.comments.items = [{ id: 31, authorName: 'Taro', body: '1行目\n2行目\n3行目\n4行目', editableByCurrentUser: true }];
   await push();
-  await evaluate(`document.getElementById('detail-tab-comments').click()`);
+  assert.equal(await evaluate(`document.getElementById('detail-comment-count').textContent`), '1');
   assert.equal(await evaluate(`document.querySelector('.comment-body').textContent`), state.comments.items[0].body);
   assert.equal(await evaluate(`document.querySelector('.comment-timeline') !== null`), true);
   await evaluate(`document.querySelector('.comment-card.is-editable').click()`);
   assert.deepEqual(await evaluate(`({type:window.messages.at(-1).type,ticketId:window.messages.at(-1).ticketId,commentId:window.messages.at(-1).commentId})`), { type: 'comment.edit', ticketId: 10, commentId: 31 });
-  await evaluate(`document.getElementById('detail-tab-overview').click()`);
-  state.comments.items = [];
+  state.comments.items = [
+    { id: 31, authorName: 'Taro', body: Array.from({ length: 12 }, (_, i) => `長文行${i + 1}`).join('\n'), editableByCurrentUser: true },
+    { id: 32, authorName: 'Hanako', body: '短いコメント', editableByCurrentUser: false },
+  ];
   await push();
-  for (const [id, type] of [['detail-browser-btn', 'ticket.openBrowser']]) {
-    await evaluate(`document.getElementById('${id}').click()`);
+  const commentLayout = await evaluate(`(() => {
+    const cards = Array.from(document.querySelectorAll('#comments-list .comment-card'));
+    const longBody = cards[0].querySelector('.comment-body');
+    const shortBody = cards[1].querySelector('.comment-body');
+    longBody.scrollTop = 20;
+    return {
+      longCardHeight: cards[0].getBoundingClientRect().height,
+      shortCardHeight: cards[1].getBoundingClientRect().height,
+      longScrollable: longBody.scrollHeight > longBody.clientHeight,
+      longOverflowY: getComputedStyle(longBody).overflowY,
+      longScrollTop: longBody.scrollTop,
+      shortOverflowY: getComputedStyle(shortBody).overflowY,
+      shortScrollable: shortBody.scrollHeight > shortBody.clientHeight,
+    };
+  })()`);
+  assert.equal(commentLayout.longCardHeight, 80);
+  assert.equal(commentLayout.shortCardHeight, 80);
+  assert.equal(commentLayout.longScrollable, true);
+  assert.equal(commentLayout.longOverflowY, 'auto');
+  assert.ok(commentLayout.longScrollTop > 0);
+  assert.equal(commentLayout.shortOverflowY, 'auto');
+  assert.equal(commentLayout.shortScrollable, false);
+  for (const [selector, type] of [['#add-comment-btn', 'comment.add'], ['#reload-comments-btn', 'comment.reload'], ['.ticket-row[data-id="10"] [data-ticket-action="browser"]', 'ticket.openBrowser']]) {
+    await evaluate(`document.querySelector(${JSON.stringify(selector)}).click()`);
     assert.deepEqual(await evaluate(`({type:window.messages.at(-1).type,ticketId:window.messages.at(-1).ticketId})`), { type, ticketId: 10 });
   }
+  state.comments.items = [
+    { id: 31, noteIndex: 1, authorName: 'Taro', body: '編集中のコメント', editableByCurrentUser: true, isEditing: true, hasUnsyncedEdit: false },
+    { id: 32, noteIndex: 2, authorName: 'Hanako', body: '未同期編集のコメント', editableByCurrentUser: true, isEditing: false, hasUnsyncedEdit: true },
+    { authorName: 'Local draft', body: 'ローカル下書きコメント', editableByCurrentUser: false, hasUnsyncedEdit: true, isLocalUnsynced: true, syncKey: { kind: 'comment', ticketId: 10, documentUri: 'file:///tmp/comment-draft.md' } },
+  ];
+  state.comments.selectedCommentId = 32;
+  state.comments.selectedCommentUri = undefined;
+  await push();
+  assert.equal(await evaluate(`document.querySelectorAll('#comments-list .comment-card .unsynced-inline-badge')[0]?.textContent`), strings.syncEditing);
+  assert.equal(await evaluate(`document.querySelectorAll('#comments-list .comment-card .unsynced-inline-badge')[1]?.textContent`), strings.unsyncedEditBadge);
+  assert.equal(await evaluate(`document.querySelector('.comment-card[data-comment-id="31"]').classList.contains('selected')`), false);
+  assert.equal(await evaluate(`document.querySelector('.comment-card[data-comment-id="31"]').getAttribute('aria-current')`), 'false');
+  assert.equal(await evaluate(`document.querySelector('.comment-card[data-comment-id="32"]').classList.contains('selected')`), true);
+  assert.equal(await evaluate(`document.querySelector('.comment-card[data-comment-id="32"]').getAttribute('aria-current')`), 'true');
+  assert.equal(await evaluate(`document.querySelector('.comment-card[data-comment-uri="file:///tmp/comment-draft.md"] [data-comment-action="sync"]') !== null`), true);
+  assert.equal(await evaluate(`document.querySelector('.comment-card[data-comment-uri="file:///tmp/comment-draft.md"] [data-comment-action="browser"]')`), null);
+  assert.equal(await evaluate(`getComputedStyle(document.querySelector('.comment-card[data-comment-id="32"] .comment-hover-actions')).display`), 'none');
+  await evaluate(`document.querySelector('.comment-card[data-comment-id="32"]').focus()`);
+  assert.equal(await evaluate(`getComputedStyle(document.querySelector('.comment-card[data-comment-id="32"] .comment-hover-actions')).display`), 'flex');
+  await evaluate(`document.querySelector('.comment-card[data-comment-id="32"]').blur()`);
+  assert.equal(await evaluate(`getComputedStyle(document.querySelector('.comment-card[data-comment-id="32"] .comment-hover-actions')).display`), 'none');
+  await evaluate(`window.messages.length=0;document.querySelector('.comment-card[data-comment-id="32"] [data-comment-action="sync"]').click()`);
+  assert.deepEqual(await evaluate(`window.messages.map(m=>({type:m.type,ticketId:m.ticketId,commentId:m.commentId}))`), [{ type: 'comment.syncSelected', ticketId: 10, commentId: 32 }]);
+  assert.equal(await evaluate(`document.querySelector('.comment-card[data-comment-id="32"] [data-comment-action="sync"]').disabled`), true);
+  await evaluate(`window.dispatchEvent(new MessageEvent('message',{data:{type:'operation.success',requestId:window.messages.at(-1).requestId,message:'同期しました'}}))`);
+  assert.equal(await evaluate(`document.querySelector('.comment-card[data-comment-id="32"] [data-comment-action="sync"]').disabled`), false);
+  await evaluate(`window.messages.length=0;document.querySelector('.comment-card[data-comment-id="32"] [data-comment-action="browser"]').click()`);
+  assert.deepEqual(await evaluate(`window.messages.map(m=>({type:m.type,ticketId:m.ticketId,commentId:m.commentId,noteIndex:m.noteIndex}))`), [{ type: 'comment.openBrowser', ticketId: 10, commentId: 32, noteIndex: 2 }]);
+  await evaluate(`window.messages.length=0;document.querySelector('.comment-card[data-comment-uri="file:///tmp/comment-draft.md"] [data-comment-action="sync"]').click()`);
+  assert.deepEqual(await evaluate(`window.messages.map(m=>({type:m.type,ticketId:m.ticketId,documentUri:m.documentUri}))`), [{ type: 'comment.syncSelected', ticketId: 10, documentUri: 'file:///tmp/comment-draft.md' }]);
+  await evaluate(`window.dispatchEvent(new MessageEvent('message',{data:{type:'operation.success',requestId:window.messages.at(-1).requestId,message:'同期しました'}}))`);
+  state.comments.selectedCommentId = undefined;
+  state.comments.selectedCommentUri = 'file:///tmp/comment-draft.md';
+  await push();
+  assert.equal(await evaluate(`document.querySelector('.comment-card[data-comment-uri="file:///tmp/comment-draft.md"]').classList.contains('selected')`), true);
+  assert.equal(await evaluate(`document.querySelector('.comment-card[data-comment-uri="file:///tmp/comment-draft.md"]').getAttribute('aria-current')`), 'true');
+  state.comments.selectedCommentUri = undefined;
+  state.comments.items = [];
+  await push();
   assert.equal(await evaluate(`document.querySelectorAll('[data-ticket-action-menu="detail-10"]').length`), 0);
   assert.equal(await evaluate(`document.querySelectorAll('[data-ticket-action="refresh"]').length`), 0);
-  assert.equal(await evaluate(`document.querySelectorAll('.detail-metadata-grid').length`), 1);
   assert.equal(await evaluate(`document.querySelectorAll('[data-metadata-field]').length`), 0);
 
   // Escape キーで詳細ドロワーを閉じる。
@@ -712,46 +1594,52 @@ async function main() {
   assert.equal(await evaluate(`window.messages.at(-1).type`), 'ticket.cancelDetail');
 
   // 同期は送信直後から無効化し、state 更新・started・成功・失敗でも二重送信しない。
+  const rowSyncSelector = '.ticket-row[data-id="10"] [data-ticket-action="sync"]';
   const beforeSync = await evaluate('window.messages.length');
-  await evaluate(`document.getElementById('detail-sync-btn').click();document.getElementById('detail-sync-btn').click()`);
+  await evaluate(`document.querySelector(${JSON.stringify(rowSyncSelector)}).click();document.querySelector(${JSON.stringify(rowSyncSelector)}).click()`);
   assert.equal(await evaluate('window.messages.length'), beforeSync + 1);
   const syncRequest = await evaluate('window.messages.at(-1)');
   assert.equal(syncRequest.type, 'ticket.syncSelected');
   assert.equal(syncRequest.ticketId, 10);
-  assert.equal(await evaluate(`document.getElementById('detail-sync-btn').textContent`), strings.syncSyncing);
+  assert.equal(await evaluate(`document.querySelector(${JSON.stringify(rowSyncSelector)}).disabled`), true);
   await push();
-  assert.equal(await evaluate(`document.getElementById('detail-sync-btn').disabled`), true);
+  assert.equal(await evaluate(`document.querySelector(${JSON.stringify(rowSyncSelector)}).disabled`), true);
   await evaluate(`window.dispatchEvent(new MessageEvent('message',{data:{type:'operation.started',requestId:'${syncRequest.requestId}',label:'同期中…'}}))`);
-  assert.equal(await evaluate(`document.getElementById('detail-sync-state').textContent`), strings.syncSyncing);
   state.selectedTicket.syncState = 'Synced';
   await push();
   await evaluate(`window.dispatchEvent(new MessageEvent('message',{data:{type:'operation.success',requestId:'${syncRequest.requestId}',message:'同期が完了しました'}}))`);
-  assert.equal(await evaluate(`document.getElementById('detail-sync-btn').disabled`), false);
+  assert.equal(await evaluate(`document.querySelector(${JSON.stringify(rowSyncSelector)}).disabled`), false);
   assert.equal(await evaluate(`document.querySelector('.toast-success:last-child').textContent`), '同期が完了しました');
-  await evaluate(`document.getElementById('detail-sync-btn').click()`);
+  await evaluate(`document.querySelector(${JSON.stringify(rowSyncSelector)}).click()`);
   const failedSync = await evaluate('window.messages.at(-1).requestId');
   state.selectedTicket.syncState = 'Failed';
   await push();
   await evaluate(`window.dispatchEvent(new MessageEvent('message',{data:{type:'operation.error',requestId:'${failedSync}',message:'同期に失敗しました'}}))`);
-  assert.equal(await evaluate(`document.getElementById('detail-sync-btn').disabled`), false);
+  assert.equal(await evaluate(`document.querySelector(${JSON.stringify(rowSyncSelector)}).disabled`), false);
   assert.equal(await evaluate(`document.querySelector('.toast-error:last-child').textContent`), '同期に失敗しました');
   // キャッシュ再取得の中断通知も started を終了し、同期操作を再び使えるようにする。
   await evaluate(`window.dispatchEvent(new MessageEvent('message',{data:{type:'operation.started',requestId:'interrupted-cache-reset',label:'キャッシュ再取得中'}}))`);
-  assert.equal(await evaluate(`document.getElementById('detail-sync-btn').disabled`), true);
+  assert.equal(await evaluate(`document.querySelector(${JSON.stringify(rowSyncSelector)}).disabled`), true);
   await push();
   await evaluate(`window.dispatchEvent(new MessageEvent('message',{data:{type:'operation.success',requestId:'interrupted-cache-reset',message:'表示が変更されたため再取得を中断しました',level:'info'}}))`);
-  assert.equal(await evaluate(`document.getElementById('detail-sync-btn').disabled`), false);
+  assert.equal(await evaluate(`document.querySelector(${JSON.stringify(rowSyncSelector)}).disabled`), false);
   const messagesAfterReset = await evaluate('window.messages.length');
-  await evaluate(`document.getElementById('detail-sync-btn').click()`);
+  await evaluate(`document.querySelector(${JSON.stringify(rowSyncSelector)}).click()`);
   assert.equal(await evaluate('window.messages.length'), messagesAfterReset + 1);
   assert.equal(await evaluate('window.messages.at(-1).type'), 'ticket.syncSelected');
   await evaluate(`window.dispatchEvent(new MessageEvent('message',{data:{type:'operation.success',requestId:window.messages.at(-1).requestId,message:'完了'}}))`);
-  for (const [syncState, label] of [['Synced', ''], ['Draft', strings.draft], ['Dirty', strings.unsyncedShort], ['Queued', strings.unsyncedShort], ['Syncing', strings.syncSyncing], ['Failed', strings.syncFailed], ['Conflict', strings.syncConflict], ['RecoveryPending', strings.syncRecoveryPending], ['CommitUnknown', strings.syncOutcomeUnknown]]) {
+  for (const [syncState, label] of [['Synced', ''], ['Draft', strings.draft], ['Dirty', strings.syncEditing], ['Queued', strings.syncQueued], ['Syncing', strings.syncSyncing], ['Failed', strings.syncFailed], ['Conflict', strings.syncConflict], ['RecoveryPending', strings.syncRecoveryPending], ['CommitUnknown', strings.syncOutcomeUnknown]]) {
     state.selectedTicket.syncState = syncState;
+    if (syncState === 'Dirty' || syncState === 'Queued' || syncState === 'Synced') {
+      state.tickets[0].syncState = syncState;
+    }
     await push();
-    assert.equal(await evaluate(`document.getElementById('detail-sync-state').textContent`), label);
-    assert.equal(await evaluate(`document.querySelectorAll('.detail-description-warning').length`), syncState === 'Synced' ? 0 : 1);
-    assert.equal(await evaluate(`document.getElementById('detail-sync-btn').disabled`), syncState === 'Syncing');
+    assert.equal(await evaluate(`document.querySelector(${JSON.stringify(rowSyncSelector)}).disabled`), syncState === 'Syncing');
+    if (syncState === 'Dirty' || syncState === 'Queued') {
+      assert.equal(await evaluate(`document.querySelector('.ticket-row[data-id="${state.tickets[0].id}"] .unsynced-inline-badge')?.textContent`), label);
+    } else if (syncState === 'Synced') {
+      assert.equal(await evaluate(`document.querySelector('.ticket-row[data-id="${state.tickets[0].id}"] .unsynced-inline-badge')`), null);
+    }
   }
 
   // 手動レイアウトは画面幅より優先され、Webview state に保持される。
@@ -774,10 +1662,16 @@ async function main() {
     await evaluate(`document.body.className=${JSON.stringify(theme)}`);
     await push();
     assert.equal(await evaluate(`document.getElementById('ticket-detail-card').scrollWidth <= document.getElementById('ticket-detail-card').clientWidth`), true, `detail overflow: ${theme} ${width}`);
-    assert.equal(await evaluate(`(()=>{const card=document.getElementById('ticket-detail-card').getBoundingClientRect();return [...document.querySelectorAll('.detail-head-actions button, #detail-cancel-btn')].filter(el=>el.getClientRects().length>0).every(el=>{const r=el.getBoundingClientRect();return r.left>=card.left && r.right<=card.right;});})()`), true, `control overflow: ${theme} ${width}`);
+    assert.equal(await evaluate(`(()=>{const card=document.getElementById('ticket-detail-card').getBoundingClientRect();return [...document.querySelectorAll('#detail-cancel-btn, #add-comment-btn, #reload-comments-btn')].filter(el=>el.getClientRects().length>0).every(el=>{const r=el.getBoundingClientRect();return r.left>=card.left && r.right<=card.right;});})()`), true, `control overflow: ${theme} ${width}`);
     await evaluate(`document.querySelector('.ticket-row[data-id="10"]').focus()`);
     assert.notEqual(await evaluate(`getComputedStyle(document.querySelector('.ticket-row[data-id="10"]')).outlineStyle`), 'none');
-    assert.notEqual(await evaluate(`getComputedStyle(document.querySelector('.ticket-row[data-id="10"]'),'::before').backgroundColor`), 'rgba(0, 0, 0, 0)');
+    assert.equal(await evaluate(`getComputedStyle(document.querySelector('.ticket-row[data-id="10"]'),'::before').content`), 'none');
+    assert.notEqual(await evaluate(`getComputedStyle(document.querySelector('.ticket-row[data-id="10"]')).backgroundColor`), 'rgba(0, 0, 0, 0)');
+    assert.notEqual(
+      await evaluate(`getComputedStyle(document.querySelector('.ticket-row[data-id="10"]')).backgroundColor`),
+      await evaluate(`getComputedStyle(document.getElementById('ticket-scroll')).backgroundColor`),
+      `selected ticket highlight differs from scroll background: ${theme} ${width}`,
+    );
   }
 
   // 新規作成パネルが詳細列に収まり、更新中も入力値と選択範囲を保持する。
@@ -1048,12 +1942,25 @@ async function main() {
     await evaluate(`document.body.className=${JSON.stringify(theme)};document.getElementById('tab-tickets').click()`);
     await push();
     if (theme === 'vscode-dark') assert.equal(await evaluate('getComputedStyle(document.body).backgroundColor'), 'rgb(37, 37, 38)');
+    if (theme === 'vscode-light' || theme === 'vscode-dark') {
+      assert.notEqual(
+        await evaluate(`getComputedStyle(document.getElementById('ticket-detail-card')).backgroundColor`),
+        await evaluate(`getComputedStyle(document.getElementById('ticket-scroll')).backgroundColor`),
+        `detail background differs from list: ${theme} ${width}`,
+      );
+    }
     assert.equal(await evaluate(`document.querySelectorAll('.ticket-row .due-overdue').length`), 0);
     assert.equal(await evaluate(`document.querySelector('.tickets-master').scrollWidth <= document.querySelector('.tickets-master').clientWidth`), true);
     assert.equal(await evaluate(`document.getElementById('ticket-scroll').scrollWidth <= document.getElementById('ticket-scroll').clientWidth`), true, `list overflow: ${theme} ${width}`);
     assert.equal(await evaluate(`getComputedStyle(document.querySelector('.tickets-master')).borderRightWidth`), '1px');
     assert.equal(await evaluate(`document.querySelector('.ticket-subject').getBoundingClientRect().width >= 40`), true, `subject clipped: ${theme} ${width}`);
-    assert.equal(await evaluate(`document.querySelectorAll('.detail-head-actions svg[aria-hidden="true"]').length === 2`), true);
+    assert.equal(await evaluate(`document.querySelectorAll('.ticket-row.selected .ticket-hover-actions svg[aria-hidden="true"]').length === 3`), true);
+    assert.equal(await evaluate(`getComputedStyle(document.querySelector('.ticket-row:not(.selected) .ticket-hover-actions')).display`), 'none');
+    assert.equal(await evaluate(`getComputedStyle(document.querySelector('.ticket-row.selected .ticket-hover-actions')).display`), 'none');
+    await evaluate(`document.querySelector('.ticket-row.selected').focus()`);
+    assert.equal(await evaluate(`getComputedStyle(document.querySelector('.ticket-row.selected .ticket-hover-actions')).display`), 'flex');
+    await evaluate(`document.querySelector('.ticket-row.selected').blur()`);
+    assert.equal(await evaluate(`getComputedStyle(document.querySelector('.ticket-row.selected .ticket-hover-actions')).display`), 'none');
     if (width < 700) assert.equal(await evaluate(`document.querySelector('.tickets-master').getBoundingClientRect().height <= innerHeight * .55 + 1`), true);
     await evaluate(`document.getElementById('ticket-scroll').scrollTop=0; document.querySelector('.tickets-layout').scrollTop=0`);
     await evaluate('new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)))');
@@ -1108,7 +2015,7 @@ async function main() {
   assert.notEqual(await evaluate(`getComputedStyle(document.querySelector('.tickets-master')).display`), 'none');
   await evaluate(`window.dispatchEvent(new MessageEvent('message',{data:{type:'toast',level:'info',message:'位置確認'}}))`);
   await evaluate('new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)))');
-  assert.equal(await evaluate(`document.getElementById('toast-area').getBoundingClientRect().bottom < document.getElementById('sync-tray').getBoundingClientRect().top`), true);
+  assert.equal(await evaluate(`document.getElementById('toast-area').getBoundingClientRect().bottom <= window.innerHeight`), true);
   await evaluate(`document.getElementById('toast-area').replaceChildren()`);
   const preview = await call('Page.captureScreenshot', { format: 'png' });
   fs.writeFileSync(path.join(directory, 'dashboard-preview.png'), Buffer.from(preview.data, 'base64'));
@@ -1154,8 +2061,10 @@ async function main() {
   assert.equal(await evaluate(`document.getElementById('tickets-badge').textContent`), '6');
   assert.equal(await evaluate(`document.querySelector('.ticket-row').classList.contains('is-draft')`), true);
   assert.equal(await evaluate(`document.querySelector('.ticket-row.is-draft .ticket-id-new').textContent`), '#NEW');
-  assert.equal(await evaluate(`document.querySelectorAll('.ticket-row.is-draft .ticket-hover-actions').length`), 0);
+  assert.equal(await evaluate(`document.querySelectorAll('.ticket-row.is-draft .ticket-hover-actions').length`), 1);
+  assert.equal(await evaluate(`document.querySelectorAll('.ticket-row.is-draft [data-draft-action="sync"]').length`), 1);
   assert.equal(await evaluate(`document.querySelectorAll('.ticket-row.is-draft [data-ticket-action="browser"]').length`), 0);
+  assert.equal(await evaluate(`document.querySelectorAll('.ticket-row.is-draft [data-ticket-action="delete"]').length`), 0);
   await evaluate(`window.messages.length=0;document.querySelector('.ticket-row.is-draft').click()`);
   assert.deepEqual(await evaluate(`(({type,queueId})=>({type,queueId}))(window.messages.at(-1))`), { type: 'ticket.openDraft', queueId: 'draft-q1' });
   state.draftTickets = [];
@@ -1168,6 +2077,7 @@ async function main() {
     statusId: 1,
     statusName: 'Open',
     dueDate: '2099-12-31',
+    doneRatio: 50,
     syncState: 'Synced',
     children: [{
       id: 101,
@@ -1177,6 +2087,7 @@ async function main() {
       statusName: 'Closed',
       priorityName: 'High',
       dueDate: '2020-01-01',
+      doneRatio: 100,
       syncState: 'Synced',
       children: [],
     }],
@@ -1184,6 +2095,7 @@ async function main() {
   state.loadedTicketCount = 2;
   state.totalTicketCount = 2;
   await push();
+  assert.equal(await evaluate(`document.querySelectorAll('.ticket-progress, [role="progressbar"]').length`), 0, 'doneRatio があっても進捗線を表示しない');
   await evaluate(`document.querySelector('[data-expand="100"]').click()`);
   assert.equal(await evaluate(`document.querySelector('[data-expand="100"]').getAttribute('aria-expanded')`), 'false');
   await evaluate(`document.querySelector('[data-quick-filter="high"]').click()`);
@@ -1193,9 +2105,100 @@ async function main() {
   assert.equal(await evaluate(`document.querySelectorAll('.ticket-row[data-id="101"]').length`), 0);
   await evaluate(`document.querySelector('[data-quick-filter="overdue"]').click()`);
 
-  await evaluate(`window.messages.length=0;document.getElementById('tab-settings').click();document.getElementById('open-settings-json-btn').click()`);
+  state.tickets = [{
+    id: 200,
+    subject: '連動親チケット',
+    level: 0,
+    statusId: 1,
+    statusName: 'Open',
+    syncState: 'Synced',
+    children: [{
+      id: 201,
+      subject: '連動子チケット',
+      level: 1,
+      statusId: 1,
+      statusName: 'Open',
+      syncState: 'Synced',
+      children: [],
+    }],
+  }];
+  state.selectedTicketId = undefined;
+  state.selectedTicket = undefined;
+  state.loadedTicketCount = 2;
+  state.totalTicketCount = 2;
+  await push();
+  await evaluate(`document.querySelector('[data-expand="200"]').click()`);
+  assert.equal(await evaluate(`document.querySelector('[data-expand="200"]').getAttribute('aria-expanded')`), 'false');
+  assert.equal(await evaluate(`document.querySelectorAll('.ticket-row[data-id="201"]').length`), 0);
+  state.selectedTicketId = 201;
+  state.selectedTicket = { id: 201, subject: '連動子チケット', syncState: 'Synced' };
+  await push();
+  assert.equal(await evaluate(`document.querySelector('[data-expand="200"]').getAttribute('aria-expanded')`), 'true');
+  assert.equal(await evaluate(`document.querySelector('.ticket-row[data-id="201"]').classList.contains('selected')`), true);
+
+  state.draftTickets = [{
+    queueId: 'draft-created',
+    documentUri: 'file:///tmp/redmine-client-new-ticket-draft-created.md',
+    subject: '新規登録確認',
+    projectId: 1,
+    statusName: 'Open',
+    syncState: 'Draft',
+  }];
+  state.selectedTicketId = undefined;
+  state.selectedTicket = undefined;
+  await push();
+  await evaluate(`document.querySelector('.ticket-row.is-draft[data-draft-queue-id="draft-created"]').click()`);
+  assert.equal(await evaluate(`document.querySelector('.ticket-row.is-draft[data-draft-queue-id="draft-created"]').classList.contains('selected')`), true);
+
+  state.draftTickets = [];
+  state.tickets = [...state.tickets, {
+    id: 205,
+    subject: '新規登録確認',
+    level: 0,
+    statusId: 1,
+    statusName: 'Open',
+    syncState: 'Synced',
+    children: [],
+  }];
+  state.loadedTicketCount = 3;
+  state.totalTicketCount = 3;
+  state.selectedTicketId = 205;
+  state.selectedTicket = { id: 205, subject: '新規登録確認', syncState: 'Synced' };
+  await push();
+  assert.equal(await evaluate(`document.querySelectorAll('.ticket-row.is-draft').length`), 0);
+  assert.equal(await evaluate(`document.querySelector('.ticket-row[data-id="205"]').classList.contains('selected')`), true);
+  assert.equal(await evaluate(`document.querySelector('.ticket-row[data-id="205"]').getAttribute('aria-current')`), 'true');
+
+  await evaluate(`document.getElementById('tab-unsynced').click()`);
+  assert.equal(await evaluate(`document.getElementById('panel-tickets').hidden`), true);
+  state.tickets = [...state.tickets, {
+    id: 206,
+    subject: '別タブ作成確認',
+    level: 0,
+    statusId: 1,
+    statusName: 'Open',
+    syncState: 'Synced',
+    children: [],
+  }];
+  state.loadedTicketCount = 4;
+  state.totalTicketCount = 4;
+  state.selectedTicketId = 206;
+  state.selectedTicket = { id: 206, subject: '別タブ作成確認', syncState: 'Synced' };
+  await push();
+  await evaluate(`(()=>{window.__scrollCalls=0;const row=document.querySelector('.ticket-row[data-id="206"]');const orig=row.scrollIntoView;row.scrollIntoView=function(...args){window.__scrollCalls++;return orig.apply(this,args);};document.getElementById('tab-tickets').click();})()`);
+  assert.equal(await evaluate(`window.__scrollCalls`), 1);
+  assert.equal(await evaluate(`document.querySelector('.ticket-row[data-id="206"]').classList.contains('selected')`), true);
+  await evaluate(`document.getElementById('tab-unsynced').click();document.getElementById('tab-tickets').click()`);
+  assert.equal(await evaluate(`window.__scrollCalls`), 1);
+
+  await evaluate(`window.messages.length=0;document.getElementById('tab-settings').click();document.getElementById('settings-tickets').open=true;document.getElementById('set-follow-active-editor').click()`);
+  assert.deepEqual(await evaluate(`window.messages.find(m=>m.type==='settings.updateGeneral'&&m.patch&&'followActiveEditor' in m.patch)?.patch`), { followActiveEditor: true });
+  await evaluate(`window.messages.length=0;document.getElementById('open-settings-json-btn').click()`);
   assert.equal(await evaluate(`window.messages.at(-1).type`), 'settings.openJson');
+  await checkTicketSelectionHighlight();
+  await checkDetailPanelResize();
   assert.deepEqual(errors, []);
+  assert.deepEqual(await evaluate('window.cspViolations'), [], 'Dashboard は CSP 違反を発生させない');
   console.log('PASS: Detail操作/状態9種/読み取り専用preview、Metadata一括適用/キャンセル/失敗/接続切替、同期二重送信防止/成功/失敗、日本語/IME/入力待機、番号・本文検索の要求/範囲切替、検索中の新規/子チケット入力保持、追加取得の一覧/スクロール/フォーカス保持/再試行、一覧の情報集約/表示件数、Settings セクション/編集/キーボード操作、折りたたみ維持、子チケット検索、メニューのキーボード操作/表示領域、タブ横断の新規作成、入力/フォーカス維持、下書き前の同期抑止、ローディング/エラー再試行、7画面幅、4テーマ');
   console.log('検証用 HTML: ' + fixture);
   console.log('Project picker screenshots: ' + path.join(directory, 'project-picker-search-440.png') + ', ' + path.join(directory, 'project-picker-search-320.png') + ', ' + path.join(directory, 'project-picker-search-440-dark.png'));

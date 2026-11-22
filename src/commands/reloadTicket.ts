@@ -29,28 +29,28 @@ const notifyReloadResult = (result: TicketSaveResult): void => {
   showError(result.message);
 };
 
-export const reloadTicketFromEditor = async (): Promise<void> => {
+export const reloadTicketFromEditor = async (): Promise<boolean> => {
   const editor = vscode.window.activeTextEditor;
   if (!editor) {
     showError(vscode.l10n.t("Open a ticket editor before reloading."));
-    return;
+    return false;
   }
 
   if (getEditorContentType(editor) !== "ticket") {
     showError(vscode.l10n.t("Reload is only available for ticket editors."));
-    return;
+    return false;
   }
 
   const ticketId = getTicketIdForEditor(editor);
   if (!ticketId) {
     showError(vscode.l10n.t("Unable to resolve the ticket for this editor."));
-    return;
+    return false;
   }
 
   const operationScope = getConnectionScopeForEditor(editor);
   if (!operationScope || operationScope !== getCurrentConnectionScope()) {
     showError(CONNECTION_SCOPE_MISMATCH_MESSAGE);
-    return;
+    return false;
   }
 
   const discardLabel = vscode.l10n.t("Reload and Discard Changes");
@@ -58,7 +58,7 @@ export const reloadTicketFromEditor = async (): Promise<void> => {
     vscode.l10n.t("Reloading from Redmine will discard your local ticket changes."),
     discardLabel,
   )) {
-    return;
+    return false;
   }
 
   const result = await runWithConnectionScope(
@@ -68,5 +68,7 @@ export const reloadTicketFromEditor = async (): Promise<void> => {
   notifyReloadResult(result);
   if (result.status === "success") {
     setEditorDisplaySource(editor, "saved");
+    return true;
   }
+  return false;
 };

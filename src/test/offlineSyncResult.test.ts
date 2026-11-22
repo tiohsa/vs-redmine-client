@@ -1,5 +1,6 @@
 import * as assert from "assert";
 import {
+  addOfflineNewTicketAsync,
   addOfflineTicketUpdateAsync,
   clearOfflineSyncQueueAsync,
   getOfflineSyncQueue,
@@ -166,5 +167,74 @@ suite("offlineSyncResult — 構造化戻り値", () => {
     };
     assert.strictEqual(r.status, "failed");
     assert.strictEqual(r.synced, 0);
+  });
+
+  test("runOfflineSync は新規作成完了チケットの createdTicketIds を success/partial_failure で返す", async () => {
+    const first = await addOfflineNewTicketAsync({
+      content: "# 新規1\n本文1",
+      projectId: 1,
+      documentUri: "file:///tmp/offline-sync-new-1.md",
+    });
+    const second = await addOfflineNewTicketAsync({
+      content: "# 新規2\n本文2",
+      projectId: 1,
+      documentUri: "file:///tmp/offline-sync-new-2.md",
+    });
+
+    const successResult = await runOfflineSync({
+      suppressResultNotifications: true,
+      createSyncEngine: () => ({
+        syncAll: async () => ({
+          plan: [
+            { kind: "newTicket", queueId: first.queueId, documentUri: first.documentUri },
+            { kind: "newTicket", queueId: second.queueId, documentUri: second.documentUri },
+          ],
+          results: [
+            {
+              key: { kind: "newTicket", queueId: first.queueId, documentUri: first.documentUri },
+              outcome: { kind: "completed", ticketId: 901 },
+            },
+            {
+              key: { kind: "newTicket", queueId: second.queueId, documentUri: second.documentUri },
+              outcome: { kind: "completed", ticketId: 902 },
+            },
+          ],
+          remaining: [],
+          cancelled: false,
+          stopReason: "completed",
+        }),
+      }),
+    });
+
+    assert.strictEqual(successResult.status, "success");
+    assert.deepStrictEqual(successResult.createdTicketIds, [901, 902]);
+
+    const partialResult = await runOfflineSync({
+      suppressResultNotifications: true,
+      createSyncEngine: () => ({
+        syncAll: async () => ({
+          plan: [
+            { kind: "newTicket", queueId: first.queueId, documentUri: first.documentUri },
+            { kind: "newTicket", queueId: second.queueId, documentUri: second.documentUri },
+          ],
+          results: [
+            {
+              key: { kind: "newTicket", queueId: first.queueId, documentUri: first.documentUri },
+              outcome: { kind: "completed", ticketId: 903 },
+            },
+            {
+              key: { kind: "newTicket", queueId: second.queueId, documentUri: second.documentUri },
+              outcome: { kind: "failed_before_commit", error: new Error("failed") },
+            },
+          ],
+          remaining: [],
+          cancelled: false,
+          stopReason: "failed",
+        }),
+      }),
+    });
+
+    assert.strictEqual(partialResult.status, "partial_failure");
+    assert.deepStrictEqual(partialResult.createdTicketIds, [903]);
   });
 });

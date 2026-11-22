@@ -2,6 +2,7 @@ import * as path from "path";
 import * as vscode from "vscode";
 import { setCommentDraft } from "../views/commentDraftStore";
 import { setCommentDraftBody } from "../views/commentEditStore";
+import { extractCommentBody } from "../views/commentUpdateFile";
 import {
   isNewTicketDraftFilename,
   parseDirectTicketFilename,
@@ -10,25 +11,11 @@ import {
 } from "../views/editorFilename";
 import { formatTicketLabel } from "../views/ticketLabel";
 import { parseTicketEditorContent } from "../views/ticketEditorContent";
-import {
-  getTicketDraft,
-  getTicketDraftContent,
-  markDraftStatus,
-  setTicketDraftContent,
-} from "../views/ticketDraftStore";
-import { isSaveSyncSuppressed } from "../views/saveSyncSuppression";
-import {
-  detectTicketChanges,
-  detectTicketIntentChanges,
-  isSafeQueuedTicketUpdate,
-  parseQueuedTicketIntent,
-} from "../views/ticketSync/ticketChangeDetector";
-import { getOfflineSyncQueue } from "../views/offlineSyncStore";
+import { setTicketDraftContent } from "../views/ticketDraftStore";
 import {
   getCommentIdForEditor,
   getConnectionScopeForDocument,
   getConnectionScopeForEditor,
-  getEditorContentTypeForDocument,
   resolveEditorConnectionScope,
   getEditorContentType,
   getTicketIdForDocument,
@@ -43,8 +30,19 @@ import {
 } from "../views/ticketEditorRegistry";
 import { setViewContext } from "../views/viewContext";
 import type { SyncController } from "./syncController";
-import { parseCommentUpdateFile } from "../views/commentUpdateFile";
-import { scheduleTask } from "../packages/framework-core";
+import { parseCommentUpdateFile, parseCommentUpdateFilename } from "../views/commentUpdateFile";
+import { createPendingDocumentChangeScheduler } from "./editorDocumentChangeScheduler";
+import {
+  clearCommentEditingFromDocument,
+  updateCommentEditingStatusFromDocument,
+  updateTicketDraftStatusFromDocument,
+} from "./editorDocumentPreview";
+
+export {
+  clearCommentEditingFromDocument,
+  updateCommentEditingStatusFromDocument,
+  updateTicketDraftStatusFromDocument,
+} from "./editorDocumentPreview";
 
 export const TICKET_EDITOR_CONTEXT_KEY = "redmine-client.isTicketEditor";
 export const EXISTING_TICKET_EDITOR_CONTEXT_KEY = "redmine-client.isExistingTicketEditor";
@@ -59,6 +57,45 @@ export const isExistingTicketEditor = (editor?: vscode.TextEditor): boolean => {
   }
   const ticketId = getTicketIdForEditor(editor);
   return ticketId !== undefined && ticketId !== NEW_TICKET_DRAFT_ID && ticketId > 0;
+};
+
+export const resolveActiveTicketForEditor = (
+  editor?: vscode.TextEditor,
+): { ticketId: number; connectionScope?: string } | undefined => {
+  if (!editor || !isExistingTicketEditor(editor)) {
+    return undefined;
+  }
+  const ticketId = getTicketIdForEditor(editor);
+  if (ticketId === undefined || ticketId <= 0) {
+    return undefined;
+  }
+  return {
+    ticketId,
+    connectionScope: getConnectionScopeForEditor(editor),
+  };
+};
+
+export const resolveActiveCommentForEditor = (
+  editor?: vscode.TextEditor,
+): { ticketId: number; commentId?: number; documentUri?: string; connectionScope?: string } | undefined => {
+  if (!editor || !isExistingTicketEditor(editor)) {
+    return undefined;
+  }
+  const contentType = getEditorContentType(editor);
+  if (contentType !== "comment" && contentType !== "commentDraft") {
+    return undefined;
+  }
+  const ticketId = getTicketIdForEditor(editor);
+  if (ticketId === undefined || ticketId <= 0) {
+    return undefined;
+  }
+  const commentId = contentType === "comment" ? getCommentIdForEditor(editor) : undefined;
+  return {
+    ticketId,
+    ...(commentId !== undefined && commentId > 0 ? { commentId } : {}),
+    documentUri: editor.document.uri.toString(),
+    connectionScope: getConnectionScopeForEditor(editor),
+  };
 };
 
 export const refreshTicketEditorContexts = (
@@ -95,6 +132,23 @@ export const buildRegisterEditorDocument = (): (
           resolveEditorConnectionScope(document.uri),
         );
       }
+      return;
+    }
+
+    const commentUpdateIdentity =
+      parseCommentUpdateFilename(filename) ??
+      (document.uri.scheme === "untitled"
+        ? parseCommentUpdateFilename(filename.replace(/^redmine-client-[a-f0-9]{16}-/i, ""))
+        : undefined);
+    if (commentUpdateIdentity) {
+      const parsedComment = parseCommentUpdateFile(document.getText());
+      registerCommentDocument(
+        commentUpdateIdentity.issueId,
+        commentUpdateIdentity.journalId,
+        document,
+        parsedComment?.fields.projectId,
+        resolveEditorConnectionScope(document.uri),
+      );
       return;
     }
 
@@ -190,141 +244,48 @@ export interface EditorEventDeps {
   updateTicketStatus: (editor?: vscode.TextEditor) => void;
   notifyTicketChanged: () => void;
   sync: Pick<SyncController, "syncOnSave">;
+  onActiveTicketChanged?: (ticketId: number, connectionScope?: string) => void;
+  onActiveCommentChanged?: (
+    target: { ticketId: number; commentId?: number; documentUri?: string },
+    connectionScope?: string,
+  ) => void;
 }
 
-export const updateTicketDraftStatusFromDocument = (
-  document: vscode.TextDocument,
-): boolean => {
-  if (isSaveSyncSuppressed(document.uri.toString())) {
-    return false;
-  }
-
-  const ticketId = getTicketIdForDocument(document);
-  if (
-    ticketId === undefined ||
-    getEditorContentTypeForDocument(document) !== "ticket"
-  ) {
-    return false;
-  }
-
-  if (ticketId === NEW_TICKET_DRAFT_ID) {
-    return true;
-  }
-
-  const connectionScope = getConnectionScopeForDocument(document);
-  const draft = getTicketDraft(ticketId, connectionScope);
-  if (!draft) {
-    return false;
-  }
-  if (draft.status !== "Synced" && draft.status !== "Dirty" && draft.status !== "Queued") {
-    return false;
-  }
-
-  const prevDisplay = getTicketDraftContent(ticketId, connectionScope);
-  const prevSubject = prevDisplay?.subject ?? draft.baseSubject;
-  const prevMeta = prevDisplay?.metadata ?? draft.baseMetadata;
-
-  let nextStatus: "Synced" | "Dirty" | "Queued" = "Dirty";
-  let displayChanged = false;
-  try {
-    const content = parseTicketEditorContent(document.getText(), {
-      allowMissingMetadata: true,
-      fallbackMetadata: draft.baseMetadata,
-    });
-    const queued = getOfflineSyncQueue(connectionScope).tickets.get(ticketId);
-    if (queued && isSafeQueuedTicketUpdate(queued)) {
-      const queuedContent = parseQueuedTicketIntent(queued);
-      nextStatus = queuedContent && !detectTicketIntentChanges({
-        subject: queuedContent.subject,
-        description: queuedContent.description,
-        metadata: queuedContent.metadata,
-      }, content).hasChanges
-        ? "Queued"
-        : "Dirty";
-    } else {
-      nextStatus = detectTicketChanges(draft, content).hasChanges ? "Dirty" : "Synced";
-    }
-    setTicketDraftContent(ticketId, content, connectionScope);
-    const nextDisplay = getTicketDraftContent(ticketId, connectionScope);
-    const nextSubject = nextDisplay?.subject ?? draft.baseSubject;
-    const nextMeta = nextDisplay?.metadata ?? draft.baseMetadata;
-    displayChanged =
-      prevSubject !== nextSubject ||
-      prevMeta.tracker !== nextMeta.tracker ||
-      prevMeta.status !== nextMeta.status ||
-      prevMeta.priority !== nextMeta.priority ||
-      (prevMeta.assignee ?? "") !== (nextMeta.assignee ?? "") ||
-      (prevMeta.due_date ?? "") !== (nextMeta.due_date ?? "") ||
-      (prevMeta.done_ratio ?? 0) !== (nextMeta.done_ratio ?? 0);
-  } catch {
-    // Parse errors are still unsynced editor changes.
-  }
-
-  const statusChanged = draft.status !== nextStatus;
-  if (statusChanged) {
-    markDraftStatus(ticketId, nextStatus, connectionScope);
-  }
-  return statusChanged || displayChanged;
-};
-
-const TEXT_CHANGE_DEBOUNCE_MS = 300;
-
 export const registerEditorEvents = (
-  context: vscode.ExtensionContext,
+  context: Pick<vscode.ExtensionContext, "subscriptions">,
   deps: EditorEventDeps,
 ): void => {
-  const { registerEditorDocument, updateTicketStatus, notifyTicketChanged, sync } = deps;
+  const {
+    registerEditorDocument,
+    updateTicketStatus,
+    notifyTicketChanged,
+    sync,
+    onActiveTicketChanged,
+    onActiveCommentChanged,
+  } = deps;
 
   let previousActiveEditor = vscode.window.activeTextEditor;
-  const pendingChanges = new Map<
-    string,
-    { cancel: () => void; document: vscode.TextDocument }
-  >();
-
-  const flushPendingDocumentChange = (uriKey: string): void => {
-    const pending = pendingChanges.get(uriKey);
-    if (!pending) {
-      return;
-    }
-    pending.cancel();
-    pendingChanges.delete(uriKey);
-    if (updateTicketDraftStatusFromDocument(pending.document)) {
+  const documentChanges = createPendingDocumentChangeScheduler((document) => {
+    if (
+      updateTicketDraftStatusFromDocument(document) ||
+      updateCommentEditingStatusFromDocument(document)
+    ) {
       notifyTicketChanged();
     }
-  };
-
-  const flushAllPendingDocumentChanges = (): void => {
-    for (const uriKey of Array.from(pendingChanges.keys())) {
-      flushPendingDocumentChange(uriKey);
-    }
-  };
-
-  const clearPendingDocumentChange = (uriKey: string): void => {
-    const pending = pendingChanges.get(uriKey);
-    if (!pending) {
-      return;
-    }
-    pending.cancel();
-    pendingChanges.delete(uriKey);
-  };
+  });
 
   context.subscriptions.push({
-    dispose: () => {
-      for (const pending of pendingChanges.values()) {
-        pending.cancel();
-      }
-      pendingChanges.clear();
-    },
+    dispose: () => documentChanges.dispose(),
   });
 
   context.subscriptions.push(
     vscode.window.onDidChangeActiveTextEditor((editor) => {
-      flushAllPendingDocumentChanges();
+      documentChanges.flushAll();
 
       if (previousActiveEditor && isTicketEditor(previousActiveEditor)) {
         const ticketId = getTicketIdForEditor(previousActiveEditor);
         const contentType = getEditorContentType(previousActiveEditor);
-        if (ticketId && contentType === "ticket") {
+        if (ticketId && contentType === "ticket" && previousActiveEditor.document.isDirty) {
           try {
             const parsed = parseTicketEditorContent(
               previousActiveEditor.document.getText(),
@@ -340,20 +301,14 @@ export const registerEditorEvents = (
           } catch {
             // Ignore parse errors when swapping focus.
           }
-        } else if (ticketId && contentType === "comment") {
-          const draft = previousActiveEditor.document.getText();
-          setCommentDraft(
-            ticketId,
-            draft,
-            getConnectionScopeForEditor(previousActiveEditor),
-          );
+        } else if (ticketId && contentType === "comment" && previousActiveEditor.document.isDirty) {
+          const draft = extractCommentBody(previousActiveEditor.document.getText());
+          const scope = getConnectionScopeForEditor(previousActiveEditor);
           const commentId = getCommentIdForEditor(previousActiveEditor);
           if (commentId) {
-            setCommentDraftBody(
-              commentId,
-              draft,
-              getConnectionScopeForEditor(previousActiveEditor),
-            );
+            setCommentDraftBody(commentId, draft, scope);
+          } else {
+            setCommentDraft(ticketId, draft, scope);
           }
         }
       }
@@ -366,26 +321,39 @@ export const registerEditorEvents = (
       previousActiveEditor = editor;
       refreshTicketEditorContexts(editor);
       updateTicketStatus(editor);
+      const activeComment = resolveActiveCommentForEditor(editor);
+      if (activeComment && onActiveCommentChanged) {
+        onActiveCommentChanged(
+          {
+            ticketId: activeComment.ticketId,
+            commentId: activeComment.commentId,
+            documentUri: activeComment.documentUri,
+          },
+          activeComment.connectionScope,
+        );
+      } else {
+        const activeTicket = resolveActiveTicketForEditor(editor);
+        if (activeTicket) {
+          onActiveTicketChanged?.(activeTicket.ticketId, activeTicket.connectionScope);
+        }
+      }
     }),
   );
 
   context.subscriptions.push(
     vscode.workspace.onDidChangeTextDocument((event) => {
-      const uriKey = event.document.uri.toString();
-      clearPendingDocumentChange(uriKey);
-      const cancel = scheduleTask(() => {
-        pendingChanges.delete(uriKey);
-        if (updateTicketDraftStatusFromDocument(event.document)) {
-          notifyTicketChanged();
-        }
-      }, TEXT_CHANGE_DEBOUNCE_MS);
-      pendingChanges.set(uriKey, { cancel, document: event.document });
+      if (event.contentChanges.length > 0) {
+        documentChanges.schedule(event.document);
+      }
     }),
   );
 
   context.subscriptions.push(
     vscode.workspace.onDidCloseTextDocument((document) => {
-      clearPendingDocumentChange(document.uri.toString());
+      documentChanges.clear(document.uri.toString());
+      if (clearCommentEditingFromDocument(document)) {
+        notifyTicketChanged();
+      }
       removeTicketEditorByDocument(document);
     }),
   );

@@ -61,6 +61,20 @@ export const detectTicketChanges = (
   metadata: draft.baseMetadata,
 }, content);
 
+export const matchesQueuedTicketIntent = (
+  queued: TicketEditorContent,
+  current: TicketEditorContent,
+): boolean => {
+  const queuedChildren = queued.metadata.children ?? [];
+  const currentChildren = current.metadata.children ?? [];
+  return queuedChildren.length === currentChildren.length &&
+    queuedChildren.every((child, index) => child === currentChildren[index]) &&
+    !detectTicketIntentChanges(queued, {
+      ...current,
+      metadata: { ...current.metadata, children: [] },
+    }).hasChanges;
+};
+
 export const isSafeQueuedTicketUpdate = (
   queued: Pick<OfflineTicketUpdate, "phase" | "nextIntent" | "remoteUpdatedAt" | "createdChildIds" | "effects">,
 ): boolean => (

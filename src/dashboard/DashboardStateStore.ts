@@ -3,6 +3,7 @@ import type { DashboardState } from "./dashboardProtocol";
 type StateListener = (state: DashboardState) => void;
 
 const DEFAULT_STATE: DashboardState = {
+  connectionGeneration: 0,
   quickFilterCapabilities: { mine: "loading", open: "loading" },
   includeChildProjects: false,
   projects: [],
@@ -30,6 +31,7 @@ const DEFAULT_STATE: DashboardState = {
       trackerIds: [],
       assigneeIds: [],
       includeUnassigned: true,
+      syncFilter: "all",
     },
     sort: { direction: "asc" },
     dueDate: {
@@ -50,6 +52,7 @@ const DEFAULT_STATE: DashboardState = {
     showTracker: true,
     showPriority: true,
     showAssignee: true,
+    followActiveEditor: false,
     editorStorageDirectory: "",
     editorDefaults: {
       subject: "",

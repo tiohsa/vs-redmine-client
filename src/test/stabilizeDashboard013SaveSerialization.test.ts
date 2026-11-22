@@ -2,11 +2,12 @@ import * as assert from "assert";
 import * as vscode from "vscode";
 import { performSyncOnSave } from "../app/saveSyncExecutor";
 import { createSyncController } from "../app/syncController";
+import { createSyncEngine } from "../app/syncEngine";
 import { clearTicketDrafts } from "../views/ticketDraftStore";
 import { clearNewTicketDrafts } from "../views/newTicketDraftStore";
 import { suppressSaveSync, releaseSaveSync } from "../views/saveSyncSuppression";
-import { clearOfflineSyncQueueAsync, getOfflineSyncQueue } from "../views/offlineSyncStore";
-import { buildCommentUpdateFileContent } from "../views/commentUpdateFile";
+import { clearOfflineSyncQueueAsync, getActiveScope, getOfflineSyncQueue } from "../views/offlineSyncStore";
+import { buildCommentCreateFileContent, buildCommentUpdateFileContent } from "../views/commentUpdateFile";
 import { clearRegistry, registerNewCommentDraft } from "../views/ticketEditorRegistry";
 import { createEditorStub } from "./helpers/editorStubs";
 
@@ -277,5 +278,45 @@ suite("0.1.3 安定化: 保存トリガー同期のシリアライゼーショ�
     assert.ok(entry, "開いている新規コメントのキューが存在すること");
     assert.strictEqual(entry?.body, "Queued new comment from editor");
     assert.strictEqual(entry?.documentUri, uri.toString());
+  });
+
+  test("新規コメントの先頭見出しを保存から対象チケットへの同期まで保持する", async () => {
+    const uri = vscode.Uri.parse("untitled:redmine-client-new-comment-61.md");
+    const body = "# 作成者が入力した見出し\n\n本文";
+    const editor = createEditorStub(uri, buildCommentCreateFileContent(61) + body);
+    registerNewCommentDraft(61, editor);
+    const sent: Array<{ ticketId: number; body: string }> = [];
+    const engine = createSyncEngine({ comments: {
+      addComment: async (ticketId, notes) => { sent.push({ ticketId, body: notes }); },
+      getIssueDetail: async () => ({
+        ticket: { id: 61, subject: "Ticket", projectId: 5 },
+        comments: [{ id: 701, body, authorId: 7, ticketId: 61, authorName: "User", editableByCurrentUser: true }],
+      }),
+      getCurrentUserId: async () => 7,
+    } });
+
+    await performSyncOnSave(editor.document, editor, {
+      ticketsPresentation: makeNoopProvider(),
+      commentsPresentation: makeNoopProvider(),
+      unsyncedPresentation: makeNoopProvider(),
+      notifications: {
+        notifyTicketSaveResult: () => undefined,
+        notifyCommentSaveResult: () => undefined,
+      },
+      updateTicketListSubject: () => undefined,
+    });
+
+    const entry = getOfflineSyncQueue().comments.find((comment) => comment.ticketId === 61);
+    assert.ok(entry);
+    assert.strictEqual(entry.body, body);
+    const outcome = await engine.syncOne(
+      { kind: "comment", ticketId: 61, documentUri: uri.toString() },
+      { connectionScope: getActiveScope() },
+    );
+    assert.ok(
+      outcome.kind === "completed" || outcome.kind === "remote_committed",
+      JSON.stringify(outcome, (_key, value: unknown) => value instanceof Error ? value.message : value),
+    );
+    assert.deepStrictEqual(sent, [{ ticketId: 61, body }]);
   });
 });

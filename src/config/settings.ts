@@ -56,6 +56,9 @@ export const getTicketListShowPriority = (): boolean =>
 export const getTicketListShowAssignee = (): boolean =>
   getSettings().get<boolean>("ticketList.showAssignee", true);
 
+export const getTicketListFollowActiveEditor = (): boolean =>
+  getSettings().get<boolean>("ticketList.followActiveEditor", false);
+
 export const EDITOR_DEFAULT_FIELDS = [
   "subject",
   "description",

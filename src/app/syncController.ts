@@ -64,10 +64,13 @@ export const createSyncController = (deps: SyncControllerDeps): SyncController =
       const wasNewTicketDraft = getTicketIdForEditor(editor) === NEW_TICKET_DRAFT_ID;
       const oldUri = editor.document.uri;
       const operationScope = getConnectionScopeForEditor(editor) ?? getCurrentConnectionScope();
+      let createdTicketId: number | undefined;
       const syncResult = await syncEditorToRedmine(editor, {
         trigger: "explicit",
         onSubjectUpdated: updateTicketListSubject,
-        onTicketCreated: () => ticketsPresentation.refresh(),
+        onTicketCreated: (ticketId) => {
+          createdTicketId = ticketId;
+        },
         onCommentsRefresh: (ticketId) => commentsPresentation.refreshForTicket(ticketId),
         syncEngine: deps.syncEngine,
       });
@@ -87,7 +90,7 @@ export const createSyncController = (deps: SyncControllerDeps): SyncController =
         }
         notifications.notifyTicketSaveResult(result);
         if (result.status === "created") {
-          const createdId = getTicketIdForEditor(editor);
+          const createdId = createdTicketId ?? getTicketIdForEditor(editor);
           if (wasNewTicketDraft && createdId && createdId > 0) {
             await renameSyncedNewTicketFileIfEligible({
               oldUri,
@@ -97,7 +100,11 @@ export const createSyncController = (deps: SyncControllerDeps): SyncController =
             });
           }
           refreshTicketEditorContexts(vscode.window.activeTextEditor);
-          ticketsPresentation.refresh();
+          if (createdId && createdId > 0 && ticketsPresentation.revealCreatedTickets) {
+            await ticketsPresentation.revealCreatedTickets([createdId], operationScope).catch(() => undefined);
+          } else {
+            ticketsPresentation.refresh();
+          }
         } else {
           ticketsPresentation.notifyChange();
         }
@@ -113,7 +120,16 @@ export const createSyncController = (deps: SyncControllerDeps): SyncController =
           );
         }
         notifications.notifyCommentSaveResult(result);
-        if (shouldRefreshComments(result.status)) {
+        if (
+          result.status === "created" &&
+          result.commentId !== undefined &&
+          result.commentId > 0 &&
+          commentsPresentation.revealCreatedComment
+        ) {
+          await commentsPresentation
+            .revealCreatedComment(syncResult.ticketId, result.commentId, operationScope)
+            .catch(() => undefined);
+        } else if (shouldRefreshComments(result.status)) {
           commentsPresentation.refreshForTicket(syncResult.ticketId);
         }
         return toSyncStatus(result.status);
@@ -123,7 +139,7 @@ export const createSyncController = (deps: SyncControllerDeps): SyncController =
     }
   };
 
-  const handleSyncOnSave = async (document: vscode.TextDocument): Promise<void> => {
+  const handleSyncOnSave = async (document: vscode.TextDocument, savedContent: string): Promise<void> => {
     const editor =
       vscode.window.visibleTextEditors.find((candidate) => candidate.document === document) ??
       (vscode.window.activeTextEditor?.document === document
@@ -137,7 +153,7 @@ export const createSyncController = (deps: SyncControllerDeps): SyncController =
       updateTicketListSubject,
       syncEngine: deps.syncEngine,
       offlineSyncMode: deps.offlineSyncMode,
-    });
+    }, savedContent);
   };
 
   const syncOnSave = (document: vscode.TextDocument): void => {
@@ -150,7 +166,8 @@ export const createSyncController = (deps: SyncControllerDeps): SyncController =
       return;
     }
 
-    scheduleSave(uriString, () => handleSyncOnSave(document), async (error, uri) => {
+    const savedContent = document.getText();
+    scheduleSave(uriString, () => handleSyncOnSave(document, savedContent), async (error, uri) => {
       console.error("Save synchronization failed", uri, error);
       // The queue observes this Promise independently of subsequent saves.
       await vscode.window.showErrorMessage(vscode.l10n.t("Save synchronization failed."));

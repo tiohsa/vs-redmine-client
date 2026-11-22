@@ -16,10 +16,14 @@ function requiredEnv(name) {
   return value;
 }
 
+function isLoopbackHost(hostname) {
+  return hostname === "127.0.0.1" || hostname === "localhost" || hostname === "::1" || hostname === "[::1]";
+}
+
 function normalizeBaseUrl(value) {
   const url = new URL(value);
-  if (url.protocol !== "http:" && url.protocol !== "https:") {
-    throw new Error("REDMINE_SYNC_LIVE_URL must use HTTP or HTTPS");
+  if (url.protocol !== "http:" || !isLoopbackHost(url.hostname)) {
+    throw new Error("REDMINE_SYNC_LIVE_URL must use HTTP on a loopback host (127.0.0.1, localhost, or ::1)");
   }
   if (!url.pathname.endsWith("/")) url.pathname += "/";
   return url;
@@ -262,7 +266,7 @@ async function cleanupRestartProject(upstream, statePath) {
   });
 }
 
-function writeSummary(reportDir, selectedTests, restartResult, suiteFailures) {
+function writeSummary(reportDir, selectedTests, restartResult, suiteFailures, upstreamUrl) {
   const cases = [];
   const missing = [];
   for (const file of selectedTests) {
@@ -271,8 +275,8 @@ function writeSummary(reportDir, selectedTests, restartResult, suiteFailures) {
     else missing.push(path.basename(file));
   }
   if (restartResult) cases.push(restartResult);
-  writeJsonAtomic(path.join(reportDir, "summary.json"), { upstream: "http://127.0.0.1:3000/", cases, missing, suiteFailures });
-  const lines = ["# 実Redmine同期テスト結果", "", "接続先: http://127.0.0.1:3000/", "",
+  writeJsonAtomic(path.join(reportDir, "summary.json"), { upstream: upstreamUrl, cases, missing, suiteFailures });
+  const lines = ["# 実Redmine同期テスト結果", "", `接続先: ${upstreamUrl}`, "",
     `成功: ${cases.filter((item) => item.status === "passed").length} / 失敗: ${cases.filter((item) => item.status === "failed").length} / 未実行: ${cases.filter((item) => item.status === "not_run").length} / 未完了suite: ${missing.length} / suiteエラー: ${suiteFailures.length}`, "",
     "| ID | 結果 | 確認内容 |", "| --- | --- | --- |",
     ...cases.map((item) => `| ${item.id} | ${item.status} | ${item.title.replaceAll("|", "\\|")} |`),
@@ -329,7 +333,7 @@ async function runSuite({ fixtureDir, userDataDir, extensionsDir, workspaceDir, 
 
 function normalLiveTestFiles() {
   const liveDirectory = path.join(repoRoot, "out", "test", "live");
-  const names = new Set(["normalSync.test.js", "recoverySync.test.js", "conflictsSync.test.js", "entrypointsSync.test.js", "isolationSync.test.js", "durabilitySync.test.js", "dashboardSync.test.js"]);
+  const names = new Set(["normalSync.test.js", "recoverySync.test.js", "conflictsSync.test.js", "entrypointsSync.test.js", "isolationSync.test.js", "durabilitySync.test.js", "dashboardSync.test.js", "editorWorkflowSync.test.js", "dashboardWorkflow.test.js"]);
   return fs.readdirSync(liveDirectory)
     .filter((name) => names.has(name))
     .map((name) => path.join(liveDirectory, name));
@@ -338,10 +342,7 @@ function normalLiveTestFiles() {
 async function run() {
   if (process.env.REDMINE_LIVE_WORKER === "1") return runWorker();
 
-  const upstream = normalizeBaseUrl(requiredEnv("REDMINE_SYNC_LIVE_URL"));
-  if (upstream.toString() !== "http://127.0.0.1:3000/") {
-    throw new Error("REDMINE_SYNC_LIVE_URL must be http://127.0.0.1:3000/ for this live suite");
-  }
+  const upstream = normalizeBaseUrl(process.env.REDMINE_SYNC_LIVE_URL?.trim() || "http://127.0.0.1:3000/");
   requiredEnv("REDMINE_API_KEY");
   const restartTest = path.join(repoRoot, "out", "test", "live", "restartSync.test.js");
   for (const file of [path.join(repoRoot, "out", "extension.js"), restartTest, path.join(repoRoot, "out", "test", "live")]) {
@@ -436,7 +437,7 @@ async function run() {
     proxy.server.closeAllConnections();
     await proxy.close();
     if (fs.existsSync(tracePath)) fs.copyFileSync(tracePath, path.join(reportDir, "restart-traces.json"));
-    writeSummary(reportDir, selectedTests, restartResult, failures);
+    writeSummary(reportDir, selectedTests, restartResult, failures, upstream.toString());
     process.stdout.write(`実Redmine検証結果: ${reportDir}\n`);
     try { await cleanupRestartProject(upstream, statePath); }
     finally {

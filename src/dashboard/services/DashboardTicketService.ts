@@ -8,7 +8,7 @@ import type { Ticket } from "../../redmine/types";
 import { applyTicketFilters, applyTicketSort, type TicketListSettings } from "../../views/projectListSettings";
 import { buildTicketDashboardNodes, buildTicketDetail } from "../viewModels/ticketDashboardViewModel";
 import { showTicketPreview } from "../../views/ticketPreview";
-import { openTicketInBrowser } from "../../commands/openInBrowser";
+import { openIssueInBrowser } from "../../commands/openInBrowser";
 import type { ResolvedProject } from "../resolveProject";
 
 type SearchPage = { offset: number; total?: number };
@@ -45,7 +45,11 @@ export class DashboardTicketService {
     getTotalCount: () => number;
     setTotalCount: (count: number) => void;
     getSettings: () => TicketListSettings;
-    loadComments: (ticketId: number, throwOnError?: boolean) => Promise<void>;
+    loadComments: (
+      ticketId: number,
+      throwOnError?: boolean,
+      selection?: { commentId?: number; documentUri?: string },
+    ) => Promise<void>;
     refreshUnsynced: () => void;
     onSearchAccepted?: () => void;
     listIssues?: typeof fetchIssues;
@@ -94,9 +98,15 @@ export class DashboardTicketService {
     await this.searchTickets(rawQuery, { kind: "all" });
   }
 
-  async loadTickets(throwOnError = false): Promise<void> {
+  async loadTickets(
+    throwOnError = false,
+    options?: { ensureTicketIds?: readonly number[] },
+  ): Promise<void> {
     const generation = ++this.ticketLoadGeneration;
     this.projectIssueOffset = undefined;
+    const normalizedEnsureIds = Array.from(
+      new Set((options?.ensureTicketIds ?? []).filter((id) => Number.isInteger(id) && id > 0)),
+    );
     const { store } = this.deps.context;
     const project = this.deps.getResolvedProject();
     const includeChildProjects = getIncludeChildProjects();
@@ -117,10 +127,41 @@ export class DashboardTicketService {
         const result = await this.listIssues({ projectId: project.id, includeChildProjects, limit: getTicketListLimit(), offset: 0 });
         if (generation !== this.ticketLoadGeneration) { return; }
         this.projectIssueOffset = result.offset + result.tickets.length;
-        const loaded = mergeTicketsById([], result.tickets);
+        let loaded = mergeTicketsById([], result.tickets);
+        const missingIds = normalizedEnsureIds.filter((id) => !loaded.some((ticket) => ticket.id === id));
+        if (missingIds.length > 0) {
+          try {
+            const ensured = await this.listIssues({
+              projectId: project.id,
+              includeChildProjects,
+              limit: missingIds.length,
+              offset: 0,
+              issueIds: missingIds,
+            });
+            if (generation !== this.ticketLoadGeneration) { return; }
+            loaded = mergeTicketsById(loaded, ensured.tickets);
+          } catch {
+          }
+        }
         this.cachedProjectTickets = { projectId: project.id, includeChildProjects, tickets: loaded };
         this.deps.setTickets(loaded);
         this.deps.setTotalCount(result.totalCount);
+      } else if (normalizedEnsureIds.length > 0) {
+        let ensuredTickets: Ticket[] = [];
+        try {
+          const ensured = await this.listIssues({
+            includeChildProjects: true,
+            limit: normalizedEnsureIds.length,
+            offset: 0,
+            issueIds: normalizedEnsureIds,
+          });
+          if (generation !== this.ticketLoadGeneration) { return; }
+          ensuredTickets = mergeTicketsById([], ensured.tickets);
+        } catch {
+        }
+        this.cachedProjectTickets = undefined;
+        this.deps.setTickets(ensuredTickets);
+        this.deps.setTotalCount(ensuredTickets.length);
       } else {
         this.cachedProjectTickets = undefined;
         this.deps.setTickets([]);
@@ -294,7 +335,11 @@ export class DashboardTicketService {
     this.deps.setTotalCount(tickets.length);
   }
 
-  async selectTicket(ticketId: number, throwOnCommentError = false): Promise<void> {
+  async selectTicket(
+    ticketId: number,
+    throwOnCommentError = false,
+    commentSelection?: { commentId?: number; documentUri?: string },
+  ): Promise<void> {
     const { store } = this.deps.context;
     const tickets = this.deps.getTickets();
     const ticket = tickets.find((t) => t.id === ticketId);
@@ -306,7 +351,7 @@ export class DashboardTicketService {
       selectedTicket: buildTicketDetail(ticket, tickets),
       workPanel: { mode: "detail", ticketId },
     });
-    await this.deps.loadComments(ticketId, throwOnCommentError);
+    await this.deps.loadComments(ticketId, throwOnCommentError, commentSelection);
   }
 
   async openEditor(ticketId: number, preserveFocus?: boolean): Promise<void> {
@@ -317,11 +362,25 @@ export class DashboardTicketService {
   }
 
   async openInBrowser(ticketId: number): Promise<void> {
-    const ticket = this.deps.getTickets().find((t) => t.id === ticketId);
-    if (!ticket) {
+    if (!this.deps.getTickets().some((ticket) => ticket.id === ticketId)) {
+      void vscode.window.showErrorMessage(vscode.l10n.t("The selected ticket is no longer available."));
       return;
     }
-    await openTicketInBrowser({ ticket });
+    await openIssueInBrowser({ ticketId });
+  }
+
+  removeDeletedTickets(ticketIds: readonly number[]): void {
+    const deletedIds = new Set(ticketIds);
+    if (this.cachedProjectTickets) {
+      this.cachedProjectTickets.tickets = this.cachedProjectTickets.tickets.filter(ticket => !deletedIds.has(ticket.id));
+    }
+    const currentTickets = this.deps.getTickets();
+    const remaining = currentTickets.filter(ticket => !deletedIds.has(ticket.id));
+    const removed = currentTickets.length - remaining.length;
+    if (removed === 0) { return; }
+    this.deps.setTickets(remaining);
+    this.deps.setTotalCount(Math.max(remaining.length, this.deps.getTotalCount() - removed));
+    this.pushTickets();
   }
 
   pushTickets(): void {
@@ -371,6 +430,8 @@ export class DashboardTicketService {
             comments: {
               ...state.comments,
               ticketId: undefined,
+              selectedCommentId: undefined,
+              selectedCommentUri: undefined,
               items: [],
               loading: false,
               error: undefined,
@@ -383,7 +444,8 @@ export class DashboardTicketService {
     if (this.search) {
       return [this.search.subject, this.search.description].some(page => page.total !== undefined && page.offset < page.total);
     }
-    return (this.projectIssueOffset ?? this.deps.getTickets().length) < this.deps.getTotalCount();
+    return (this.projectIssueOffset ?? this.deps.getTickets().length) < this.deps.getTotalCount() &&
+      this.deps.getTickets().length < this.deps.getTotalCount();
   }
 
   private get listIssues(): typeof fetchIssues {

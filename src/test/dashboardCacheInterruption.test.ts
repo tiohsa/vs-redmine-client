@@ -33,7 +33,7 @@ const fixture = () => {
   controller["projectService"].selectProject = async id => { projectId = id ?? 1; await service.loadTickets(); };
   controller["projectService"].resetForConnectionChange = async () => undefined;
   controller["initialize"] = async () => undefined;
-  controller["loadProjects"] = async () => undefined;
+  controller["projectService"].loadProjects = async () => undefined;
   controller["refreshUnsynced"] = () => undefined;
   service["deps"].listIssues = async input => ({
     tickets: [{ id: (input.subjectQuery ?? input.descriptionQuery) === "new" ? 20 : 10, projectId, subject: "Ticket" }],
@@ -58,11 +58,14 @@ suite("Dashboard キャッシュ再取得の中断", () => {
         const pending = deferred<void>();
         const wait = () => { reached.resolve(); return pending.promise; };
         try {
-          await f.controller["loadMetadataOptions"](true);
+          await f.controller["dataService"].loadMetadataOptions(true);
           await f.service.searchTickets("old");
           f.store.update({ workPanel: { mode: "detail", ticketId: 10 }, selectedTicketId: 10 });
-          if (stage === "projects") { f.controller["loadProjects"] = wait; }
-          if (stage === "tickets") { f.controller["loadTickets"] = wait; }
+          if (stage === "projects") { f.controller["projectService"].loadProjects = wait; }
+          if (stage === "tickets") {
+            const loadTickets = f.service.loadTickets.bind(f.service);
+            f.service.loadTickets = (throwOnError) => throwOnError ? wait() : loadTickets();
+          }
           if (stage === "detail") { f.controller["selectTicket"] = wait; }
           const reset = f.controller.handle({ type: "dashboard.resetCache", requestId: "reset" });
           await reached.promise;
@@ -91,9 +94,9 @@ suite("Dashboard キャッシュ再取得の中断", () => {
     const projects = deferred<void>();
     const reached = deferred<void>();
     f.hooks.listTrackers = () => trackers.promise;
-    f.controller["loadProjects"] = () => { reached.resolve(); return projects.promise; };
+    f.controller["projectService"].loadProjects = () => { reached.resolve(); return projects.promise; };
     try {
-      const initialMetadata = f.controller["loadMetadataOptions"](true);
+      const initialMetadata = f.controller["dataService"].loadMetadataOptions(true);
       const reset = f.controller.handle({ type: "dashboard.resetCache", requestId: "reset" });
       await reached.promise;
       await f.service.searchTickets("new");
@@ -112,7 +115,7 @@ suite("Dashboard キャッシュ再取得の中断", () => {
       const trackers = deferred<typeof options>();
       const reached = deferred<void>();
       try {
-        await f.controller["loadMetadataOptions"](true);
+        await f.controller["dataService"].loadMetadataOptions(true);
         const before = structuredClone(f.store.getState().metadataOptions);
         f.hooks.listTrackers = () => { reached.resolve(); return trackers.promise; };
         const reset = f.controller.handle({ type: "dashboard.resetCache", requestId: "reset" });
@@ -134,7 +137,7 @@ suite("Dashboard キャッシュ再取得の中断", () => {
       const trackers = deferred<typeof options>();
       const reached = deferred<void>();
       try {
-        await f.controller["loadMetadataOptions"](true);
+        await f.controller["dataService"].loadMetadataOptions(true);
         f.hooks.listTrackers = () => { reached.resolve(); return trackers.promise; };
         const reset = f.controller.handle({ type: "dashboard.resetCache", requestId: "reset" });
         await reached.promise;
@@ -144,7 +147,7 @@ suite("Dashboard キャッシュ再取得の中断", () => {
         else { trackers.resolve(options); }
         await reset;
         assert.deepStrictEqual(f.store.getState(), current);
-        assert.strictEqual(f.controller["metadataOptionsLoaded"], false);
+        assert.strictEqual(f.controller["dataService"].hasMetadataOptions, false);
         f.assertCanceled();
       } finally { f.controller.dispose(); }
     });

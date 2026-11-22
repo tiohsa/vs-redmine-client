@@ -14,6 +14,16 @@ export const getCommentDraftState = (
   scope = getCurrentConnectionScope(),
 ): CommentDraftState | undefined => drafts.get(draftKey(scope, ticketId));
 
+export const isPendingCommentDraft = (draft: CommentDraftState | undefined): boolean =>
+  draft !== undefined && draft.status !== "Synced" && (draft.body.trim().length > 0 || draft.status === "Syncing");
+
+export const getPendingCommentDraftTicketIds = (scope: string): number[] => {
+  const prefix = `${scope}\u0000`;
+  return Array.from(drafts)
+    .filter(([key, draft]) => key.startsWith(prefix) && isPendingCommentDraft(draft))
+    .map(([key]) => Number(key.slice(prefix.length)));
+};
+
 export const getCommentDraft = (
   ticketId: number,
   scope = getCurrentConnectionScope(),

@@ -2,15 +2,29 @@ import * as assert from "assert";
 import * as vscode from "vscode";
 import {
   buildRegisterEditorDocument,
+  clearCommentEditingFromDocument,
+  updateCommentEditingStatusFromDocument,
   updateTicketDraftStatusFromDocument,
 } from "../app/editorEventController";
 import {
   clearRegistry,
+  getCommentIdForDocument,
+  getEditorContentTypeForDocument,
   getProjectIdForDocument,
   getTicketIdForDocument,
   NEW_TICKET_DRAFT_ID,
+  registerCommentDocument,
   registerTicketDocument,
 } from "../views/ticketEditorRegistry";
+import { clearCommentEdits, isCommentEditing } from "../views/commentEditStore";
+import { buildCommentUpdateFileContent } from "../views/commentUpdateFile";
+import { computeNotesHash } from "../utils/notesHash";
+import {
+  addOfflineCommentUpdateAsync,
+  clearOfflineSyncQueueAsync,
+  initializeOfflineSyncStore,
+} from "../views/offlineSyncStore";
+import { createTestMemento } from "./helpers/vscodeMemento";
 import { createDocumentStub, createMutableDocumentStub } from "./helpers/editorStubs";
 import { buildTicketEditorContent, parseTicketEditorContent } from "../views/ticketEditorContent";
 import { buildIssueMetadataFixture } from "./helpers/ticketMetadataFixtures";
@@ -56,10 +70,12 @@ const createRegisteredTicketDocument = (ticketId: number, scope: string) => {
 };
 
 suite("editorEventController registerEditorDocument", () => {
-  teardown(() => {
+  teardown(async () => {
     clearRegistry();
     clearTicketDrafts();
+    clearCommentEdits();
     initializeDraftStore(createInMemoryDraftStorage());
+    await clearOfflineSyncQueueAsync();
   });
 
   test("新規チケット名でも ticket-update の issue_id を優先して既存チケット登録する", () => {
@@ -260,5 +276,109 @@ suite("editorEventController registerEditorDocument", () => {
     } finally {
       releaseSaveSync(uri.toString());
     }
+  });
+
+  test("comment-update ファイルと untitled ファイルの登録と編集中状態の遷移を検知する", async () => {
+    initializeOfflineSyncStore(createTestMemento());
+    await clearOfflineSyncQueueAsync();
+
+    const registerEditorDocument = buildRegisterEditorDocument();
+    const untitledDoc = createDocumentStub(
+      vscode.Uri.parse("untitled:redmine-client-0123456789abcdef-redmine-client-comment-update-42-99.md"),
+      "",
+    );
+    registerEditorDocument(untitledDoc);
+    assert.strictEqual(getTicketIdForDocument(untitledDoc), 42);
+    assert.strictEqual(getCommentIdForDocument(untitledDoc), 99);
+    assert.strictEqual(getEditorContentTypeForDocument(untitledDoc), "comment");
+
+    const baseBody = "Original comment";
+    const initialContent = buildCommentUpdateFileContent(
+      {
+        issueId: 10,
+        journalId: 20,
+        projectId: 3,
+        sourceNotesHash: computeNotesHash(baseBody),
+      },
+      baseBody,
+    );
+    const commentDoc = createMutableDocumentStub(
+      vscode.Uri.file("/tmp/redmine-client-comment-update-10-20.md"),
+      initialContent,
+    );
+    registerEditorDocument(commentDoc);
+    assert.strictEqual(getTicketIdForDocument(commentDoc), 10);
+    assert.strictEqual(getCommentIdForDocument(commentDoc), 20);
+    assert.strictEqual(getEditorContentTypeForDocument(commentDoc), "comment");
+    assert.strictEqual(updateCommentEditingStatusFromDocument(commentDoc), false);
+    assert.strictEqual(isCommentEditing(10, 20), false);
+
+    commentDoc.setText(
+      buildCommentUpdateFileContent(
+        {
+          issueId: 10,
+          journalId: 20,
+          projectId: 3,
+          sourceNotesHash: computeNotesHash(baseBody),
+        },
+        "Edited comment",
+      ),
+    );
+    assert.strictEqual(updateCommentEditingStatusFromDocument(commentDoc), true);
+    assert.strictEqual(isCommentEditing(10, 20), true);
+
+    await addOfflineCommentUpdateAsync({
+      ticketId: 10,
+      commentId: 20,
+      body: "Edited comment",
+      documentUri: commentDoc.uri.toString(),
+      sourceNotesHash: computeNotesHash(baseBody),
+    });
+    assert.strictEqual(isCommentEditing(10, 20, undefined, "Edited comment"), false);
+
+    commentDoc.setText(
+      buildCommentUpdateFileContent(
+        {
+          issueId: 10,
+          journalId: 20,
+          projectId: 3,
+          sourceNotesHash: computeNotesHash(baseBody),
+        },
+        "Edited comment 2",
+      ),
+    );
+    assert.strictEqual(updateCommentEditingStatusFromDocument(commentDoc), true);
+    assert.strictEqual(isCommentEditing(10, 20, undefined, "Edited comment"), true);
+
+    assert.strictEqual(clearCommentEditingFromDocument(commentDoc), true);
+    assert.strictEqual(isCommentEditing(10, 20), false);
+  });
+
+  test("Dirty 中に start_date や description のみを変更した場合も true を返す", () => {
+    const ticketId = 135;
+    const scope = "test:dirty-start-date-description";
+    const { document, metadata } = createRegisteredTicketDocument(ticketId, scope);
+
+    document.setText(buildTicketEditorContent({
+      subject: "Changed",
+      description: "Body",
+      metadata,
+    }));
+    assert.strictEqual(updateTicketDraftStatusFromDocument(document), true);
+    assert.strictEqual(getTicketDraft(ticketId, scope)?.status, "Dirty");
+
+    document.setText(buildTicketEditorContent({
+      subject: "Changed",
+      description: "Body",
+      metadata: { ...metadata, start_date: "2026-11-25" },
+    }));
+    assert.strictEqual(updateTicketDraftStatusFromDocument(document), true);
+
+    document.setText(buildTicketEditorContent({
+      subject: "Changed",
+      description: "Updated Body",
+      metadata: { ...metadata, start_date: "2026-11-25" },
+    }));
+    assert.strictEqual(updateTicketDraftStatusFromDocument(document), true);
   });
 });

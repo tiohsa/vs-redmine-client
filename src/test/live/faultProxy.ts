@@ -27,7 +27,8 @@ export interface FaultProxy {
 /** 実通信を転送し、応答だけの喪失と送信前の拒否を区別する。秘密情報は記録しない。 */
 export const createFaultProxy = async (upstream: string, port = 0): Promise<FaultProxy> => {
   const target = new URL(upstream);
-  if (target.origin !== "http://127.0.0.1:3000") { throw new Error("実Redmine proxyの転送先が許可範囲外です。"); }
+  const isLoopback = target.hostname === "127.0.0.1" || target.hostname === "localhost" || target.hostname === "::1" || target.hostname === "[::1]";
+  if (target.protocol !== "http:" || !isLoopback) { throw new Error("実Redmine proxyの転送先が許可範囲外です。"); }
   let rules: ProxyRule[] = [];
   let traces: ProxyTrace[] = [];
   const server = http.createServer((request, response) => {

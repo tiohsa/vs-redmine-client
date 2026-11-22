@@ -1,8 +1,17 @@
 import * as vscode from "vscode";
+import { getConnectionScope } from "../config/connectionScope";
+import { openBrowserIssue } from "../layers/extension-host/features/open-in-browser";
+import { runWithConnectionScope } from "../redmine/client";
+import { listComments } from "../redmine/comments";
 import { getBaseUrl } from "../config/settings";
 import { Project, Ticket, Comment } from "../redmine/types";
 import { buildCommentUrl, buildProjectUrl, buildTicketUrl } from "../utils/redmineUrls";
 import { showError } from "../utils/notifications";
+
+type IssueBrowserOptions = {
+  scope?: string;
+  comments?: { ticketId?: number; items: readonly { id?: number; noteIndex?: number }[] };
+};
 
 type BrowserDeps = {
   baseUrl?: string;
@@ -50,14 +59,14 @@ export const openProjectInBrowser = async (
   }
 };
 
-export const openTicketInBrowser = async (
-  item?: { ticket: Ticket },
+export const openTicketInBrowser = async <T extends Pick<Ticket, "id">>(
+  item?: { ticket: T },
   deps?: BrowserDeps,
 ): Promise<void> => {
   const onError = resolveErrors(deps);
   const ticketId = item?.ticket.id;
   if (!ticketId) {
-    onError("Ticket ID is missing.");
+    onError(vscode.l10n.t("Ticket ID is missing."));
     return;
   }
 
@@ -66,18 +75,18 @@ export const openTicketInBrowser = async (
     ticketId,
   );
   if (!url) {
-    onError(errorMessage ?? "Failed to build ticket URL.");
+    onError(vscode.l10n.t("Could not build the Redmine URL: {0}", errorMessage ?? ""));
     return;
   }
 
   const opened = await openExternalUrl(url, deps?.openExternal);
   if (!opened) {
-    onError("Failed to open browser.");
+    onError(vscode.l10n.t("Failed to open browser."));
   }
 };
 
-export const openCommentInBrowser = async (
-  item?: { comment: Comment },
+export const openCommentInBrowser = async <T extends Pick<Comment, "id" | "ticketId" | "noteIndex">>(
+  item?: { comment: T },
   deps?: BrowserDeps,
 ): Promise<void> => {
   const onError = resolveErrors(deps);
@@ -85,27 +94,75 @@ export const openCommentInBrowser = async (
   const commentId = item?.comment.id;
   const noteIndex = item?.comment.noteIndex;
   if (!ticketId) {
-    onError("Ticket ID is missing.");
+    onError(vscode.l10n.t("Ticket ID is missing."));
     return;
   }
   if (!commentId) {
-    onError("Comment ID is missing.");
+    onError(vscode.l10n.t("Comment ID is missing."));
     return;
   }
 
   const { url, errorMessage } = buildCommentUrl(
     deps?.baseUrl ?? getBaseUrl(),
     ticketId,
-    commentId,
     noteIndex,
   );
   if (!url) {
-    onError(errorMessage ?? "Failed to build comment URL.");
+    onError(vscode.l10n.t("Could not build the Redmine URL: {0}", errorMessage ?? ""));
     return;
   }
 
   const opened = await openExternalUrl(url, deps?.openExternal);
   if (!opened) {
-    onError("Failed to open browser.");
+    onError(vscode.l10n.t("Failed to open browser."));
   }
 };
+
+export async function openIssueInBrowser(
+  target: { ticketId: number; commentId?: number },
+  options: IssueBrowserOptions = {},
+): Promise<void> {
+  const currentScope = () => getConnectionScope(getBaseUrl());
+  const scope = options.scope ?? currentScope();
+  if (target.commentId !== undefined && scope === currentScope()) {
+    const { errorMessage } = buildTicketUrl(scope, target.ticketId);
+    if (errorMessage) {
+      showError(vscode.l10n.t("Could not build the Redmine URL: {0}", errorMessage));
+      return;
+    }
+  }
+  let changed = false;
+  const configurationListener = vscode.workspace.onDidChangeConfiguration((event) => {
+    if (event.affectsConfiguration("redmine-client.baseUrl") && currentScope() !== scope) {
+      changed = true;
+    }
+  });
+  try {
+    const browserDeps: BrowserDeps = { baseUrl: scope };
+    await openBrowserIssue(target, {
+      isCurrentConnection: () => !changed && currentScope() === scope,
+      onError: showError,
+      findNoteIndex: async (ticketId, commentId) => {
+        const comments = options.comments;
+        const noteIndex = comments?.ticketId === ticketId
+          ? comments.items.find((item) => item.id === commentId)?.noteIndex
+          : undefined;
+        if (noteIndex !== undefined && Number.isSafeInteger(noteIndex) && noteIndex > 0) {
+          return noteIndex;
+        }
+        try {
+          const remoteComments = await runWithConnectionScope(scope, () => listComments(ticketId));
+          return remoteComments.find((item) => item.ticketId === ticketId && item.id === commentId)?.noteIndex;
+        } catch {
+          return undefined;
+        }
+      },
+      openTicket: (ticketId) => openTicketInBrowser({ ticket: { id: ticketId } }, browserDeps),
+      openComment: (ticketId, commentId, noteIndex) => openCommentInBrowser({
+        comment: { id: commentId, ticketId, noteIndex },
+      }, browserDeps),
+    });
+  } finally {
+    configurationListener.dispose();
+  }
+}

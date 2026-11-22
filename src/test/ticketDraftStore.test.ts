@@ -5,7 +5,9 @@ import {
   initializeTicketDraft,
   initializeDraftStore,
   markDraftStatus,
+  onTicketDraftSaved,
   setTicketDraftContent,
+  type TicketDraftSavedEvent,
   updateDraftAfterSave,
 } from "../views/ticketDraftStore";
 import { createInMemoryDraftStorage } from "../views/draftPersistence";
@@ -92,5 +94,31 @@ suite("Ticket draft store", () => {
       metadata: buildIssueMetadataFixture({ children: ["Child"] }),
     });
     assert.deepStrictEqual(getTicketDraft(11)?.draftMetadata?.children, ["Child"]);
+  });
+
+  test("updateDraftAfterSave は onTicketDraftSaved リスナーへ保存イベントを通知する", () => {
+    const events: TicketDraftSavedEvent[] = [];
+    const dispose = onTicketDraftSaved((event) => {
+      events.push(event);
+    });
+    try {
+      const metadata = buildIssueMetadataFixture({ status: "Closed", priority: "High" });
+      updateDraftAfterSave(
+        20,
+        "Synced Subject",
+        "Synced Body",
+        metadata,
+        "2026-11-22T00:00:00Z",
+        "https://example.test",
+      );
+      assert.strictEqual(events.length, 1);
+      assert.strictEqual(events[0].ticketId, 20);
+      assert.strictEqual(events[0].connectionScope, "https://example.test");
+      assert.strictEqual(events[0].draft.baseSubject, "Synced Subject");
+      assert.strictEqual(events[0].draft.baseMetadata.status, "Closed");
+    } finally {
+      dispose();
+      clearTicketDrafts("https://example.test");
+    }
   });
 });

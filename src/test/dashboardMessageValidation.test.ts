@@ -97,6 +97,33 @@ suite("Dashboard メッセージバリデーション", () => {
     assert.strictEqual(r.ok, true);
   });
 
+  test("削除メッセージは描画時の接続世代と正の安全な整数 ID を要求する", () => {
+    const ticket = { type: "deleteTicket", requestId: "ticket", ticketId: 42, connectionGeneration: 0 };
+    const comment = { type: "deleteComment", requestId: "comment", ticketId: 42, commentId: 91, connectionGeneration: 5 };
+    assert.deepStrictEqual(validateDashboardMessage(ticket), { ok: true, request: ticket });
+    assert.deepStrictEqual(validateDashboardMessage(comment), { ok: true, request: comment });
+    for (const invalid of [0, -1, 1.5, "42", Number.MAX_SAFE_INTEGER + 1]) {
+      assert.strictEqual(validateDashboardMessage({ ...ticket, ticketId: invalid }).ok, false);
+      assert.strictEqual(validateDashboardMessage({ ...comment, commentId: invalid }).ok, false);
+    }
+    for (const connectionGeneration of [undefined, -1, 0.5, Number.MAX_SAFE_INTEGER + 1]) {
+      assert.strictEqual(validateDashboardMessage({ ...ticket, connectionGeneration }).ok, false);
+      assert.strictEqual(validateDashboardMessage({ ...comment, connectionGeneration }).ok, false);
+    }
+  });
+
+  test("保留項目を開く要求は項目 ID だけをホストへ渡す", () => {
+    const request = { type: "unsynced.openPendingChange", requestId: "pending", itemId: "a".repeat(64) };
+    assert.deepStrictEqual(validateDashboardMessage({ ...request, documentUri: "file:///untrusted.md" }), { ok: true, request });
+    assert.strictEqual(validateDashboardMessage({ ...request, itemId: "file:///untrusted.md" }).ok, false);
+  });
+
+  test("下書き破棄は項目 ID を要求し、エディターのパスや別の接続先を受け取らない", () => {
+    const request = { type: "unsynced.discardPendingChange", requestId: "pending", itemId: "b".repeat(64) };
+    assert.deepStrictEqual(validateDashboardMessage({ ...request, connectionScope: "https://another.invalid/", documentUri: "file:///other.md" }), { ok: true, request });
+    assert.strictEqual(validateDashboardMessage({ ...request, itemId: "file:///untrusted.md" }).ok, false);
+  });
+
   test("ticket.createChild: parentTicketId が数値でないと拒否される", () => {
     const r = validateDashboardMessage({ type: "ticket.createChild", requestId: "r", parentTicketId: "bad" });
     assert.strictEqual(r.ok, false);
@@ -120,6 +147,39 @@ suite("Dashboard メッセージバリデーション", () => {
   test("comment.edit: 正常", () => {
     const r = validateDashboardMessage({ type: "comment.edit", requestId: "r", ticketId: 1, commentId: 99 });
     assert.strictEqual(r.ok, true);
+  });
+
+  test("comment.syncSelected: ticketId が正の整数でないと拒否される", () => {
+    assert.strictEqual(validateDashboardMessage({ type: "comment.syncSelected", requestId: "r", ticketId: 0, commentId: 1 }).ok, false);
+    assert.strictEqual(validateDashboardMessage({ type: "comment.syncSelected", requestId: "r", ticketId: "1", commentId: 1 }).ok, false);
+  });
+
+  test("comment.syncSelected: commentId と documentUri が両方ないと拒否される", () => {
+    const r = validateDashboardMessage({ type: "comment.syncSelected", requestId: "r", ticketId: 10 });
+    assert.strictEqual(r.ok, false);
+  });
+
+  test("comment.syncSelected: 不正な commentId や空の documentUri は拒否される", () => {
+    assert.strictEqual(validateDashboardMessage({ type: "comment.syncSelected", requestId: "r", ticketId: 10, commentId: 0 }).ok, false);
+    assert.strictEqual(validateDashboardMessage({ type: "comment.syncSelected", requestId: "r", ticketId: 10, documentUri: "" }).ok, false);
+  });
+
+  test("comment.syncSelected: commentId 指定 / documentUri 指定の正常系", () => {
+    const byId = validateDashboardMessage({ type: "comment.syncSelected", requestId: "r1", ticketId: 10, commentId: 55 });
+    assert.strictEqual(byId.ok, true);
+    if (byId.ok && byId.request.type === "comment.syncSelected") {
+      assert.strictEqual(byId.request.ticketId, 10);
+      assert.strictEqual(byId.request.commentId, 55);
+      assert.strictEqual(byId.request.documentUri, undefined);
+    }
+
+    const byUri = validateDashboardMessage({ type: "comment.syncSelected", requestId: "r2", ticketId: 10, documentUri: "file:///tmp/draft.md" });
+    assert.strictEqual(byUri.ok, true);
+    if (byUri.ok && byUri.request.type === "comment.syncSelected") {
+      assert.strictEqual(byUri.request.ticketId, 10);
+      assert.strictEqual(byUri.request.commentId, undefined);
+      assert.strictEqual(byUri.request.documentUri, "file:///tmp/draft.md");
+    }
   });
 
   test("unsynced.syncOne: key が無効だと拒否される", () => {
@@ -217,6 +277,19 @@ suite("Dashboard メッセージバリデーション", () => {
       patch: { filters: { priorityIds: [1, 2], statusIds: [3], trackerIds: [4], assigneeIds: [5] } },
     });
     assert.strictEqual(r.ok, true);
+  });
+
+  test("settings.update: syncFilter は許可値のみ受け入れ、不正値は拒否する", () => {
+    for (const syncFilter of ["all", "dirty", "editing", "unsynced"]) {
+      assert.strictEqual(
+        validateDashboardMessage({ type: "settings.update", requestId: "r", patch: { filters: { syncFilter } } }).ok,
+        true,
+      );
+    }
+    assert.strictEqual(
+      validateDashboardMessage({ type: "settings.update", requestId: "r", patch: { filters: { syncFilter: "invalid" } } }).ok,
+      false,
+    );
   });
 
   test("settings.update: 正常", () => {

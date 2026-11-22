@@ -35,9 +35,20 @@ const normalizedLiveUrl = (() => {
     return undefined;
   }
 })();
-const liveSuite = normalizedLiveUrl === "http://127.0.0.1:3000/" && apiKey ? suite : suite.skip;
+const isLoopbackLiveUrl = (value: string | undefined): boolean => {
+  if (!value) { return false; }
+  try {
+    const url = new URL(value);
+    return url.protocol === "http:" && (url.hostname === "127.0.0.1" || url.hostname === "localhost" || url.hostname === "::1" || url.hostname === "[::1]");
+  } catch {
+    return false;
+  }
+};
+if (!isLoopbackLiveUrl(normalizedLiveUrl) || !apiKey) {
+  throw new Error("実Redmine検証にはループバックのHTTP URLとAPIキーが必要です。");
+}
 
-liveSuite("実Redmine同期リカバリー", function () {
+suite("実Redmine同期リカバリー", function () {
   this.timeout(120_000);
 
   test("画像付きコメントの復旧と競合解決失敗時の本文保持を検証する", async () => {
@@ -71,8 +82,12 @@ liveSuite("実Redmine同期リカバリー", function () {
         assert.strictEqual(currentUser.user.login, "admin", "このテストにはadminアカウントが必要です");
         assert.strictEqual(currentUserId, currentUser.user.id);
 
+        const { project } = await requestJson<{ project: { id: number } }>({
+          method: "GET",
+          path: "/projects/e2e-seed.json",
+        });
         const createdIssueId = await createIssue({
-          projectId: 35,
+          projectId: project.id,
           subject,
           description: `Temporary live sync recovery fixture ${testId}`,
         });

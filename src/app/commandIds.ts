@@ -1,13 +1,5 @@
 export const TICKET_SETTINGS_COMMANDS = {
-  titleFilter: "redmine-client.configureTicketTitleFilter",
-  priorityFilter: "redmine-client.configureTicketPriorityFilter",
-  statusFilter: "redmine-client.configureTicketStatusFilter",
-  trackerFilter: "redmine-client.configureTicketTrackerFilter",
-  assigneeFilter: "redmine-client.configureTicketAssigneeFilter",
-  sort: "redmine-client.configureTicketSort",
-  dueDate: "redmine-client.configureTicketDueDateDisplay",
   offlineSyncMode: "redmine-client.configureOfflineSyncMode",
-  reset: "redmine-client.resetTicketListSettings",
 } as const;
 
 export const EDITOR_DEFAULT_COMMANDS = {
@@ -26,3 +18,7 @@ export const CREATE_TICKET_FROM_MARKDOWN_HEADER_COMMAND =
 export const INSERT_REDMINE_TICKET_FRONTMATTER_COMMAND =
   "redmine-client.insertRedmineTicketFrontmatter";
 
+
+export const OPEN_IN_BROWSER_COMMAND = "redmine-client.openInBrowser";
+export const OPEN_TICKET_IN_BROWSER_COMMAND = "redmine-client.openTicketInBrowser";
+export const OPEN_COMMENT_IN_BROWSER_COMMAND = "redmine-client.openCommentInBrowser";

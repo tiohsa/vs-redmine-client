@@ -363,6 +363,16 @@ suite("Dashboard バリデーション拡張", () => {
     }
   });
 
+  test("settings.updateGeneral: アクティブエディタ連動は boolean のみ受け入れる", () => {
+    for (const value of [true, false, "true", 1, null, [], {}]) {
+      const result = validateDashboardMessage({
+        type: "settings.updateGeneral", requestId: "follow",
+        patch: { followActiveEditor: value },
+      });
+      assert.strictEqual(result.ok, typeof value === "boolean");
+    }
+  });
+
   test("settings.updateGeneral: 複数フィールドの正常ケース", () => {
     const r = validateDashboardMessage({
       type: "settings.updateGeneral", requestId: "r",

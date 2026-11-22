@@ -58,7 +58,9 @@ The Tickets tab shows the ticket list for the selected project.
 
 **Work Panel** shows ticket metadata (ID, subject, project, tracker, status, priority, dates, parent) and provides **Overview / Comments** tabs, inline metadata editing, and ticket actions. Comments open in the VS Code Markdown editor for editing.
 
-Quick filters (My Issues, Open, Overdue, Unsynced) filter tickets already loaded into the Dashboard. The displayed count distinguishes shown, loaded, and total tickets. **Filters…** edits persistent ticket filters. The sync attention tray at the bottom links to the existing Unsynced and conflict flows.
+Hover over a ticket or comment already saved in Redmine, or focus its row with the keyboard, to reveal **Delete**. Review the target in the confirmation dialog, then choose **Delete**. Resolve any unsynced changes to the target before deleting it.
+
+Quick filters in **Tickets** (My Issues, Open, Overdue, High Priority, and Editing) filter loaded tickets and new drafts. The counts distinguish shown, loaded, and total tickets. Use **Filters…** to edit persistent ticket filters. The **Unsynced** tab shows all unsynced changes and provides actions to sync them or resolve conflicts.
 
 ### Dashboard Maintenance
 
@@ -80,6 +82,7 @@ Supported actions per item:
 | Open file | Open the local Markdown draft |
 | Sync one | Upload this item to Redmine |
 | Discard | Remove from the unsynced queue |
+| Discard draft | Confirm and discard a read-only local draft |
 
 A **Sync all** button uploads all queued items at once.
 
@@ -168,16 +171,15 @@ After Redmine accepts a ticket, child-ticket, or comment mutation, the item rema
 | `Redmine: Search Tickets` | Search tickets by keyword |
 | `Redmine: Focus Active Ticket` | Reveal the active ticket editor's ticket in the Dashboard |
 | `Redmine: Focus Open Ticket Editor` | Focus the open editor for the selected ticket |
-| `Redmine: Open Ticket in Browser` | Open the selected ticket in a browser |
+| `Redmine: Open in Browser` | Open the active Redmine editor’s ticket or comment, or use the Dashboard selection when no Redmine editor is active |
 
 ### Comment Commands
 
 | Command | Description |
 |---------|-------------|
-| `Redmine: Add Comment` | Add a new comment to the selected ticket |
+| `Redmine: Add Comment` (`redmine-client.addCommentFromComments`) | Add a new comment to the selected ticket |
 | `Redmine: Edit Comment` | Open the selected comment in an editor |
 | `Redmine: Reload Comment` | Reload the active comment editor from Redmine |
-| `Redmine: Open Comment in Browser` | Open the selected comment in a browser |
 
 ### Editor Default Commands
 

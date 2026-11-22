@@ -1351,7 +1351,7 @@ suite("T-R10 〜 T-R15 & T-F05 〜 T-F11: Lifecycle, Recovery, and Freshness Con
     });
 
     const docUri = "file:///dummy/ticket-560.md";
-    let appliedContent = "";
+    let appliedContent = rawContentWithChildren;
     const mockDoc: any = {
       uri: vscode.Uri.parse(docUri),
       version: 1,
@@ -1376,6 +1376,7 @@ suite("T-R10 〜 T-R15 & T-F05 〜 T-F11: Lifecycle, Recovery, and Freshness Con
       operationScope: SCOPE,
     });
 
+    assert.notStrictEqual(appliedContent, rawContentWithChildren);
     let updated = false;
     const engine = createSyncEngine({
       tickets: {

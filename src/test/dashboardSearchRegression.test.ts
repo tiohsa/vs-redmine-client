@@ -24,8 +24,8 @@ const fixture = (listIssues: (input: IssuesListInput) => Promise<IssuesListResul
     _maintenanceTestHooks: { confirmDashboardCacheReset: async () => true },
   });
   controller["projectService"].getResolvedProject = () => ({ id: 1, name: "Project" });
-  controller["loadProjects"] = async () => undefined;
-  controller["loadMetadataOptions"] = async () => undefined;
+  controller["projectService"].loadProjects = async () => undefined;
+  controller["dataService"].loadMetadataOptions = async () => undefined;
   controller["refreshUnsynced"] = () => undefined;
   const service = controller["ticketService"];
   service["deps"].listIssues = listIssues;
@@ -112,7 +112,7 @@ suite("Dashboard 検索の状態保持", () => {
           await service.searchTickets(query);
           await service.loadMoreTickets();
           const before = structuredClone(store.getState());
-          if (fails) { controller["loadMetadataOptions"] = async () => { throw new Error("metadata offline"); }; }
+          if (fails) { controller["dataService"].loadMetadataOptions = async () => { throw new Error("metadata offline"); }; }
           inputs.length = 0;
           await controller.handle({ type: "dashboard.resetCache", requestId: "reset" });
           assert.deepStrictEqual(store.getState().ticketSearch, before.ticketSearch);
@@ -140,7 +140,7 @@ suite("Dashboard 検索の状態保持", () => {
     const { controller, service, store } = fixture(async input => page([input.subjectQuery === "new" ? 2 : 1]));
     try {
       await service.searchTickets("old");
-      controller["loadProjects"] = () => { started.resolve(); return projects.promise; };
+      controller["projectService"].loadProjects = () => { started.resolve(); return projects.promise; };
       const reset = controller.handle({ type: "dashboard.resetCache", requestId: "reset" });
       await started.promise;
       await service.searchTickets("new");
@@ -163,7 +163,7 @@ suite("Dashboard 検索の状態保持", () => {
     try {
       await service.loadTickets();
       const oldLoad = service.loadMoreTickets();
-      controller["loadMetadataOptions"] = async () => { throw new Error("metadata offline"); };
+      controller["dataService"].loadMetadataOptions = async () => { throw new Error("metadata offline"); };
       await controller.handle({ type: "dashboard.resetCache", requestId: "reset" });
       assert.strictEqual(store.getState().loading.moreTickets, false);
       const newLoad = service.loadMoreTickets();

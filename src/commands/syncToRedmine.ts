@@ -43,7 +43,7 @@ export type SyncTrigger = "save" | "explicit";
 export interface SyncToRedmineOptions {
   trigger?: SyncTrigger;
   onSubjectUpdated?: (ticketId: number, subject: string) => void;
-  onTicketCreated?: () => void;
+  onTicketCreated?: (ticketId?: number) => void;
   onCommentsRefresh?: (ticketId: number) => void;
   deps?: Partial<TicketSaveDependencies & CommentSaveDependencies>;
   rewrite?: RewriteDocumentDeps;
@@ -137,7 +137,7 @@ const syncEditorToRedmineAtScope = async (
         }).syncEditor(input);
     const result = ticketSyncOutcomeToSaveResult(outcome, true);
     if (outcome.kind === "completed") {
-      options.onTicketCreated?.();
+      options.onTicketCreated?.(outcome.ticketId);
     }
     return { kind: "ticket", result };
   }

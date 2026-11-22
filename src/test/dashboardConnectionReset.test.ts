@@ -31,18 +31,11 @@ suite("Dashboard connection reset", () => {
       notifyToast: () => undefined,
       onTicketsRefreshed: () => undefined,
     });
-    const target = controller as unknown as {
-      ticketService: { invalidate(): void };
-      commentService: { invalidate(): void };
-      metadataService: { invalidate(): void };
-      projectService: { resetForConnectionChange(): Promise<void> };
-      initialize(): Promise<void>;
-    };
-    target.ticketService = { invalidate: () => undefined };
-    target.commentService = { invalidate: () => undefined };
-    target.metadataService = { invalidate: () => undefined };
-    target.projectService = { resetForConnectionChange: async () => undefined };
-    target.initialize = async () => undefined;
+    controller["ticketService"].invalidate = () => undefined;
+    controller["commentService"].invalidate = () => undefined;
+    controller["metadataService"].invalidate = () => undefined;
+    controller["projectService"].resetForConnectionChange = async () => undefined;
+    controller.initialize = async () => undefined;
 
     await controller.resetForConnectionChange();
 
@@ -74,20 +67,11 @@ suite("Dashboard connection reset", () => {
       notifyToast: () => undefined,
       onTicketsRefreshed: () => undefined,
     });
-    const target = controller as unknown as {
-      ticketService: { invalidate(): void };
-      commentService: { invalidate(): void };
-      metadataService: { invalidate(): void };
-      projectService: { resetForConnectionChange(): Promise<void> };
-      initialize(): Promise<void>;
-    };
-    target.ticketService = { invalidate: () => undefined };
-    target.commentService = { invalidate: () => undefined };
-    target.metadataService = { invalidate: () => undefined };
-    target.projectService = {
-      resetForConnectionChange: () => (++resetCount === 1 ? first.promise : second.promise),
-    };
-    target.initialize = async () => { initializeCount++; };
+    controller["ticketService"].invalidate = () => undefined;
+    controller["commentService"].invalidate = () => undefined;
+    controller["metadataService"].invalidate = () => undefined;
+    controller["projectService"].resetForConnectionChange = () => (++resetCount === 1 ? first.promise : second.promise);
+    controller.initialize = async () => { initializeCount++; };
 
     const oldChange = controller.resetForConnectionChange();
     const latestChange = controller.resetForConnectionChange();
@@ -96,6 +80,7 @@ suite("Dashboard connection reset", () => {
     first.resolve();
     await oldChange;
 
+    assert.strictEqual(resetCount, 2);
     assert.strictEqual(initializeCount, 1);
     controller.dispose();
   });

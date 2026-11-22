@@ -1,6 +1,7 @@
 /** Dashboard の同じ操作には、静的 HTML と動的描画で共通のアイコンを使う。 */
 export const dashboardActionPaths = {
   browser: "M14 3h7v7M21 3 10 14M10 3H3v18h18v-7",
+  delete: "M4 6h16M9 6V4h6v2m-9 0 1 14h10l1-14M10 10v7m4-7v7",
   cancel: "M6 6l12 12M18 6 6 18",
   open: "M3 7V5h6l2 3h10v12H3V7Z",
   comment: "M4 4h16v13H9l-5 4V4Z",
