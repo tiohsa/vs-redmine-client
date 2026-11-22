@@ -46,28 +46,25 @@ export const buildTicketUrl = (rawBaseUrl: string, ticketId?: number): UrlResult
   }
 
   const url = new URL(`issues/${ticketId}`, base.url);
+  url.username = "";
+  url.password = "";
   return { url: url.toString() };
 };
 
 export const buildCommentUrl = (
   rawBaseUrl: string,
   ticketId?: number,
-  commentId?: number,
   noteIndex?: number,
 ): UrlResult => {
-  const base = resolveBaseUrl(rawBaseUrl);
-  if (!base.url) {
-    return base;
+  const ticket = buildTicketUrl(rawBaseUrl, ticketId);
+  if (!ticket.url) {
+    return ticket;
   }
-  if (!ticketId) {
-    return { errorMessage: "Ticket ID is missing." };
-  }
-  const anchorId = noteIndex ?? commentId;
-  if (!anchorId) {
-    return { errorMessage: "Comment ID is missing." };
+  if (noteIndex === undefined || !Number.isSafeInteger(noteIndex) || noteIndex <= 0) {
+    return { errorMessage: "Comment position is missing." };
   }
 
-  const url = new URL(`issues/${ticketId}`, base.url);
-  url.hash = `note-${anchorId}`;
+  const url = new URL(ticket.url);
+  url.hash = `note-${noteIndex}`;
   return { url: url.toString() };
 };

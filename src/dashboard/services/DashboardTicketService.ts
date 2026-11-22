@@ -8,7 +8,7 @@ import type { Ticket } from "../../redmine/types";
 import { applyTicketFilters, applyTicketSort, type TicketListSettings } from "../../views/projectListSettings";
 import { buildTicketDashboardNodes, buildTicketDetail } from "../viewModels/ticketDashboardViewModel";
 import { showTicketPreview } from "../../views/ticketPreview";
-import { openTicketInBrowser } from "../../commands/openInBrowser";
+import { openIssueInBrowser } from "../../commands/openInBrowser";
 import type { ResolvedProject } from "../resolveProject";
 
 type SearchPage = { offset: number; total?: number };
@@ -362,11 +362,11 @@ export class DashboardTicketService {
   }
 
   async openInBrowser(ticketId: number): Promise<void> {
-    const ticket = this.deps.getTickets().find((t) => t.id === ticketId);
-    if (!ticket) {
+    if (!this.deps.getTickets().some((ticket) => ticket.id === ticketId)) {
+      void vscode.window.showErrorMessage(vscode.l10n.t("The selected ticket is no longer available."));
       return;
     }
-    await openTicketInBrowser({ ticket });
+    await openIssueInBrowser({ ticketId });
   }
 
   pushTickets(): void {

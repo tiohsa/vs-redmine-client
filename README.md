@@ -168,7 +168,7 @@ After Redmine accepts a ticket, child-ticket, or comment mutation, the item rema
 | `Redmine: Search Tickets` | Search tickets by keyword |
 | `Redmine: Focus Active Ticket` | Reveal the active ticket editor's ticket in the Dashboard |
 | `Redmine: Focus Open Ticket Editor` | Focus the open editor for the selected ticket |
-| `Redmine: Open Ticket in Browser` | Open the selected ticket in a browser |
+| `Redmine: Open in Browser` | Open the active Redmine editor’s ticket or comment, or use the Dashboard selection when no Redmine editor is active |
 
 ### Comment Commands
 
@@ -177,7 +177,6 @@ After Redmine accepts a ticket, child-ticket, or comment mutation, the item rema
 | `Redmine: Add Comment` | Add a new comment to the selected ticket |
 | `Redmine: Edit Comment` | Open the selected comment in an editor |
 | `Redmine: Reload Comment` | Reload the active comment editor from Redmine |
-| `Redmine: Open Comment in Browser` | Open the selected comment in a browser |
 
 ### Editor Default Commands
 

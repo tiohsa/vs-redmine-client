@@ -31,6 +31,7 @@
   "command.toggleCompactMode.title": "Redmine: Toggle Compact Mode",
   "command.createChildTicketFromList.title": "Redmine: Add Child Ticket",
   "command.openProjectInBrowser.title": "Redmine: Open Project in Browser",
+  "command.openInBrowser.title": "Redmine: Open in Browser",
   "command.openTicketInBrowser.title": "Redmine: Open Ticket in Browser",
   "command.openCommentInBrowser.title": "Redmine: Open Comment in Browser",
   "command.editComment.title": "Redmine: Edit Comment",

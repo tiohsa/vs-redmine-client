@@ -31,6 +31,7 @@
   "command.toggleCompactMode.title": "Redmine: 表示密度を切替",
   "command.createChildTicketFromList.title": "Redmine: 子チケットを追加",
   "command.openProjectInBrowser.title": "Redmine: プロジェクトをブラウザで開く",
+  "command.openInBrowser.title": "Redmine: ブラウザで開く",
   "command.openTicketInBrowser.title": "Redmine: チケットをブラウザで開く",
   "command.openCommentInBrowser.title": "Redmine: コメントをブラウザで開く",
   "command.editComment.title": "Redmine: コメントを編集",

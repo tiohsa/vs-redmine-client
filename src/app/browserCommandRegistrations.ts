@@ -1,30 +1,25 @@
-import * as path from "path";
 import * as vscode from "vscode";
-import { openCommentInBrowser, openProjectInBrowser, openTicketInBrowser } from "../commands/openInBrowser";
-import {
-  getTicketIdForEditor,
-  getTicketIdForUri,
-  isTicketEditor,
-  NEW_TICKET_DRAFT_ID,
-} from "../views/ticketEditorRegistry";
-import {
-  isNewTicketDraftFilename,
-  parseDirectTicketFilename,
-  parseEditorFilename,
-  parseNewCommentDraftFilename,
-} from "../views/editorFilename";
+import { openIssueInBrowser, openProjectInBrowser } from "../commands/openInBrowser";
+import { getCurrentConnectionScope } from "../config/connectionScope";
 import type { Project } from "../redmine/types";
+import {
+  OPEN_IN_BROWSER_COMMAND,
+  OPEN_TICKET_IN_BROWSER_COMMAND,
+  OPEN_COMMENT_IN_BROWSER_COMMAND,
+} from "./commandIds";
+import { browserTargetForDashboard, browserTargetForEditor, browserTargetForUri, type EditorBrowserTarget } from "./browserCommandTarget";
 import {
   EDIT_FIELD_VIA_QUICK_PICK_COMMAND,
   editTicketFieldViaQuickPick,
   type TicketQuickPickField,
 } from "../views/ticketCodeLensProvider";
-import type { CommandDeps } from "./commandRegistry";
-import { toSelectedTicket, pickDashboardComment } from "./dashboardCommandSelection";
+import type { DashboardWebviewProvider } from "../dashboard/DashboardWebviewProvider";
+import { NEW_TICKET_DRAFT_ID } from "../views/ticketEditorRegistry";
+import { pickDashboardComment } from "./dashboardCommandSelection";
 
 export const registerBrowserCommands = (
-  context: vscode.ExtensionContext,
-  { dashboardProvider }: Pick<CommandDeps, "dashboardProvider">,
+  context: Pick<vscode.ExtensionContext, "subscriptions">,
+  { dashboardProvider }: { dashboardProvider: Pick<DashboardWebviewProvider, "getStateSnapshot"> },
 ): void => {
   const getState = () => dashboardProvider.getStateSnapshot();
 
@@ -38,59 +33,40 @@ export const registerBrowserCommands = (
       const project: Project = { id: selected.id, name: selected.name, identifier: selected.identifier };
       await openProjectInBrowser({ project });
     }),
-    vscode.commands.registerCommand("redmine-client.openTicketInBrowser", async (uriArg?: unknown) => {
-      if (uriArg instanceof vscode.Uri) {
-        const filename = path.basename(uriArg.path);
-        const registeredId = getTicketIdForUri(uriArg);
-        const parsedEditor = parseEditorFilename(filename);
-        const uriTicketId =
-          registeredId ??
-          parseDirectTicketFilename(filename) ??
-          parseNewCommentDraftFilename(filename) ??
-          parsedEditor?.ticketId;
-        if (uriTicketId === NEW_TICKET_DRAFT_ID || isNewTicketDraftFilename(filename)) {
-          vscode.window.showErrorMessage(
-            vscode.l10n.t("Cannot open an unsynced new ticket draft in the browser."),
-          );
-          return;
-        }
-        if (uriTicketId && uriTicketId > 0) {
-          await openTicketInBrowser({
-            ticket: {
-              id: uriTicketId,
-              subject: "",
-              projectId: 0,
-            },
-          });
-          return;
-        }
-      }
-      const selected = toSelectedTicket(getState());
-      if (selected) {
-        await openTicketInBrowser({ ticket: selected });
+    vscode.commands.registerCommand(OPEN_IN_BROWSER_COMMAND, async (uriArg?: unknown) => {
+      const scope = getCurrentConnectionScope();
+      if (uriArg !== undefined && !(uriArg instanceof vscode.Uri)) {
+        showSelectTarget();
         return;
       }
-      const activeEditor = vscode.window.activeTextEditor;
-      const activeTicketId = activeEditor && isTicketEditor(activeEditor)
-        ? getTicketIdForEditor(activeEditor)
-        : undefined;
-      if (activeTicketId === NEW_TICKET_DRAFT_ID) {
-        vscode.window.showErrorMessage(
-          vscode.l10n.t("Cannot open an unsynced new ticket draft in the browser."),
-        );
+      const editorTarget = uriArg
+        ? browserTargetForUri(uriArg, scope)
+        : browserTargetForEditor(vscode.window.activeTextEditor, scope);
+      if (uriArg || editorTarget) {
+        await openEditorTarget(editorTarget, scope);
         return;
       }
-      if (activeTicketId && activeTicketId > 0) {
-        await openTicketInBrowser({
-          ticket: {
-            id: activeTicketId,
-            subject: "",
-            projectId: 0,
-          },
-        });
+      const state = getState();
+      const target = browserTargetForDashboard(state);
+      if (!target) {
+        showSelectTarget();
         return;
       }
-      vscode.window.showErrorMessage("Dashboard でチケットを選択してください。");
+      await openIssueInBrowser(target, { scope, comments: state.comments });
+    }),
+    vscode.commands.registerCommand(OPEN_TICKET_IN_BROWSER_COMMAND, async (uriArg?: unknown) => {
+      const scope = getCurrentConnectionScope();
+      const editorTarget = uriArg instanceof vscode.Uri ? browserTargetForUri(uriArg, scope) : undefined;
+      if (editorTarget) {
+        await openEditorTarget(editorTarget, scope, true);
+        return;
+      }
+      const ticketId = getState().selectedTicketId;
+      if (ticketId) {
+        await openIssueInBrowser({ ticketId }, { scope });
+        return;
+      }
+      await openEditorTarget(browserTargetForEditor(vscode.window.activeTextEditor, scope), scope, true);
     }),
     vscode.commands.registerCommand(
       EDIT_FIELD_VIA_QUICK_PICK_COMMAND,
@@ -98,13 +74,44 @@ export const registerBrowserCommands = (
         await editTicketFieldViaQuickPick(uriOrField, field);
       },
     ),
-    vscode.commands.registerCommand("redmine-client.openCommentInBrowser", async () => {
-      const comment = await pickDashboardComment(getState());
-      if (!comment) {
+    vscode.commands.registerCommand(OPEN_COMMENT_IN_BROWSER_COMMAND, async () => {
+      const state = getState();
+      if (!state.comments.ticketId || !state.comments.items.some((item) => item.id !== undefined)) {
         vscode.window.showErrorMessage(vscode.l10n.t("Select a comment in Dashboard."));
         return;
       }
-      await openCommentInBrowser({ comment });
+      const scope = getCurrentConnectionScope();
+      const comment = await pickDashboardComment(state);
+      if (comment) {
+        await openIssueInBrowser(
+          { ticketId: comment.ticketId, commentId: comment.id },
+          { scope, comments: state.comments },
+        );
+      }
     }),
   );
+
+  async function openEditorTarget(editorTarget: EditorBrowserTarget | undefined, scope: string, ticketOnly = false): Promise<void> {
+    if (!editorTarget) {
+      showSelectTarget();
+      return;
+    }
+    if (editorTarget.connectionScope !== scope) {
+      vscode.window.showErrorMessage(vscode.l10n.t("This editor belongs to another Redmine connection."));
+      return;
+    }
+    if (editorTarget.ticketId === NEW_TICKET_DRAFT_ID) {
+      vscode.window.showErrorMessage(vscode.l10n.t("Cannot open an unsynced new ticket draft in the browser."));
+      return;
+    }
+    const { ticketId, commentId } = editorTarget;
+    await openIssueInBrowser(
+      { ticketId, commentId: ticketOnly ? undefined : commentId },
+      { scope, comments: getState().comments },
+    );
+  }
 };
+
+function showSelectTarget(): void {
+  vscode.window.showErrorMessage(vscode.l10n.t("Open a Redmine editor or select a ticket in Dashboard."));
+}

@@ -171,6 +171,11 @@
         "icon": "$(link-external)"
       },
       {
+        "command": "redmine-client.openInBrowser",
+        "title": "%command.openInBrowser.title%",
+        "icon": "$(link-external)"
+      },
+      {
         "command": "redmine-client.openTicketInBrowser",
         "title": "%command.openTicketInBrowser.title%",
         "icon": "$(link-external)"
@@ -249,6 +254,16 @@
       ]
     },
     "menus": {
+      "commandPalette": [
+        {
+          "command": "redmine-client.openTicketInBrowser",
+          "when": "false"
+        },
+        {
+          "command": "redmine-client.openCommentInBrowser",
+          "when": "false"
+        }
+      ],
       "view/title": [
         {
           "command": "redmine-client.refreshTickets",
@@ -273,7 +288,7 @@
           "group": "navigation@1"
         },
         {
-          "command": "redmine-client.openTicketInBrowser",
+          "command": "redmine-client.openInBrowser",
           "when": "redmine-client.isExistingTicketEditor",
           "group": "navigation@2"
         }

@@ -387,7 +387,7 @@ export class DashboardController {
         await this.commentService.editTicketComment(req.ticketId, req.commentId);
         break;
       case "comment.openBrowser":
-        await this.commentService.openCommentInBrowser(req.ticketId, req.commentId, req.noteIndex);
+        await this.commentService.openCommentInBrowser(req.ticketId, req.commentId);
         break;
       case "comment.syncSelected":
         await this.unsyncedService.handleSyncSelectedComment(req.requestId, {

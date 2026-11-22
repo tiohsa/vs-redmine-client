@@ -12,15 +12,24 @@ const findContextItem = (commandId: string, when: string): MenuItem | undefined 
 suite("Open in browser actions", () => {
   test("declares commands with icons", () => {
     const project = findCommand("redmine-client.openProjectInBrowser");
+    const shared = findCommand("redmine-client.openInBrowser");
     const ticket = findCommand("redmine-client.openTicketInBrowser");
     const comment = findCommand("redmine-client.openCommentInBrowser");
 
+    assert.strictEqual(shared?.icon, "$(link-external)");
     assert.ok(project, "project open command must exist");
     assert.ok(ticket, "ticket open command must exist");
     assert.ok(comment, "comment open command must exist");
     assert.strictEqual(project?.icon, "$(link-external)");
     assert.strictEqual(ticket?.icon, "$(link-external)");
     assert.strictEqual(comment?.icon, "$(link-external)");
+  });
+
+  test("keeps one ticket and comment action visible in the command palette", () => {
+    const palette = getMenuItems("commandPalette");
+    assert.notStrictEqual(palette.find((item) => item.command === "redmine-client.openInBrowser")?.when, "false");
+    assert.strictEqual(palette.find((item) => item.command === "redmine-client.openTicketInBrowser")?.when, "false");
+    assert.strictEqual(palette.find((item) => item.command === "redmine-client.openCommentInBrowser")?.when, "false");
   });
 
   test("legacy Activity Bar item context menus are removed", () => {

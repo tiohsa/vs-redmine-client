@@ -5,7 +5,7 @@ import { listComments } from "../../redmine/comments";
 import type { Comment } from "../../redmine/types";
 import { getCurrentUserId } from "../../redmine/users";
 import { buildCommentDashboardItems } from "../viewModels/commentsDashboardViewModel";
-import { openCommentInBrowser } from "../../commands/openInBrowser";
+import { openIssueInBrowser } from "../../commands/openInBrowser";
 import { openCommentUpdateDraft } from "../../commands/openCommentUpdateDraft";
 import { addCommentFromList } from "../../commands/addCommentFromList";
 
@@ -136,22 +136,8 @@ export class DashboardCommentService {
     }
   }
 
-  async openCommentInBrowser(
-    ticketId: number,
-    commentId: number,
-    noteIndex?: number,
-  ): Promise<void> {
-    await openCommentInBrowser({
-      comment: {
-        id: commentId,
-        ticketId,
-        authorId: 0,
-        authorName: "",
-        body: "",
-        editableByCurrentUser: false,
-        noteIndex,
-      },
-    });
+  async openCommentInBrowser(ticketId: number, commentId: number): Promise<void> {
+    await openIssueInBrowser({ ticketId, commentId }, { comments: this.context.store.getState().comments });
   }
 
   async editTicketComment(ticketId: number, commentId: number): Promise<void> {

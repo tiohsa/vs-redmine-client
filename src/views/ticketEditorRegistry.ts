@@ -47,12 +47,15 @@ const hasEditorFilename = (uri: vscode.Uri): boolean => {
 export const resolveEditorConnectionScope = (
   uri: vscode.Uri,
   currentScope = defaultScope(),
+  options: { requireStoredScope?: boolean } = {},
 ): string => {
   const storedHash = extractEditorScopeHash(uri);
   if (!storedHash) {
     // Legacy editor files predate connection-scoped storage. Keep them
     // assigned to `unresolved:unknown` until explicit user selection.
-    return hasEditorFilename(uri) ? `${UNRESOLVED_CONNECTION_SCOPE_PREFIX}unknown` : currentScope;
+    return options.requireStoredScope || hasEditorFilename(uri)
+      ? `${UNRESOLVED_CONNECTION_SCOPE_PREFIX}unknown`
+      : currentScope;
   }
   return getConnectionScopeHash(currentScope) === storedHash
     ? currentScope

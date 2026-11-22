@@ -1,4 +1,6 @@
 import * as assert from "assert";
+import { browserTargetForDashboard } from "../app/browserCommandTarget";
+import { DashboardStateStore } from "../dashboard/DashboardStateStore";
 import {
   openCommentInBrowser,
   openProjectInBrowser,
@@ -66,5 +68,18 @@ suite("Open in browser commands", () => {
     );
 
     assert.deepStrictEqual(errors, ["Failed to open browser."]);
+  });
+});
+
+suite("チケット・コメントのブラウザ対象", () => {
+  test("Dashboard は選択中のチケットに属するコメントを優先する", () => {
+    const state = new DashboardStateStore().getState();
+    state.selectedTicketId = 42;
+    state.comments = { loading: false, items: [], ticketId: 42, selectedCommentId: 99 };
+    assert.deepStrictEqual(browserTargetForDashboard(state), { ticketId: 42, commentId: 99 });
+    state.selectedTicketId = 43;
+    assert.deepStrictEqual(browserTargetForDashboard(state), { ticketId: 43, commentId: undefined });
+    state.selectedTicketId = undefined;
+    assert.strictEqual(browserTargetForDashboard(state), undefined);
   });
 });
